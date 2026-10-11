@@ -81,7 +81,7 @@ a remeasure on a quiet host with the daemon's CPU seconds per test
 (17.1's results line), then the `xfstests_slow` set's numbers after
 23.11; the tmpfs cache understates production on an SSD (WAL fsync cost):
 say so in the note. Owner: dcfs-investigator.
-Status 2026-10-11: done, merged 1f499bc. Full report in `notes/slowness-17.3.md`.
+Status 2026-10-11: done, merged 1f499bc. Full report in `docs/plan/notes/slowness-17.3.md`.
 Measured side-by-side with `xfstests_costs.py`: daemon CPU accounts for 80-98%
 of extra latency (single-threaded CPU bound at 100% of a core). Waiting/IO accounts
 for only 2-20%; extra disk flushes are negligible (-4 to +21). Conclusion: the

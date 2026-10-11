@@ -2,7 +2,7 @@
 # dcfs, kept out of the normal set so that a shard fits its job, and run with a
 # limit of 1500 s by the weekly set (xfstests_slow_<n>.sh; lists
 # xfstests.slow.<fstype>.*). Their native times are in the reasons. Step 17.3
-# attributed the extra time on a quiet host (notes/slowness-17.3.md): 80-98%
+# attributed the extra time on a quiet host (docs/plan/notes/slowness-17.3.md): 80-98%
 # daemon CPU (single-threaded SQLite queries and tri-state bookkeeping), not
 # host load or disk wait. This file is the global set; xfstests.<fstype>.slow
 # has the tests slow on one backing only.

@@ -286,7 +286,7 @@ consider on a case-by-case basis."
   holds exactly his approvals.
 Owner: dcfs-implementer, after the current rounds land (budget), before
 25.2.
-Status 2026-10-11: audit completed (bd0083b, lane-3; notes/crash-audit-25.9.md).
+Status 2026-10-11: audit completed (bd0083b, lane-3; docs/plan/notes/crash-audit-25.9.md).
 Census found 25 CHECK sites in production (1 clean conversion to RET_CHECK in
 `ReplyNone`; 17 FUSE pointer checks convertible to RET_CHECK_NE inside Serve
 lambdas; 1 formal case for crash in `RestoreRoot`; 6 lifecycle/session checks),
