@@ -3170,3 +3170,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the ten exit sites classified (eight ordinary fork/exec child exits, two CLI exits, one
   daemoniser case with a StatusOr remedy). It is ready for russ's case-by-case ruling as the rule
   requires; nothing in it should be applied before that.
+- russ on finding (6): "Agreed, and that's what I had intended the whole time." To the temporary
+  orchestrator: make non-SMT pinning off by default and on only for budget-measuring runs
+  (`DCFS_PIN_NON_SMT=1` from the measurement scripts and the cost-reporting CI jobs; the default
+  path never pins); update run-qemu.sh's header, test/qemu/README.md and the self-check. Subject
+  `26.17:`. Mechanical.
