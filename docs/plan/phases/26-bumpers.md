@@ -502,6 +502,20 @@ dcfs-implementer for the budget files; after the current fix rounds
 (15.6b, 17.1, 6.5) merge, since all three touch the same guest harness
 files. The Gantt is updated when it is dispatched.
 
+Merged 2026-10-11:
+- 26.17a RAM-backed guest disks (3e0c778): loop over tmpfs, 13 fault targets,
+  guest RAM sized from measurements, fault_recover silent pass found.
+- 26.17b deterministic budgets (2330209, five commits a565c32..e073bc0):
+  CPU time of dcfs per test held to cpu_budgets.txt with 100% tolerance;
+  I/O operations of the disks and dcfs held to io_budgets.txt; wall time
+  hang guard refused in run-qemu.sh if allowance is shorter than formula;
+  load-starvation flag in summary when wall time stretches under load;
+  non-SMT core pinning in run-qemu.sh (taskset -c <cpulist> parsed from
+  sysfs thread_siblings_list, DCFS_PIN_NON_SMT=0 escape hatch, self-checks);
+  xfstests cost lines and side-by-side native comparison (scripts/xfstests_costs.py,
+  xfstests_costs_test, xfstests_notrun_test); xfstests_1_test_ext4 shard budgets
+  calibrated. Full suites green: fast (299 pass), presubmit (444 pass), tools (38 pass).
+
 ## 26.18 End-to-end tests: assertions and oracles in C++ (russ, 2026-10-09, approved; start after the weekly quota resets, Friday 2026-10-16)
 
 Premise: the unit tests are already googletest C++ binaries run in the

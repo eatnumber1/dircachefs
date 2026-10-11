@@ -3057,4 +3057,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ: "Note: you no longer need to do `sg kvm` anywhere anymore." (2026-10-11). Removed `sg kvm`
   wrapper requirement from AGENTS.md, CLAUDE.md, docs/plan/process.md, and all agent definitions,
   now that the login session has the kvm group directly (18f1943).
+- 26.17b merged (2330209, five commits a565c32..e073bc0): deterministic budgets
+  (CPU time of dcfs per test held to cpu_budgets.txt with 100% tolerance;
+  I/O of the disks and dcfs per test held to io_budgets.txt; wall time hang guard
+  refused in run-qemu.sh if allowance is shorter than formula; load-starvation flag
+  when wall time stretches under load; non-SMT core pinning via taskset -c <cpulist>
+  from sysfs thread_siblings_list with DCFS_PIN_NON_SMT=0 escape hatch; xfstests
+  cost lines and side-by-side native comparison via scripts/xfstests_costs.py;
+  xfstests_1_test_ext4 shard budgets calibrated; dcfs/BUILD.bazel trace initramfs
+  genrules fixed with cost_lib.sh). Fast (299 pass), presubmit (444 pass), and tools
+  (38 pass) suites green. Lane-1 free. Push point: main at this commit.
 
