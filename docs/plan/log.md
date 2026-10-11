@@ -3226,3 +3226,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ: `sg kvm` and `sg qemu` are gone for good. The last command-form mentions removed from the
   agent definitions, README's test commands and kvm paragraph, and test/qemu/README; the "no longer
   needed" sentences in AGENTS.md, CLAUDE.md and process.md stay as the record.
+- 8.5 merged bf91e61 (lane-4): Finding 1 addressed: converted OpName and DescribeRequest to AbslStringify hidden friends on events::Op and events::Request in dcfs/protocol_events.h (style 1.2 ADL rule), allowing absl::StrCat and VLOG to format ops and requests everywhere; dropped declarations from dcfs/fuse_ops.h (restoring it to MakeFuseOps only) and definitions from dcfs/fuse_ops.cc; updated dcfs/fuse_ops_test.cc to test all 37 enum values, fallback, and request formatting/escaping via absl::StrCat. All dcfs and tools tests pass. Push point: main at this commit.
+
