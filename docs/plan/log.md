@@ -3192,3 +3192,22 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   agrees, the temporary orchestrator applies the audit's conversions plus these three as one
   protocol-agent step (credentials and daemon lifecycle are protocol territory), test first, and
   the repo_shape crash rule lands with an empty allowlist.
+- russ on 25.9's three: (1) RestoreRoot: a Status can be inspected and ignored by its caller, and
+  ignoring this one would be disastrous, so the crash stays unless a better idea comes (open to
+  one); (2) asked what ForkSplit is; (3) agreed (delete the impossible null checks; cannot-refuse
+  INIT logs and exits the session). Regular orchestrator's idea for (1), for russ to accept or
+  refuse: make the failure impossible to ignore by construction instead of conveying it: on a
+  failed restore, RestoreRoot itself (not a caller) sets a process-wide poisoned flag and calls
+  fuse_session_exit; every backing syscall passes through backing.cc's one door (the
+  syscalls_backing layer, which //tools:syscalls_backing_users_test enforces), and that door
+  refuses with a Status once the flag is set, so no further instruction can touch the backing as
+  the wrong user whatever any caller does with any Status; the cache database is root-owned, so a
+  wrong-user write there fails on its own. The crash's one remaining advantage is zero further
+  instructions of any kind; the design's advantage is an orderly end (in-flight replies, the
+  lock released, the log line) and a test. If russ keeps the crash, it is approved and
+  allowlisted with his reason. ForkSplit (dcfs/fork_split.h, 26.14f): fork(2) without a frame that
+  returns twice, so llvm-cov's continuous-mode counters are not corrupted (a function entered once
+  and left twice gave negative counts); it runs `child` in the child and returns its value, runs
+  `parent` in the parent, which must exit and never return; the abort guards that contract. The
+  fix that removes the abort: `parent` returns the exit status and ForkSplit `_exit`s with it, so
+  "parent returned" cannot occur.
