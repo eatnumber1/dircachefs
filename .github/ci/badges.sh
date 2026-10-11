@@ -14,6 +14,15 @@ set -euo pipefail
 run_id=$1
 in=$2
 
+# No producer ran (the badges job still runs, `if: always()`): nothing to do,
+# and the branch is not touched.
+shopt -s nullglob
+files=("$in"/*.json)
+if [ ${#files[@]} -eq 0 ]; then
+	echo "no badge files, nothing to do"
+	exit 0
+fi
+
 rc=0
 git ls-remote --exit-code --heads origin badges >/dev/null || rc=$?
 case $rc in
@@ -31,7 +40,7 @@ case $rc in
 	;;
 esac
 
-cp "$in"/*.json badges-branch/
+cp "${files[@]}" badges-branch/
 cd badges-branch
 if [ -z "$(git status --porcelain)" ]; then
 	echo "badges: no change"

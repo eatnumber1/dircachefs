@@ -1,0 +1,2 @@
+Error: Invariant CrashSafe is violated.
+1479307 states generated, 1479307 distinct states found, 12 states left on queue.

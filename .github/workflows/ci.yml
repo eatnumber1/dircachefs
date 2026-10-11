@@ -633,6 +633,24 @@ jobs:
             bazel-
       - name: Test (shard ${{ matrix.shard }} of 3)
         run: ./.github/ci/test.sh --sizes=large,enormous --shard=${{ matrix.shard }}/3
+      - name: Badge (TLC states, step 26.28; shard 0 holds //formal:large_test)
+        # The test's log is the only place TLC's summary is printed (a passing
+        # test's output is not in the job log). test.sh --shard deals the sorted
+        # large and enormous targets out by index; //formal:large_test is index
+        # 1 of shard 0.
+        if: ${{ !cancelled() && matrix.shard == 0 }}
+        run: |
+          mkdir -p badges
+          bazel run //tools/badges:badge_json -- tlc \
+            --input "$PWD/bazel-testlogs/formal/large_test/test.log" \
+            --out "$PWD/badges/tlc.json"
+      - name: Upload the TLC badge
+        if: ${{ !cancelled() && matrix.shard == 0 }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: badge-tlc
+          path: badges/tlc.json
+          if-no-files-found: ignore
       - name: Report the accelerator
         if: ${{ !cancelled() }}
         run: ./.github/ci/accelerator.sh
@@ -1054,6 +1072,59 @@ jobs:
             --config=osv-scanner.toml
             -L
             osv/shipped-debs.cdx.json
+      # Step 26.28: the same two scans once more as JSON, for the badge. The
+      # human-readable scans above are the gates; these never fail the job
+      # (continue-on-error), and the badge step reports a missing file.
+      - name: Scan the shipped dependencies as JSON (badge)
+        id: json-git
+        continue-on-error: true
+        uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+        with:
+          fail-on-vuln: false
+          scan-args: |-
+            scan
+            source
+            --config=osv-scanner.toml
+            --include-git-root
+            --no-ignore
+            -r
+            --format
+            json
+            --output-file
+            osv/shipped-git.json
+            osv/shipped-git
+      - name: Scan the shipped Debian packages as JSON (badge)
+        id: json-debs
+        continue-on-error: true
+        uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+        with:
+          fail-on-vuln: false
+          scan-args: |-
+            scan
+            source
+            --config=osv-scanner.toml
+            --format
+            json
+            --output-file
+            osv/shipped-debs.json
+            -L
+            osv/shipped-debs.cdx.json
+      - name: Badge (OSV, step 26.28)
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p badges
+          bazel run //tools/badges:badge_json -- osv \
+            --input "$PWD/osv/shipped-git.json" \
+            --input "$PWD/osv/shipped-debs.json" \
+            --config "$PWD/osv-scanner.toml" \
+            --out "$PWD/badges/osv.json"
+      - name: Upload the OSV badge
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: badge-osv
+          path: badges/osv.json
+          if-no-files-found: ignore
       - name: Scan the test-only dependencies (informational, never fails)
         id: testonly
         continue-on-error: true
@@ -1220,7 +1291,7 @@ jobs:
     # to the repository; a producer that did not run leaves its badge as it
     # is. Other jobs are read-only (the workflow's `contents: read`).
     if: ${{ always() && github.ref == 'refs/heads/main' }}
-    needs: [coverage, reproducible]
+    needs: [coverage, reproducible, full, osv]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -1230,7 +1301,11 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      # download-artifact has no "no match" switch: with no badge artifact
+      # (no producer ran) the step may fail, and badges.sh then has nothing to
+      # do and says so.
+      - continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: badge-*
           merge-multiple: true

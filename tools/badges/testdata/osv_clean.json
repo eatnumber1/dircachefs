@@ -1,0 +1,1 @@
+{"results":[{"source":{"path":"osv/shipped-git","type":"git"},"packages":[{"package":{"name":"libfuse","version":"3.2.0","ecosystem":""},"vulnerabilities":[{"id":"DEBIAN-CVE-2010-4756"}]}]}]}

@@ -1,0 +1,2 @@
+Model checking completed. No error has been found.
+6907834 states generated, 1479307 distinct states found, 0 states left on queue.

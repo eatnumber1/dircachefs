@@ -87,6 +87,52 @@ class MutationTest(unittest.TestCase):
             badge_json.badge("mutation", text)
 
 
+class TlcTest(unittest.TestCase):
+    def test_completed_run_is_green_with_distinct_states(self):
+        obj = badge_json.badge("tlc", read(testdata("tlc_completed.txt")))
+        self.assertEqual(obj["message"], "1479307 states · 0 violations")
+        self.assertEqual(obj["color"], "green")
+
+    def test_violation_is_red(self):
+        obj = badge_json.badge("tlc", read(testdata("tlc_violation.txt")))
+        self.assertEqual(obj["message"], "1479307 states · violation")
+        self.assertEqual(obj["color"], "red")
+
+    def test_no_state_count_is_an_error(self):
+        with self.assertRaises(badge_json.BadInput):
+            badge_json.badge("tlc", "Model checking completed. No error has been found.\n")
+
+
+class OsvTest(unittest.TestCase):
+    def test_only_ignored_findings_is_green(self):
+        obj = badge_json.badge(
+            "osv", [read(testdata("osv_clean.json"))],
+            config=read(testdata("osv-scanner.toml")))
+        self.assertEqual(obj["message"],
+                         "0 vulnerabilities · 21 ignored until 2027-01-06")
+        self.assertEqual(obj["color"], "green")
+
+    def test_an_unignored_finding_is_red(self):
+        obj = badge_json.badge(
+            "osv", [read(testdata("osv_found.json"))],
+            config=read(testdata("osv-scanner.toml")))
+        self.assertEqual(obj["message"],
+                         "1 vulnerabilities · 21 ignored until 2027-01-06")
+        self.assertEqual(obj["color"], "red")
+
+    def test_no_ignores_says_zero_ignored(self):
+        obj = badge_json.badge(
+            "osv", [read(testdata("osv_found.json"))], config="")
+        self.assertEqual(obj["message"], "2 vulnerabilities · 0 ignored")
+        self.assertEqual(obj["color"], "red")
+
+    def test_malformed_json_is_an_error(self):
+        with self.assertRaises(badge_json.BadInput):
+            badge_json.badge(
+                "osv", [read(testdata("osv_malformed.json"))],
+                config=read(testdata("osv-scanner.toml")))
+
+
 class EndpointTest(unittest.TestCase):
     def test_writes_the_endpoint_schema_and_nothing_on_bad_input(self):
         with tempfile.TemporaryDirectory() as d:
