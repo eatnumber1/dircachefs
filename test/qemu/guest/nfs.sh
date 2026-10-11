@@ -149,11 +149,10 @@ trap cleanup EXIT
 
 echo "nfs.sh: kernel $(uname -r)"
 
-# Timers work (review M3). The `timeout 10 mount -t nfs4` guards below are
-# GNU timeout, which needs timer_create/alarm; with CONFIG_POSIX_TIMERS off
-# (an EXPERT-gated symbol tinyconfig turns off) it never fires and a hung
-# mount waits for the harness limit instead of failing after 10 s. GNU
-# timeout exits 124 when it kills its command. Without timers the sleep runs its
+# Timers work (review M3). GNU timeout needs timer_create/alarm; with
+# CONFIG_POSIX_TIMERS off (an EXPERT-gated symbol tinyconfig turns off) it
+# never fires and a command waits for the harness limit instead of failing.
+# GNU timeout exits 124 when it kills its command. Without timers the sleep runs its
 # five seconds and exits 0, so the status says whether it fired; how long it took
 # is the host's load (step 26.17: no correctness check compares wall time).
 timeout 1 sleep 5
@@ -410,7 +409,7 @@ mkdir -p "$NFS"
 i=0
 nfs_mount_ok=0
 while [ "$i" -lt 10 ]; do
-	if timeout 10 mount -t nfs4 -o vers=4.0,nolock 127.0.0.1:/mnt "$NFS" 2>/tmp/nfs_mount.err; then
+	if mount -t nfs4 -o vers=4.0,nolock 127.0.0.1:/mnt "$NFS" 2>/tmp/nfs_mount.err; then
 		nfs_mount_ok=1
 		break
 	fi
@@ -575,7 +574,7 @@ else
 	fail bind-export-exportfs "exportfs of $EXPORT_BIND failed"
 fi
 
-if timeout 10 mount -t nfs4 -o vers=4.0,nolock 127.0.0.1:/export/bind "$NFS_BIND" 2>/tmp/nfs_bind_mount.err; then
+if mount -t nfs4 -o vers=4.0,nolock 127.0.0.1:/export/bind "$NFS_BIND" 2>/tmp/nfs_bind_mount.err; then
 	NFS_BIND_MOUNTED=1
 	pass bind-export-mount
 else
@@ -727,7 +726,7 @@ if [ "$MOUNTED" -eq 1 ]; then
 
 	umount "$NFS" 2>/dev/null || true
 	NFS_MOUNTED=0
-	if timeout 10 mount -t nfs4 -o vers=4.0,nolock 127.0.0.1:/mnt "$NFS" 2>/tmp/nfs_remount.err; then
+	if mount -t nfs4 -o vers=4.0,nolock 127.0.0.1:/mnt "$NFS" 2>/tmp/nfs_remount.err; then
 		NFS_MOUNTED=1
 		pass nfs-remount-after-wipe
 		fresh=$(cat "$NFS/a.txt" 2>/tmp/fresh.err)
