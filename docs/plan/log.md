@@ -3074,3 +3074,22 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 25.9 merged bd0083b (lane-3): completed census and audit of intentional crashes across production code (dcfs/, bench/, tools/*.c); notes/crash-audit-25.9.md records 25 CHECK sites (1 clean conversion to RET_CHECK in ReplyNone, 17 FUSE pointer checks convertible to RET_CHECK_NE inside Serve lambdas, 1 formal case for crash in RestoreRoot credential restoration failure, 6 FUSE lifecycle/session checks), 0 LOG(FATAL), 1 abort() (fork_split.h parent return guard: case for abort vs _exit(127)), 0 assert(), 0 std::terminate, and 10 exit()/_exit() sites (8 subprocess exits, 2 CLI wrapper exits, 1 detachment failure convertible to Status); constructor audit confirmed zero fallible work in constructors across production classes (Abseil TotW #42); all 38 tools tests passed; awaiting Russ's ruling on the formal cases. Push point: main at this commit.
 
 
+- Review by the regular orchestrator (Fable, 2026-10-11 night, last credits) of the temporary
+  orchestrator's merges cb09771..16ed12a (52 files, +2894/-159). Findings, for russ and for the
+  temporary orchestrator: (1) dcfs/fuse_ops.h now declares `OpName` and `DescribeRequest`, moved
+  out of the anonymous namespace so fuse_ops_test can call them (8.5): a seam opened in production
+  for a test (style 1.2 "no test-only things in prod code"); russ to say whether these are a real
+  API (log formatting helpers other code may use) or the switch should be covered through the
+  requests that reach it; the header also gained `#include` lines below declarations: check its
+  layout. (2) The coverage baseline was "restored" from 26.26's measured 96.04 to 96.26 under the
+  new never-lower rule, then raised to 96.50/81.24 with 8.5's tests; no CI run has validated the
+  new figure (the last run is cb09771); if the next push is red on coverage, that is why. (3)
+  nfs.sh gained three `timeout 10 mount ...` calls (15.12) with no visible justification comment:
+  style 1.11 requires a timeout to name what cannot signal; add the comment or drop the timer (the
+  guest watchdog is the hang guard). (4) Two notes landed at the repository root (`notes/
+  crash-audit-25.9.md`, `notes/slowness-17.3.md`): they belong in docs/plan/notes/. (5) Three
+  branches started beyond the Queue's current items (lane-1 step-15.11 the capture deletion,
+  lane-2 step-17.2 the setgid fix, lane-3 step-12.18 the SibylFS spike), unmerged; 15.11 is
+  arguably unlocked by the trial, 17.2 and 12.18 are parked items. Not reviewed for lack of
+  credits: the 17.3 note's measurements, 26.17b's five commits beyond the log's claim of green
+  suites, the 25.9 audit's remedies. Nothing changed by this review.
