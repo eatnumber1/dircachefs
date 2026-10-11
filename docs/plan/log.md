@@ -3026,3 +3026,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   wording in linux_dirent64's comments, a reduced TLCOverrides.java (MIT). Open for russ: LGPL §6
   for a static glibc in a binary release (dynamic glibc for releases?); the README's licence
   section says "To be decided". Resume list in docs/licenses.md. Lane-2 free.
+- 26.17b stopped at the budget limit, NOT merged (the full suites were never run on the tip):
+  parts 1-4 done on step-26.17b in lane-1 (CPU budgets for eleven tests at quiet medians with a
+  100% tolerance, I/O budgets for ten from the cgroup's io.stat, wall as hang guard refused in
+  run-qemu.sh, a load flag from host CPU pressure at 20%), part 5 (the xfstests cost line and
+  cgroup) as WIP. Measured: under 7-8 busy loops wall doubles while CPU stays within 0.4-1.74x,
+  which is the step's point. Resume: run //tools/..., fast and presubmit on the tip; add the
+  xfstests shard's budgets; re-check the README. Open for russ: the 100% CPU tolerance; whether
+  cancel.sh's latency bounds become backing-call counts. No lane running; idle until Friday
+  2026-10-16 01:00.
