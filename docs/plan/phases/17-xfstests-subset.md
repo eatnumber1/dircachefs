@@ -90,6 +90,24 @@ per-op SQLite transactions, 3-phase write-through protocol), not parameter tunin
 `test/qemu/guest/xfstests.slow` notes updated; `xfstests_dev_native_test_<fstype>`
 added in `test/qemu/BUILD.bazel`.
 
+## 17.4 Spike: In-daemon CPU breakdown under serial metadata storms (russ, 2026-10-11)
+
+Step 17.3 proved that in-guest daemon CPU accounts for 80%–98% of the latency
+difference between dcfs and native ext4 under metadata storms.
+This spike profiles the daemon during a representative serial metadata storm
+(e.g., `generic/007`'s 100k creates/unlinks or `generic/471`'s 10k creates)
+to determine the exact fine-grained breakdown of daemon CPU consumption:
+1. Instrument or sample the daemon using `perf` / Linux sampling / symbol-level
+   profiling in the guest under the serial workload.
+2. Attribute the ~312 µs/op daemon CPU budget into:
+   - FUSE message handling: read/write on `/dev/fuse`, context switches, libfuse framing.
+   - SQLite internals: statement preparation, B-tree traversal/balancing, pager, locks, WAL framing.
+   - Backing filesystem interaction: `AsCaller` credentials switching (setfsuid/setfsgid/setgroups),
+     `statx`, `openat`, `unlinkat`.
+   - C++ runtime & bookkeeping: allocations, invariant checking/observers, hash table lookups.
+3. Deliver report with flamegraph and symbol attribution table in `notes/metadata-storm-breakdown-17.4.md`.
+Scheduled soon; owner: dcfs-investigator.
+
 ## 17.1b A glibc rootfs for xfstests (from the review; after 17.1, not instead)
 
 Base the xfstests root on third_party/debian's rules_distroless snapshot
