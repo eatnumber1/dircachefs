@@ -183,3 +183,32 @@ across restarts (notes/trial-2026-10-11.md) is demoted to "probably
 never" (russ: the in-process state handed between versions would be a
 second compatibility surface on top of the database's; the reboot case
 is what matters and this design does nothing for it).
+
+Addendum (russ, 2026-10-11, on stubs: "Why can't we use the underlying
+filesystem's inode+generation? I know it's hidden, but there's a way to
+access it anyway, right?"). Today a stub's nodeid is a counter from 2^63
+(`cache_state.last_stub_id`), never reused, which is bookkeeping that
+exists only because the stub's identity was not derived from the
+backing. A derivation exists for both kinds of boundary:
+- A real mount: the covered directory is an inode of the backing
+  filesystem, unique in our nodeid space, and its inode number is
+  already in dcfs's hands: the parent's `getdents` returns the directory
+  entry's own `d_ino`, not the mounted root's. Its generation and handle
+  are reachable only by opening it, which path lookup will not do (it
+  follows the mount); a private copy of the mount namespace with the
+  submount detached would, at a cost per probe. So: nodeid = 2^63 |
+  covered d_ino, generation 0 (the generation-0 rules apply).
+- A btrfs subvolume: there is no covered inode (the dentry is the
+  subvolume's root, ino 256 in its own tree, so `d_ino` collides across
+  subvolumes), but the subvolume id (BTRFS_IOC_GET_SUBVOL_INFO on the
+  root, which is openable; dcfs refuses its contents by policy, not for
+  lack of access) is unique in the filesystem and never reused. So:
+  nodeid = 2^63 | subvolume id, generation 0.
+Both are stable across cache wipes and reboots, need no counter and no
+"never handed out again" rule, and keep the reserved range's property
+that no regular object collides. Semantics match: a boundary at a
+directory keeps its identity whatever is mounted there; a subvolume
+deleted and recreated under the same name is a new object. To settle in
+14.9 together with the epoch (the stub range is the high bit the epoch
+cannot have; the generation carries it for stubs as for generation-0
+files). Cost: a schema change to `stubs` (no migration before release).

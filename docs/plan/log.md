@@ -2989,3 +2989,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   detection of a nodeid from an incompatible past: 14.9 queued (a database epoch in the nodeid's
   high bits, ESTALE deterministically; the (nodeid, generation) meaning a public interface from
   release one; a handle corpus test per release); 15.12's primary test shape is the server reboot.
+- russ asked why stubs do not take the backing's inode and generation: they can (covered d_ino for
+  a mount from the parent's getdents; the subvolume id for btrfs), stable without the counter;
+  recorded as part of 14.9.
