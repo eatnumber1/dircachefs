@@ -607,6 +607,15 @@ program-output sites (six in dcfs/: three `--version`, usage, fsck's
 report; thirteen in bench/) become `absl::FPrintF`/`PrintF`/`SNPrintF`
 with byte-identical output as the test (style 1.6a's program-output
 ruling, 2026-10-10).
+Also (russ, 2026-10-11, style 1.2's callables bullet): `Scope` in
+protocol_events.h takes two pointers to member functions; `begin` becomes
+an `absl::FunctionRef<void(Context &)>` parameter (the caller binds its
+arguments with `absl::bind_front` or a lambda), `end` an
+`absl::AnyInvocable<void(Context &, const absl::Status &)>` member bound
+to the events object; every other function-pointer or member-pointer
+callable in dcfs/ follows the same split (grep `(*` and `::*` in
+parameter and member positions); a `function_pointer_callable` matcher
+with the one gtest-table site allowlisted with its reason.
 Also (russ, 2026-10-11, TotW #103, style 1.2's flags bullet):
 `IsDcfsFlagFile` in dcfs/main.cc matches every file under a `dcfs/`
 directory for Abseil's `--help`; all three flags already live in

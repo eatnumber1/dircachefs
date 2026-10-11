@@ -3046,3 +3046,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   GPL-2.0-or-later test-only, the pjdfstest patch BSD-2-Clause test-only). A scratchpad file named
   enum.py from the 25.22 census agent shadowed Python's stdlib for anything run from there;
   renamed. Push point: main at this commit. Idle until Friday except a red push.
+- russ: no function pointers or pointers to members for callables; FunctionRef for a callable only
+  called within the call, AnyInvocable for one stored. Style 1.2 (the 25.15 table ruling narrowed
+  to one allowlisted exception with its reason); Scope's conversion and a matcher in 25.20.

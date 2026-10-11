@@ -185,6 +185,26 @@ use it as design guidance rather than firm rules."
   main file, not a directory. Mechanically: `repo_shape.py` refuses
   `ABSL_FLAG(` and `absl::GetFlag(` outside files named `main.cc` (or the
   binary's own `<name>.cc`), no allowlist (25.20).
+- **No function pointers or pointers to members for callables** (russ,
+  2026-10-11, on `Scope`'s `void (ProtocolEvents::*begin)(...)` in
+  protocol_events.h: "In general function pointers should not be used,
+  absl::FunctionRef or absl::AnyInvocable are almost always the better
+  choice."). A callable that is only called within the call it is passed
+  to is an `absl::FunctionRef` parameter; one that is stored and called
+  later is an `absl::AnyInvocable` (owning, move-only); a pointer to
+  member bound to an object is `absl::bind_front(&T::f, &obj)` handed to
+  one of those. `Scope` is the example: its `begin` is called once in the
+  constructor (a `FunctionRef`), its `end` is kept for the destructor (an
+  `AnyInvocable` member bound to the events object, which outlives the
+  scope). The one tolerated exception, with its reason at the site: a
+  table of captureless callbacks that must be copied by something that
+  cannot move (the gtest parameter table in dir_cache_fs_test.cc, which
+  `ValuesIn` copies, where `AnyInvocable` cannot go and a `FunctionRef`
+  into a temporary table entry would dangle), which keeps a plain function
+  pointer; this amends the 25.15 ruling that made that the general form
+  for such tables. Mechanically: a clang-query matcher for function-pointer
+  and member-pointer types in parameters, members and locals, with that
+  one site allowlisted (25.20).
 - **Banned: `std::function`, `std::unordered_map`/`std::unordered_set`,
   `std::chrono`** (russ, 2026-10-10: "These classes / functions are
   banned. Abseil's versions are always better."). In their place:
