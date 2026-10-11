@@ -3009,3 +3009,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ: the licence-header check must catch a bad licence, not only a missing header; 7.8's
   SPDX rule becomes a gate with an allowlist of accepted licences (no GPL/LGPL identifiers) and a
   provenance list for non-MIT files; the agent told. Push point: main at this commit.
+- Usage 98% all-models (russ, 2026-10-11 evening; 91% in the morning: the trial's rounds, 26.17b,
+  7.8, 26.28 and the Fable session cost seven points in a day). Stop: 26.17b and 7.8 told to
+  commit WIP and stop; 26.28's small round finishes; no dispatch until Friday 2026-10-16 01:00.
+  The pace rule failed today because three Sonnet-class agents and a long interactive trial ran
+  at once; the Queue's "one lane" was not kept. Lesson recorded in process.md.

@@ -168,7 +168,11 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   run as many lanes as that rate buys (at 16% with six days left, about one
   busy Sonnet lane); near the end of the week, an unused remainder goes to
   queued work rather than being left. A red push still gets fixed whatever
-  the pace. Each lane's `user.bazelrc` caps its tests (since 2026-10-10:
+  the pace. 2026-10-11: the pace was broken (91% to 98% in one day) by
+  running three Sonnet-class agents beside a long interactive trial; from
+  here the count of concurrently running Sonnet or Opus agents is the thing
+  the orchestrator limits, not the lane count, and an interactive session
+  with russ (a trial, a review conversation) counts as one. Each lane's `user.bazelrc` caps its tests (since 2026-10-10:
   `--jobs=4`, `--local_test_jobs=4`, 20 GB; the machine has 8 cores and
   62 GB). Prefer `SendMessage` follow-ups to
   new agents. Shut down agents, background loops and Bazel servers that
