@@ -24,6 +24,8 @@ Rules marked "(from phase N)" take effect when that plan phase lands.
 - **Coverage** (from phase 7/8): new code arrives fully covered by tests,
   error paths included. CI fails if total coverage drops. Gaps that
   cannot be covered are listed with a reason in `docs/coverage.md`.
+  You must not lower the coverage baseline. That's why it exists. Only ever
+  increase it (russ, 2026-10-11).
 - **Test sizes are tiers**: Bazel `size` is the tier, and every test
   declares `size` and `timeout` explicitly (the QEMU test macros refuse a
   missing one). `small` tests run constantly during development

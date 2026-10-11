@@ -3067,4 +3067,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   xfstests_1_test_ext4 shard budgets calibrated; dcfs/BUILD.bazel trace initramfs
   genrules fixed with cost_lib.sh). Fast (299 pass), presubmit (444 pass), and tools
   (38 pass) suites green. Lane-1 free. Push point: main at this commit.
-
+- russ: "You must not lower the coverage baseline. That's why it exists. Only ever increase it." (2026-10-11). Baseline restored to 96.26; step 8.5 queued to close the 21-line deficit.

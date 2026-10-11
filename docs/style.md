@@ -1208,6 +1208,10 @@ necessary, but if you think one is necessary, come to me."
   missing one); pick the tier from the measured duration. The soak test is
   `manual`.
 - New code arrives covered, error paths included (from phase 7/8).
+  **Never lower the coverage baseline** (russ, 2026-10-11: "You must not lower
+  the coverage baseline. That's why it exists. Only ever increase it."). CI
+  fails if total coverage drops. A change that would drop coverage adds tests to
+  keep or raise the baseline, never lowers `dcfs/coverage_baseline.txt`.
 
 ## 3. Bazel
 

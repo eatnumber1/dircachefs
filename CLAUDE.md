@@ -75,3 +75,5 @@ up one row (implementer to protocol, mechanical to implementer).
   make`, `command diff`).
 - Commit to `main` at sensible points without asking (russ, 2026-10-05);
   subagents commit on their step branches. Never push.
+- You must not lower the coverage baseline. That's why it exists. Only ever
+  increase it (russ, 2026-10-11).
