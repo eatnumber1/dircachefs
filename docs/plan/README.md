@@ -131,6 +131,15 @@ push; the queue above starts in earnest after the reset.
 
 ## Future work (not scheduled)
 
+- **dcfs on NFS clients, in front of an NFS mount: rejected** (russ,
+  2026-10-11, proposed and withdrawn in the same breath: "I can't
+  guarantee exclusive access"). The write-through protocol requires that
+  nothing changes the backing behind dcfs; a shared NFS mount violates
+  that by definition. The server-side instance already answers the
+  clients' attribute traffic from its cache (the trial's 175k GETATTRs
+  per round with the disk asleep), and the kernel's NFS client cache does
+  the rest locally.
+
 - **More backing filesystems.** Phase 14 (Identity from the backing filesystem) supports ext4, xfs and btrfs
   handles. Extending it:
   - The generic encoder `generic_encode_ino32_fh` (fs/libfs.c; types
