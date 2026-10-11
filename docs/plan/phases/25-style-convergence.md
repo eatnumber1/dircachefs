@@ -286,6 +286,15 @@ consider on a case-by-case basis."
   holds exactly his approvals.
 Owner: dcfs-implementer, after the current rounds land (budget), before
 25.2.
+Status 2026-10-11: audit completed (bd0083b, lane-3; notes/crash-audit-25.9.md).
+Census found 25 CHECK sites in production (1 clean conversion to RET_CHECK in
+`ReplyNone`; 17 FUSE pointer checks convertible to RET_CHECK_NE inside Serve
+lambdas; 1 formal case for crash in `RestoreRoot`; 6 lifecycle/session checks),
+0 LOG(FATAL), 1 abort() (fork_split.h parent return guard: case for abort vs _exit(127)),
+0 assert(), 0 std::terminate, and 10 exit()/_exit() sites (8 subprocess exits,
+2 CLI wrapper exits, 1 detachment failure convertible to Status).
+Constructor audit confirmed zero fallible work in constructors across production.
+All 38 tools tests passed. Awaiting Russ's ruling on the formal cases.
 
 Exception and its inverse (russ, 2026-10-09): "crashes are permitted in
 tests when invariants fail that aren't under test. Like if we fail to
