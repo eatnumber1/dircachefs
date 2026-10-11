@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests of the TLA+ mode of the mutation tester (mutate.py `--lang tla`,
 plan step 12.13): the scope, `generate` and `changed` over a throwaway git
 repository, the judging of Bazel's output (killed, survived, INVALID),

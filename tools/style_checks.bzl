@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """clang-tidy and clang-query over our C++ with the build's own flags (25.21).
 
 `style_findings(name, targets)` applies an aspect to each cc_library,

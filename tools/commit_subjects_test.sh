@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Self-check of .github/ci/commit_subjects.sh (plan steps 26.1 and 26.13):
 # canned subject lists, one accepted and one rejected per rule.
 set -euo pipefail

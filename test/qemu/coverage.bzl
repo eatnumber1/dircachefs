@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Coverage plumbing of the QEMU test macros (step 7.2).
 
 Under `bazel coverage` the test binaries and dcfs are built with clang's

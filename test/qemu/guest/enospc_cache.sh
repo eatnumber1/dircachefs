@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 11.4 (b): the filesystem holding the CACHE DATABASE out of space
 # (docs/plan/phases/11-crash-stress-failure-testing.md, 11.4; design.md,
 # "The write-through protocol", "Sync points"). SQLite's "disk full"

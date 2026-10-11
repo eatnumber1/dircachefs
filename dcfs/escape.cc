@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/escape.h"
 
 #include <cstddef>

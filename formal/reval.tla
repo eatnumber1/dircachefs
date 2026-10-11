@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------------- MODULE reval -------------------------------
 (***************************************************************************)
 (* The revalidation model: what dcfs reuses across a change of the        *)

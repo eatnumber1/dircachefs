@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "bench/dm_delay.h"
 
 #include <fcntl.h>

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Self-check of the ASan build (step 7.1, review): the sanitizer's C++
 // runtime is linked, so ASan reports the C++-only errors. Only built under
 // --config=asan (see BUILD.bazel).

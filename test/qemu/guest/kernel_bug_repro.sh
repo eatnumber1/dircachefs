@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 26.15: runs the standalone reproducer of a Linux kernel bug
 # (tools/kernel_bugs/<name>/reproduce.sh, installed under
 # /kernel_bugs/<name>/ by scripts/mkinitramfs.sh) as a DISABLED_ check, the

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for extract.py: what the skip list keeps (plan step 7.1b).
 
 Run as extract_test.py <BUILD.llvm_repo.tpl of toolchains_llvm>. The skip list

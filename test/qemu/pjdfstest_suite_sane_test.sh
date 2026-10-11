@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Self-check of the pjdfstest wrapper's pjdfstest-suite-sane gate (step 26.1):
 # sources the real guest/lib.sh and guest/pjdfstest_lib.sh (the functions
 # guest/pjdfstest.sh calls) and feeds them canned TAP output through the real

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 17.1 acceptance test: xfstests' generic tests against dcfs.
 #
 # Runs in the xfstests root file system (test/qemu/scripts/mkxfstests_rootfs.py:

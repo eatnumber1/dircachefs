@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Repository rules for packages from an Alpine release branch (step 24.1).
 
     alpine_index(name = "alpine_index", branch = "v3.24")

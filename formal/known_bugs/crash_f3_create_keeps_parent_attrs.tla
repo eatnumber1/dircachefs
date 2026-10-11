@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ----------------- MODULE crash_f3_create_keeps_parent_attrs -----------------
 (***************************************************************************)
 (* Known bug: crash audit F3 (docs/plan/audits/crash.md; also races F6,   *)

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # The TLA+ tools: see README.md. The jar itself is @tla2tools//file
 # (MODULE.bazel); tlc.bzl defines tlc_test.
 

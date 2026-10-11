@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Assembles the NFS test's Debian rootfs ext4 image (step 24.3).
 
 Input is @debian//:flat, the tar rules_distroless's `flatten` rule makes of

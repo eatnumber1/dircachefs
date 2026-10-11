@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # The xfstests wrapper's gate and list functions (step 17.1), sourced by
 # guest/xfstests.sh after lib.sh and by test/qemu/xfstests_gate_test.sh on the
 # host, which feeds them canned results and lists to prove they reject.

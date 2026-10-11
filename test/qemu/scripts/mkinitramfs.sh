@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Adapted from fuse-generation-qemu; that repo stays the LKML patch's test
 # suite.
 #

@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 --------------------- MODULE ident_skip_identity_statx ---------------------
 (***************************************************************************)
 (* OpenNode without VerifyBackingIdentity: whatever open_by_handle_at      *)

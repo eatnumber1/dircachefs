@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """xfstests_test: a QEMU test of the xfstests generic tests (step 17.1).
 
 Every target that runs xfstests goes through this macro, so that it always has

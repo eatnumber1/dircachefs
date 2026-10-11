@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Assembles the xfstests guest's root file system, an ext4 image (step 17.1).
 
 The generic tests need bash, GNU coreutils, util-linux's mount and a dozen

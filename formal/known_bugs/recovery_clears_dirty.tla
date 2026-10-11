@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------ MODULE recovery_clears_dirty ------------------------
 (***************************************************************************)
 (* The start takes the recovered rows out of the dirty set when its probe  *)

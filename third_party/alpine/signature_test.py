@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests that the Alpine package checks refuse what they must (step 24.1).
 
 A tampered APKINDEX and a tampered .apk are refused (signature, control

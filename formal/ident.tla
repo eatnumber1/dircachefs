@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------------- MODULE ident -------------------------------
 (***************************************************************************)
 (* The identity model: what a nodeid and its FUSE generation stand for,   *)

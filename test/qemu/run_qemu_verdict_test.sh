@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Host-side test of run-qemu.sh's verdict (step 23.7): a guest whose kernel
 # logged an oops, a BUG, a WARNING or a panic fails the run, whatever its own
 # checks said, and the FAIL names the first such line. A fake qemu prints a

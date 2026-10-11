@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Mutation operators over TLA+ source (plan step 12.13).
 
 There is no parser: a conjunct-aware token scanner. The source is masked

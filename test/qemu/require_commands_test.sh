@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Self-check of guest/lib.sh's require_commands gate (step 26.1): sources the
 # real lib.sh and calls the real require_commands with one name that is not a
 # command, then with names that all are. It must report the missing name in

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 12.14: the model's abstraction of the cache database's
 # durability, tested against what SQLite leaves on a disk that reorders
 # writes (formal/README.md, "Abstractions"; formal/dcfs.tla, Commit and

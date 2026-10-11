@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ---------------- MODULE lifetime_tmpfile_row_survives_crash -----------------
 (***************************************************************************)
 (* The bug before step 23.7 (review L5): an O_TMPFILE file's row, which    *)

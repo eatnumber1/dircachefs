@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Prepares a CI runner (a GitHub-hosted ubuntu-24.04 or an `act` job
 # container, see third_party/act/README.md) for `bazel test`:
 #

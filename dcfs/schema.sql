@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: MIT
 -- dcfs schema v4 (see kSchemaVersion in dcfs/migrate.h for the history;
 -- Migrate() upgrades older databases in place).
 --

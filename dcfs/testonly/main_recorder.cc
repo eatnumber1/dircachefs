@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // MainProtocolEvents() for the testonly recording build of the daemon
 // (//dcfs:main_static_traced): a TraceRecorder writing to $DCFS_TRACE_FILE,
 // or to /dev/console (the QEMU guest's serial log, which outlives a killed

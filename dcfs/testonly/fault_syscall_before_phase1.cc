@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // A fault for trace validation (formal/README.md, "Trace validation"): an
 // unlink whose backing unlinkat runs before its phase 1, as if the syscall
 // (and its protocol event, which follows it) had been moved above

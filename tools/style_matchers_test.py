@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The fixtures of the clang-query matchers and of .clang-tidy (step 25.21).
 
 Each matcher in tools/style_matchers/ must report every line its known-bad

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #ifndef DCFS_SCHEMA_H_
 #define DCFS_SCHEMA_H_
 

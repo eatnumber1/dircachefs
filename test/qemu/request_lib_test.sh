@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Self-check of the request-count gate (step 26.4b): the real
 # guest/request_lib.sh delta over canned cost-counter snapshots
 # (dcfs/testonly/cost_counter.h's format), and strace_lib.sh's budget

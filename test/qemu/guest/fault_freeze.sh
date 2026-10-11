@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 11.6: the backing filesystem frozen (FIFREEZE, `testutil fsfreeze`):
 # what blocks, what does not, and what a freeze leaves behind.
 #

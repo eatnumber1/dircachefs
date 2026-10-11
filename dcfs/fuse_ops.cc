@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/fuse_ops.h"
 
 #include <linux/fs.h>  // FS_IOC_SETFLAGS

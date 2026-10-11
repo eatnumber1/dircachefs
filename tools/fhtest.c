@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* Copied from fuse-generation-qemu/guest/fhtest.c; keep in sync by hand. */
 /*
  * fhtest - file handle test client for the FUSE generation work.

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Arid nodes: code in which a mutant is noise (plan step 26.5d).
 
 A mutant inside a log statement, a diagnostic string or a testonly hook

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 3.2 acceptance test: read-only ops served from the cache.
 #
 # Builds a tree on vdb, mounts dcfs over it, and checks: metadata matches the

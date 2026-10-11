@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Self-check of busybox_test.sh (step 26.1): drives the real busybox_test.sh
 # with a fake busybox (a script answering --list from a file). With `find`
 # missing from the list the real gate must exit non-zero with its "missing

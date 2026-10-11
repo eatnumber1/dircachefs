@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """A small mutation tester for the protocol code (steps 26.5, 26.5d).
 
   mutate.py generate --workspace W --scope scope.txt --out mutants.json

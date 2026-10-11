@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Self-check of the crash states guest/sqlite_durability.sh replays (step
 # 12.14): the real guest/sqlite_durability_lib.sh epoch_states over a
 # synthetic crash_states log-list, so that a write left out of the states

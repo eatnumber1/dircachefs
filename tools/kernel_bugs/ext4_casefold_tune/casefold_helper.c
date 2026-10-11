@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* Step 26.15: the two ioctls reproduce.sh needs that no stock tool issues.
  *
  *   casefold_helper enable <mountpoint>

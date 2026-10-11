@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests of noisy_report.py (step 26.14e): over canned build events, a run with
 a failed test, a flaky one (two of three runs failed) and a timeout lists each,
 and a clean run says so; a damaged event file is an error, not an empty table;

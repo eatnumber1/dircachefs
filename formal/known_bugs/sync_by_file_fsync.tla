@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------- MODULE sync_by_file_fsync -------------------------
 (***************************************************************************)
 (* Not the code, and not historical (step 12.8): a sync point after the    *)

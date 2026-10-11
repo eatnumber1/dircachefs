@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 -------------------- MODULE tristate_f1_unguarded_fills --------------------
 (***************************************************************************)
 (* Known bug: tri-state audit F1 (docs/plan/audits/tristate.md). No fill  *)

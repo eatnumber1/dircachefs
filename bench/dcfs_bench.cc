@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // dcfs benchmarks (phase 10): google/benchmark cases run inside the QEMU
 // guest (test/qemu/guest/bench_*.sh start it), plus two helper subcommands
 // the guest scripts use:

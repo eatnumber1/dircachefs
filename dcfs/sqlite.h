@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #ifndef DCFS_SQLITE_H_
 #define DCFS_SQLITE_H_
 

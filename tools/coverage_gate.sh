@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Step 8.1: the coverage gate (CI coverage job only).
 #
 #   coverage_gate.sh <coverage.lcov> <baseline file>

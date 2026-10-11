@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // A fault for trace validation and step 12.6b: the start's first probe of a
 // recovered row (backing::BackingNlink, from ProbeRecoveredRows) fails, as
 // a crash before that probe would leave it: unprobed and in the dirty set,

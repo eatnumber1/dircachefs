@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------ MODULE rename_stale_source ------------------------
 (***************************************************************************)
 (* Known bug: formal/ finding rename_stale_source (found by this model,   *)

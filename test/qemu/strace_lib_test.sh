@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Self-check of the syscall-trace gate (step 26.3): the real
 # guest/strace_lib.sh reducer and golden comparison over canned strace -f -y
 # output. The reduction must classify each syscall (a backing path, the

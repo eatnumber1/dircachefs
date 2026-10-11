@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """What scripts/mkinitramfs.sh needs to install a dynamic binary's libraries.
 
 A guest binary linked dynamically (the ASan and UBSan builds) runs the glibc

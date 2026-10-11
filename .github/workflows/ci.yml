@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # CI: the whole test suite, in three jobs of increasing size (the tiers of
 # test/qemu/README.md) and two sanitizer suites (`asan`, `ubsan`) that run in
 # parallel with the last tier, `full`; those three jobs are matrices of three

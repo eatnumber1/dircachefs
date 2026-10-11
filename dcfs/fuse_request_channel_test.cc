@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Regression test for 0795d12: FuseRequest::Reply*() helpers must build
 // their failure Status via dcfs::ErrnoToStatus() (which attaches the
 // kErrnoTypeUrl payload GetErrnoFromStatus() needs to recover the original

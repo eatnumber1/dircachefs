@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // A fault for trace validation (formal/README.md, "Trace validation"): an
 // unlink whose unlinkat reports an error the model does not have (EBUSY),
 // which the code then ignores, carrying on as if the syscall had succeeded

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for mkmodules.py (step 24.2), on a synthetic module tree."""
 
 import gzip

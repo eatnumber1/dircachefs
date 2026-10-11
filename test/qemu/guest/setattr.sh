@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 4.1 acceptance test: Setattr (chmod/chown/truncate/utimes)
 # write-through.
 #

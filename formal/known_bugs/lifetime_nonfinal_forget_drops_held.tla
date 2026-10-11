@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ---------------- MODULE lifetime_nonfinal_forget_drops_held -----------------
 (***************************************************************************)
 (* A bug the code does not have: a FORGET that is not the last (the kernel *)

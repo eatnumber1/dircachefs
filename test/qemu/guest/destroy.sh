@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 23.7 (review M2): the cost of DESTROY's reconciliation.
 #
 # At unmount the kernel sends no FORGETs, so DESTROY reconciles every file

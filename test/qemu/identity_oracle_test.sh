@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Host-side self-check of the identity oracle in guest/fault_lib.sh (step
 # 26.14e, the minimal form of 11.7's): identity_take records, for every object
 # under a directory, the handle dcfs gives it and the backing filesystem's own

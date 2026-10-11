@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Self-check of //tools:toolchain_test (step 26.1 rule): the checker must pass
 # the pinned clang's info file and reject a host gcc and another clang version.
 set -eu

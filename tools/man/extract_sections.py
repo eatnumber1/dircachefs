@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Builds the markdown source of the dcfs(8) man page from README.md.
 
 Usage: extract_sections.py README.md version.h SECTION [SECTION...] > dcfs.md

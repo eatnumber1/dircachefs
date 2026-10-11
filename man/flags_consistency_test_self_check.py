@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Self-check of man/flags_consistency_test.py (step 26.1).
 
 Runs the real flags_consistency_test.py, as a subprocess with this

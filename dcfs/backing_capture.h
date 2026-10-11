@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #ifndef DCFS_BACKING_CAPTURE_H_
 #define DCFS_BACKING_CAPTURE_H_
 

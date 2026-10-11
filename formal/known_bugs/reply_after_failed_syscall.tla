@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------- MODULE reply_after_failed_syscall --------------------
 (***************************************************************************)
 (* A mutation result the backing filesystem never gave (step 12.7b): a     *)

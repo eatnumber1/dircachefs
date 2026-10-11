@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/remount.h"
 
 #include <cerrno>

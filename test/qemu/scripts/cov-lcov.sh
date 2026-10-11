@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Step 7.2: merge LLVM raw profiles and export them as lcov.
 #
 #   cov-lcov.sh <llvm-profdata> <llvm-cov> <profraw-dir> <out.lcov> <object>...

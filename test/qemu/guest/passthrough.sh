@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 3.3 acceptance test: file contents served via FUSE passthrough
 # (falling back to dcfs's own Read() when the kernel doesn't grant it).
 #

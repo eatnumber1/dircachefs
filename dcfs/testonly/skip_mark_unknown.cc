@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // A fault for trace validation's test-first check (formal/README.md, "Trace
 // validation"): phase 1 no longer marks names unknown. Every statement that
 // would store a dentry as 'unknown' (cache::MarkUnknown, via PutDentry) is

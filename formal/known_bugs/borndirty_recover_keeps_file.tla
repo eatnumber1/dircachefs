@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 -------------------- MODULE borndirty_recover_keeps_file --------------------
 (***************************************************************************)
 (* Not the code (step 23.11): recovery forgets a dirty directory's records *)

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Host-side test of run-qemu.sh's --ram-disks (step 26.17): the disk-specs name
 # disks in the guest's RAM, so no image is made, no mkfs runs, no drive is
 # attached and the specs go to the guest on the kernel command line; the mkfs

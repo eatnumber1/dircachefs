@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The pinned LLVM distribution with its own sysroot and runtime (7.1b).
 
     llvm_distribution(

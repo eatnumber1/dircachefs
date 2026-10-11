@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Reads the clang-tidy and clang-query outputs of //tools:style_checks_test.
 
 //tools:style_checks.bzl runs the two tools over our C++ as Bazel actions and

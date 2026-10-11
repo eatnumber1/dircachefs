@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """SBOMs and OSV ignore checks for dcfs (plan step 5.3).
 
 OSV-Scanner does not read MODULE.bazel.lock, so the pins are written out as

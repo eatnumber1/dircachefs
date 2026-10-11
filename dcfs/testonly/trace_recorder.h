@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #ifndef DCFS_TESTONLY_TRACE_RECORDER_H_
 #define DCFS_TESTONLY_TRACE_RECORDER_H_
 

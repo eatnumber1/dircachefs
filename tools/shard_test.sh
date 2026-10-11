@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Self-check of .github/ci/shard.sh (step 7.4b): over a canned target list,
 # every target is in exactly one shard, the partition is stable (the same for
 # any input order and with duplicates), and each size is spread over the

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/backing_capture.h"
 
 #include <string>

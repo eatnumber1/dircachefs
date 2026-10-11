@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 -------------------------- MODULE reval_out_of_band --------------------------
 (***************************************************************************)
 (* What dcfs's exclusive-access rule buys (docs/design.md, "Assumptions"): *)

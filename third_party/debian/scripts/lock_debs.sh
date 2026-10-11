@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Print, one line per fetched .deb (transitive packages included), the file
 # name and sha256 that MODULE.bazel.lock records for rules_distroless's apt
 # extension: `<file name> <sha256>`, sorted. third_party/debian/debs.lock is

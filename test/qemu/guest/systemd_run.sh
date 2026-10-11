@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Step 15.6: what dcfs-test.service (guest/systemd_install.sh) runs in the
 # systemd guest: the guest script, then the same report guest/init gives the
 # other guests (the MEM line, the kernel's oopses, the verdict), then a reboot.

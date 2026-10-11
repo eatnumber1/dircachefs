@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Step 15.6: sets up the released Debian cloud image for the systemd guest.
 # guest/init runs it (in the busybox initramfs) with the image's root
 # partition mounted at ROOT, just before switch_root; it is not a test.

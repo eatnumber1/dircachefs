@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #ifndef DCFS_ESCAPE_H_
 #define DCFS_ESCAPE_H_
 

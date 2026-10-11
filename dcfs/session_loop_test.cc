@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Step 15.2: SessionLoop's FUSE_INIT callback, which tells the waiting
 // mount.dcfs wrapper that dcfs is serving. A libfuse session with custom io
 // (as fuse_request_channel_test.cc) whose read() hands out forged requests:

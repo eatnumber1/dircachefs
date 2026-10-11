@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------- MODULE reval_no_write_fd -------------------------
 (***************************************************************************)
 (* Known bug: review L1 of Phase 23, fixed in step 23.7. A writable open   *)

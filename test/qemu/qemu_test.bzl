@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """qemu_test(name, guest_script, disks): a dcfs QEMU end-to-end test.
 
 Boots the shared dcfs QEMU initramfs (:initramfs_checked for the small and

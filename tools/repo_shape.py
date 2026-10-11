@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Repository-shape rules (plan step 26.13).
 
 Each function takes the root of a source tree and returns a list of problems

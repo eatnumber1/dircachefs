@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for sbom.py: every pin has an SBOM entry, and the ignore checks."""
 
 import datetime

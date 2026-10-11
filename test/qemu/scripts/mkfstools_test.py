@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for mkfstools.py (step 26.17), on a synthetic Alpine tree."""
 
 import gzip

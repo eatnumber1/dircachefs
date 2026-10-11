@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # shellcheck shell=sh
 # Step 26.4b: FUSE requests per user-level operation, from the testonly
 # checking daemon's cost counter (dcfs/testonly/cost_counter.h: it rewrites

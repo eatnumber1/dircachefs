@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ---------------------- MODULE effect_before_syscall ----------------------
 (***************************************************************************)
 (* An effect point too early (step 12.7): a mutation's phase 1 that        *)

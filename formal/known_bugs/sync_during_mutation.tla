@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------ MODULE sync_during_mutation ------------------------
 (***************************************************************************)
 (* Known bug: formal/ finding sync_during_mutation (found by this model,  *)

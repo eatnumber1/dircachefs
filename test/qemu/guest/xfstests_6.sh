@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # xfstests shard 6 of 6: see xfstests.sh.
 XFSTESTS_SHARD=6
 XFSTESTS_SHARDS=6

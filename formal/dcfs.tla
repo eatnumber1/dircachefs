@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 -------------------------------- MODULE dcfs --------------------------------
 (***************************************************************************)
 (* A model of dcfs's write-through protocol (docs/design.md, "The          *)

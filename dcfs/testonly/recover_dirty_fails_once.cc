@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // A crash for trace validation (formal/README.md, "Trace validation"): the
 // first start's recovery (cache::RecoverDirty) fails before it writes
 // anything, as if the daemon had died there, so that the test starts

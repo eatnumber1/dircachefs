@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests of the mutation operators and the arid nodes on a C++ fixture.
 
 The fixture (fixture.cc) is compiled by the pinned clang with the command

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """tla_trace_test: trace validation of a QEMU guest run (formal/README.md).
 
 Boots a guest whose dcfs records its protocol events (a qemu_cc_test's

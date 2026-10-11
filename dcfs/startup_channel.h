@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #ifndef DCFS_STARTUP_CHANNEL_H_
 #define DCFS_STARTUP_CHANNEL_H_
 

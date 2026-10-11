@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Test first (docs/plan/phases/04-pinned-host-tools.md, e2fsprogs
 # follow-up): confirms the Debian rootfs image (//third_party/debian:rootfs)
 # has *real* root:root ownership and setuid bits, not just whatever uid ran

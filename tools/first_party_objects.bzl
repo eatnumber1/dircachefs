@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Collects the compiled objects of everything a binary links (step 26.8).
 
 `linked_objects(name, binary)` writes `<name>.txt`, one object path per line

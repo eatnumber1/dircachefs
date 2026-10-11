@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Self-check of the reproducible-build gate (step 26.12).
 
 repro_compare.py must accept identical builds and reject two builds of a

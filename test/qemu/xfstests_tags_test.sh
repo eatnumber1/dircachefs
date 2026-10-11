@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Self-check of the xfstests tag (step 17.1): .github/ci/test.sh leaves out of
 # the full, asan and ubsan shards every test tagged `xfstests`, so a target
 # that runs xfstests and lacks the tag would run in those jobs too (and

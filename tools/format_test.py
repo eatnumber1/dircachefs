@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Every tracked C and C++ file is formatted (plan step 7.6a).
 
 The check runs over the real source tree (found through MODULE.bazel's

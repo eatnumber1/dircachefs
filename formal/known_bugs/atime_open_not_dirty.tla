@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ----------------------- MODULE atime_open_not_dirty -----------------------
 (***************************************************************************)
 (* Not the code (step 23.8): a cold read-only open does not mark the       *)

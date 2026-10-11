@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // DirCacheFS driven through forged FUSE requests, for interleavings that
 // only coroutines can produce in the daemon itself.
 //

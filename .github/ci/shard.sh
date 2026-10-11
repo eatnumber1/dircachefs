@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Deterministic partition of a suite's test targets across CI shards
 # (step 7.4b). Reads `SIZE LABEL` lines on standard input (Bazel's `size`
 # attribute and the test's label, one per line, in any order and with

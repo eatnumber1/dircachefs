@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 15.1 acceptance test: the mount.dcfs wrapper (phase 15).
 #
 # mount(8) runs `mount.dcfs SOURCE MOUNTPOINT [-sfnv] [-N ns] -o OPTIONS` for

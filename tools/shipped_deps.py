@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Golden of the external repositories in the shipped binaries (step 26.9).
 
 //dcfs:linked_deps (a genquery over deps(//dcfs:main) + deps(//dcfs:main_static),

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #ifndef DCFS_SYSLOG_SINK_H_
 #define DCFS_SYSLOG_SINK_H_
 

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Writes the notrun list of a file system (test/qemu/guest/xfstests.<fstype>.notrun)
 # from the serial logs of its xfstests shards (step 17.1): one
 # "generic/NNN <reason>" per test the run did not run, with the reason in the

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Checks the generated dcfs(8) page, read back by pandoc as plain text."""
 import re
 import sys

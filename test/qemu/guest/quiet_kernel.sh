@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Step 26.14: the guest's kernel is quiet. guest/init sets the sysctls that
 # take away the kernel's spontaneous activity (periodic writeback, reclaim of
 # cached dentries and inodes, laptop-mode writeback) before any test runs and

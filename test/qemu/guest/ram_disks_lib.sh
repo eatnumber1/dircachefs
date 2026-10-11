@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # shellcheck shell=sh
 # The verdicts of guest/ram_disks.sh (step 26.17) as a function of the values it
 # reads from the guest, so that //test/qemu:ram_disks_lib_test can feed it good

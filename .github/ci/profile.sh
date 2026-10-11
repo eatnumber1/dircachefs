@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Step 26.16: puts the table of tools/ci_profile.py for the job's Bazel
 # profiles (ci-profile/*.json.gz, written by test.sh, coverage.sh and
 # tools/reproducible_build.sh when DCFS_CI_PROFILE is set) in the job summary

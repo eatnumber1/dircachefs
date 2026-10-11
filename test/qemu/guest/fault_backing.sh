@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 11.1: I/O errors on the BACKING disk (design.md, "The
 # write-through protocol", "Phase 2"; docs/plan/phases/11-crash-stress-
 # failure-testing.md, 11.3). The backing filesystem sits on a dm device

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Backing-syscall traces of one operation (step 26.3), for the guest scripts
 # that compare them with goldens (guest/syscall_traces.sh). Sourced after
 # lib.sh; strace_reduce, strace_backing, strace_counts and strace_compare

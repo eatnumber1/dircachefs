@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Host-side self-check of guest/ram_disks.sh's verdicts (step 26.17): the real
 # ram_disk_judge (guest/ram_disks_lib.sh) over canned values, good ones (every
 # check ok) and one bad value at a time (the check that value belongs to, and

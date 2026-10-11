@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Host-side test of run-qemu.sh's mkfs wiring (R3, L5): the scratch disks are
 # formatted by the pinned, Bazel-built mkfs tools passed with --mke2fs /
 # --mke2fs-conf / --mkfs-xfs / --mkfs-btrfs, never by a host mkfs.* found on

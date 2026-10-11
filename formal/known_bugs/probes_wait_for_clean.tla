@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------ MODULE probes_wait_for_clean ------------------------
 (***************************************************************************)
 (* Not the code (step 12.12a, a premise for RecoveryTerminates): the       *)

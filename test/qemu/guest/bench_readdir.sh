@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Readdir benchmark only (Phase 6.2): the READDIR_ENTRIES-entry directory
 # (default 10000) listed through the backing filesystem, dcfs and dcfs0,
 # with the cache dropped before every listing. Prints the numbers. Run it

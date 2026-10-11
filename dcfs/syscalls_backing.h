@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // The backing-reaching wrappers of dcfs::syscalls: every syscall that takes
 // a backing fd, file handle or name (docs/style.md 1.8), plus mount and
 // umount2 (staging, remount, bench). Only backing.cc, its lower layers,

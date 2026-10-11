@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/fsck.h"
 
 #include <fcntl.h>

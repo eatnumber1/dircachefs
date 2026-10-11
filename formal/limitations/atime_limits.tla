@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 --------------------------- MODULE atime_limits ---------------------------
 (***************************************************************************)
 (* What step 23.8 does not deliver, stated as checked counterexamples     *)

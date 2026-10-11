@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ---------------------- MODULE interrupt_after_syscall -----------------------
 (***************************************************************************)
 (* Not a historical bug (Phase 22): a mutation interruptible after its     *)

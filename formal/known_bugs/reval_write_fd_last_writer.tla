@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 --------------------- MODULE reval_write_fd_last_writer ---------------------
 (***************************************************************************)
 (* Known bug: review L-a of step 23.7 (fixed there). Every allowed         *)

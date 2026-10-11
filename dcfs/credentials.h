@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #ifndef DCFS_CREDENTIALS_H_
 #define DCFS_CREDENTIALS_H_
 

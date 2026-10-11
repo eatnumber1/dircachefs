@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------ MODULE readdirplus_unlocked ------------------------
 (***************************************************************************)
 (* Known bug: formal/ finding readdirplus_unlocked (found by this model,  *)

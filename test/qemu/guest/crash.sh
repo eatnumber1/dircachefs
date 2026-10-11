@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 4.6 acceptance test: crash safety of passthrough writes, and
 # out-of-band change detection.
 #

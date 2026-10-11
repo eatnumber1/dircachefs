@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Applies one clang-tidy check to the given files, under the build's flags.
 
 `bazel run //tools:style_fix -- --check=misc-include-cleaner [paths]`

@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 -------------------- MODULE reval_write_fd_never_dropped --------------------
 (***************************************************************************)
 (* A bug the code does not have, for the model's own sake (review of step  *)

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 26.4b: how many FUSE requests the kernel sends dcfs for one
 # user-level operation (ls -l of 100 entries, find over a tree, stat of a
 # path 10 directories deep, cat of a file), each on a cold kernel cache and a

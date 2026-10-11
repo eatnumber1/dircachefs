@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Compares two coverage reports of one commit (step 26.14).
 
   coverage_diff.py [--exact] [--prefix P]... A.dat B.dat

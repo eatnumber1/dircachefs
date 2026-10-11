@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Self-check of .github/ci/collect-logs.sh (plan step 26.22): over a tree
 # shaped like bazel-testlogs, where Bazel leaves the test outputs read-only
 # (files 0444 in directories 0555), every log, result and console file is

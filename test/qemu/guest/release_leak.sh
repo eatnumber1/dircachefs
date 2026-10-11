@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 4.14 regression test for 2a4f672: Release() must never leak the
 # backing file (fd + passthrough registration) when the attribute refresh
 # it does on the last writable close fails.

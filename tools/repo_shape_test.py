@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Repository-shape rules over the real source tree (plan step 26.13).
 
 The tree is found through the real path of MODULE.bazel (a symlink into the

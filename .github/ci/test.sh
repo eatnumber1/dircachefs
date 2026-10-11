@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # `bazel test` for CI: the arguments are Bazel's (--config=fast, ...), every
 # target is tested (--keep_going: a failure must not hide the others) and
 # with the restored disk cache, an unchanged test is a cached pass (Bazel

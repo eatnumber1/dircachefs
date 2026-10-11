@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs --help and --version, run under the installed name `dcfs` (Abseil's
 # --help only lists flags from files it thinks are "main" files, by default
 # those named after the program, so the installed name used to matter).

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #ifndef DCFS_FSCK_H_
 #define DCFS_FSCK_H_
 

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Step 26.12 gate: two builds of the shipped outputs, in two copies of the
 # repository at different paths and two Bazel output bases, with no disk cache,
 # must be byte-identical. Run it with `bazel run //tools:reproducible_build`

@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ----------------------------- MODULE MClifetime -----------------------------
 (***************************************************************************)
 (* The model-checking root module of the lifetime model (lifetime.tla):   *)

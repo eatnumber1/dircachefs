@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Step 26.14e: the noisy run took effect. The inverse of guest/quiet_kernel.sh:
 # under DCFS_NOISY=1 (bazel test --test_env) run-qemu.sh puts dcfs_noisy=1 on
 # the kernel command line and gives the guest two vCPUs, and guest/init leaves

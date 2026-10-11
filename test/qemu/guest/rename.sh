@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 4.3 acceptance test: the remove/rename write-through ops
 # (unlink/rmdir/rename, including RENAME_NOREPLACE and RENAME_EXCHANGE) and
 # the inode-row lifetime rule (a row goes away once its backing nlink is 0

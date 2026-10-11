@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/mounts_below.h"
 
 // Mount enumeration method chosen: /proc/self/mountinfo, not

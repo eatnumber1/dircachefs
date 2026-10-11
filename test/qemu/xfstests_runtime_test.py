@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Self-check of the xfstests guest's runtime (step 17.1).
 
 The Alpine packages of @alpine_xfstests_tools are listed by name, not

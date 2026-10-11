@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Unit tests of style_fix.py: the changed-line ranges of a diff, the flags
 file's parsing, and the choice of one flags file per source (25.23)."""
 

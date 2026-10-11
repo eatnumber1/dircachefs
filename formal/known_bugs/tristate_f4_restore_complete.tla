@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 -------------------- MODULE tristate_f4_restore_complete --------------------
 (***************************************************************************)
 (* Known bug: tri-state audit F4 (docs/plan/audits/tristate.md). Before   *)

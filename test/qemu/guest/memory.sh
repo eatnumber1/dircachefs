@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs phase 10: memory. dcfs's resident memory after a `find` over a large
 # tree, and after the kernel drops its inode cache (which sends FORGETs):
 # dcfs must hold memory for what the kernel references, not for the tree.

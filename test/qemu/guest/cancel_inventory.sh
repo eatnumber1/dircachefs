@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 22.1: the cancellation inventory's measurements. How long each
 # request path that can wait on the backing filesystem takes when every
 # backing I/O is slow: the backing filesystem is on a device-mapper delay

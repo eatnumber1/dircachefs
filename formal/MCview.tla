@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 -------------------------------- MODULE MCview --------------------------------
 (***************************************************************************)
 (* Step 23.8b: the View of MC.tla with one component removed at a time,   *)

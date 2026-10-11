@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Checks Alpine's linux-virt kernel for every option the tests need.
 
 Step 24.2. required_options.txt lists, each with the reason, the kernel

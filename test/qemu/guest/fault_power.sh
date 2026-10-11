@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 11.1: power cuts, on real disks (docs/plan/phases/11-crash-stress-
 # failure-testing.md; design.md, "A power loss or kernel crash" and "Sync
 # points"). guest/power.sh fabricates the state a power loss leaves; here the

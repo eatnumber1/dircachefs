@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # xfstests slow shard 2 of 8: see xfstests.sh.
 XFSTESTS_SET=slow
 XFSTESTS_SHARD=2

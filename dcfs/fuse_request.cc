@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/fuse_request.h"
 
 #include <sys/stat.h>

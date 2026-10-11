@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ----------------------------- MODULE IdentTrace -----------------------------
 (***************************************************************************)
 (* Trace validation for the identity model (ident.tla): is a recorded      *)

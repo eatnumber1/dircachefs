@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Self-check of rootfs_invariant_test.py (step 26.1).
 
 Builds a small synthetic tar and its image with the real mkrootfs.py and

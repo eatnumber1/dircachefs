@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * An LD_PRELOAD library for the musl programs of the xfstests guest (written
  * for this repository; step 17.1). xfstests' tests and its _require_* checks

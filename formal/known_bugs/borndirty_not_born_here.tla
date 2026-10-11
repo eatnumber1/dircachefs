@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ---------------------- MODULE borndirty_not_born_here -----------------------
 (***************************************************************************)
 (* Not the code (step 23.11): phase 3 makes F durably dirty even when a    *)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Self-check of the UBSan build (step 7.4): the checks that matter most are
 // compiled in, linked with their runtime (the vptr check lives in the C++
 // part, ubsan_standalone_cxx) and fatal (-fno-sanitize-recover=all), so a

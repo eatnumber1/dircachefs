@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Mutation operators over clang's AST-JSON (plan step 26.5d).
 
 Each operator is a small class with a `name` and a `visit(node, ctx)` that

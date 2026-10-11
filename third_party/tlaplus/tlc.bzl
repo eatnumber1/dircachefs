@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """tlc_test: run the TLC model checker on a TLA+ specification as a test.
 
 TLC runs on the host (it needs neither root nor kernel control, so the

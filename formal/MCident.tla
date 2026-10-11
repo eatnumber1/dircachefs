@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------------ MODULE MCident ------------------------------
 (***************************************************************************)
 (* The model-checking root module of the identity model (ident.tla):      *)

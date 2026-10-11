@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Step 7.2 gate: an lcov file (a test's coverage.dat or the combined report)
 # must be non-empty and show at least one executed line of <source>.
 #

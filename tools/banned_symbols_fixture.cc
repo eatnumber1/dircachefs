@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Known-bad input of //tools:banned_symbols_self_check_test (plan step 26.8):
 // a tiny program that calls realpath(3) and sleep(3), which
 // tools/banned_symbols.txt bans, and defines nftw64 (a banned symbol that is in

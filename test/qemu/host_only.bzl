@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """HOST_ONLY_COMPATIBLE: for the tests that need neither root nor the guest.
 
 A test that runs on the host and does not depend on how our code was built

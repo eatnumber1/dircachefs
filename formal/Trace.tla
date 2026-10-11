@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------------- MODULE Trace --------------------------------
 (***************************************************************************)
 (* Trace validation: is a recorded run of dcfs a behavior of the model?    *)

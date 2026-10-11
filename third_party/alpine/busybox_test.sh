@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Host-side test of the guest's busybox, Alpine's busybox-static (step 24.3):
 # it is statically linked, has every applet the guest scripts use (grep
 # test/qemu/guest/*.sh and guest/init before adding or removing one below)

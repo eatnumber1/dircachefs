@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------------ MODULE lifetime ------------------------------
 (***************************************************************************)
 (* The inode lifetime model: which nodeids the kernel holds, what dcfs    *)

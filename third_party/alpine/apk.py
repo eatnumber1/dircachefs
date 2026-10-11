@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Alpine APKINDEX and .apk verification, resolution and unpacking.
 
 Plan step 24.1 (docs/plan/phases/24-alpine-series-pins.md). Run by

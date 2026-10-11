@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 11.1: I/O errors on the CACHE disk, the one holding the SQLite
 # database (docs/plan/phases/11-crash-stress-failure-testing.md, 11.3, 11.4;
 # design.md, "The write-through protocol" and "Sync points"). The cache

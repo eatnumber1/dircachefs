@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests of coverage_diff.py, the coverage determinism check (step 26.14).
 
 The check must pass two identical reports and fail, naming file and line, on

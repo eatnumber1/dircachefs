@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Self-check of the shipped-dependency golden (plan steps 26.1 and 26.9).
 
 The real comparison over the real graph and a golden with one line removed

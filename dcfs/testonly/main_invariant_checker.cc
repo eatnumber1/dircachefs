@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // MainProtocolEvents() for the testonly checking build of the daemon
 // (//dcfs:main_static_checked): the invariant checker and the cost counter
 // (testonly/checking_observers.h). See dcfs/protocol_events.h.

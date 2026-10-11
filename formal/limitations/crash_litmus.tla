@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ---------------------------- MODULE crash_litmus ----------------------------
 (***************************************************************************)
 (* What the backing filesystem's crash consistency leaves to the caller    *)

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* Step 26.15: name_to_handle_at(2) and open_by_handle_at(2), which no stock
  * tool of the usual distributions issues, for reproduce.sh.
  *

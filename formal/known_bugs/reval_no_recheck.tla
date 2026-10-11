@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 --------------------------- MODULE reval_no_recheck ---------------------------
 (***************************************************************************)
 (* Known bug: a writable open that shares a read-write backing fd took the *)

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Self-check of man/dcfs_8_test.py (step 26.1).
 
 Runs the real dcfs_8_test.py, as a subprocess with this interpreter, over

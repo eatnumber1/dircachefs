@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Self-check of the test selection of .github/ci/test.sh (step 17.1): the
 # xfstests shards (tagged `xfstests`) have a job of their own, so the shards of
 # the full, asan and ubsan jobs (no --tag) must not select them, and the

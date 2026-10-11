@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Reproduces a Linux kernel NULL pointer dereference in ext4: after
 # EXT4_IOC_SET_TUNE_SB_PARAM (6.18+) turned the casefold feature on under a
 # mounted filesystem, listing a directory marked casefold (chattr +F) oopses

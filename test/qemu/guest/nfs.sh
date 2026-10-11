@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 5.3 acceptance test: dcfs actually exported over real NFSv4,
 # not just a synthetic fhtest client.
 #

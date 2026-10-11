@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ---------------- MODULE lifetime_forget_multi_counted_as_one ----------------
 (***************************************************************************)
 (* A bug the code does not have: each entry of a FORGET_MULTI takes one    *)

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Builds the kernel-module part of a QEMU guest's initramfs (step 24.2).
 
 The test kernel is Alpine's linux-virt, whose drivers are mostly modules.

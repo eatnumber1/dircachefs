@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Step 15.6b: the lock the daemon holds for umount.fuse.dcfs to wait on.
 // Waiting for a real daemon, and what the helper does around a real unmount,
 // are test/qemu/guest/mount_dcfs.sh and the systemd guest: they take a mount.

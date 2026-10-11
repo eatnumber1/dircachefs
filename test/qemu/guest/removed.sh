@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 6.3 (audit F10): an object that is removed while something
 # still refers to it -- a process whose working directory is removed, an
 # O_PATH descriptor on a file that is then unlinked -- must behave as it

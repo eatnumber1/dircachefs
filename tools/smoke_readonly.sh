@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Read-only smoke test for dcfs.
 #
 # Mounts a small tree twice-listed: pass 1 exercises the initial backing-

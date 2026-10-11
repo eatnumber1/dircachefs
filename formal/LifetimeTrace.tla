@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ---------------------------- MODULE LifetimeTrace ----------------------------
 (***************************************************************************)
 (* Trace validation for the lifetime model (lifetime.tla): is a recorded  *)

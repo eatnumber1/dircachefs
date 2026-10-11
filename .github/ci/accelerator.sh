@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Says which accelerator the tests used: run-qemu.sh logs "using tcg" when
 # it falls back to emulation and nothing when it uses KVM, so a test log
 # without that line ran under KVM.

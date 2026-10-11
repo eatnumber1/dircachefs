@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 3.5 acceptance test: daemon lifecycle and CLI.
 #
 # Exercises main.cc's command-line validation, startup ordering (source

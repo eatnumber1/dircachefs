@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 23.5 (Phase 15's decision 3, pulled forward): a mount point or
 # btrfs subvolume below the source is presented as a stub directory.
 #

@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------- MODULE ident_probe_by_name_gen_first -------------------
 (***************************************************************************)
 (* As ident_probe_by_name_handle_first, with the generation read before    *)

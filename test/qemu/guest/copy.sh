@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 23.4: copy_file_range, reflinks, the forwarded ioctls and
 # O_TMPFILE, each compared with the backing filesystem.
 #

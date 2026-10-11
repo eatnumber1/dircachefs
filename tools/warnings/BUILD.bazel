@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 load(":flags_test.bzl", "flags_test")
 
 # Tests of the warning flags (flags_test.bzl) on external repositories, whose

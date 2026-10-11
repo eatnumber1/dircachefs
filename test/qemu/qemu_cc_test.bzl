@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """qemu_cc_test(name, srcs, deps, ...): a dcfs unit test that runs inside a
 QEMU guest, root, on the project's own kernel.
 

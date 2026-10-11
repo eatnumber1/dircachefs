@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # The fsstress/fsx test's checks (step 11.2b), sourced by guest/stress.sh
 # after lib.sh and by test/qemu/stress_checks_test.sh on the host, which feeds
 # them trees and logs it has damaged on purpose to prove they reject.

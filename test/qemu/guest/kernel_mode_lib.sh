@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # The two kernel modes of a guest (steps 26.14 and 26.14e), as one check that
 # guest/quiet_kernel.sh (the quiet default) and guest/noisy_kernel.sh (the
 # noisy run) share, and that test/qemu/kernel_mode_test.sh runs over canned

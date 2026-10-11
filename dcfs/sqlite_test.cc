@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/sqlite.h"
 
 #include <sys/stat.h>

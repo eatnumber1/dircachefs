@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # dcfs over fault-injectable disks (step 11.1), for the failure tests
 # guest/fault_*.sh. Sourced after lib.sh and fault_lib.sh.
 #

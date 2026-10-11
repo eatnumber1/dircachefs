@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ----------------------- MODULE borndirty_fill_rule_a ------------------------
 (***************************************************************************)
 (* Not the code (step 23.11): the audit's first candidate rule for G5, a   *)

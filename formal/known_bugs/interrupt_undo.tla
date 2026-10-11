@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 --------------------------- MODULE interrupt_undo ---------------------------
 (***************************************************************************)
 (* Not a historical bug (Phase 22): an interrupt before the syscall that   *)

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 26.2: self-check of the runtime invariant checks' tier selection
 # (test/qemu/README.md, "Gates and their self-checks"). This test is small,
 # so qemu_test.bzl's initramfs_for gives it :initramfs_checked, as it gives

@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------- MODULE stop_clear_skipped -------------------------
 (***************************************************************************)
 (* Not the code (step 12.12a, a premise for CleanMeansNoDirty): the clean  *)

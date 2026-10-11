@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /*
  * A stand-in for xfsprogs' <xfs/xqm.h>, written for this repository: the
  * kernel's own XFS quota interface (<linux/dqblk_xfs.h>) is all that

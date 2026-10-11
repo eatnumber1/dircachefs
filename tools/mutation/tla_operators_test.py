@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests of the TLA+ mutation operators (tla_operators.py, plan step 12.13)
 on tools/mutation/testdata/snippets.tla, constructs copied from
 formal/dcfs.tla, and on the real formal/dcfs.tla (sanity checks)."""

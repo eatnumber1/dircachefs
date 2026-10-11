@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ---------------------- MODULE atime_sync_clears_held ----------------------
 (***************************************************************************)
 (* Not the code (step 23.8): a sync point clears the dirty row of a file   *)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Step 15.2: the failure paths of CaptureBacking (dcfs/backing_capture.cc),
 // which no real mount makes on demand: the helper failing before it answers,
 // dying without an answer, answering without the descriptor, and mount(8)

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs phase 10: the idle test. With dcfs mounted on a warm cache and only
 # the activity a quiet server sees (statfs, as df does it -- busybox has no
 # df, `stat -f` makes the same call --, stat and ls of cached paths, dcfs's

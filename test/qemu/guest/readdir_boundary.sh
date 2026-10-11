@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 4.14 regression test for 49a9b9c: Readdir/Readdirplus must stop
 # adding entries exactly when the next one would not fit in the reply
 # buffer, and a follow-up call at the returned (resume) offset must pick up

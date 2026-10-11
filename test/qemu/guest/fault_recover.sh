@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 11.3: a failed BACKING operation leaves the record unknown (never
 # cached as having succeeded), goes back to the caller as an error, and the
 # cache is consistent once the device recovers (design.md, "The write-through

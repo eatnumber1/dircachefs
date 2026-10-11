@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // A fault for trace validation (formal/README.md, "Trace validation"): a
 // sync point whose snapshot (cache::BeginSync) is taken after its syncfs
 // calls, as if BeginSync had been moved below the syncfs loop in

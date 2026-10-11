@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------- MODULE atime_fill_no_touch -------------------------
 (***************************************************************************)
 (* Not the code (step 23.8): a record of F's attributes by another path    *)

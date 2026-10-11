@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ---------------------------- MODULE ident_limits ----------------------------
 (***************************************************************************)
 (* What the identity model (ident.tla) shows does not hold, each a         *)

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Step 26.15: the standalone reproducer of the ext4 casefold tune oops (see
 # README.md). No dcfs in it; //test/qemu installs the files in the guest
 # under /kernel_bugs/ext4_casefold_tune/ (scripts/mkinitramfs.sh) for

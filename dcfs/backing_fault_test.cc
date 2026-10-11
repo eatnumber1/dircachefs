@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Fault-injection tests for the xattr retry loops in dcfs/backing.cc: the
 // value or the list of xattrs can grow between the size query and the read
 // that follows, and no real filesystem can be made to do that

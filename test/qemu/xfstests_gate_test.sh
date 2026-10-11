@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Self-check of the xfstests gate (step 17.1): sources the real
 # guest/lib.sh and guest/xfstests_lib.sh (the functions guest/xfstests.sh
 # calls) and feeds them canned results and lists. The gate must pass a run

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Compares two builds of one output byte for byte (step 26.12).
 
   repro_compare.py A B [A B ...]

@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ----------------------- MODULE interrupt_leaks_guard ------------------------
 (***************************************************************************)
 (* Not a historical bug (Phase 22): an interrupted mutation that returns   *)

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 module(name = "dircachefs", version = "0.1")
 
 bazel_dep(name = "abseil-cpp", version = "20260817.0", repo_name="absl")

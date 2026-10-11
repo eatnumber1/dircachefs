@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Sums Bazel JSON trace profiles into a table of where the time went (26.16).
 
   ci_profile.py PROFILE.json[.gz]...

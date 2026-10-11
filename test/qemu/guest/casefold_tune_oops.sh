@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 23.7: the reproducer of a kernel bug, kept as a DISABLED_ check.
 #
 # EXT4_IOC_SET_TUNE_SB_PARAM (Linux 6.18+) can switch the casefold feature on

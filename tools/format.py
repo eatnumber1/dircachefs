@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Formats the tracked C and C++ files with the pinned clang-format.
 
 `bazel run //tools:format` rewrites the files in place (clang-format -i);

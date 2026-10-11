@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # The pjdfstest wrapper's gate functions (step 26.1), sourced by
 # guest/pjdfstest.sh after lib.sh and by test/qemu/pjdfstest_suite_sane_test.sh
 # on the host, which feeds them canned results to prove they reject.

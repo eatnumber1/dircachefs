@@ -1,3 +1,6 @@
 # Files we wrote whose SPDX licence is not MIT (docs/licenses.md, step 7.8;
 # tools/repo_shape.py, spdx_licenses). Format: path | licence | role | provenance.
 # A GPL or LGPL licence only with role test-only.
+third_party/tlaplus/overrides/tlc2/overrides/TLCOverrides.java | MIT | test-only | reduced copy of the class of the same name in TLA+ CommunityModules (MIT, its LICENSE inside the jar)
+third_party/xfstests/0001-dcfs-guest.patch | GPL-2.0-or-later | test-only | patches check and common/rc of xfstests, whose files carry GPL-2.0 and GPL-2.0+ (docs/licenses.md)
+third_party/pjdfstest/0001-linux-portability.patch | BSD-2-Clause | test-only | patches tests/conf and tests/misc.sh of pjdfstest (COPYING, two clauses)

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Runs the Alpine host tools (musl binaries) on this glibc host through the
 # wrappers third_party/alpine/alpine.bzl writes: QEMU (version, accelerators,
 # a KVM start of a paused microvm guest), mke2fs and debugfs (ext4 made with

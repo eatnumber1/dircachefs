@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # shellcheck shell=sh
 # The crash states of a dm-log-writes log for guest/sqlite_durability.sh
 # (step 12.14): plain functions of their input, so that

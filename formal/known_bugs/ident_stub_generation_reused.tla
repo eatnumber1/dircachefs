@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 -------------------- MODULE ident_stub_generation_reused --------------------
 (***************************************************************************)
 (* A boundary stub's generation not drawn afresh (cache::SetRefused).      *)

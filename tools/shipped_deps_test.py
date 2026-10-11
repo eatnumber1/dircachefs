@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The shipped-dependency golden (plan step 26.9)."""
 
 import sys

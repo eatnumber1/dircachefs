@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Shared helpers for the dcfs QEMU guest test scripts (test/qemu/guest/*.sh).
 #
 # Installed at /tests/lib.sh alongside every guest script (it matches the

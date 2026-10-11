@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 11.4 (a): the BACKING filesystem out of space (docs/plan/phases/
 # 11-crash-stress-failure-testing.md, 11.4; design.md, "The write-through
 # protocol", "Phase 2"). Before dcfs starts, the backing filesystem is filled

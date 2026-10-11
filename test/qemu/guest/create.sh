@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 4.2 acceptance test: the create-family write-through ops
 # (mkdir/mknod/symlink/link/create).
 #

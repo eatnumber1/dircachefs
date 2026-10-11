@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #ifndef DCFS_TESTONLY_COST_COUNTER_H_
 #define DCFS_TESTONLY_COST_COUNTER_H_
 

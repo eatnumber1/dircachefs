@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Host-side test: mke2fs, run with the checked-in
 # mke2fs.conf (MKE2FS_CONFIG), produces the ext4 feature set the config
 # names -- never whatever the host's /etc/mke2fs.conf or a sandbox-path-baked

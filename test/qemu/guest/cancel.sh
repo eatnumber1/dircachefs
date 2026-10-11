@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs Phase 22: request cancellation (docs/design.md, "Cancellation").
 #
 # The backing filesystem is on a device-mapper delay target (every read and

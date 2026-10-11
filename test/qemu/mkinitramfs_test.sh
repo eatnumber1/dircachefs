@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Host-side test of scripts/mkinitramfs.sh (no root, no kernel). Phase 5.2's
 # act run found it printing "cpio: not found", exiting 0 and leaving an EMPTY
 # initramfs behind (which Bazel then cached). Two checks:

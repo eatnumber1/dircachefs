@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Analysis tests of the warning flags on compile and link command lines.
 
 `.bazelrc` makes every warning in our code an error (`-Werror` for compiles,

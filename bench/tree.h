@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // The benchmark tree: the layout every bench/ tool agrees on.
 //
 //   <root>/t/<i/10000, 3 digits>/<(i/100)%100, 2 digits>/f<i%100, 2 digits>

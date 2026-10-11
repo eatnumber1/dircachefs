@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # clang-tidy configuration (plan step 25.21; step 7.5's check set, russ,
 # 2026-10-10). //tools:style_checks_test runs the pinned LLVM's clang-tidy
 # with this file over our C++ (dcfs/, bench/, tools/) with the build's own

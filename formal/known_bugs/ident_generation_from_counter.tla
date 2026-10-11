@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------- MODULE ident_generation_from_counter -------------------
 (***************************************************************************)
 (* A row's FUSE generation that follows from its id (a counter, so that    *)

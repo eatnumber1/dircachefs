@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs phase 10: runs //bench:dcfs_bench (google/benchmark) in the guest and
 # prints its results; the verdict is only that every benchmark ran (VM
 # timing is too noisy to pass or fail on).

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Self-check of the banned-symbols gate (plan steps 26.1 and 26.8).
 
 Runs the real checker and the real deny list over a tiny program that calls

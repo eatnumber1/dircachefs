@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # shellcheck shell=sh
 # RAM disks for the guest (step 26.17): a block device whose blocks are a
 # sparse file in a tmpfs, made the one way both users make them. guest/init

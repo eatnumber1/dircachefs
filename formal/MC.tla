@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 --------------------------------- MODULE MC ---------------------------------
 (***************************************************************************)
 (* The model-checking root module: the configurations (MC_small.cfg,      *)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Step 15.1: the mount.dcfs wrapper's pure parts: the mount(8) helper
 // command line, the split of its options into dcfs's and the underlying
 // mount's, the exit statuses, the startup report the daemon sends the

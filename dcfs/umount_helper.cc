@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/umount_helper.h"
 
 #include <fcntl.h>

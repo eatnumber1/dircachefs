@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ---------------------- MODULE borndirty_trusts_any_row ----------------------
 (***************************************************************************)
 (* Not the code (step 23.11): BeginWriting (the model's fset) takes the    *)

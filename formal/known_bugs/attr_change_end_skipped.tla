@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 --------------------- MODULE attr_change_end_skipped ---------------------
 (***************************************************************************)
 (* An attribute change that never Ends (step 12.11; 8.2's mutation         *)

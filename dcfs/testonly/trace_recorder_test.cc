@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Tests of the trace recorder's own decisions (trace_recorder.h): which
 // changes of a directory's cached state it explains, cuts or calls
 // unexplained, which files' events become lines of a file's trace

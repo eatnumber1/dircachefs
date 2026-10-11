@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 -------------------- MODULE crash_f1_phase1_not_durable --------------------
 (***************************************************************************)
 (* Known bug: crash audit F1 (docs/plan/audits/crash.md). Phase 1 of a    *)

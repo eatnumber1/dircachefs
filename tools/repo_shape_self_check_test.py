@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Self-check of the repository-shape rules (plan steps 26.1 and 26.13).
 
 Fixture trees with a missing README, an unreferenced script, an unlisted

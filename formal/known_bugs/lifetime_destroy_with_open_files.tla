@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------ MODULE lifetime_destroy_with_open_files ------------------
 (***************************************************************************)
 (* Found by this model (formerly findings/), fixed in step 12.4b: DESTROY  *)

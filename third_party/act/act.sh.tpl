@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # nektos/act with this repository's settings (see README.md):
 #
 #   bazel run //third_party/act -- -j fast

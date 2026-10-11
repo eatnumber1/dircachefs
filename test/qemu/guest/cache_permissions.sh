@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 2 acceptance test: cache database permissions.
 #
 # Before this step, main.cc created the cache database mode 0644 after

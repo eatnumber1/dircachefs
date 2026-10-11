@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/log_open_flags.h"
 
 #include <fcntl.h>

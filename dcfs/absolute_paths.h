@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #ifndef DCFS_ABSOLUTE_PATHS_H_
 #define DCFS_ABSOLUTE_PATHS_H_
 

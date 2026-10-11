@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 -------------------- MODULE lifetime_stub_nodeid_reused ---------------------
 (***************************************************************************)
 (* Found by this model (formerly findings/), fixed in step 12.4b: a stub's *)

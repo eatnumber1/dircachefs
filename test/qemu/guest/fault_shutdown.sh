@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 11.5: an instant crash of the BACKING filesystem, the shutdown
 # ioctl xfstests' godown uses (docs/plan/phases/11-crash-stress-failure-
 # testing.md, 11.5; design.md, "The write-through protocol", "A power loss

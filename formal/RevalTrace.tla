@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ----------------------------- MODULE RevalTrace -----------------------------
 (***************************************************************************)
 (* Trace validation for the revalidation model (reval.tla): is a recorded *)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /*
  * A stand-in for xfsprogs' <xfs/xfs.h>, written for this repository (the real
  * header is xfsprogs-dev's, which the guest build does not have).

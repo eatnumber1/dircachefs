@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 4.4 acceptance test: write-through file I/O (Write/Flush/Fsync/
 # Fallocate/Setxattr/Removexattr) and the "one backing file per inode" fix.
 #

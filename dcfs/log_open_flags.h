@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #ifndef DCFS_LOG_OPEN_FLAGS_H_
 #define DCFS_LOG_OPEN_FLAGS_H_
 

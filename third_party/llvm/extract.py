@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Unpacks the archives of the pinned C/C++ toolchain (plan step 7.1b).
 
     extract.py llvm ARCHIVE STRIP_PREFIX OUT_DIR

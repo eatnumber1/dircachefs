@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Host-side self-check of guest/kernel_mode_lib.sh (step 26.14e): the check that
 # says which kernel mode a guest is in must accept a guest in that mode and
 # reject one in the other, in both directions, so that quiet_kernel_test (passes

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 4.5 acceptance test: POSIX filesystem-call conformance, measured
 # with pjdfstest (github.com/pjd/pjdfstest -- ~8000 checks of chmod/chown/
 # link/mkdir/open/rename/unlink/... semantics and errnos, used by ZFS,

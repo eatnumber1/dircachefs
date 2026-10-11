@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 3.4b acceptance test: NFS export handles (FUSE_CAP_EXPORT_SUPPORT).
 #
 # Builds a small tree on vdb, mounts dcfs over it, and uses fhtest

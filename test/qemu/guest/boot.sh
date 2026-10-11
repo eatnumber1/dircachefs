@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs's own QEMU boot smoke test (not adapted from fuse-generation-qemu;
 # that repo's guest/run-tests.sh is the LKML patch's test suite and tests
 # a different daemon).

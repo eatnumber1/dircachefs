@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------- MODULE lifetime_lookup_uncounted -------------------
 (***************************************************************************)
 (* Not the code (step 12.12a, a premise for ForgetKnown): an entry reply   *)

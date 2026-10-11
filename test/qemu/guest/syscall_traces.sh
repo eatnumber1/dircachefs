@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 26.3: golden backing-syscall traces per operation, observed with
 # strace on the running daemon (russ: observe reality, not our accounting).
 # Each check runs one operation through /mnt under strace_op (strace_lib.sh)

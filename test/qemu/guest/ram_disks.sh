@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Self-check of qemu_test's ram_disks option (step 26.17): the test's disks
 # are in the guest's RAM (a loop device over a tmpfs file that guest/init made,
 # formatted there), not virtio disks backed by files on the host, and a

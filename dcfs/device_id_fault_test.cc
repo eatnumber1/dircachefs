@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Fault-injection tests for GetDeviceId (dcfs/device_id.cc): the ways its two
 // ioctls (FS_IOC_GETFSUUID, and BTRFS_IOC_FS_INFO / BTRFS_IOC_GET_SUBVOL_INFO
 // on btrfs) can fail or answer oddly, which no real filesystem of the test

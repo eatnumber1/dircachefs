@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The real Debian rootfs image matches the headers of the tar it came from.
 
 Step 24.3. For every member of @debian//:flat (its path resolved through the

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Step 26.14e: one `bazel test` of the noisy job, reported as findings.
 #
 #   noisy.sh NAME [--targets=LABEL,LABEL...] [test.sh or bazel arguments...]

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 9: names of random bytes (any byte but NUL and '/', 1-255 bytes),
 # seeded, created through dcfs and directly on the backing filesystem, and
 # compared both ways. RANDOM_COUNT names in all, half in each direction: 1000

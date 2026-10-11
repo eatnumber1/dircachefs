@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Prepares the `osv` job (plan step 5.3): checks osv-scanner.toml's ignores
 # (every one needs a reason and an expiry date that has not passed), checks
 # the pinned upstream tags against their commits (network), and writes to osv/:

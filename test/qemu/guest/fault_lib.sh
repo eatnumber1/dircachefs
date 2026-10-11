@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Fault injection over a disk with device-mapper (step 11.1): the helper the
 # failure tests (guest/fault_*.sh, Phase 11) source after lib.sh.
 #

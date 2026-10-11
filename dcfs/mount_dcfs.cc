@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/mount_dcfs.h"
 
 #include <sys/mount.h>  // IWYU pragma: keep (MS_* macros)

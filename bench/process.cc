@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "bench/process.h"
 
 #include <fcntl.h>

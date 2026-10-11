@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ---------------------- MODULE effect_after_syscall ----------------------
 (***************************************************************************)
 (* An effect point too late (step 12.7): crash F3's create, whose phase 1  *)

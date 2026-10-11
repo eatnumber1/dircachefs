@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 4.10 acceptance test: the durable dirty set and unclean-shutdown
 # recovery.
 #

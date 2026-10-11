@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // A fault for trace validation (formal/README.md, "Trace validation"): a
 // create whose phase-2 syscall is started before its phase 1, as if the
 // syscall (with MutationSyscallStarting, which precedes it) had been moved

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Self-check of tools/style_checks.py (plan step 25.21).
 
 Canned clang-tidy and clang-query outputs and fixture sources: the parsers,

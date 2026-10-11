@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * crash_states - the crash states of the cache database's disk, for
  * guest/sqlite_durability.sh (plan step 12.14): reads a dm-log-writes log,

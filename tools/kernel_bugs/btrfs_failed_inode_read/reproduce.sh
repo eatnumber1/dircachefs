@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Reproduces a Linux kernel WARNING in btrfs: when an inode read fails with an
 # I/O error and the inode is a DIRECTORY whose inode item has only been
 # updated in memory (a delayed inode: here an atime update by readdir), the

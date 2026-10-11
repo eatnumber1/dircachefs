@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Step 7.1b: nothing a C/C++ action takes from outside the Bazel workspace
 # comes from the host but glibc's runtime (third_party/llvm/README.md).
 # $1 is the probe tools/cc_toolchain_probe.txt, which the genrule of that name

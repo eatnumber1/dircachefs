@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------------ MODULE MClitmus ------------------------------
 (***************************************************************************)
 (* Litmus tests of the backing filesystem's crash consistency through dcfs *)

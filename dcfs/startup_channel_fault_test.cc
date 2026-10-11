@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Step 15.2: ForkDaemon's parent side and its failure paths: a daemon that
 // reports ready, one that reports a failure, one that dies without a word,
 // and one that cannot detach (a link-time wrap of setsid fails it). The

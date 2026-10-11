@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The xfstests src/ programs built for the guest (step 17.1)."""
 
 # The src/ programs built from one file (src/Makefile's TARGETS and

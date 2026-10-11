@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Summarizes one `bazel test` of the noisy CI job (step 26.14e).
 
 The noisy job runs the suite with the quiet kernel's sysctls left at the

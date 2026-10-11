@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Builds the mkfs part of a RAM-disk guest's initramfs (step 26.17).
 
 A test whose disks are in the guest's RAM (qemu_test's `ram_disks`) has them

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Self-check of the coverage pipeline (step 7.2), on the host (it needs
 # neither root nor a kernel): an instrumented program runs, its profile goes
 # through scripts/cov-lcov.sh exactly as run-qemu.sh does, and the lcov must

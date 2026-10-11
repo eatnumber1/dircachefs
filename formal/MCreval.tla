@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------------ MODULE MCreval ------------------------------
 (***************************************************************************)
 (* The model-checking root module of the revalidation model (reval.tla):  *)

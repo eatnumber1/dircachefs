@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 -------------------- MODULE recover_clears_dirty_first --------------------
 (***************************************************************************)
 (* Recovery that is not idempotent (step 12.6, FSCQ's crash condition for  *)

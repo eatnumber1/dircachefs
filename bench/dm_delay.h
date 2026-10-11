@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // A device-mapper "delay" target over a block device, made through the
 // /dev/mapper/control ioctls (the guest has no dmsetup).
 #ifndef DCFS_BENCH_DM_DELAY_H_

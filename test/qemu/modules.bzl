@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The kernel modules a QEMU test's initramfs carries (step 24.2).
 
 The test kernel is Alpine's linux-virt, whose drivers are mostly modules:

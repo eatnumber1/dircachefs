@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------- MODULE lifetime_probe_list_in_memory -------------------
 (***************************************************************************)
 (* Found by this model (formerly findings/lifetime_crash_during_probe,     *)

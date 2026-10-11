@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // A fault for trace validation (formal/README.md, "Trace validation"): an
 // unlink whose phase 3 (the name absent) and Mutation::End run right after
 // its phase 1, before its backing unlinkat, as if they had been moved there

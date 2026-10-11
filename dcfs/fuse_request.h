@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #ifndef DCFS_FUSE_REQUEST_H_
 #define DCFS_FUSE_REQUEST_H_
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Test-only code for dcfs (AGENTS.md: test-only code lives in *_test.cc or
 # in a testonly/ directory whose targets set testonly = 1).
 

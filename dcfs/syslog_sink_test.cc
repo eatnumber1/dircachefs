@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/syslog_sink.h"
 
 #include <sys/syslog.h>

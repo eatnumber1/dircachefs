@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The endpoint JSON of a README badge (plan step 26.28).
 
   badge_json.py coverage --input <gate output> --baseline <coverage_baseline.txt>

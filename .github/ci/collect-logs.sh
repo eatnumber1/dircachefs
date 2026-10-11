@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Copies every test's log, result and guest console (test.outputs/) out of
 # bazel-testlogs, a symlink into the output base that actions/upload-artifact
 # would not follow, into ./ci-test-logs/<label>. Called by test.sh right

@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------------ MODULE ident_rowid_from_max ------------------------
 (***************************************************************************)
 (* Row ids taken as MAX(id) + 1 (an INTEGER PRIMARY KEY without            *)

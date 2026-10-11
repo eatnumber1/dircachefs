@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The banned-symbols gate over //dcfs:main_static (plan step 26.8)."""
 
 import sys

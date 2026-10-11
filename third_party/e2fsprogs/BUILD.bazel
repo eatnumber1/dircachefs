@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Step 26.15: standalone reproducers of Linux kernel bugs the test suite
 # found, for bug reports (docs/plan/notes/kernel-bugs-2026-10-09.md). Each
 # directory is self-contained and has no dcfs in it.

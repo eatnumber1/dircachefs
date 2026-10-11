@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ---------------------- MODULE file_setattr_end_skipped ----------------------
 (***************************************************************************)
 (* Not the code (step 23.11, the audit's G17): a setattr or write of F     *)

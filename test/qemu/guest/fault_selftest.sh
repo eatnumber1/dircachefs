@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Self-check of guest/fault_lib.sh (step 11.1): each mode of fault_mode does
 # what it says to a filesystem on the wrapped disk. A harness that injects
 # nothing would make every failure test pass for the wrong reason.

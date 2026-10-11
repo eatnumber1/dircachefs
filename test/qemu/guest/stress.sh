@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 11.2b: fsstress and fsx, built from xfstests' sources
 # (//third_party/xfstests), run against dcfs on the backing filesystem of the
 # matrix (ext4, xfs or btrfs).

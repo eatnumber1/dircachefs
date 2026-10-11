@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Self-check of the coverage gate (step 8.1, 26.1 rule): the real
 # coverage_gate.sh over canned lcovs against a canned baseline (lines 80.00,
 # branches 50.00): below it fails with the numbers, equal and within the 0.1

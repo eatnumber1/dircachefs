@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/testonly/invariant_checker.h"
 
 #include <cstddef>

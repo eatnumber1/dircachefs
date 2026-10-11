@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # The TLA+ model of dcfs's write-through protocol: see README.md.
 #
 # Every target runs TLC on the host (no root, no kernel control: the QEMU

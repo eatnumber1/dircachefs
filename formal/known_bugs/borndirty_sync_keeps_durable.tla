@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 -------------------- MODULE borndirty_sync_keeps_durable --------------------
 (***************************************************************************)
 (* Not the code (step 23.11): a sync point clears F's born-dirty mark but  *)

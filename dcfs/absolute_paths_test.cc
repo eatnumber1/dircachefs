@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/absolute_paths.h"
 
 #include <cstdlib>

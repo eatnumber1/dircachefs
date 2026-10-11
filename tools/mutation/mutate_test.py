@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests of the mutation tester (mutate.py): sampling, equivalents, reports,
 the per-push mode, `run` end to end with a fake bazel. The operators are
 tested on a real AST in operators_test.py."""

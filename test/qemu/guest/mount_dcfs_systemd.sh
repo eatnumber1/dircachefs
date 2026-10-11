@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 15.6 acceptance test: mount.dcfs through util-linux's mount(8),
 # fstab and systemd (phase 15, decision 14).
 #

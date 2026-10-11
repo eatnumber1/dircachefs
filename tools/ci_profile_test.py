@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests of ci_profile.py, the CI profile summary (step 26.16).
 
 The committed fixture (ci_profile_testdata/fast_profile.json) is a trimmed

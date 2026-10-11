@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The flags defined in dcfs/main.cc and the README's Flags table agree."""
 import re
 import sys

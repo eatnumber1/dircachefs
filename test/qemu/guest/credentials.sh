@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 4.7 acceptance test: backing operations take on the FUSE
 # caller's identity.
 #

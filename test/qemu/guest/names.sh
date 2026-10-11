@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 9: file names are bytes. One guest runs the whole name corpus
 # (about 60 names, one per hazard class -- see docs/plan/phases/09-*.md and
 # tools/testutil.c's names-* subcommands) through every operation, on

@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ------------------ MODULE ident_probe_by_name_handle_first ------------------
 (***************************************************************************)
 (* A probe whose reads each resolve the name again, instead of going       *)

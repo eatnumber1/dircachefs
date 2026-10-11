@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Plan step 26.13: every commit subject on a CI push range starts with the
 # plan step it belongs to (`N.M:` or `N:`, optionally with a letter suffix, a
 # `-N.M` / `/N.M` second step and a parenthesized note) or one of the

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Fails on a raw libc syscall call outside dcfs/syscalls.cc (docs/style.md).
 
 Every syscall goes through dcfs/syscalls.h, which turns the failure into a

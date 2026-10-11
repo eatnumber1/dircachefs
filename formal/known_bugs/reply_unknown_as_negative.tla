@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 -------------------- MODULE reply_unknown_as_negative --------------------
 (***************************************************************************)
 (* A stale negative (step 12.7b): a lookup whose population the fill guard *)

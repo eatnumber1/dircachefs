@@ -1,3 +1,4 @@
+\* SPDX-License-Identifier: MIT
 ----------------------- MODULE reval_recheck_if_changed -----------------------
 (***************************************************************************)
 (* A fix the code declined (russ, step 23.7): re-check a writable open     *)

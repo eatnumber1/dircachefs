@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Self-check of the fsstress/fsx test's checks (step 11.2b): sources the real
 # guest/lib.sh and guest/stress_lib.sh (the functions guest/stress.sh calls)
 # and runs them over trees and logs that are damaged on purpose. A tree that

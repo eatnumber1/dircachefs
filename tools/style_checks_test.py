@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The style checks over our C++ (plan step 25.21).
 
 Reads the clang-tidy and clang-query outputs that //tools:style_checks.bzl

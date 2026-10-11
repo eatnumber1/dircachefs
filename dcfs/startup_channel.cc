@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/startup_channel.h"
 
 #include <fcntl.h>

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests mkrootfs.py with the real Alpine tools on a small synthetic tar.
 
 Host-side: it needs neither root nor a kernel. Checks, through debugfs, that

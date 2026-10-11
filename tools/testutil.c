@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * testutil - small helpers for the dcfs QEMU guest tests, for syscalls
  * busybox's own applets can't drive precisely enough:

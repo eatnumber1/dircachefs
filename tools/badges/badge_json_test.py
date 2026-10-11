@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for badge_json.py (plan step 26.28): each parser on the line its job
 prints, the endpoint schema shields.io reads, and a malformed input that fails
 with exit 2 and writes nothing."""

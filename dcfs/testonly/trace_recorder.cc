@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
 #include "dcfs/testonly/trace_recorder.h"

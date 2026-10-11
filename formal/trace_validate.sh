@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Trace validation (formal/README.md, "Trace validation"): runs a QEMU guest
 # whose dcfs records its protocol events, collects the traces from the
 # serial log, and checks each with TLC against formal/Trace.tla.

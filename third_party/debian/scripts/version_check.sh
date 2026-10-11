@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Test first (docs/plan/phases/04-pinned-host-tools.md, part c; extended by
 # docs/plan/review-fixes.md R3/L9): a host-side check (no root, no kernel, no
 # guest boot) that the Debian packages the build actually uses are exactly the

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Step 15.5: the argument parsing, the status combination and the cache
 // database checks of fsck.dcfs. The helper as a process (findmnt, the
 // backing's fsck, fsck(8)'s statuses through systemd) is the guests'

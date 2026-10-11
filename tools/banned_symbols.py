@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Banned symbols in the shipped binary (plan step 26.8).
 
 The deny list (banned_symbols.txt) names symbols the shipped binary must not

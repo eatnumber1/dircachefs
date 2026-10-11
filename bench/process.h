@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Helpers for running dcfs from the benchmarks and reading its memory use.
 #ifndef DCFS_BENCH_PROCESS_H_
 #define DCFS_BENCH_PROCESS_H_

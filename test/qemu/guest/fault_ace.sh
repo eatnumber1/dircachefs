@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # dcfs step 11.2: bounded sequences of operations with a power cut after them,
 # in the manner of ACE (the CrashMonkey/ACE bounded black-box crash tests):
 # sequences of up to two operations from a small set, on a small tree, with or

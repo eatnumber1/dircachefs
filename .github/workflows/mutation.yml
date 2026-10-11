@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Step 26.5b, reworked by 26.5d: the full mutation run (tools/mutation/
 # README.md) on a schedule. `generate` samples (at most one mutant per source
 # line and --per-function 2 per function, seeded with the run number, so each

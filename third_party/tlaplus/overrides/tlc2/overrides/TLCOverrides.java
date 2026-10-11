@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // The registry of Java operator overrides TLC loads (by this class name)
 // when the CommunityModules jar is on the class path. The jar ships its own,
 // listing every module's overrides; this one comes first on the class path

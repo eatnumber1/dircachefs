@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "dcfs/status.h"
 
 #include <cerrno>

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # `bazel coverage` for CI (step 7.2): measures our code (.bazelrc, `coverage`
 # section) over the tests the arguments select (--config=presubmit, ...), then
 # checks that the combined lcov report really has coverage in it (a harness

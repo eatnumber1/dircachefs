@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Step 26.28: commits the badges' endpoint JSON to the `badges` branch of this
 # repository, where shields.io reads it (README.md, "Status"). The `badges` job
 # of ci.yml and of mutation.yml runs it on main, with the workflow's token

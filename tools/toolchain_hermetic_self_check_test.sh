@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Self-check of //tools:toolchain_hermetic_test (step 26.1 rule): the checker
 # must pass a probe of the pinned toolchain and fail each of the host's
 # leaks: a host include directory, a host C library file, a host library
