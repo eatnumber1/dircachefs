@@ -1,0 +1,31 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
+
+# Step 26.28: the endpoint JSON of the README's CI badges (shields.io reads
+# badges/<name>.json from the `badges` branch; the workflows' badges jobs
+# commit them). One parser per job's printed line; exit 2 when the line is
+# not there.
+py_library(
+    name = "badge_json_lib",
+    srcs = ["badge_json.py"],
+    imports = ["."],
+)
+
+py_binary(
+    name = "badge_json",
+    srcs = ["badge_json.py"],
+    main = "badge_json.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+py_test(
+    name = "badge_json_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["badge_json_test.py"],
+    data = glob(["testdata/*"]),
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":badge_json_lib"],
+)

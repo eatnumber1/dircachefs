@@ -1,0 +1,1 @@
+reproducible: dcfs/main dcfs/main_static man/dcfs.8 are byte-identical across two builds

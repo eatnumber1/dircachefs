@@ -357,6 +357,21 @@ jobs:
             bazel-
       - name: Test
         run: ./.github/ci/coverage.sh --config=presubmit
+      - name: Badge (coverage, step 26.28)
+        if: ${{ !cancelled() && hashFiles('ci-coverage/gate.txt') != '' }}
+        run: |
+          mkdir -p badges
+          bazel run //tools/badges:badge_json -- coverage \
+            --input "$PWD/ci-coverage/gate.txt" \
+            --baseline "$PWD/dcfs/coverage_baseline.txt" \
+            --out "$PWD/badges/coverage.json"
+      - name: Upload the coverage badge
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: badge-coverage
+          path: badges/coverage.json
+          if-no-files-found: ignore
       - name: Upload the lcov report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -426,12 +441,31 @@ jobs:
           restore-keys: |
             bazel-repo-
       - name: Reproducible build
-        run: bazel run //tools:reproducible_build
+        shell: bash
+        # The verdict line goes to a log for the badge step (26.28); the
+        # pipe keeps the build's exit status.
+        run: |
+          set -o pipefail
+          bazel run //tools:reproducible_build 2>&1 | tee "$RUNNER_TEMP/reproducible.log"
+      - name: Badge (reproducible, step 26.28)
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p badges
+          bazel run //tools/badges:badge_json -- reproducible \
+            --input "$RUNNER_TEMP/reproducible.log" \
+            --out "$PWD/badges/reproducible.json"
+      - name: Upload the reproducible badge
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: badge-reproducible
+          path: badges/reproducible.json
+          if-no-files-found: ignore
       - name: Where the time went (job summary)
         if: ${{ !cancelled() }}
-        # The job starts no Bazel of its own at the repository root (the
-        # builds are inside the script, in two output bases): the host's
-        # python3 runs the tool instead of `bazel run`.
+        # The builds are inside the script, in two output bases; the badge
+        # step's `bazel run` (26.28) is the job's only Bazel at the repository
+        # root, so the host's python3 runs the profile tool instead.
         run: ./.github/ci/profile.sh --python3
       - name: Upload the Bazel profile
         if: ${{ !cancelled() }}
@@ -1178,3 +1212,28 @@ jobs:
           name: noisy-report-${{ matrix.suite }}-${{ matrix.shard }}
           path: noisy-report
           if-no-files-found: ignore
+
+  badges:
+    # Step 26.28: the README's badges from this run's jobs (their badge-*
+    # artifacts) committed to the `badges` branch (.github/ci/badges.sh). Main
+    # only: a branch's run must not move them. The one job with write access
+    # to the repository; a producer that did not run leaves its badge as it
+    # is. Other jobs are read-only (the workflow's `contents: read`).
+    if: ${{ always() && github.ref == 'refs/heads/main' }}
+    needs: [coverage, reproducible]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: badges-branch
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: badge-*
+          merge-multiple: true
+          path: badges-in
+      - name: Commit the changed badges to the badges branch
+        run: ./.github/ci/badges.sh "$GITHUB_RUN_ID" badges-in

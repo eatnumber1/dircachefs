@@ -1,0 +1,1 @@
+coverage_gate.sh: ok: lines 96.04 (baseline 96.04), branches 80.85 (baseline 80.85)

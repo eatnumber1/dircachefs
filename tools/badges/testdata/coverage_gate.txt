@@ -1,0 +1,2 @@
+coverage_gate.sh: dcfs: lines 9058/9431 = 96.04%, branches 4505/5572 = 80.85%
+coverage_gate.sh: ok: lines 96.04 (baseline 96.04), branches 80.85 (baseline 80.85)

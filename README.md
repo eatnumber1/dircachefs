@@ -5,6 +5,9 @@
 ![Kernel 6.9+](https://img.shields.io/badge/kernel-6.9%2B-informational)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-informational)
 [![MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eatnumber1/dircachefs/badges/coverage.json)](#coverage)
+[![Reproducible](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eatnumber1/dircachefs/badges/reproducible.json)](#reproducible-build)
+[![Mutation score](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eatnumber1/dircachefs/badges/mutation.json)](https://github.com/eatnumber1/dircachefs/actions/workflows/mutation.yml)
 
 dcfs is a FUSE filesystem that mirrors one backing directory tree and
 answers every metadata operation from a persistent SQLite cache, so that

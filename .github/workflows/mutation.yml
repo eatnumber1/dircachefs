@@ -105,13 +105,52 @@ jobs:
           ls
           cat survivors-*.txt > survivors.txt
           # The merged table (per operator, mutants per hour) and the
-          # survivors grouped by function.
-          python3 src/tools/mutation/mutate.py report result-*.json \
-            >>"$GITHUB_STEP_SUMMARY"
+          # survivors grouped by function. Kept in a file too: the badge
+          # step (26.28) reads its totals.
+          python3 src/tools/mutation/mutate.py report result-*.json >report.md
+          cat report.md >>"$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: mutation-survivors
           path: survivors.txt
+      - name: Prepare the runner for the badge (Bazelisk)
+        working-directory: src
+        run: ./.github/ci/prepare.sh
+      - name: Badge (mutation, step 26.28)
+        working-directory: src
+        run: |
+          mkdir -p badges
+          bazel run //tools/badges:badge_json -- mutation \
+            --input "$GITHUB_WORKSPACE/report.md" \
+            --out "$PWD/badges/mutation.json"
+      - name: Upload the mutation badge
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: badge-mutation
+          path: src/badges/mutation.json
+
+  badges:
+    # Step 26.28: the mutation badge committed to the `badges` branch
+    # (.github/ci/badges.sh; ci.yml's `badges` job says the rest). Main only,
+    # and the one job with write access (`contents: write`, here alone).
+    if: ${{ always() && github.ref == 'refs/heads/main' }}
+    needs: [report]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: badges-branch
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: badge-*
+          merge-multiple: true
+          path: badges-in
+      - name: Commit the changed badges to the badges branch
+        run: ./.github/ci/badges.sh "$GITHUB_RUN_ID" badges-in
 
   mutation-tla:
     runs-on: ubuntu-24.04

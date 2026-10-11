@@ -42,7 +42,9 @@ if [ -s "$report" ]; then
 	# baseline; it also fails when coverage rose by 0.1 or more, so that the
 	# baseline is raised in the commit that raised the coverage. A failure
 	# here fails the job, but the report above is already published.
-	tools/coverage_gate.sh ci-coverage/coverage.lcov dcfs/coverage_baseline.txt || status=1
+	# Its output also goes to ci-coverage/gate.txt: the badge step (26.28)
+	# reads the dcfs line from there.
+	tools/coverage_gate.sh ci-coverage/coverage.lcov dcfs/coverage_baseline.txt | tee ci-coverage/gate.txt || status=1
 else
 	echo "coverage.sh: no combined report at $report" >&2
 	status=1
