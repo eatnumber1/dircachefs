@@ -3153,3 +3153,20 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
      docs/plan/notes/handoff-<date>.md before you stop.
   8. Credit for the regular orchestrator resets Friday 2026-10-16 01:00; until then this log is the
      only channel.
+- Review continued (regular orchestrator, 2026-10-11 night), 26.17b, 15.12 and 25.9 as merged:
+  (6) Non-SMT pinning (26.17b, at russ's request) pins every QEMU to one thread per physical core
+  by default: on this host that is 4 of 8 CPUs ({0,2,4,6}) for all concurrent guests, on a
+  4-vCPU GitHub runner 2 of 4. Right for a measurement run, costly as the default: parallel test
+  guests now contend on half the threads while the other half idles except for Bazel. Russ to
+  decide: default on (measurement fidelity) or on only for budget-measuring runs
+  (`DCFS_PIN_NON_SMT=1` set by the measurement scripts and the cost jobs, off otherwise). (7)
+  15.12's nfs.sh test is sound in shape: the bind-export restart in the wrong order asserts EIO,
+  in the right order asserts success, and the held-descriptor read after restart asserts
+  sectors_read moved on the backing disk (the read reached the disk, not a cache): that is the
+  test the trial could not do. The three `timeout 10 mount` wrappers remain the one defect
+  (finding 3). (8) 25.9's audit (notes/crash-audit-25.9.md, to move under docs/plan/notes/) is a
+  complete census with per-site remedies: one clean RET_CHECK conversion (ReplyNone), the 17 FUSE
+  callback null checks as RET_CHECK plus an error reply, fork_split's abort presented as a case,
+  the ten exit sites classified (eight ordinary fork/exec child exits, two CLI exits, one
+  daemoniser case with a StatusOr remedy). It is ready for russ's case-by-case ruling as the rule
+  requires; nothing in it should be applied before that.
