@@ -3049,3 +3049,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ: no function pointers or pointers to members for callables; FunctionRef for a callable only
   called within the call, AnyInvocable for one stored. Style 1.2 (the 25.15 table ruling narrowed
   to one allowlisted exception with its reason); Scope's conversion and a matcher in 25.20.
+- 26.17b resumed in lane-1 (implementer): rebase onto main (cb09771), part 5 xfstests shard budgets,
+  and full suites.
+- russ: "Let's configure the QEMU machine to pin to non-SMT cores, to avoid that noise." (2026-10-11).
+  Added to 26.17b: run-qemu.sh detects one CPU per physical core via sysfs thread_siblings_list and
+  launches QEMU under taskset, with a DCFS_PIN_NON_SMT=0 escape hatch and self-check.
+
