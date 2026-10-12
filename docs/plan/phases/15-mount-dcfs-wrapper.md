@@ -745,6 +745,8 @@ fsck.dcfs's fstab integration (15.5) either learns to run for a bind line
 (a cache-database check with no device: the unit would need a path, not
 a device) or fsck.dcfs becomes a manual tool only; decide in 15.11. Also
 a README gap: the install section lists no `/sbin/fsck.dcfs` link.
+Follow-up (merged 6249b99): removed obsolete `dcfs.fstype=bind` arguments and comments across guest test scripts (`guest/lib.sh`, `lifecycle.sh`, `sqlite_durability.sh`), tools (`smoke_readonly.sh`), benchmarks (`bench/process.cc`), and `test/qemu/README.md`; deleted obsolete `ro-capture-$form-refused` test block from `fault_shutdown.sh`.
+
 
 ## 15.12 NFS export of a dcfs mount across a daemon restart (done 2026-10-11, f9ed5ef)
 
