@@ -1080,27 +1080,34 @@ absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset) {
   return std::string(buf.data(), total);
 }
 
-absl::StatusOr<size_t> WriteFile(int fd, std::span<const char> buf,
-                                 off_t offset) {
-  size_t total = 0;
-  while (total < buf.size()) {
-    ASSIGN_OR_RETURN(
-        size_t n, syscalls::pwrite(fd, buf.data() + total, buf.size() - total,
-                                   offset + total));
-    if (n == 0) break;  // Should not happen for a regular file.
-    total += n;
-  }
-  return total;
+absl::StatusOr<size_t> WriteFile(const Credentials &caller, int fd,
+                                 std::span<const char> buf, off_t offset) {
+  return AsCaller(caller, [&]() -> absl::StatusOr<size_t> {
+    size_t total = 0;
+    while (total < buf.size()) {
+      ASSIGN_OR_RETURN(
+          size_t n, syscalls::pwrite(fd, buf.data() + total, buf.size() - total,
+                                     offset + total));
+      if (n == 0) break;  // Should not happen for a regular file.
+      total += n;
+    }
+    return total;
+  });
 }
 
-absl::Status FallocateFd(int fd, int mode, off_t offset, off_t length) {
-  return syscalls::fallocate(fd, mode, offset, length);
+absl::Status FallocateFd(const Credentials &caller, int fd, int mode,
+                         off_t offset, off_t length) {
+  return AsCaller(
+      caller, [&] { return syscalls::fallocate(fd, mode, offset, length); });
 }
 
-absl::StatusOr<size_t> CopyFileRangeFd(int fd_in, off_t off_in, int fd_out,
-                                       off_t off_out, size_t len,
-                                       unsigned int flags) {
-  return syscalls::copy_file_range(fd_in, off_in, fd_out, off_out, len, flags);
+absl::StatusOr<size_t> CopyFileRangeFd(const Credentials &caller, int fd_in,
+                                       off_t off_in, int fd_out, off_t off_out,
+                                       size_t len, unsigned int flags) {
+  return AsCaller(caller, [&] {
+    return syscalls::copy_file_range(fd_in, off_in, fd_out, off_out, len,
+                                     flags);
+  });
 }
 
 absl::StatusOr<std::string> IoctlFd(int fd, unsigned int cmd,

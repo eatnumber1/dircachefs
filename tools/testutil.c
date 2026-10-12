@@ -117,9 +117,10 @@
  *       btrfs has it from Linux 6.19, behind CONFIG_BTRFS_EXPERIMENTAL;
  *       elsewhere it fails with ENOTTY.
  *   testutil fallocate <path> <mode> <offset> <len>
- *       fallocate(2), where <mode> is "0", "keep_size" (FALLOC_FL_KEEP_SIZE)
- *       or "punch_hole" (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE --
- *       punching a hole always requires KEEP_SIZE).
+ *       fallocate(2), where <mode> is "0", "keep_size" (FALLOC_FL_KEEP_SIZE),
+ *       "punch_hole" (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE --
+ *       punching a hole always requires KEEP_SIZE) or "zero"
+ *       (FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE).
  *   testutil writehold <path> <append|create> <nbytes>
  *       open(2)s <path> O_WRONLY|O_APPEND ("append") or
  *       O_WRONLY|O_CREAT|O_TRUNC, 0644 ("create"), writes <nbytes> bytes of
@@ -216,6 +217,9 @@
  *   testutil copyrange <src> <dst>
  *       copy_file_range(2) of all of <src> to the start of <dst> (created
  *       or truncated, mode 0644), looping until EOF; prints "copied=<n>".
+ *   testutil copyrange-into <src> <dst>
+ *       copy_file_range(2) of all of <src> into an existing <dst> (opened
+ *       O_WRONLY without truncating), looping until EOF; prints "copied=<n>".
  *   testutil clone <src> <dst>
  *       FICLONE: <dst> (created or truncated) becomes a reflink of <src>.
  *   testutil shared-extents <path>
@@ -885,6 +889,10 @@ static int cmd_shutdown(const char *path, const char *how) {
   return 0;
 }
 
+#ifndef FALLOC_FL_ZERO_RANGE
+#define FALLOC_FL_ZERO_RANGE 0x10
+#endif
+
 static int cmd_fallocate(const char *path, const char *mode_str,
                          const char *offset_str, const char *len_str) {
   int fd;
@@ -899,6 +907,9 @@ static int cmd_fallocate(const char *path, const char *mode_str,
   } else if (strcmp(mode_str, "punch_hole") == 0) {
     /* Punching a hole is only valid together with KEEP_SIZE. */
     mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
+  } else if (strcmp(mode_str, "zero") == 0 ||
+             strcmp(mode_str, "zero_range") == 0) {
+    mode = FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE;
   } else {
     fprintf(stderr, "testutil fallocate: bad mode '%s'\n", mode_str);
     return 2;
@@ -1321,6 +1332,38 @@ static int cmd_copyrange(const char *src, const char *dst) {
 
     if (n == -1) {
       print_err(errno);
+      return 1;
+    }
+    if (n == 0) break;
+    total += n;
+  }
+  printf("copied=%lld\n", total);
+  close(in);
+  close(out);
+  return 0;
+}
+
+static int cmd_copyrange_into(const char *src, const char *dst) {
+  int in = open(src, O_RDONLY), out;
+  long long total = 0;
+
+  if (in == -1) {
+    print_err(errno);
+    return 1;
+  }
+  out = open(dst, O_WRONLY);
+  if (out == -1) {
+    print_err(errno);
+    close(in);
+    return 1;
+  }
+  for (;;) {
+    ssize_t n = copy_file_range(in, NULL, out, NULL, 1 << 30, 0);
+
+    if (n == -1) {
+      print_err(errno);
+      close(in);
+      close(out);
       return 1;
     }
     if (n == 0) break;
@@ -2848,6 +2891,8 @@ int main(int argc, char *argv[]) {
   if (argc == 3 && strcmp(argv[1], "rmcwd") == 0) return cmd_rmcwd(argv[2]);
   if (argc == 4 && strcmp(argv[1], "copyrange") == 0)
     return cmd_copyrange(argv[2], argv[3]);
+  if (argc == 4 && strcmp(argv[1], "copyrange-into") == 0)
+    return cmd_copyrange_into(argv[2], argv[3]);
   if (argc == 4 && strcmp(argv[1], "clone") == 0)
     return cmd_clone(argv[2], argv[3]);
   if (argc == 3 && strcmp(argv[1], "shared-extents") == 0)

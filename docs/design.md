@@ -1896,7 +1896,15 @@ their own pid, so they read real groups and log nothing.
 **Run as the caller:** `mkdirat`, `mknodat`, `symlinkat`,
 `openat(O_CREAT)`, `unlinkat`, `renameat2`, the chown (including the
 otherwise empty `chown(path, -1, -1)` the kernel forwards, which still
-updates ctime), utimes, the truncate, `setxattr` and `removexattr`.
+updates ctime), utimes, the truncate, `setxattr`, `removexattr`,
+`fallocate` (including punch and zero), the write fallback (`WriteFile`),
+and `copy_file_range` (`CopyFileRangeFd`). Fallocate, write fallback and
+copy_file_range run inside `AsCaller` so that the backing filesystem's own
+`file_remove_privs` applies the kernel's privilege-removal rules with the
+caller's fsuid, fsgid and groups: an unprivileged caller outside the file's
+group drops `CAP_FSETID`, which clears the setgid bit on files without group
+execute (mode 02666 -> 0666). Phase 1 marks the attributes unknown and phase 3
+reads the mode back from the backing filesystem.
 
 **Stay root:**
 

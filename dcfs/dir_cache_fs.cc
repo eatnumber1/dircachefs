@@ -1831,6 +1831,7 @@ absl::Status DirCacheFS::Write(FuseRequest &req, fuse_ino_t ino,
   auto backing_it = backing_files_.find(id);
   RET_CHECK(backing_it != backing_files_.end())
       << "Write on inode " << id << " with no BackingFile";
+  ASSIGN_OR_RETURN(Credentials caller, req.Caller());
 
   // Phase 1: the size/mtime/ctime (and side-effect xattrs) this write is
   // about to change. (A writable open already made `id` durably dirty, so
@@ -1855,8 +1856,9 @@ absl::Status DirCacheFS::Write(FuseRequest &req, fuse_ino_t ino,
   // O_RDONLY -- see MakeBackingFile -- exactly as the kernel would report
   // for a write against a read-only fd).
   BackingCall("WriteFile");
-  ASSIGN_OR_RETURN(size_t n,
-                   backing::WriteFile(backing_it->second.WriteFd(), buf, off));
+  ASSIGN_OR_RETURN(
+      size_t n,
+      backing::WriteFile(caller, backing_it->second.WriteFd(), buf, off));
 
   // Phase 3: nothing yet -- Flush/Release/Fsync (below) pick up the fresh
   // size/mtime/ctime, not every individual write.
@@ -2708,6 +2710,7 @@ absl::Status DirCacheFS::Fallocate(FuseRequest &req, fuse_ino_t ino, int mode,
   auto backing_it = backing_files_.find(id);
   RET_CHECK(backing_it != backing_files_.end())
       << "Fallocate on inode " << id << " with no BackingFile";
+  ASSIGN_OR_RETURN(Credentials caller, req.Caller());
   int fd = backing_it->second.WriteFd();
 
   // Phase 1 (none for a removed object, which has no row: see Setattr).
@@ -2727,7 +2730,7 @@ absl::Status DirCacheFS::Fallocate(FuseRequest &req, fuse_ino_t ino, int mode,
   // exactly as the kernel would report for any write-family syscall on a
   // read-only fd -- no special-casing needed here.
   BackingCall("FallocateFd");
-  absl::Status status = backing::FallocateFd(fd, mode, offset, length);
+  absl::Status status = backing::FallocateFd(caller, fd, mode, offset, length);
   // Phase 3 is refreshes only, which run as ordinary fills: after End(), the
   // failure's refresh included (hence status is carried across it).
   if (mutation.has_value()) mutation->End();
@@ -2764,6 +2767,7 @@ absl::Status DirCacheFS::CopyFileRange(FuseRequest &req, fuse_ino_t ino_in,
   RET_CHECK(in_backing != backing_files_.end() &&
             out_backing != backing_files_.end())
       << "CopyFileRange on an inode with no BackingFile";
+  ASSIGN_OR_RETURN(Credentials caller, req.Caller());
   const int out_fd = out_backing->second.WriteFd();
 
   // Phase 1, as a fallback Write: the destination's attributes and the
@@ -2790,8 +2794,8 @@ absl::Status DirCacheFS::CopyFileRange(FuseRequest &req, fuse_ino_t ino_in,
   // itself for EOPNOTSUPP and EXDEV.
   BackingCall("CopyFileRangeFd");
   absl::StatusOr<size_t> copied =
-      backing::CopyFileRangeFd(*in_backing->second.fd, off_in, out_fd, off_out,
-                               len, static_cast<unsigned int>(flags));
+      backing::CopyFileRangeFd(caller, *in_backing->second.fd, off_in, out_fd,
+                               off_out, len, static_cast<unsigned int>(flags));
   if (mutation.has_value()) mutation->End();
   if (removed) {
     RETURN_IF_ERROR(copied.status());

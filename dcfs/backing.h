@@ -170,20 +170,26 @@ absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset);
 // FUSE_CAP_PASSTHROUGH granted the kernel writes directly against `fd` and
 // this is never called. Returns the number of bytes written (always
 // `buf.size()` on success; a short write only happens on an error, which is
-// then returned instead).
-absl::StatusOr<size_t> WriteFile(int fd, std::span<const char> buf,
-                                 off_t offset);
+// then returned instead). Runs as the caller (AsCaller), so that an
+// unprivileged write clears setgid on a file without group execute.
+absl::StatusOr<size_t> WriteFile(const Credentials &caller, int fd,
+                                 std::span<const char> buf, off_t offset);
 
 // fallocate(2) on `fd` (as ReadFile/WriteFile, an already-open, identity
 // verified real fd -- DirCacheFS::Fallocate's shared per-inode backing fd).
-absl::Status FallocateFd(int fd, int mode, off_t offset, off_t length);
+// Runs as the caller (AsCaller), so that an unprivileged fallocate/punch/zero
+// clears setgid on a file without group execute.
+absl::Status FallocateFd(const Credentials &caller, int fd, int mode,
+                         off_t offset, off_t length);
 
 // copy_file_range(2) between two such fds (DirCacheFS::CopyFileRange, step
 // 23.4): the backing filesystem's own copy, which on btrfs and xfs shares
 // the extents (a reflink) where it can. Returns how many bytes it copied.
-absl::StatusOr<size_t> CopyFileRangeFd(int fd_in, off_t off_in, int fd_out,
-                                       off_t off_out, size_t len,
-                                       unsigned int flags);
+// Runs as the caller (AsCaller), so that an unprivileged copy clears setgid
+// on a file without group execute.
+absl::StatusOr<size_t> CopyFileRangeFd(const Credentials &caller, int fd_in,
+                                       off_t off_in, int fd_out, off_t off_out,
+                                       size_t len, unsigned int flags);
 
 // The ioctls DirCacheFS::Ioctl forwards (step 23.4), on a real fd on the
 // object: `cmd` with `in` as its input and an output buffer of `out_size`

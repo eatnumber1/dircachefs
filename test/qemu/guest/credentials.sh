@@ -50,6 +50,8 @@ cleanup() {
 	if [ "$rc" -ne 0 ] || [ "$FAILED" -ne 0 ]; then
 		echo "--- dcfs stderr ---"
 		cat "$LOG" 2>/dev/null
+		echo "--- dmesg ---"
+		dmesg | tail -n 30 2>/dev/null || true
 	fi
 	if [ "$MOUNTED" -eq 1 ]; then
 		umount "$MNT" 2>/dev/null || true
@@ -329,6 +331,83 @@ expect_ok acl-umask-create alice sh -c \
 	"umask 027 && touch $MNT/pub/umf && mkdir $MNT/pub/umd"
 expect_stat acl-umask-file-mode '%a' pub/umf 640
 expect_stat acl-umask-dir-mode '%a' pub/umd 750
+
+# --- step 17.2: setgid dropped on unprivileged writes ---------------------
+#
+# On a file without group execute (mode 02666), an unprivileged caller outside
+# the file's group drops the setgid bit (02666 -> 0666) on any write-family
+# mutation: fallocate, punch hole, zero range, write, copy_file_range,
+# truncate. Each operation is compared against the same operation on a native
+# directory (/tmp/native), and rechecked through the mount after drop_caches.
+
+NAT=/src/native
+mkdir -p "$NAT" "$MNT/pub/sgid_ops"
+chmod 0777 "$NAT" "$MNT/pub/sgid_ops"
+
+# Setup files in both native directory and mount. Files are owned by bob
+# (uid 1001) with group 2000 (which bob is not in). Under UNIX / Linux
+# semantics, an unprivileged owner outside the file's group drops the setgid bit
+# on modification.
+for op in fallocate punch zero write copy_file_range truncate; do
+	echo "test-data-for-setgid-drop" >"$NAT/f_$op"
+	echo "test-data-for-setgid-drop" >"$MNT/pub/sgid_ops/f_$op"
+	chown 1001:2000 "$NAT/f_$op" "$MNT/pub/sgid_ops/f_$op"
+	chmod 02666 "$NAT/f_$op" "$MNT/pub/sgid_ops/f_$op"
+done
+echo "source" >"$NAT/f_src"
+echo "source" >"$MNT/pub/sgid_ops/f_src"
+chown 1001:2000 "$NAT/f_src" "$MNT/pub/sgid_ops/f_src"
+chmod 0666 "$NAT/f_src" "$MNT/pub/sgid_ops/f_src"
+
+# Execute operations as unprivileged bob (outside group 2000).
+expect_ok sgid-op-fallocate bob "$TESTUTIL" fallocate "$MNT/pub/sgid_ops/f_fallocate" 0 0 4096
+bob "$TESTUTIL" fallocate "$NAT/f_fallocate" 0 0 4096
+
+expect_ok sgid-op-punch bob "$TESTUTIL" fallocate "$MNT/pub/sgid_ops/f_punch" punch_hole 0 4096
+bob "$TESTUTIL" fallocate "$NAT/f_punch" punch_hole 0 4096
+
+expect_ok sgid-op-zero bob "$TESTUTIL" fallocate "$MNT/pub/sgid_ops/f_zero" zero 0 4096
+bob "$TESTUTIL" fallocate "$NAT/f_zero" zero 0 4096
+
+expect_ok sgid-op-write bob sh -c "echo 'x' >>'$MNT/pub/sgid_ops/f_write'"
+bob sh -c "echo 'x' >>'$NAT/f_write'"
+
+expect_ok sgid-op-copy bob "$TESTUTIL" copyrange-into "$MNT/pub/sgid_ops/f_src" "$MNT/pub/sgid_ops/f_copy_file_range"
+bob "$TESTUTIL" copyrange-into "$NAT/f_src" "$NAT/f_copy_file_range"
+
+expect_ok sgid-op-truncate bob "$TESTUTIL" truncate "$MNT/pub/sgid_ops/f_truncate" 4
+bob "$TESTUTIL" truncate "$NAT/f_truncate" 4
+
+# Compare each operation against native directory and backing tree.
+for op in fallocate punch zero write copy_file_range truncate; do
+	nat_mode=$(stat -c '%a' "$NAT/f_$op")
+	mnt_mode=$(stat -c '%a' "$MNT/pub/sgid_ops/f_$op")
+	src_mode=$(stat -c '%a' "$SRC/pub/sgid_ops/f_$op")
+	if [ "$mnt_mode" = "$nat_mode" ] && [ "$src_mode" = "$nat_mode" ] && [ "$mnt_mode" = "666" ]; then
+		pass "sgid-$op-matches-native"
+	else
+		fail "sgid-$op-matches-native" "nat=$nat_mode mnt=$mnt_mode src=$src_mode"
+	fi
+done
+
+# Cold cache: recheck after drop_caches.
+drop_caches_quiesced
+for op in fallocate punch zero write copy_file_range truncate; do
+	nat_mode=$(stat -c '%a' "$NAT/f_$op")
+	cold_mode=$(stat -c '%a' "$MNT/pub/sgid_ops/f_$op")
+	if [ "$cold_mode" = "$nat_mode" ]; then
+		pass "sgid-$op-cold-cache"
+	else
+		fail "sgid-$op-cold-cache" "nat=$nat_mode cold=$cold_mode"
+	fi
+done
+
+# Control: group member (alice in group 2000) keeps setgid bit.
+echo "member-data" >"$MNT/pub/sgid_ops/f_grp"
+chown 1001:2000 "$MNT/pub/sgid_ops/f_grp"
+chmod 02666 "$MNT/pub/sgid_ops/f_grp"
+expect_ok sgid-group-member-write alice sh -c "echo 'x' >>'$MNT/pub/sgid_ops/f_grp'"
+expect_stat sgid-group-member-keeps '%a' pub/sgid_ops/f_grp 2666
 
 # --- the daemon is root again afterwards ----------------------------------
 

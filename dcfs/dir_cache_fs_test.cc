@@ -38,12 +38,14 @@
 
 #include <fcntl.h>
 #include <linux/fs.h>
+#include <linux/fuse.h>
 #include <sys/ioctl.h>  // IWYU pragma: keep (FS_IOC_* macros)
 #include <sys/mount.h>  // IWYU pragma: keep (MS_* macros)
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/statvfs.h>
+#include <sys/types.h>
 #include <sys/uio.h>
 #include <sys/xattr.h>  // IWYU pragma: keep (XATTR_* macros)
 #include <unistd.h>
@@ -72,6 +74,7 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/base/log_severity.h"
+#include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/log/check.h"
@@ -496,11 +499,14 @@ void AppendBytes(std::string &out, const T &value) {
   out.append(reinterpret_cast<const char *>(&value), sizeof(value));
 }
 
-void WriteFile(const std::string &path) {
-  ASSERT_THAT(
-      syscalls::openat(AT_FDCWD, path, O_WRONLY | O_CREAT | O_TRUNC, 0644),
-      IsOk())
-      << path;  // the descriptor closes at once
+void WriteFile(const std::string &path, std::string_view contents = "") {
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor fd,
+      syscalls::openat(AT_FDCWD, path, O_WRONLY | O_CREAT | O_TRUNC, 0644));
+  if (!contents.empty()) {
+    EXPECT_THAT(syscalls::write(*fd, contents.data(), contents.size()),
+                IsOkAndHolds(contents.size()));
+  }
 }
 
 // A write the kernel would make through a passthrough fd, which dcfs never
@@ -737,12 +743,13 @@ class DirCacheFSTest : public ::testing::Test {
 
   // Processes one request and returns its reply (requests processed by a
   // hook meanwhile get their own).
-  Reply Send(uint32_t opcode, uint64_t nodeid, std::string_view body) {
-    return SendOn(se_, opcode, nodeid, body);
+  Reply Send(uint32_t opcode, uint64_t nodeid, std::string_view body,
+             uid_t uid = 0, gid_t gid = 0) {
+    return SendOn(se_, opcode, nodeid, body, uid, gid);
   }
   // Send, to another session (NewSession's).
   Reply SendOn(struct fuse_session *se, uint32_t opcode, uint64_t nodeid,
-               std::string_view body) {
+               std::string_view body, uid_t uid = 0, gid_t gid = 0) {
     const uint64_t unique = next_unique_++;
     std::string buf;
     struct fuse_in_header hdr = {};
@@ -750,6 +757,8 @@ class DirCacheFSTest : public ::testing::Test {
     hdr.opcode = opcode;
     hdr.unique = unique;
     hdr.nodeid = nodeid;
+    hdr.uid = uid;
+    hdr.gid = gid;
     // Root, from this process: the pid whose /proc/<pid>/task/<pid>/status
     // FuseRequest::Caller reads the supplementary groups from. pid 0 (what
     // the kernel sends for a caller outside the daemon's pid namespace)
@@ -1019,7 +1028,8 @@ class DirCacheFSTest : public ::testing::Test {
   // fh_in) to the start of (out, fh_out); the reply's count, or its errno
   // negated.
   int64_t CopyFileRange(InodeId in, uint64_t fh_in, InodeId out,
-                        uint64_t fh_out, uint64_t len) {
+                        uint64_t fh_out, uint64_t len, uid_t uid = 0,
+                        gid_t gid = 0) {
     struct fuse_copy_file_range_in arg = {};
     arg.fh_in = fh_in;
     arg.nodeid_out = static_cast<uint64_t>(out);
@@ -1027,12 +1037,37 @@ class DirCacheFSTest : public ::testing::Test {
     arg.len = len;
     std::string body;
     AppendBytes(body, arg);
-    Reply reply = Send(FUSE_COPY_FILE_RANGE, static_cast<uint64_t>(in), body);
+    Reply reply =
+        Send(FUSE_COPY_FILE_RANGE, static_cast<uint64_t>(in), body, uid, gid);
     if (reply.error != 0) return reply.error;
     struct fuse_write_out written{};
     if (reply.payload.size() < sizeof(written)) return -EIO;
     std::memcpy(&written, reply.payload.data(), sizeof(written));
     return written.size;
+  }
+
+  Reply Fallocate(InodeId id, uint64_t fh, int mode, off_t offset, off_t length,
+                  uid_t uid = 0, gid_t gid = 0) {
+    struct fuse_fallocate_in in = {};
+    in.fh = fh;
+    in.offset = offset;
+    in.length = length;
+    in.mode = mode;
+    std::string body;
+    AppendBytes(body, in);
+    return Send(FUSE_FALLOCATE, static_cast<uint64_t>(id), body, uid, gid);
+  }
+
+  Reply Write(InodeId id, uint64_t fh, std::string_view data, uint64_t off,
+              uid_t uid = 0, gid_t gid = 0) {
+    struct fuse_write_in in = {};
+    in.fh = fh;
+    in.offset = off;
+    in.size = static_cast<uint32_t>(data.size());
+    std::string body;
+    AppendBytes(body, in);
+    body.append(data);
+    return Send(FUSE_WRITE, static_cast<uint64_t>(id), body, uid, gid);
   }
 
   // An IOCTL of `id` with `cmd`, input `in` and `out_size` bytes of output:
@@ -6336,6 +6371,234 @@ TEST_F(DirCacheFSTest, FallocateEndsItsMutationBeforeItsRefreshes) {
   EXPECT_EQ(Release(f, fh).error, 0);
 }
 
+// Step 17.2: fallocate by a caller outside the file's group clears the setgid
+// bit on a file without group execute (02666 -> 0666). Group-member and root
+// callers keep it.
+TEST_F(DirCacheFSTest, FallocateByCallerOutsideGroupClearsSetgid) {
+  std::vector<gid_t> saved_groups(64);
+  ASSERT_OK_AND_ASSIGN(
+      int n, syscalls::getgroups(static_cast<int>(saved_groups.size()),
+                                 saved_groups.data()));
+  saved_groups.resize(static_cast<size_t>(n));
+  const gid_t unpriv_groups[] = {1000};
+  ASSERT_THAT(syscalls::setgroups(unpriv_groups), IsOk());
+  absl::Cleanup restore_groups = [&] {
+    (void)syscalls::setgroups(saved_groups);
+  };
+
+  WriteFile(Path("f_root"), "data");
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("f_root"), 02666, 0), IsOk());
+  WriteFile(Path("f_grp"), "data");
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("f_grp"), 02666, 0), IsOk());
+  WriteFile(Path("f_out"), "data");
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("f_out"), 02666, 0), IsOk());
+
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f_root, Id("f_root"));
+  ASSERT_OK_AND_ASSIGN(InodeId f_grp, Id("f_grp"));
+  ASSERT_OK_AND_ASSIGN(InodeId f_out, Id("f_out"));
+
+  // Root control: root keeps CAP_FSETID, so setgid is kept.
+  {
+    auto [open, fh] = Open(f_root, O_WRONLY);
+    ASSERT_EQ(open.error, 0);
+    EXPECT_EQ(Fallocate(f_root, fh, 0, 0, 4096, /*uid=*/0, /*gid=*/0).error, 0);
+    ASSERT_OK_AND_ASSIGN(struct stat st,
+                         syscalls::fstatat(AT_FDCWD, Path("f_root")));
+    EXPECT_EQ(st.st_mode & 07777, 02666u);
+    auto [ga, attr] = Getattr(f_root);
+    ASSERT_EQ(ga.error, 0);
+    EXPECT_EQ(attr.mode & 07777, 02666u);
+    EXPECT_EQ(Release(f_root, fh).error, 0);
+  }
+
+  // Group-member control: caller is in the file's group (gid 0), so setgid is
+  // kept.
+  {
+    auto [open, fh] = Open(f_grp, O_WRONLY);
+    ASSERT_EQ(open.error, 0);
+    EXPECT_EQ(Fallocate(f_grp, fh, 0, 0, 4096, /*uid=*/1000, /*gid=*/0).error,
+              0);
+    ASSERT_OK_AND_ASSIGN(struct stat st,
+                         syscalls::fstatat(AT_FDCWD, Path("f_grp")));
+    EXPECT_EQ(st.st_mode & 07777, 02666u);
+    auto [ga, attr] = Getattr(f_grp);
+    ASSERT_EQ(ga.error, 0);
+    EXPECT_EQ(attr.mode & 07777, 02666u);
+    EXPECT_EQ(Release(f_grp, fh).error, 0);
+  }
+
+  // Outside group: unprivileged caller outside group drops setgid.
+  {
+    auto [open, fh] = Open(f_out, O_WRONLY);
+    ASSERT_EQ(open.error, 0);
+    EXPECT_EQ(
+        Fallocate(f_out, fh, 0, 0, 4096, /*uid=*/1000, /*gid=*/1000).error, 0);
+    ASSERT_OK_AND_ASSIGN(struct stat st,
+                         syscalls::fstatat(AT_FDCWD, Path("f_out")));
+    EXPECT_EQ(st.st_mode & 07777, 0666u);
+    auto [ga, attr] = Getattr(f_out);
+    ASSERT_EQ(ga.error, 0);
+    EXPECT_EQ(attr.mode & 07777, 0666u);
+    EXPECT_EQ(Release(f_out, fh).error, 0);
+  }
+}
+
+// Step 17.2: fallback WriteFile by a caller outside the file's group clears the
+// setgid bit on a file without group execute (02666 -> 0666). Group-member and
+// root callers keep it.
+TEST_F(DirCacheFSTest, WriteByCallerOutsideGroupClearsSetgid) {
+  std::vector<gid_t> saved_groups(64);
+  ASSERT_OK_AND_ASSIGN(
+      int n, syscalls::getgroups(static_cast<int>(saved_groups.size()),
+                                 saved_groups.data()));
+  saved_groups.resize(static_cast<size_t>(n));
+  const gid_t unpriv_groups[] = {1000};
+  ASSERT_THAT(syscalls::setgroups(unpriv_groups), IsOk());
+  absl::Cleanup restore_groups = [&] {
+    (void)syscalls::setgroups(saved_groups);
+  };
+
+  WriteFile(Path("f_root"), "data");
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("f_root"), 02666, 0), IsOk());
+  WriteFile(Path("f_grp"), "data");
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("f_grp"), 02666, 0), IsOk());
+  WriteFile(Path("f_out"), "data");
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("f_out"), 02666, 0), IsOk());
+
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f_root, Id("f_root"));
+  ASSERT_OK_AND_ASSIGN(InodeId f_grp, Id("f_grp"));
+  ASSERT_OK_AND_ASSIGN(InodeId f_out, Id("f_out"));
+
+  // Root control: root keeps CAP_FSETID, so setgid is kept.
+  {
+    auto [open, fh] = Open(f_root, O_WRONLY);
+    ASSERT_EQ(open.error, 0);
+    EXPECT_EQ(Write(f_root, fh, "x", 0, /*uid=*/0, /*gid=*/0).error, 0);
+    EXPECT_EQ(Release(f_root, fh).error, 0);
+    ASSERT_OK_AND_ASSIGN(struct stat st,
+                         syscalls::fstatat(AT_FDCWD, Path("f_root")));
+    EXPECT_EQ(st.st_mode & 07777, 02666u);
+    auto [ga, attr] = Getattr(f_root);
+    ASSERT_EQ(ga.error, 0);
+    EXPECT_EQ(attr.mode & 07777, 02666u);
+  }
+
+  // Group-member control: caller is in the file's group (gid 0), so setgid is
+  // kept.
+  {
+    auto [open, fh] = Open(f_grp, O_WRONLY);
+    ASSERT_EQ(open.error, 0);
+    EXPECT_EQ(Write(f_grp, fh, "x", 0, /*uid=*/1000, /*gid=*/0).error, 0);
+    EXPECT_EQ(Release(f_grp, fh).error, 0);
+    ASSERT_OK_AND_ASSIGN(struct stat st,
+                         syscalls::fstatat(AT_FDCWD, Path("f_grp")));
+    EXPECT_EQ(st.st_mode & 07777, 02666u);
+    auto [ga, attr] = Getattr(f_grp);
+    ASSERT_EQ(ga.error, 0);
+    EXPECT_EQ(attr.mode & 07777, 02666u);
+  }
+
+  // Outside group: unprivileged caller outside group drops setgid.
+  {
+    auto [open, fh] = Open(f_out, O_WRONLY);
+    ASSERT_EQ(open.error, 0);
+    EXPECT_EQ(Write(f_out, fh, "x", 0, /*uid=*/1000, /*gid=*/1000).error, 0);
+    EXPECT_EQ(Release(f_out, fh).error, 0);
+    ASSERT_OK_AND_ASSIGN(struct stat st,
+                         syscalls::fstatat(AT_FDCWD, Path("f_out")));
+    EXPECT_EQ(st.st_mode & 07777, 0666u);
+    auto [ga, attr] = Getattr(f_out);
+    ASSERT_EQ(ga.error, 0);
+    EXPECT_EQ(attr.mode & 07777, 0666u);
+  }
+}
+
+// Step 17.2: CopyFileRangeFd by a caller outside the destination's group clears
+// the setgid bit on a file without group execute (02666 -> 0666). Group-member
+// and root callers keep it.
+TEST_F(DirCacheFSTest, CopyFileRangeByCallerOutsideGroupClearsSetgid) {
+  std::vector<gid_t> saved_groups(64);
+  ASSERT_OK_AND_ASSIGN(
+      int n, syscalls::getgroups(static_cast<int>(saved_groups.size()),
+                                 saved_groups.data()));
+  saved_groups.resize(static_cast<size_t>(n));
+  const gid_t unpriv_groups[] = {1000};
+  ASSERT_THAT(syscalls::setgroups(unpriv_groups), IsOk());
+  absl::Cleanup restore_groups = [&] {
+    (void)syscalls::setgroups(saved_groups);
+  };
+
+  WriteFile(Path("src"), "source data");
+  WriteFile(Path("dst_root"), "destination");
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("dst_root"), 02666, 0), IsOk());
+  WriteFile(Path("dst_grp"), "destination");
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("dst_grp"), 02666, 0), IsOk());
+  WriteFile(Path("dst_out"), "destination");
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("dst_out"), 02666, 0), IsOk());
+
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId src, Id("src"));
+  ASSERT_OK_AND_ASSIGN(InodeId dst_root, Id("dst_root"));
+  ASSERT_OK_AND_ASSIGN(InodeId dst_grp, Id("dst_grp"));
+  ASSERT_OK_AND_ASSIGN(InodeId dst_out, Id("dst_out"));
+
+  auto [in_open, in_fh] = Open(src, O_RDONLY);
+  ASSERT_EQ(in_open.error, 0);
+
+  // Root control: root keeps CAP_FSETID, so setgid is kept.
+  {
+    auto [out_open, out_fh] = Open(dst_root, O_WRONLY);
+    ASSERT_EQ(out_open.error, 0);
+    EXPECT_GT(
+        CopyFileRange(src, in_fh, dst_root, out_fh, 1, /*uid=*/0, /*gid=*/0),
+        0);
+    ASSERT_OK_AND_ASSIGN(struct stat st,
+                         syscalls::fstatat(AT_FDCWD, Path("dst_root")));
+    EXPECT_EQ(st.st_mode & 07777, 02666u);
+    auto [ga, attr] = Getattr(dst_root);
+    ASSERT_EQ(ga.error, 0);
+    EXPECT_EQ(attr.mode & 07777, 02666u);
+    EXPECT_EQ(Release(dst_root, out_fh).error, 0);
+  }
+
+  // Group-member control: caller is in the file's group (gid 0), so setgid is
+  // kept.
+  {
+    auto [out_open, out_fh] = Open(dst_grp, O_WRONLY);
+    ASSERT_EQ(out_open.error, 0);
+    EXPECT_GT(
+        CopyFileRange(src, in_fh, dst_grp, out_fh, 1, /*uid=*/1000, /*gid=*/0),
+        0);
+    ASSERT_OK_AND_ASSIGN(struct stat st,
+                         syscalls::fstatat(AT_FDCWD, Path("dst_grp")));
+    EXPECT_EQ(st.st_mode & 07777, 02666u);
+    auto [ga, attr] = Getattr(dst_grp);
+    ASSERT_EQ(ga.error, 0);
+    EXPECT_EQ(attr.mode & 07777, 02666u);
+    EXPECT_EQ(Release(dst_grp, out_fh).error, 0);
+  }
+
+  // Outside group: unprivileged caller outside group drops setgid.
+  {
+    auto [out_open, out_fh] = Open(dst_out, O_WRONLY);
+    ASSERT_EQ(out_open.error, 0);
+    EXPECT_GT(CopyFileRange(src, in_fh, dst_out, out_fh, 1, /*uid=*/1000,
+                            /*gid=*/1000),
+              0);
+    ASSERT_OK_AND_ASSIGN(struct stat st,
+                         syscalls::fstatat(AT_FDCWD, Path("dst_out")));
+    EXPECT_EQ(st.st_mode & 07777, 0666u);
+    auto [ga, attr] = Getattr(dst_out);
+    ASSERT_EQ(ga.error, 0);
+    EXPECT_EQ(attr.mode & 07777, 0666u);
+    EXPECT_EQ(Release(dst_out, out_fh).error, 0);
+  }
+
+  EXPECT_EQ(Release(src, in_fh).error, 0);
+}
+
 // A RELEASE says whether the open it ends could write (the lifetime model's
 // argument of kReleased): 1 for a writable open, 0 for a read-only one, both
 // when other opens remain and when it is the file's last.
@@ -7255,17 +7518,6 @@ class FaultIteration : public DirCacheFSTest {
     std::string body(name);
     body.push_back('\0');
     return Send(opcode, static_cast<uint64_t>(id), body);
-  }
-
-  Reply Write(InodeId id, uint64_t fh, std::string_view data, uint64_t off) {
-    struct fuse_write_in in = {};
-    in.fh = fh;
-    in.offset = off;
-    in.size = static_cast<uint32_t>(data.size());
-    std::string body;
-    AppendBytes(body, in);
-    body.append(data);
-    return Send(FUSE_WRITE, static_cast<uint64_t>(id), body);
   }
 
   Reply Fsync(InodeId id, uint64_t fh) {

@@ -15,7 +15,4 @@ generic/306 `mount -o remount,ro` is ignored by dcfs (dcfs.ro is the way to make
 generic/411 the test mounts the scratch device several times at once; dcfs refuses a second daemon on one cache database ("in use by another dcfs process"), README.md, limitations: a second dcfs needs its own cache database
 generic/424 statx(2) does not report the append, immutable, nodump and compressed attributes that chattr set: FUSE has no way to carry them (README.md, limitations: remount,ro and statx attributes)
 generic/589 the test mounts the scratch device several times at once; dcfs refuses a second daemon on one cache database ("in use by another dcfs process"), README.md, limitations: a second dcfs needs its own cache database
-generic/683 dcfs bug: after falloc by an unprivileged user the setgid bit stays on a file without group execute (mode 2666) where the backing file system clears it (666); the suid bit is cleared. 684 and 685 are the same for fpunch and fzero (FUSE refuses COLLAPSE_RANGE, so 687 is "not run")
-generic/684 dcfs bug: as generic/683, for fpunch
-generic/685 dcfs bug: as generic/683, for fzero
 generic/732 the test mounts the scratch device twice (two mount points); dcfs refuses a second daemon on one cache database ("in use by another dcfs process"), README.md, limitations: a second dcfs needs its own cache database

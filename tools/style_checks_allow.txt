@@ -109,7 +109,6 @@ dcfs/dir_cache_fs_test.cc|<file scope>|misc-unused-parameters|1
 dcfs/dir_cache_fs_test.cc|BackingAtime|misc-include-cleaner|1
 dcfs/dir_cache_fs_test.cc|BatchForget|bugprone-invalid-enum-default-initialization|1
 dcfs/dir_cache_fs_test.cc|CheckAndRecover|readability-avoid-nested-conditional-operator|1
-dcfs/dir_cache_fs_test.cc|DCFS_BACKSTOP|misc-include-cleaner|7
 dcfs/dir_cache_fs_test.cc|Forget|bugprone-invalid-enum-default-initialization|1
 dcfs/dir_cache_fs_test.cc|INSTANTIATE_TEST_SUITE_P|modernize-type-traits|1
 dcfs/dir_cache_fs_test.cc|ListAll|readability-function-cognitive-complexity|1
