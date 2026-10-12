@@ -36,7 +36,6 @@
 #include "absl/container/fixed_array.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/function_ref.h"
-#include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
@@ -64,6 +63,8 @@
 
 namespace dcfs::backing {
 namespace {
+
+struct fuse_session *g_fuse_session = nullptr;
 
 // Everything the cache stores about an inode's attributes.
 constexpr unsigned int kAttrMask = STATX_BASIC_STATS | STATX_BTIME;
@@ -273,15 +274,20 @@ using SavedGroups = std::vector<gid_t>;
 // Puts the thread's credentials back after a switch. Cannot fail for a
 // process whose effective uid is root; if it somehow did, carrying on
 // would perform every later backing operation as the wrong user, so that
-// is fatal.
+// poisons backing and exits the FUSE session.
 void RestoreRoot(const SavedGroups &groups) {
   absl::Status uid = syscalls::setfsuid(0);
   absl::Status status = syscalls::setgroups(groups);
   absl::Status gid = syscalls::setfsgid(0);
-  CHECK(uid.ok() && status.ok() && gid.ok())
-      << "cannot restore root filesystem credentials: setfsuid " << uid
-      << ", setgroups " << status << ", setfsgid " << gid << " (fsuid "
-      << syscalls::fsuid() << ", fsgid " << syscalls::fsgid() << ")";
+  if (!uid.ok() || !status.ok() || !gid.ok()) {
+    LOG(ERROR) << "cannot restore root filesystem credentials: setfsuid " << uid
+               << ", setgroups " << status << ", setfsgid " << gid << " (fsuid "
+               << syscalls::fsuid() << ", fsgid " << syscalls::fsgid() << ")";
+    syscalls::PoisonBacking();
+    if (g_fuse_session != nullptr) {
+      fuse_session_exit(g_fuse_session);
+    }
+  }
 }
 
 // Switches to `caller`. fsgid and groups go before fsuid so the thread is
@@ -615,6 +621,8 @@ absl::StatusOr<RootProbe> Probe(Context &ctx, int source_fd) {
 }
 
 }  // namespace
+
+void RegisterFuseSession(struct fuse_session *se) { g_fuse_session = se; }
 
 absl::StatusOr<RootIdentity> ProbeRoot(Context &ctx, int source_fd) {
   ASSIGN_OR_RETURN(RootProbe probe, Probe(ctx, source_fd));

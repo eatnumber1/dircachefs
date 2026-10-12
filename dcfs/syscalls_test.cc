@@ -28,9 +28,12 @@
 #include "absl/algorithm/container.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/match.h"
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls_backing.h"
+#include "dcfs/syscalls_process.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -667,6 +670,33 @@ TEST(SyscallsWrapperTest, UnshareRefusesUnknownFlags) {
 TEST(SyscallsWrapperTest, SyslogNeverFails) {
   syscalls::openlog("dcfs-test", LOG_PID, LOG_DAEMON);
   syscalls::syslog(LOG_INFO, "syscalls_test: a message with a %s in it");
+}
+
+TEST(SyscallsBackingTest, PoisonBackingPermanentlyRefusesBackingSyscalls) {
+  EXPECT_FALSE(syscalls::IsBackingPoisoned());
+  absl::StatusOr<pid_t> pid = syscalls::fork();
+  ASSERT_THAT(pid, IsOk());
+  if (*pid == 0) {
+    if (syscalls::IsBackingPoisoned()) syscalls::_exit(1);
+    syscalls::PoisonBacking();
+    if (!syscalls::IsBackingPoisoned()) syscalls::_exit(2);
+    auto status = syscalls::openat(AT_FDCWD, "/dev/null", O_RDONLY);
+    if (status.ok() || !absl::IsInternal(status.status()) ||
+        !absl::StrContains(status.status().message(), "backing is poisoned")) {
+      syscalls::_exit(3);
+    }
+    auto stat_status = syscalls::fstat(-1);
+    if (stat_status.ok() || !absl::IsInternal(stat_status.status()) ||
+        !absl::StrContains(stat_status.status().message(),
+                           "backing is poisoned")) {
+      syscalls::_exit(4);
+    }
+    syscalls::_exit(0);
+  }
+  int status = -1;
+  ASSERT_THAT(syscalls::waitpid(*pid, &status, 0), IsOkAndHolds(*pid));
+  EXPECT_EQ(status, 0);
+  EXPECT_FALSE(syscalls::IsBackingPoisoned());
 }
 
 }  // namespace

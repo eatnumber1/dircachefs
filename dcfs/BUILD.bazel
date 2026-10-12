@@ -344,6 +344,7 @@ qemu_cc_test(
       ":status",
       ":syscalls",
       ":syscalls_backing",
+      ":syscalls_process",
       "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/algorithm:container",
       "@absl//absl/status",
@@ -409,6 +410,7 @@ qemu_cc_test(
     size = "small",
     timeout = "short",
     srcs = ["fuse_request_test.cc"],
+    linkopts = ["-Wl,--wrap=fuse_reply_none"],
     deps = [
       ":fuse_request",
       ":status",
@@ -456,10 +458,12 @@ cc_library(
       ":dir_cache_fs",
       ":fuse_request",
       ":escape",
+      ":ret_check",
       "@absl//absl/strings",
       "@absl//absl/log",
       "@absl//absl/log:check",
       "@absl//absl/status",
+      "@absl//absl/status:statusor",
       "@libfuse//:libfuse",
     ],
 )

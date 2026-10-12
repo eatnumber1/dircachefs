@@ -275,14 +275,11 @@ absl::Status FuseRequest::ReplyStatfs(const struct statvfs &stbuf) {
   return st;
 }
 
-void FuseRequest::ReplyNone() {
-  // ReplyNone() returns void (there is nothing to report to the caller, and
-  // no reply function call that could itself fail), so unlike the other
-  // Reply* methods this uses CHECK rather than RET_CHECK to enforce the
-  // single-reply invariant.
-  CHECK(req_.has_value()) << "FuseRequest already replied";
+absl::Status FuseRequest::ReplyNone() {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   fuse_reply_none(*req_);
   req_ = std::nullopt;
+  return absl::OkStatus();
 }
 
 }  // namespace dcfs

@@ -31,6 +31,12 @@
 namespace dcfs {
 namespace syscalls {
 
+// Backing door self-poisoning (step 25.9): when root credentials cannot be
+// restored, backing is permanently poisoned and all backing syscalls are
+// refused.
+void PoisonBacking();
+bool IsBackingPoisoned();
+
 // O_CLOEXEC is unconditionally added.
 absl::StatusOr<FileDescriptor> openat(int dirfd, std::string_view pathname,
                                       int flags = 0, mode_t mode = 0);
@@ -138,6 +144,10 @@ absl::Status umount2(std::string_view target, int flags);
 namespace syscalls {
 
 absl::StatusOr<int> ioctl(int fd, unsigned long request, auto &&...args) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   int rc = ::ioctl(fd, request, std::forward<decltype(args)>(args)...);
   if (rc == -1) return ErrnoToStatus(errno, "ioctl");
   return rc;

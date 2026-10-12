@@ -44,7 +44,6 @@ dcfs/backing.cc|RecordChild|readability-function-cognitive-complexity|1
 dcfs/backing.cc|RecordNewChild|capturing_mutating_lambda|1
 dcfs/backing.cc|RecordTmpfile|capturing_mutating_lambda|1
 dcfs/backing.cc|ResolveName|capturing_mutating_lambda|1
-dcfs/backing.cc|RestoreRoot|check_in_production|1
 dcfs/backing.cc|SetAttrFd|readability-function-cognitive-complexity|1
 dcfs/backing.cc|SetAttrFd|readability-implicit-bool-conversion|13
 dcfs/backing.cc|StaleOrUnreadable|misc-no-recursion|1
@@ -165,7 +164,6 @@ dcfs/fd.cc|FileDescriptor::~FileDescriptor|bugprone-exception-escape|1
 dcfs/fd_test.cc|OpenTmpdir|concurrency-mt-unsafe|1
 dcfs/fd_test.cc|TEST|bugprone-use-after-move|2
 dcfs/file_handle_test.cc|SetUp|concurrency-mt-unsafe|1
-dcfs/fork_split.h|__attribute__|check_in_production|1
 dcfs/fsck.cc|<file scope>|modernize-deprecated-headers|1
 dcfs/fsck.cc|FstabOptions|performance-no-automatic-move|1
 dcfs/fsck.cc|Inspect|capturing_mutating_lambda|2
@@ -175,31 +173,10 @@ dcfs/fsck.cc|RunProgram|misc-include-cleaner|4
 dcfs/fsck_test.cc|<file scope>|misc-include-cleaner|1
 dcfs/fsck_test.cc|<file scope>|misc-unused-using-decls|3
 dcfs/fsck_test.cc|TestFile|concurrency-mt-unsafe|1
-dcfs/fuse_ops.cc|CopyFileRange|check_in_production|2
-dcfs/fuse_ops.cc|Create|check_in_production|1
-dcfs/fuse_ops.cc|Destroy|check_in_production|1
-dcfs/fuse_ops.cc|Fallocate|check_in_production|1
-dcfs/fuse_ops.cc|Flush|check_in_production|1
-dcfs/fuse_ops.cc|ForgetMulti|check_in_production|1
-dcfs/fuse_ops.cc|Fsync|check_in_production|1
-dcfs/fuse_ops.cc|Fsyncdir|check_in_production|1
-dcfs/fuse_ops.cc|GetFS|check_in_production|1
-dcfs/fuse_ops.cc|Init|check_in_production|3
 dcfs/fuse_ops.cc|Ioctl|misc-unused-parameters|1
-dcfs/fuse_ops.cc|Link|check_in_production|1
-dcfs/fuse_ops.cc|Open|check_in_production|1
-dcfs/fuse_ops.cc|Opendir|check_in_production|1
-dcfs/fuse_ops.cc|Read|check_in_production|1
-dcfs/fuse_ops.cc|Readdir|check_in_production|1
-dcfs/fuse_ops.cc|Readdirplus|check_in_production|1
-dcfs/fuse_ops.cc|Release|check_in_production|1
-dcfs/fuse_ops.cc|Releasedir|check_in_production|1
-dcfs/fuse_ops.cc|Tmpfile|check_in_production|1
-dcfs/fuse_ops.cc|Write|check_in_production|1
 dcfs/fuse_request.cc|FuseRequest::Caller|bugprone-narrowing-conversions|2
 dcfs/fuse_request.cc|FuseRequest::Caller|modernize-use-integer-sign-comparison|2
 dcfs/fuse_request.cc|FuseRequest::FuseRequest|performance-move-const-arg|1
-dcfs/fuse_request.cc|FuseRequest::ReplyNone|check_in_production|1
 dcfs/fuse_request.cc|FuseRequest::~FuseRequest|bugprone-exception-escape|1
 dcfs/fuse_request.cc|FuseRequest::~FuseRequest|misc-include-cleaner|1
 dcfs/fuse_request_channel_test.cc|<file scope>|misc-include-cleaner|2
@@ -274,7 +251,6 @@ dcfs/sqlite_test.cc|TEST|capturing_mutating_lambda|4
 dcfs/sqlite_test.cc|TEST|misc-include-cleaner|1
 dcfs/sqlite_test.cc|TEST_F|bugprone-unchecked-optional-access|1
 dcfs/sqlite_test.cc|TestTmpFile|concurrency-mt-unsafe|1
-dcfs/startup_channel.cc|AwaitReportAndExit|concurrency-mt-unsafe|2
 dcfs/startup_channel.cc|AwaitReportAndExit|misc-include-cleaner|1
 dcfs/startup_channel.cc|DescribeWaitStatus|misc-include-cleaner|3
 dcfs/status.cc|StatusCodeToErrno|misc-include-cleaner|1

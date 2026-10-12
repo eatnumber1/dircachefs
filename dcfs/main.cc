@@ -513,6 +513,10 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   if (session == nullptr) {
     return InternalErrorBuilder() << "fuse_session_new failed";
   }
+  backing::RegisterFuseSession(session);
+  absl::Cleanup unregister_session = [] {
+    backing::RegisterFuseSession(nullptr);
+  };
 
   if (fuse_set_signal_handlers(session) != 0) {
     fuse_session_destroy(session);
@@ -689,7 +693,7 @@ int MountHelperMain(int argc, char *argv[]) {
     absl::StatusOr<StartupReporter> forked = ForkDaemon();
     if (!forked.ok()) {
       LOG(ERROR) << forked.status();
-      return 1;
+      return ExitStatusFor(forked.status());
     }
     reporter = *std::move(forked);
   }

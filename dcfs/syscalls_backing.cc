@@ -12,6 +12,7 @@
 #include <sys/xattr.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -29,9 +30,26 @@
 #include "dcfs/status.h"
 
 namespace dcfs::syscalls {
+namespace {
+
+std::atomic<bool> g_backing_poisoned{false};
+
+}  // namespace
+
+void PoisonBacking() {
+  g_backing_poisoned.store(true, std::memory_order_relaxed);
+}
+
+bool IsBackingPoisoned() {
+  return g_backing_poisoned.load(std::memory_order_relaxed);
+}
 
 absl::StatusOr<FileDescriptor> openat(int dirfd, std::string_view pathname,
                                       int flags, mode_t mode) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   int fd =
       ::openat(dirfd, std::string(pathname).c_str(), flags | O_CLOEXEC, mode);
   if (fd == -1) {
@@ -42,6 +60,10 @@ absl::StatusOr<FileDescriptor> openat(int dirfd, std::string_view pathname,
 }
 
 absl::StatusOr<size_t> read(int fd, void *buf, size_t count) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   ssize_t nb = ::read(fd, buf, count);
   if (nb == -1) {
     return ErrnoToStatus(errno, absl::StrCat("read(", fd, ")"));
@@ -50,6 +72,10 @@ absl::StatusOr<size_t> read(int fd, void *buf, size_t count) {
 }
 
 absl::StatusOr<struct statvfs> fstatvfs(int fd) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   struct statvfs buf;
   int ret = ::fstatvfs(fd, &buf);
   if (ret == -1) return ErrnoToStatus(errno, "fstatvfs");
@@ -57,6 +83,10 @@ absl::StatusOr<struct statvfs> fstatvfs(int fd) {
 }
 
 absl::StatusOr<struct stat> fstat(int fd) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   struct stat buf;
   int ret = ::fstat(fd, &buf);
   if (ret == -1) return ErrnoToStatus(errno, "fstat");
@@ -65,6 +95,10 @@ absl::StatusOr<struct stat> fstat(int fd) {
 
 absl::StatusOr<struct stat> fstatat(int dirfd, std::string_view pathname,
                                     int flags) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   std::string pathname_str(pathname);
   struct stat buf;
   int ret = ::fstatat(dirfd, pathname_str.c_str(), &buf, flags);
@@ -74,6 +108,10 @@ absl::StatusOr<struct stat> fstatat(int dirfd, std::string_view pathname,
 
 absl::Status name_to_handle_at(int dirfd, std::string_view pathname,
                                file_handle &handle, int &mount_id, int flags) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   int rc = ::name_to_handle_at(dirfd, std::string(pathname).c_str(), &handle,
                                &mount_id, flags);
   if (rc != 0) {
@@ -86,6 +124,10 @@ absl::Status name_to_handle_at(int dirfd, std::string_view pathname,
 absl::StatusOr<FileDescriptor> open_by_handle_at(int mount_fd,
                                                  const file_handle &handle,
                                                  int flags) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   int fd = ::open_by_handle_at(mount_fd, const_cast<file_handle *>(&handle),
                                flags | O_CLOEXEC);
   if (fd == -1) return ErrnoToStatus(errno, "open_by_handle_at");
@@ -93,12 +135,20 @@ absl::StatusOr<FileDescriptor> open_by_handle_at(int mount_fd,
 }
 
 absl::StatusOr<ssize_t> getdents64(int fd, void *dirp, size_t count) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   ssize_t nb = ::syscall(SYS_getdents64, fd, dirp, count);
   if (nb < 0) return ErrnoToStatus(errno, "getdents64");
   return nb;
 }
 
 absl::StatusOr<off_t> lseek(int fd, off_t offset, int whence) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   off_t rc = ::lseek(fd, offset, whence);
   if (rc == static_cast<off_t>(-1)) return ErrnoToStatus(errno, "lseek");
   return rc;
@@ -106,6 +156,10 @@ absl::StatusOr<off_t> lseek(int fd, off_t offset, int whence) {
 
 absl::StatusOr<struct statx> statx(int dirfd, std::string_view path, int flags,
                                    unsigned int mask) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   std::string path_str(path);
   struct statx buf;
   int ret = ::statx(dirfd, path_str.c_str(), flags, mask, &buf);
@@ -114,6 +168,10 @@ absl::StatusOr<struct statx> statx(int dirfd, std::string_view path, int flags,
 }
 
 absl::StatusOr<struct statfs> fstatfs(int fd) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   struct statfs buf;
   int ret = ::fstatfs(fd, &buf);
   if (ret == -1) return ErrnoToStatus(errno, "fstatfs");
@@ -122,6 +180,10 @@ absl::StatusOr<struct statfs> fstatfs(int fd) {
 
 absl::StatusOr<size_t> readlinkat(int dirfd, std::string_view path, char *buf,
                                   size_t size) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   std::string path_str(path);
   ssize_t nbytes = ::readlinkat(dirfd, path_str.c_str(), buf, size);
   if (nbytes == -1) return ErrnoToStatus(errno, "readlinkat");
@@ -130,6 +192,10 @@ absl::StatusOr<size_t> readlinkat(int dirfd, std::string_view path, char *buf,
 
 absl::StatusOr<size_t> fgetxattr(int fd, std::string_view name, void *value,
                                  size_t size) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   std::string name_str(name);
   ssize_t nbytes = ::fgetxattr(fd, name_str.c_str(), value, size);
   if (nbytes == -1) return ErrnoToStatus(errno, "fgetxattr");
@@ -137,6 +203,10 @@ absl::StatusOr<size_t> fgetxattr(int fd, std::string_view name, void *value,
 }
 
 absl::StatusOr<size_t> flistxattr(int fd, char *list, size_t size) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   ssize_t nbytes = ::flistxattr(fd, list, size);
   if (nbytes == -1) return ErrnoToStatus(errno, "flistxattr");
   return static_cast<size_t>(nbytes);
@@ -144,6 +214,10 @@ absl::StatusOr<size_t> flistxattr(int fd, char *list, size_t size) {
 
 absl::Status fsetxattr(int fd, std::string_view name,
                        std::span<const uint8_t> value, int flags) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   std::string name_str(name);
   if (::fsetxattr(fd, name_str.c_str(),
                   reinterpret_cast<const void *>(value.data()), value.size(),
@@ -154,6 +228,10 @@ absl::Status fsetxattr(int fd, std::string_view name,
 }
 
 absl::Status fremovexattr(int fd, std::string_view name) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   std::string name_str(name);
   if (::fremovexattr(fd, name_str.c_str()) == -1) {
     return ErrnoToStatus(errno, "fremovexattr");
@@ -163,6 +241,10 @@ absl::Status fremovexattr(int fd, std::string_view name) {
 
 absl::StatusOr<size_t> getxattr(std::string_view path, std::string_view name,
                                 void *value, size_t size) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   const std::string path_str(path);
   const std::string name_str(name);
   ssize_t nbytes = ::getxattr(path_str.c_str(), name_str.c_str(), value, size);
@@ -175,6 +257,10 @@ absl::StatusOr<size_t> getxattr(std::string_view path, std::string_view name,
 
 absl::StatusOr<size_t> listxattr(std::string_view path, char *list,
                                  size_t size) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   const std::string path_str(path);
   ssize_t nbytes = ::listxattr(path_str.c_str(), list, size);
   if (nbytes == -1) {
@@ -185,6 +271,10 @@ absl::StatusOr<size_t> listxattr(std::string_view path, char *list,
 
 absl::Status setxattr(std::string_view path, std::string_view name,
                       std::span<const uint8_t> value, int flags) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   const std::string path_str(path);
   const std::string name_str(name);
   if (::setxattr(path_str.c_str(), name_str.c_str(),
@@ -197,6 +287,10 @@ absl::Status setxattr(std::string_view path, std::string_view name,
 }
 
 absl::Status removexattr(std::string_view path, std::string_view name) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   const std::string path_str(path);
   const std::string name_str(name);
   if (::removexattr(path_str.c_str(), name_str.c_str()) == -1) {
@@ -208,6 +302,10 @@ absl::Status removexattr(std::string_view path, std::string_view name) {
 
 absl::Status fchmodat(int dirfd, std::string_view path, mode_t mode,
                       int flags) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   const std::string path_str(path);
   if (::fchmodat(dirfd, path_str.c_str(), mode, flags) == -1) {
     return ErrnoToStatus(
@@ -218,6 +316,10 @@ absl::Status fchmodat(int dirfd, std::string_view path, mode_t mode,
 
 absl::Status utimensat(int dirfd, std::string_view path,
                        const struct timespec times[2], int flags) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   const std::string path_str(path);
   if (::utimensat(dirfd, path_str.c_str(), times, flags) == -1) {
     return ErrnoToStatus(
@@ -228,6 +330,10 @@ absl::Status utimensat(int dirfd, std::string_view path,
 
 absl::Status linkat(int olddirfd, std::string_view oldpath, int newdirfd,
                     std::string_view newpath, int flags) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   std::string oldpath_str(oldpath);
   std::string newpath_str(newpath);
   if (::linkat(olddirfd, oldpath_str.c_str(), newdirfd, newpath_str.c_str(),
@@ -238,6 +344,10 @@ absl::Status linkat(int olddirfd, std::string_view oldpath, int newdirfd,
 }
 
 absl::Status unlinkat(int dirfd, std::string_view path, int flags) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   std::string path_str(path);
   if (::unlinkat(dirfd, path_str.c_str(), flags) == -1) {
     return ErrnoToStatus(errno, "unlinkat");
@@ -247,6 +357,10 @@ absl::Status unlinkat(int dirfd, std::string_view path, int flags) {
 
 absl::Status renameat2(int olddirfd, std::string_view oldpath, int newdirfd,
                        std::string_view newpath, unsigned int flags) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   std::string oldpath_str(oldpath);
   std::string newpath_str(newpath);
   if (::renameat2(olddirfd, oldpath_str.c_str(), newdirfd, newpath_str.c_str(),
@@ -257,6 +371,10 @@ absl::Status renameat2(int olddirfd, std::string_view oldpath, int newdirfd,
 }
 
 absl::Status mkdirat(int dirfd, std::string_view path, mode_t mode) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   std::string path_str(path);
   if (::mkdirat(dirfd, path_str.c_str(), mode) == -1) {
     return ErrnoToStatus(errno, "mkdirat");
@@ -265,6 +383,10 @@ absl::Status mkdirat(int dirfd, std::string_view path, mode_t mode) {
 }
 
 absl::Status mknodat(int dirfd, std::string_view path, mode_t mode, dev_t dev) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   std::string path_str(path);
   if (::mknodat(dirfd, path_str.c_str(), mode, dev) == -1) {
     return ErrnoToStatus(errno, "mknodat");
@@ -274,6 +396,10 @@ absl::Status mknodat(int dirfd, std::string_view path, mode_t mode, dev_t dev) {
 
 absl::Status symlinkat(std::string_view target, int newdirfd,
                        std::string_view linkpath) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   std::string target_str(target);
   std::string linkpath_str(linkpath);
   if (::symlinkat(target_str.c_str(), newdirfd, linkpath_str.c_str()) == -1) {
@@ -283,6 +409,10 @@ absl::Status symlinkat(std::string_view target, int newdirfd,
 }
 
 absl::Status fchmod(int fd, mode_t mode) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   if (::fchmod(fd, mode) == -1) {
     return ErrnoToStatus(errno, "fchmod");
   }
@@ -291,6 +421,10 @@ absl::Status fchmod(int fd, mode_t mode) {
 
 absl::Status fchownat(int dirfd, std::string_view path, uid_t owner,
                       gid_t group, int flags) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   std::string path_str(path);
   if (::fchownat(dirfd, path_str.c_str(), owner, group, flags) == -1) {
     return ErrnoToStatus(errno, "fchownat");
@@ -299,6 +433,10 @@ absl::Status fchownat(int dirfd, std::string_view path, uid_t owner,
 }
 
 absl::Status futimens(int fd, const struct timespec times[2]) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   if (::futimens(fd, times) == -1) {
     return ErrnoToStatus(errno, "futimens");
   }
@@ -306,6 +444,10 @@ absl::Status futimens(int fd, const struct timespec times[2]) {
 }
 
 absl::Status ftruncate(int fd, off_t length) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   if (::ftruncate(fd, length) == -1) {
     return ErrnoToStatus(errno, "ftruncate");
   }
@@ -313,6 +455,10 @@ absl::Status ftruncate(int fd, off_t length) {
 }
 
 absl::Status fsync(int fd) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   if (::fsync(fd) == -1) {
     return ErrnoToStatus(errno, "fsync");
   }
@@ -320,6 +466,10 @@ absl::Status fsync(int fd) {
 }
 
 absl::Status fdatasync(int fd) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   if (::fdatasync(fd) == -1) {
     return ErrnoToStatus(errno, "fdatasync");
   }
@@ -327,6 +477,10 @@ absl::Status fdatasync(int fd) {
 }
 
 absl::Status syncfs(int fd) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   if (::syncfs(fd) == -1) {
     return ErrnoToStatus(errno, "syncfs");
   }
@@ -334,6 +488,10 @@ absl::Status syncfs(int fd) {
 }
 
 absl::Status fallocate(int fd, int mode, off_t offset, off_t len) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   if (::fallocate(fd, mode, offset, len) == -1) {
     return ErrnoToStatus(errno, "fallocate");
   }
@@ -343,6 +501,10 @@ absl::Status fallocate(int fd, int mode, off_t offset, off_t len) {
 absl::StatusOr<size_t> copy_file_range(int fd_in, off_t off_in, int fd_out,
                                        off_t off_out, size_t len,
                                        unsigned int flags) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   loff_t in = off_in;
   loff_t out = off_out;
   ssize_t nbytes = ::copy_file_range(fd_in, &in, fd_out, &out, len, flags);
@@ -351,6 +513,10 @@ absl::StatusOr<size_t> copy_file_range(int fd_in, off_t off_in, int fd_out,
 }
 
 absl::StatusOr<size_t> pread(int fd, void *buf, size_t count, off_t offset) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   ssize_t nbytes = ::pread(fd, buf, count, offset);
   if (nbytes == -1) {
     return ErrnoToStatus(errno, "pread");
@@ -360,6 +526,10 @@ absl::StatusOr<size_t> pread(int fd, void *buf, size_t count, off_t offset) {
 
 absl::StatusOr<size_t> pwrite(int fd, const void *buf, size_t count,
                               off_t offset) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   ssize_t nbytes = ::pwrite(fd, buf, count, offset);
   if (nbytes == -1) {
     return ErrnoToStatus(errno, "pwrite");
@@ -368,6 +538,10 @@ absl::StatusOr<size_t> pwrite(int fd, const void *buf, size_t count,
 }
 
 absl::StatusOr<size_t> write(int fd, const void *buf, size_t count) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   ssize_t nbytes = ::write(fd, buf, count);
   if (nbytes == -1) {
     return ErrnoToStatus(errno, "write");
@@ -377,6 +551,10 @@ absl::StatusOr<size_t> write(int fd, const void *buf, size_t count) {
 
 absl::Status mount(const char *source, std::string_view target,
                    const char *fstype, unsigned long flags, const void *data) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   const std::string target_str(target);
   if (::mount(source, target_str.c_str(), fstype, flags, data) == -1) {
     return ErrnoToStatus(errno,
@@ -386,6 +564,10 @@ absl::Status mount(const char *source, std::string_view target,
 }
 
 absl::Status umount2(std::string_view target, int flags) {
+  if (IsBackingPoisoned()) {
+    return absl::InternalError(
+        "backing is poisoned: failed to restore root credentials");
+  }
   const std::string target_str(target);
   if (::umount2(target_str.c_str(), flags) == -1) {
     return ErrnoToStatus(errno,

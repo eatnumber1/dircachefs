@@ -90,13 +90,12 @@ void StartupReporter::Fail(const absl::Status &status) {
 namespace {
 
 // The wrapper's half of the fork: the daemon's report, then the wrapper's
-// exit (its message, if any, on stderr). Exits here rather than return: see
-// fork_split.h.
-[[noreturn]] void AwaitReportAndExit(FileDescriptor parent_end, pid_t child) {
+// exit status (its message, if any, on stderr).
+int AwaitReportAndExit(FileDescriptor parent_end, pid_t child) {
   absl::StatusOr<std::string> bytes = ReadReport(*parent_end);
   if (!bytes.ok()) bytes = std::string();
   StartupReport report = DecodeStartupReport(*bytes);
-  if (report.ready) std::exit(0);
+  if (report.ready) return 0;
   if (bytes->empty()) {
     // Died without a word: say how.
     int wait_status = 0;
@@ -106,19 +105,19 @@ namespace {
     }
   }
   LOG(ERROR) << report.message;
-  std::exit(report.exit_status);
+  return report.exit_status;
 }
 
 // The daemon's half: it holds the reporting end.
-StartupReporter BecomeDaemon(FileDescriptor parent_end,
-                             FileDescriptor child_end) {
+absl::StatusOr<StartupReporter> BecomeDaemon(FileDescriptor parent_end,
+                                             FileDescriptor child_end) {
   parent_end.Close().IgnoreError();
   StartupReporter reporter(std::move(child_end));
   // A daemon that cannot detach says so through the channel, like any other
   // failure to start.
   if (absl::Status detached = DetachDaemon(); !detached.ok()) {
     reporter.Fail(detached);
-    syscalls::_exit(ExitStatusFor(detached));
+    return detached;
   }
   return reporter;
 }
@@ -130,9 +129,9 @@ absl::StatusOr<StartupReporter> ForkDaemon() {
   auto &[parent_end, child_end] = channel;
   return ForkSplit(
       [&] { return BecomeDaemon(std::move(parent_end), std::move(child_end)); },
-      [&](pid_t child) {
+      [&](pid_t child) -> int {
         child_end.Close().IgnoreError();
-        AwaitReportAndExit(std::move(parent_end), child);
+        return AwaitReportAndExit(std::move(parent_end), child);
       });
 }
 

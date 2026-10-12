@@ -150,7 +150,7 @@ class FuseRequest {
 
   // A reply that carries no result, used by ops (e.g. forget, forget_multi)
   // that must not send a normal reply at all.
-  void ReplyNone();
+  absl::Status ReplyNone();
 
   // Implementation detail -- helper for the trampolines in fuse_ops.cc: every
   // DirCacheFS::Xxx op method is expected to reply on its own (directly, or

@@ -113,5 +113,13 @@ TEST(StatusToErrnoTest, PlainCodeStatusUsesFallbackMapping) {
   EXPECT_EQ(StatusToErrno(s), EPERM);
 }
 
+TEST(FuseRequestTest, ReplyNoneTwiceReturnsInternalError) {
+  FuseRequest req(reinterpret_cast<fuse_req_t>(0x1));
+  EXPECT_TRUE(req.ReplyNone().ok());
+  EXPECT_TRUE(absl::IsInternal(req.ReplyNone()));
+}
+
 }  // namespace
 }  // namespace dcfs
+
+extern "C" void __wrap_fuse_reply_none(fuse_req_t) {}
