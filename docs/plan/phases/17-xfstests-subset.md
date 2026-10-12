@@ -70,6 +70,12 @@ copy_file_range/truncate comparing against the same operation on a native
 directory, rechecked after a cold cache; then 683-685 leave the lists.
 Owner: dcfs-implementer (Opus review of the credentials change), after
 17.1 merges and 23.11's code half lands (backing.cc).
+Status 2026-10-11: done, merged 0503f91 (lane-2). As built: FallocateFd,
+WriteFile (fallback) and CopyFileRangeFd run under AsCaller(req.Caller(), ...);
+unit tests in dir_cache_fs_test.cc verify setgid dropped (02666 -> 0666) for
+outside-group callers while root and group members retain it; guest
+credentials.sh tests all write-family operations against native filesystem and
+cold cache; generic/683-685 removed from expected failure lists.
 
 ## 17.3 Performance finding (done 2026-10-11, 1f499bc)
 
