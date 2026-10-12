@@ -19,7 +19,6 @@ GOOD = """\
 NAME
 SYNOPSIS
 OPTIONS
-  dcfs.fstype (default: (autodetect))
   dcfs.cache_db (required)
   dcfs.ro (default: off)
   dcfs.foreground (default: off)

@@ -153,9 +153,8 @@ TEST(ParseFsckArgsTest, ProgressDescriptorAndUnknownFlagsGoToTheBacking) {
 TEST(ParseFsckArgsTest, OptionsAndVersion) {
   ASSERT_OK_AND_ASSIGN(
       FsckArgs args,
-      ParseFsckArgs(
-          Strings{"-o", "dcfs.fstype=bind,dcfs.cache_db=/c.db", "/srv/x"}));
-  EXPECT_EQ(args.options, "dcfs.fstype=bind,dcfs.cache_db=/c.db");
+      ParseFsckArgs(Strings{"-o", "dcfs.cache_db=/c.db", "/srv/x"}));
+  EXPECT_EQ(args.options, "dcfs.cache_db=/c.db");
   EXPECT_TRUE(args.backing_flags.empty());  // -o is ours, not the backing's
   ASSERT_OK_AND_ASSIGN(FsckArgs version, ParseFsckArgs(Strings{"-V"}));
   EXPECT_TRUE(version.version);
@@ -507,16 +506,13 @@ class FsckMainTest : public ::testing::Test {
 TEST_F(FsckMainTest, TheFstabLineSuppliesTheOptions) {
   const std::string db = TestFile("fsck_main_fstab.db");
   const std::string findmnt_log = TestFile("findmnt.args");
-  const std::string fsck_log = TestFile("fsck.fakefs.args");
   programs_.InstallScript("/bin/findmnt", findmnt_log,
-                          absl::StrCat("echo dcfs.fstype=fakefs,dcfs.cache_db=",
-                                       db, "\necho dcfs.fstype=otherfs"));
-  programs_.InstallScript("/sbin/fsck.fakefs", fsck_log, "exit 0");
+                          absl::StrCat("echo dcfs.cache_db=", db,
+                                       "\necho dcfs.cache_db=/other.db"));
   EXPECT_EQ(Run({"-n", "/dev/fstabdev"}), kFsckOk);
   EXPECT_EQ(Contents(findmnt_log),
             "--fstab --noheadings --raw --output OPTIONS --source "
             "/dev/fstabdev\n");
-  EXPECT_EQ(Contents(fsck_log), "-n /dev/fstabdev\n");
 }
 
 TEST_F(FsckMainTest, NoFstabLineIsOperational) {
@@ -531,59 +527,6 @@ TEST_F(FsckMainTest, OptionsThatDoNotSplitAreOperational) {
   EXPECT_EQ(Run({"-o", "dcfs.nosuchoption=1", "/dev/fake"}), kFsckOperational);
 }
 
-TEST_F(FsckMainTest, ATypeNotSetIsFoundWithBlkid) {
-  const std::string db = TestFile("fsck_main_blkid.db");
-  const std::string blkid_log = TestFile("blkid.args");
-  programs_.InstallScript("/sbin/blkid", blkid_log, "echo fakefs");
-  programs_.InstallScript("/sbin/fsck.fakefs", TestFile("fsck.fakefs.args"),
-                          "exit 4");
-  EXPECT_EQ(Run({"-n", "-o", absl::StrCat("dcfs.cache_db=", db), "/dev/fake"}),
-            kFsckUncorrected);
-  EXPECT_EQ(Contents(blkid_log), "-o value -s TYPE /dev/fake\n");
-}
-
-TEST_F(FsckMainTest, BlkidFindingNothingIsOperational) {
-  const std::string options =
-      absl::StrCat("dcfs.cache_db=", TestFile("fsck_main_none.db"));
-  programs_.InstallScript("/sbin/blkid", TestFile("blkid.args"), "exit 2");
-  EXPECT_EQ(Run({"-o", options, "/dev/fake"}), kFsckOperational);
-  programs_.InstallScript("/sbin/blkid", TestFile("blkid.args"), "exit 0");
-  EXPECT_EQ(Run({"-o", options, "/dev/fake"}), kFsckOperational);
-}
-
-TEST_F(FsckMainTest, NoBlkidMeansTheTypeMustBeSet) {
-  ASSERT_FALSE(Exists("/sbin/blkid")) << "the guest has a blkid";
-  EXPECT_EQ(Run({"-o", "dcfs.cache_db=/nowhere.db", "/dev/fake"}),
-            kFsckOperational);
-}
-
-TEST_F(FsckMainTest, ATypeThatIsAPathIsNotRun) {
-  EXPECT_EQ(Run({"-o", "dcfs.fstype=../tmp/x,dcfs.cache_db=/nowhere.db",
-                 "/dev/fake"}),
-            kFsckOperational);
-}
-
-TEST_F(FsckMainTest, ACheckerThatCannotBeRunIsOperational) {
-  programs_.Install("/sbin/fsck.fakefs", "#!/bin/sh\nexit 0\n", 0644);
-  EXPECT_EQ(
-      Run({"-o", "dcfs.fstype=fakefs,dcfs.cache_db=/nowhere.db", "/dev/fake"}),
-      kFsckOperational);
-}
-
-TEST_F(FsckMainTest, ACheckerStoppedByCtrlCIsCancelled) {
-  programs_.Install("/sbin/fsck.fakefs", "#!/bin/sh\nkill -INT $$\n");
-  EXPECT_EQ(
-      Run({"-o", "dcfs.fstype=fakefs,dcfs.cache_db=/nowhere.db", "/dev/fake"}),
-      kFsckCancelled);
-}
-
-TEST_F(FsckMainTest, ACheckerKilledBySomethingElseIsOperational) {
-  programs_.Install("/sbin/fsck.fakefs", "#!/bin/sh\nkill -KILL $$\n");
-  EXPECT_EQ(
-      Run({"-o", "dcfs.fstype=fakefs,dcfs.cache_db=/nowhere.db", "/dev/fake"}),
-      kFsckOperational);
-}
-
 // --- fork, waitpid, dup2, flock and unlink answering with an error
 // ----------------
 //
@@ -593,8 +536,6 @@ TEST_F(FsckMainTest, ACheckerKilledBySomethingElseIsOperational) {
 // (fsck_test's linkopts in BUILD.bazel) forward to the real call unless a test
 // armed a fault for it. The child of RunProgram is a forked copy of this
 // process, so the armed fault is what it sees.
-
-constexpr char kFakeOptions[] = "dcfs.fstype=fakefs,dcfs.cache_db=/nowhere.db";
 
 class FsckFaultTest : public ::testing::Test {
  protected:
@@ -641,12 +582,6 @@ TEST_F(FsckFaultTest, ACorruptCacheThatCannotBeDeletedIsReported) {
   EXPECT_THAT(syscalls::fstatat(AT_FDCWD, path), absl_testing::IsOk());
 }
 
-TEST_F(FsckFaultTest, NoProcessForTheBackingsCheckerIsOperational) {
-  programs_.Install("/sbin/fsck.fakefs", "#!/bin/sh\nexit 0\n");
-  g_fork = {.error = EAGAIN, .times = 1};
-  EXPECT_EQ(Check({"-o", kFakeOptions, "/dev/fake"}), kFsckOperational);
-}
-
 TEST_F(FsckFaultTest, NoProcessForFindmntIsOperational) {
   g_fork = {.error = EAGAIN, .times = 1};
   EXPECT_EQ(Check({"/dev/fake"}), kFsckOperational);
@@ -660,16 +595,18 @@ TEST_F(FsckFaultTest, AChildWhoseOutputCannotBeRedirectedDoesNotRun) {
 }
 
 TEST_F(FsckFaultTest, AWaitThatFailsIsOperational) {
-  programs_.Install("/sbin/fsck.fakefs", "#!/bin/sh\nexit 0\n");
+  programs_.InstallScript("/bin/findmnt", TestFile("findmnt.args"), "exit 0");
   g_waitpid = {.error = ECHILD, .times = 1};
-  EXPECT_EQ(Check({"-o", kFakeOptions, "/dev/fake"}), kFsckOperational);
+  EXPECT_EQ(Check({"/dev/fake"}), kFsckOperational);
 }
 
 // A signal that interrupts the wait is not the checker's failure.
 TEST_F(FsckFaultTest, AWaitThatASignalInterruptedIsRetried) {
-  programs_.Install("/sbin/fsck.fakefs", "#!/bin/sh\nexit 4\n");
+  const std::string db = TestFile("fsck_retry_wait.db");
+  programs_.InstallScript("/bin/findmnt", TestFile("findmnt.args"),
+                          absl::StrCat("echo dcfs.cache_db=", db));
   g_waitpid = {.error = EINTR, .times = 2};
-  EXPECT_EQ(Check({"-o", kFakeOptions, "/dev/fake"}), kFsckUncorrected);
+  EXPECT_EQ(Check({"-n", "/dev/fake"}), kFsckOk);
   EXPECT_EQ(g_waitpid.times, 0);
 }
 

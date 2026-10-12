@@ -9,8 +9,7 @@ File and function names refer to the source tree: `dcfs/schema.sql`,
 `dcfs/metadata_cache.{h,cc}` (namespace `cache::`), `dcfs/backing.{h,cc}`
 (namespace `backing::`), `dcfs/dir_cache_fs.{h,cc}` (class `DirCacheFS`),
 `dcfs/main.cc`. The `mount.dcfs` wrapper is `dcfs/mount_dcfs.{h,cc}` (options,
-statuses), `dcfs/backing_capture.{h,cc}` (the capture),
-`dcfs/startup_channel.{h,cc}` (daemonization), `dcfs/syslog_sink.{h,cc}`
+statuses), `dcfs/startup_channel.{h,cc}` (daemonization), `dcfs/syslog_sink.{h,cc}`
 and `dcfs/remount.{h,cc}`.
 
 Contents:
@@ -2016,8 +2015,7 @@ WTF-8 form).
 
 dcfs is mounted by `mount(8)`, from fstab or the command line, the same way
 (plan decision 5, russ 2026-10-04), so the binary is a mount helper. The
-plain `dcfs --source=DIR` command line is gone (decision 8): its job is the
-`dcfs.fstype=bind` form (named none until step 15.9), and every test mounts that way. Run as `dcfs`, the
+plain `dcfs --source=DIR` command line is gone (decision 8). Run as `dcfs`, the
 binary has only `--help` and `--version`.
 
 **Dispatch.** `main()` looks at the basename of `argv[0]`: `mount.dcfs` and
@@ -2030,120 +2028,50 @@ one file.
 
 **Option split** (decision 6; `dcfs/mount_dcfs.{h,cc}`, pure functions with
 unit tests). Options are not shared: each belongs to the layer it
-configures. `dcfs.<name>` is dcfs's, everything else is the underlying
-mount's, verbatim and in order. dcfs's own are the wrapper's options
-(`fstype`, `ro`, `foreground`, `cache_db`, `fuse_opt`; `cache_dir` is
+configures. `dcfs.<name>` is dcfs's own options
+(`ro`, `foreground`, `cache_db`, `fuse_opt`; `cache_dir` is
 refused until the instance identity exists) and the settable Abseil flags
 (`kSettableFlags`: dcfs's flags and the logging ones). An unknown `dcfs.`
-option is an error that lists the known ones, because a typo that is
-silently passed on to the native mount would be dropped or fail there
-with a message about the wrong thing. `ro` (the underlying mount) and
-`dcfs.ro` (the FUSE mount) differ on purpose: the first is what the backing
-filesystem does, the second is whether dcfs accepts writes, and a captured
-filesystem the administrator cannot reach afterwards needs both (decision 10).
-`flags_consistency_test` keeps the settable flags and the README's tables
-equal.
+option is an error that lists the known ones. Native options are refused:
+dcfs makes no underlying mount to give them to. `flags_consistency_test`
+keeps the settable flags and the README's tables equal.
 
-For `dcfs.fstype=bind` there is no underlying mount to give native options
-to, so they are refused (exit 1) rather than ignored: a silent `noatime` on
-a `bind` line would claim a behavior nothing provides. What libmount adds
+For dcfs there is no underlying mount to give native options
+to, so they are refused (exit 1) rather than ignored: a silent `noatime`
+would claim a behavior nothing provides. What libmount adds
 to a helper's options or fstab says for `mount(8)` itself is not native:
 `rw`, `defaults`, `nofail`, `_netdev`, `noauto`, `auto`, the `user` family
 and `x-*` (`UnhonoredNativeOptions`). Without that list the `rw` libmount
-always passes would make the form unusable under real util-linux.
+always passes would make the helper unusable under real util-linux.
 
 **Exit statuses** are mount(8)'s, which returns a helper's status verbatim:
 1 for a usage mistake or a refusal to run (an unknown option, not root: a
-status marked by `MarkUsageError`), 32 for a failed start whatever its
+status marked by `MarkUsageError`), and 32 for a failed start whatever its
 status code (an errno-derived `InvalidArgument` from `mount(2)` is a failed
-start, not a usage mistake), and for a failed native mount its own status
-(`NativeMountError` carries it as a payload). The marks are payloads on
+start, not a usage mistake). The marks are payloads on
 `absl::Status` rather than codes because the code says what failed and the
 exit status says who is to blame.
 
-**Capturing the backing tree** (`dcfs/backing_capture.{h,cc}`; native
-types only). dcfs reaches the filesystem without mounting it anywhere the
-caller can see:
+**Opening the backing tree.** dcfs opens SOURCE directly in place in the
+caller's mount namespace (`openat`, the one use of a path) and applies the start
+checks: nothing mounted below it (`RefuseMountsBelow`, naming the mount points)
+and no forced-read-only superblock (`RefuseIfForcedReadOnly`). After opening,
+it turns the descriptor into a real directory descriptor: `open_by_handle_at`
+resolves its mount descriptor as a regular file, which rejects `O_PATH` (see
+"File descriptors and handles, never paths"). dcfs walks and decodes handles
+through that descriptor; root has `CAP_DAC_READ_SEARCH`, which is what
+`open_by_handle_at` asks for (`may_decode_fh`).
 
-1. A helper process, forked by the daemon, calls `unshare(CLONE_NEWNS)` and
-   makes every mount private (`MS_REC | MS_PRIVATE`), so nothing it mounts
-   propagates out, and everything goes with its namespace if it dies at any
-   point. Doing this in the daemon itself would put dcfs, which later mounts
-   FUSE and is seen by everyone, in another namespace.
-2. In the namespace it runs `/bin/mount -n [-s] [-v] [-t TYPE] [-o OPTIONS]
-   SOURCE STAGING`, so mount(8) and the
-   type's own helper (`mount.nfs`, `mount.cifs`, sshfs) do tag resolution
-   (`UUID=`), type probing, flags and credentials: dcfs has no per-type code
-   and no libmount. Its output and exit status are collected (the text up to
-   3000 bytes) and become the error of a failed start unchanged. mount is run
-   by absolute path, not looked up in the daemon's `PATH`.
-3. The helper checks, on the staging mount, that the superblock did not go
-   read-only by itself under a read-write mount (the step 11.5 refusal,
-   `RefuseIfForcedReadOnly`). It has to be here: the clone of step 4 is in
-   no namespace, so the daemon's own mountinfo never lists it and the check
-   could not see it there.
-4. It clones the mount with `open_tree(OPEN_TREE_CLONE)` (not recursive: a
-   submount of SOURCE, if any, stays out) and sends the descriptor to the
-   daemon over a socket pair with `SCM_RIGHTS`, then exits. The clone is an
-   anonymous mount in no namespace, kept alive only by descriptors: dcfs
-   keeps the `open_tree` one, and the superblock is released when dcfs exits,
-   however it exits (a SIGKILLed dcfs leaves nothing to unmount, and the test
-   shows the filesystem's superblock go away). Before running, the helper
-   closes every descriptor it inherited but its end of the channel: a copy of
-   the daemon's startup channel in the helper would keep the waiting wrapper
-   from seeing the end of the report.
-5. The daemon turns the clone into a real directory descriptor
-   (`openat(tree, ".", O_RDONLY | O_DIRECTORY)`): `open_by_handle_at`
-   resolves its mount descriptor as a regular file, which rejects `O_PATH`
-   (see "File descriptors and handles, never paths"). dcfs walks and decodes
-   handles through that descriptor; root has `CAP_DAC_READ_SEARCH`, which is
-   what `open_by_handle_at` asks for (`may_decode_fh`).
-
-The staging directory is made in a **tmpfs mounted over `/proc/sys/vm`**
-inside the helper's namespace. It needs a directory that is not visible to
-anyone else, that exists, and whose being covered hides nothing that
-matters. A directory made with `mkdtemp` in `/tmp` or `/run` lives in the
-caller's filesystem and leaks if the helper is SIGKILLed, and a tmpfs over
-`/run` or `/tmp` could hide SOURCE (a bind source under `/tmp`, say). A
-procfs directory exists wherever dcfs can run (the daemon reads
-`/proc/sys/vm/dirtytime_expire_seconds`, and `/proc/sys` is absent only if
-`/proc` was mounted `subset=pid`, which is a clear error), is not a place
-anyone serves from, and the tmpfs covering it exists only in the helper's
-namespace.
-
-`bind` opens SOURCE as a path in the caller's namespace (`openat`, the one
-use of a path) and applies the start checks: nothing mounted below it
-(`RefuseMountsBelow`, naming the mount points) and no forced-read-only
-superblock.
-
-*Why there is no cloned form.* Until step 15.9 `dcfs.fstype=bind` captured SOURCE
-with a non-recursive bind (`mount -o bind`, then `open_tree(OPEN_TREE_CLONE)`),
-and the opened-in-place form was `none`. The clone added only a lifetime
-independent of the original mount (it could be unmounted or moved while dcfs
-kept serving), isolation from later submounts, and `ro` applied at the backing;
-all are reproduced by a native bind mount made first (README, "The bind form
-and the native bind recipe"), for a second code path in the capture helper
-(the bind remount that kept `nosuid` and `nodev`, the spec rules, the
-recorded-mount-points bookkeeping 15.4 planned for it). russ:
-delete it, and give the in-place form the name an fstab reader expects, `bind`;
-`none` is refused, with a message that says it was renamed.
-
-**Paths** (SOURCE of `bind`, MOUNTPOINT, `dcfs.cache_db`) are made
+**Paths** (SOURCE, MOUNTPOINT, `dcfs.cache_db`) are made
 absolute against the working directory before the fork
-(`MakePathsAbsolute`), since the daemon has none. A native SOURCE is made
-absolute only if it names an existing relative path: ZFS datasets, virtiofs
-tags and the like are not paths and are passed as written. The mount point
+(`MakePathsAbsolute`), since the daemon has none. The mount point
 must be a directory; a file mount point is refused (decision 9, russ
 2026-10-04).
 
 **The FUSE mount's source** is SOURCE as written (decision 11): the wrapper
 passes `fsname=<spec>` (with libfuse's escaping of `\` and `,`) and
 `subtype=dcfs`, so mountinfo, `df` and `findmnt` show `fuse.dcfs` and
-`nas:/export` or `/srv/media`, not a path of a namespace nobody sees. A
-`UUID=` or `LABEL=` source is the exception under `mount(8)`: libmount
-resolves the tag and runs the helper with the device path, so an fstab line
-`UUID=aaaa` shows `/dev/vda` (step 15.6, `mount_dcfs_systemd_test`; the
-wrapper cannot recover the tag).
+SOURCE as written, not a path of a namespace nobody sees.
 
 **Unmount** (step 15.6b; russ, 2026-10-09). The kernel does not wait for the
 daemon of a plain FUSE mount: `fuse_conn_destroy` sends FUSE_DESTROY and waits
@@ -2269,19 +2197,12 @@ fstab, so you can do fsck via fstab on a filesystem that's set up via dcfs").
 before they mount a line whose passno is not 0, with the type of the fstab
 line, `dcfs`; dcfs installs `fsck.dcfs` by the argv[0] dispatch like its other
 helpers. It receives only the device and fsck's flags, so it finds its line
-(and the `dcfs.` options) through `findmnt --fstab` run as a child, like
-`/bin/mount` in the capture; `-o OPTIONS` names them for a check by hand with no
+(and the `dcfs.` options) through `findmnt --fstab` run as a child; `-o OPTIONS` names them for a check by hand with no
 line (an option of the helper, not a test hook).
 
-*Why the backing filesystem's fsck is delegated.* dcfs knows nothing of the
-on-disk formats it serves: it reads them through the kernel. `fsck.ext4`,
-`fsck.xfs` and `fsck.btrfs` do, so for a native `dcfs.fstype` (or the type
-`blkid` finds) the helper runs that checker on the device with the flags it was
-given and relays its status, which makes passno 2 on a dcfs line mean what it
-means on a plain line. `bind` serves a directory of a filesystem the
-administrator mounts: there is no device here to check, and the helper says so
-(and systemd would wait for a device unit that never appears, so the README
-says to use passno 0 on those lines).
+*Why the backing filesystem has no checker here.* dcfs serves a directory
+of a filesystem the administrator mounts: there is no device here to check, and
+the helper notes that and goes on to the cache database.
 
 *Why the cache is rebuilt, not repaired.* The cache database is derived state:
 every row can be read again from the backing filesystem, and a mutation's
@@ -2307,8 +2228,7 @@ combines several checkers: 0 ok, 1 corrected, 4 uncorrected, 8 operational,
 
 **Remount** (decision 10). `mount -o remount` reaches the wrapper through
 `mount.fuse.dcfs` with `remount` among the options. It never touches the
-underlying filesystem, which dcfs cannot reach (it is a clone in no
-namespace) and which the administrator owns for `bind`. `RemountDcfs` finds
+underlying filesystem, which the administrator owns. `RemountDcfs` finds
 the topmost mount at the mount point in `/proc/self/mountinfo`, requires its
 type to be `fuse.dcfs`, and calls `mount(2)` with `MS_REMOUNT`, the
 per-mount flags it already has (`MS_REMOUNT` resets what it is not given) and
@@ -2327,8 +2247,8 @@ fork):
 
 1. `umask(0)`, logging set up (`WARNING` and above to standard error until
    the syslog sink replaces it), the open-file limit raised.
-2. Open the backing tree (`OpenBacking`: a capture, or a path for `bind`)
-   with the start checks of the form: nothing mounted below SOURCE, no
+2. Open the backing tree (`openat` on SOURCE directly in place in the
+   caller's namespace) with the start checks: nothing mounted below SOURCE, no
    superblock that went read-only by itself (see "A filesystem that went
    read-only by itself"). After this the daemon holds the tree by
    descriptor only.

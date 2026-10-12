@@ -257,22 +257,7 @@ absl::StatusOr<HelperOptions> SplitHelperOptionsImpl(
       name = rest.substr(0, eq);
       value = rest.substr(eq + 1);
     }
-    if (name == "fstype") {
-      if (!value.has_value() || value->empty()) {
-        return BadOption(option, "needs a value: bind or a native type");
-      }
-      if (*value == "bind") {
-        split.backing = HelperOptions::Backing::kDirectory;
-      } else if (*value == "none") {
-        return InvalidArgumentErrorBuilder()
-               << "Option " << option
-               << ": the directory form is renamed dcfs.fstype=bind (a native "
-                  "filesystem type, or bind: SOURCE is a directory)";
-      } else {
-        split.backing = HelperOptions::Backing::kNative;
-        split.native_type = std::string(*value);
-      }
-    } else if (name == "ro") {
+    if (name == "ro") {
       ASSIGN_OR_RETURN(split.read_only, ParseBoolOption(option, value));
     } else if (name == "foreground") {
       ASSIGN_OR_RETURN(split.foreground, ParseBoolOption(option, value));
@@ -296,7 +281,7 @@ absl::StatusOr<HelperOptions> SplitHelperOptionsImpl(
       if (!absl::c_contains(kSettableFlags, name)) {
         return InvalidArgumentErrorBuilder()
                << "Unknown option " << option << " (dcfs options are "
-               << "dcfs.fstype, dcfs.ro, dcfs.foreground, dcfs.cache_db, "
+               << "dcfs.ro, dcfs.foreground, dcfs.cache_db, "
                   "dcfs.fuse_opt, dcfs.attr_timeout_sec, "
                   "dcfs.entry_timeout_sec, dcfs.sync_interval_sec, "
                   "dcfs.stderrthreshold, dcfs.minloglevel, dcfs.v and "
@@ -309,12 +294,12 @@ absl::StatusOr<HelperOptions> SplitHelperOptionsImpl(
   if (bare_allow_other.has_value() && !split.remount) {
     return AllowOtherRefused(*bare_allow_other);
   }
-  if (split.backing == HelperOptions::Backing::kDirectory && !split.remount) {
+  if (!split.remount) {
     const std::vector<std::string> unhonored = UnhonoredNativeOptions(split);
     if (!unhonored.empty()) {
       return InvalidArgumentErrorBuilder()
              << "Options " << absl::StrJoin(unhonored, ", ")
-             << " are for the underlying mount, which dcfs.fstype=bind does "
+             << " are for the underlying mount, which dcfs does "
                 "not make: remove them, or remount the filesystem yourself "
                 "(dcfs.ro makes the dcfs mount read-only)";
     }
@@ -339,10 +324,6 @@ absl::StatusOr<HelperOptions> SplitHelperOptions(
 
 std::vector<std::string> UnhonoredNativeOptions(const HelperOptions &options) {
   std::vector<std::string> unhonored;
-  if (options.backing != HelperOptions::Backing::kDirectory &&
-      !options.remount) {
-    return unhonored;
-  }
   for (const std::string &option : options.native_options) {
     static constexpr std::string_view kMountOwn[] = {
         "rw",   "defaults", "nofail", "_netdev", "noauto", "auto",

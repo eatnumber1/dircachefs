@@ -35,44 +35,19 @@ class AbsolutePathsTest : public ::testing::Test {
   std::string real_;
 };
 
-HelperOptions Options(HelperOptions::Backing backing) {
-  HelperOptions options;
-  options.backing = backing;
-  return options;
-}
-
 TEST_F(AbsolutePathsTest, MountpointAndCacheDatabaseBecomeAbsolute) {
-  HelperArgs args = {.source = "/dev/x", .mountpoint = "rel"};
-  HelperOptions options = Options(HelperOptions::Backing::kNative);
+  HelperArgs args = {.source = "/srv/x", .mountpoint = "rel"};
+  HelperOptions options;
   options.cache_db = "cache.db";
   ASSERT_THAT(MakePathsAbsolute(args, options), IsOk());
   EXPECT_EQ(args.mountpoint, real_ + "/rel");
   EXPECT_EQ(*options.cache_db, real_ + "/cache.db");
-  EXPECT_EQ(args.source, "/dev/x");
+  EXPECT_EQ(args.source, "/srv/x");
 }
 
-TEST_F(AbsolutePathsTest, ABindSourceIsAlwaysAPath) {
+TEST_F(AbsolutePathsTest, SourceIsAlwaysAPath) {
   HelperArgs args = {.source = "rel", .mountpoint = "/m"};
-  HelperOptions options = Options(HelperOptions::Backing::kDirectory);
-  ASSERT_THAT(MakePathsAbsolute(args, options), IsOk());
-  EXPECT_EQ(args.source, real_ + "/rel");
-}
-
-// Specs that are not paths of this directory stay as written: a ZFS dataset,
-// a virtiofs or 9p tag, tmpfs, a network export, a tag.
-TEST_F(AbsolutePathsTest, ANativeSpecThatIsNotARelativePathStaysAsWritten) {
-  for (const char *spec : {"pool/fs", "tmpfs", "myfs", "UUID=aaaa",
-                           "host:/export", "/dev/vdb", "rel/missing"}) {
-    HelperArgs args = {.source = spec, .mountpoint = "/m"};
-    HelperOptions options = Options(HelperOptions::Backing::kNative);
-    ASSERT_THAT(MakePathsAbsolute(args, options), IsOk());
-    EXPECT_EQ(args.source, spec);
-  }
-}
-
-TEST_F(AbsolutePathsTest, ANativeSpecThatIsARelativeDirectoryBecomesAbsolute) {
-  HelperArgs args = {.source = "rel", .mountpoint = "/m"};
-  HelperOptions options = Options(HelperOptions::Backing::kNative);
+  HelperOptions options;
   ASSERT_THAT(MakePathsAbsolute(args, options), IsOk());
   EXPECT_EQ(args.source, real_ + "/rel");
 }

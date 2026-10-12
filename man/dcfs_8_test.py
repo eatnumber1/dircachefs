@@ -16,7 +16,7 @@ DEFAULTS = {
 # keeps this list and the README honest).
 FLAGS = [
     "attr_timeout_sec", "entry_timeout_sec", "sync_interval_sec",
-    "fstype", "cache_db", "ro", "foreground", "fuse_opt",
+    "cache_db", "ro", "foreground", "fuse_opt",
 ]
 SECTIONS = [
     "NAME", "SYNOPSIS", "OPTIONS", "FLAGS", "EXAMPLE",

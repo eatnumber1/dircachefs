@@ -30,7 +30,6 @@ MAIN_DEPS = [
     ":mount_dcfs",
     ":mount_options",
     ":mounts_below",
-    ":backing_capture",
     ":remount",
     ":sqlite",
     ":startup_channel",
@@ -651,25 +650,6 @@ cc_library(
     ],
 )
 
-# Step 15.2: capturing the backing tree in a private mount namespace.
-cc_library(
-    name = "backing_capture",
-    srcs = ["backing_capture.cc"],
-    hdrs = ["backing_capture.h"],
-    deps = [
-      ":escape",
-      ":mount_dcfs",
-      ":status",
-      ":syscalls",
-      ":syscalls_backing",
-      ":syscalls_process",
-      "@absl//absl/cleanup",
-      "@absl//absl/status",
-      "@absl//absl/status:status_macros",
-      "@absl//absl/status:statusor",
-      "@absl//absl/strings",
-    ],
-)
 
 # Step 15.2: remounting the dcfs mount (mount -o remount,dcfs.ro).
 cc_library(
@@ -762,16 +742,6 @@ qemu_cc_test(
     ],
 )
 
-qemu_cc_test(
-    name = "backing_capture_test",
-    size = "small",
-    timeout = "short",
-    srcs = ["backing_capture_test.cc"],
-    deps = [
-      ":backing_capture",
-      "@googletest//:gtest_main",
-    ],
-)
 
 qemu_cc_test(
     name = "syslog_sink_test",
@@ -867,28 +837,6 @@ qemu_cc_test(
     ],
 )
 
-# Step 15.2: CaptureBacking's failure paths; the wraps touch no other test.
-qemu_cc_test(
-    name = "backing_capture_fault_test",
-    size = "small",
-    timeout = "short",
-    srcs = ["backing_capture_fault_test.cc"],
-    linkopts = [
-      "-Wl,--wrap=unshare",
-      "-Wl,--wrap=open_tree",
-      "-Wl,--wrap=execv",
-      "-Wl,--wrap=sendmsg",
-    ],
-    deps = [
-      ":backing_capture",
-      ":mount_dcfs",
-      ":status",
-      ":syscalls_process",
-      "@absl//absl/status",
-      "@absl//absl/status:status_matchers",
-      "@googletest//:gtest_main",
-    ],
-)
 
 # Step 15.2: ForkDaemon's parent side; the wrap of setsid fails a detach.
 qemu_cc_test(
@@ -922,7 +870,6 @@ cc_library(
     deps = [
       ":mount_dcfs",
       ":syscalls",
-      ":syscalls_backing",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
       "@absl//absl/strings",

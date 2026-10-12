@@ -122,6 +122,7 @@ sudo install -m 0755 bazel-bin/dcfs/main_static /usr/local/bin/dcfs
 sudo ln -s /usr/local/bin/dcfs /sbin/mount.dcfs    # mount -t dcfs runs this
 sudo ln -s /usr/local/bin/dcfs /sbin/mount.fuse.dcfs    # and this, on a remount
 sudo ln -s /usr/local/bin/dcfs /sbin/umount.fuse.dcfs   # systemd's unmounts run this: it waits for the daemon
+sudo ln -s /usr/local/bin/dcfs /sbin/fsck.dcfs     # fsck on a dcfs line runs this
 sudo ln -s /usr/local/bin/dcfs /sbin/umount.fuse    # optional: a plain `umount PATH` waits too (below)
 ```
 
@@ -169,21 +170,18 @@ mount.dcfs SOURCE MOUNTPOINT [-sfnv] [-N ns] -o OPTIONS
 dcfs is the `mount.dcfs` mount helper (the dcfs binary installed under that
 name: it dispatches on its own name, and run as `dcfs` it only has `--help`
 and `--version`): `mount(8)` runs it for a mount of type `dcfs`, as in
-`mount -t dcfs -o dcfs.fstype=bind,dcfs.cache_db=/var/lib/dcfs/media.db
-/srv/media /mnt/media`. SOURCE is the directory, device or export to cache,
-as `mount` would take it; MOUNTPOINT is where dcfs appears (a directory: a
-file is refused). `mount.dcfs -V` prints the version. `-f` checks the
-options and mounts nothing; `-s` and `-v` are passed to the underlying
-mount; `-N` is not supported.
+`mount -t dcfs -o dcfs.cache_db=/var/lib/dcfs/media.db
+/srv/media /mnt/media`. SOURCE is the directory to cache (a directory: a
+file is refused), as `mount` would take it; MOUNTPOINT is where dcfs appears.
+`mount.dcfs -V` prints the version. `-f` checks the
+options and mounts nothing; `-s` and `-v` are ignored; `-N` is not supported.
 
 `mount.dcfs` returns once dcfs answers the kernel's first request (it is
 serving) or with the failure's message on its standard error and a non-zero
 exit status, in `mount(8)`'s terms: 1 for a usage mistake or a refusal to run
-(an unknown option, not root), 32 for a start that failed, and the native
-mount's own status when mounting SOURCE failed. Relative paths (SOURCE,
+(an unknown option, not root), and 32 for a start that failed. Relative paths (SOURCE,
 MOUNTPOINT, `dcfs.cache_db`) are resolved against the working directory at
-that moment. It must run as root: FUSE passthrough, the private mount
-namespace and `open_tree` need `CAP_SYS_ADMIN`, `open_by_handle_at` needs
+that moment. It must run as root: FUSE passthrough needs `CAP_SYS_ADMIN`, `open_by_handle_at` needs
 `CAP_DAC_READ_SEARCH`, and acting with each caller's credentials needs
 `setfsuid`, `setfsgid` and `setgroups`; so fstab's `user` option cannot work.
 
@@ -196,15 +194,12 @@ option). `mount.dcfs` is also installed as `mount.fuse.dcfs`, the name
 
 ### Options
 
-Options are not shared: every option goes to the underlying mount except
-those prefixed `dcfs.`, which go to dcfs (`ro` makes the underlying mount
-read-only; `dcfs.ro` makes the dcfs mount read-only). An unknown `dcfs.`
-option is an error. For `bind`, the underlying mount is the
-administrator's own.
+Options prefixed `dcfs.` configure dcfs (`dcfs.ro` makes the dcfs mount
+read-only). An unknown `dcfs.` option is an error. Native options are
+refused: dcfs makes no underlying mount to give them to.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `dcfs.fstype` | (autodetect) | How SOURCE is reached. `bind`: SOURCE is a directory, opened in place in the caller's mount namespace, and dcfs serves it live (the administrator owns the mount that holds it: it stays in place and is kept busy). Any other value, or none: the type of a native mount of SOURCE (`ext4`, `xfs`, `btrfs`, `nfs`, ...; absent: `mount(8)` autodetects it), made in a private mount namespace that exists only for the capture, so nothing is mounted in the caller's namespace and the backing filesystem is released when dcfs exits. The native error text and exit status pass through on failure and nothing is left mounted. |
 | `dcfs.cache_db` | (required) | The SQLite cache database. Created if missing, mode 0600 (its `-wal`/`-shm` files inherit that mode too), since it holds metadata as sensitive as the source's: every cached name, attribute, xattr and symlink target, including those of directories a reader cannot list. Its directory is created mode 0700 if missing; an existing one that is group- or world-accessible logs a warning but does not stop dcfs from starting. dcfs refuses to start if the database is a symlink or not a regular file, or if it (or an existing `-wal`/`-shm`) grants more access than the source's root directory does (owner not root or that directory's owner; group or other read/write that directory does not grant); the error names both sets of permissions. A database that passes but is looser than 0600 is tightened to 0600 with a warning. Put it on an SSD, not on the backing disks, on a local filesystem: dcfs refuses to start if SQLite cannot use WAL mode there. |
 | `dcfs.cache_dir` | (not yet) | Refused for now: a directory of cache databases named after the instance identity arrives with plan step 15.3; name the database with `dcfs.cache_db`. |
 | `dcfs.ro` | off | Mount dcfs read-only. `mount -o remount,dcfs.ro` toggles it, and `-o remount` alone makes it read-write again, without touching the underlying mount. |
@@ -224,10 +219,7 @@ makes you notice.
 
 The FUSE mount's source, as `mount`, `df` and `findmnt` show it, is SOURCE as
 `mount.dcfs` receives it, and its type is `fuse.dcfs`. That is SOURCE as
-written (`/srv/media`, `nas:/export`), except that `mount(8)` resolves a
-`UUID=` or `LABEL=` source to the device before it runs a helper: an fstab
-line `UUID=aaaa /data dcfs ...` shows `/dev/vdb` (what step 15.6's systemd
-guest observed), not `UUID=aaaa`.
+written (`/srv/media`, `/srv/raw/media`).
 
 ### Flags
 
@@ -263,7 +255,7 @@ tree must work through the mount.
 
 ```
 sudo mkdir -p /var/lib/dcfs /mnt/media
-sudo mount -t dcfs -o dcfs.fstype=bind,dcfs.cache_db=/var/lib/dcfs/media.db \
+sudo mount -t dcfs -o dcfs.cache_db=/var/lib/dcfs/media.db \
     /srv/media /mnt/media
 ```
 
@@ -298,7 +290,7 @@ reconfigure the daemon, so it keeps the mount's `nosuid`, `nodev`, `noexec`,
   alone.
 
 To change the underlying filesystem's options, unmount and mount again with
-the new options. With `dcfs.fstype=bind` the underlying mount is the
+the new options. The underlying mount is the
 administrator's own and can be remounted directly (`mount -o remount,ro
 /srv/media`): dcfs then sees the filesystem go read-only and its writes fail
 with `EROFS`. That needs a mount that is not over-mounted by dcfs itself, so
@@ -329,7 +321,7 @@ error.
 
 ### The bind form and the native bind recipe
 
-`dcfs.fstype=bind` says SOURCE is a directory: dcfs **opens it in place**, in
+SOURCE is a directory: dcfs **opens it in place**, in
 the caller's mount namespace, and serves what it finds. Nothing is captured or
 cloned. What that means:
 
@@ -346,27 +338,13 @@ cloned. What that means:
 - Native mount options (`ro`, `noatime`, ...) are refused: dcfs makes no mount
   to give them to.
 
-With a native type (`UUID=...`, `nas:/export`, a device) there is nothing to
-open in place: the filesystem is mounted in a private mount namespace that
-exists only while dcfs starts, so it never appears at any path in the caller's
-namespace, and the dcfs mount point can be where you would otherwise have
-mounted the filesystem itself. The filesystem is released when dcfs exits,
-however it exits.
-
-There is no detached form of `bind`. dcfs once could capture a directory with a
-non-recursive clone that no namespace held; that added only a lifetime
-independent of the original mount, isolation from later submounts, and a
-read-only remount at the backing, all of which a native bind mount does
-(below), at the price of a second code path. `dcfs.fstype=none`, the old name of
-the form above, is refused with a message saying so.
-
 **Mounting over the source directory.** dcfs opens SOURCE before it mounts and
 never uses a path again: every later access goes through that descriptor or
 through file handles stored in the cache. So it can be mounted on SOURCE
 itself:
 
 ```
-sudo mount -t dcfs -o dcfs.fstype=bind,dcfs.cache_db=/var/lib/dcfs/media.db \
+sudo mount -t dcfs -o dcfs.cache_db=/var/lib/dcfs/media.db \
     /srv/media /srv/media
 ```
 
@@ -387,7 +365,7 @@ both: the consumers keep `/srv/media`, which is dcfs, and the tools use
 mkdir -p /srv/raw/media
 sudo mount --bind /srv/media /srv/raw/media          # the kernel's bind
 sudo mount --make-private /srv/raw/media             # see below
-sudo mount -t dcfs -o dcfs.fstype=bind,dcfs.cache_db=/var/lib/dcfs/media.db \
+sudo mount -t dcfs -o dcfs.cache_db=/var/lib/dcfs/media.db \
     /srv/media /srv/media                            # dcfs over the original
 ```
 
@@ -409,7 +387,7 @@ consumers' path, with the raw mount first:
 
 ```text
 UUID=aaaa-aaaa   /srv/raw/media  ext4  defaults                                                       0 2
-/srv/raw/media   /srv/media      dcfs  dcfs.fstype=bind,x-systemd.requires-mounts-for=/srv/raw/media,dcfs.cache_db=/var/lib/dcfs/media.db  0 0
+/srv/raw/media   /srv/media      dcfs  x-systemd.requires-mounts-for=/srv/raw/media,dcfs.cache_db=/var/lib/dcfs/media.db  0 0
 ```
 
 (Mount the disk once, at the raw path; the consumers' path is dcfs's.)
@@ -427,20 +405,19 @@ parent's mount, naming the child's own device or export, not a path inside
 the parent:
 
 ```text
-UUID=aaaa  /data      dcfs  dcfs.cache_db=/var/lib/dcfs/data.db      0 0
-UUID=bbbb  /data/sub  dcfs  dcfs.cache_db=/var/lib/dcfs/data-sub.db  0 0
+/srv/raw/data  /data      dcfs  x-systemd.requires-mounts-for=/srv/raw/data,dcfs.cache_db=/var/lib/dcfs/data.db      0 0
+/srv/raw/sub   /data/sub  dcfs  x-systemd.requires-mounts-for=/srv/raw/sub,dcfs.cache_db=/var/lib/dcfs/data-sub.db  0 0
 ```
 
-The parent never sees the child, because the filesystem it serves is a
-private mount of its own. The parent must be mounted before the child (an
-earlier fstab line does that for `mount -a`; systemd orders mount units by
-path) and `umount -R /data` unmounts the child first.
+The parent never sees the child, because each serves its own directory. The
+parent must be mounted before the child (an earlier fstab line does that for
+`mount -a`; systemd orders mount units by path) and `umount -R /data` unmounts
+the child first.
 
-`dcfs.fstype=bind` serves a directory of the caller's
-mount namespace, so a filesystem mounted below SOURCE would put two
-filesystems under one `st_dev`. dcfs refuses to start in that case, whether
-the mount is a directory or a file, and the error names the mount points
-found: unmount them, or choose a SOURCE below them.
+dcfs serves a directory of the caller's mount namespace, so a filesystem
+mounted below SOURCE would put two filesystems under one `st_dev`. dcfs refuses
+to start in that case, whether the mount is a directory or a file, and the error
+names the mount points found: unmount them, or choose a SOURCE below them.
 
 A mount or btrfs subvolume that appears below SOURCE after dcfs started is
 a **boundary**: dcfs shows it as an empty stub directory, usable as a mount
@@ -457,40 +434,28 @@ that runs dcfs in the foreground; the daemon forks away from `mount.dcfs`
 and `umount` ends it.
 
 ```text
-# SOURCE        MOUNTPOINT  TYPE  OPTIONS                                    DUMP PASS
-UUID=aaaa-aaaa  /data       dcfs  noatime,dcfs.cache_db=/var/lib/dcfs/data.db                                         0 2
-UUID=bbbb-bbbb  /data/sub   dcfs  dcfs.fstype=xfs,dcfs.cache_db=/var/lib/dcfs/sub.db                                 0 2
-UUID=cccc-cccc  /data/vol   dcfs  dcfs.fstype=btrfs,subvol=vol,dcfs.cache_db=/var/lib/dcfs/vol.db                0 0
-nas:/export     /srv/nas    dcfs  dcfs.fstype=nfs,vers=4.2,_netdev,nofail,dcfs.cache_db=/var/lib/dcfs/nas.db     0 0
-/srv/raw        /cache/raw  dcfs  dcfs.fstype=bind,dcfs.ro,dcfs.cache_db=/var/lib/dcfs/raw.db                    0 0
-/mnt/disk       /mnt/fast   dcfs  dcfs.fstype=bind,dcfs.cache_db=/var/lib/dcfs/fast.db                           0 0
+# SOURCE          MOUNTPOINT     TYPE  OPTIONS                                                                                             DUMP PASS
+UUID=aaaa-aaaa    /srv/raw/data  ext4  defaults                                                                                            0 2
+/srv/raw/data     /data          dcfs  x-systemd.requires-mounts-for=/srv/raw/data,dcfs.cache_db=/var/lib/dcfs/data.db                    0 2
+/srv/raw/sub      /data/sub      dcfs  dcfs.ro,dcfs.cache_db=/var/lib/dcfs/sub.db                                                          0 0
+nas:/export       /srv/raw/nas   nfs   vers=4.2,_netdev,nofail                                                                             0 0
+/srv/raw/nas      /srv/nas       dcfs  _netdev,x-systemd.requires-mounts-for=/srv/raw/nas,dcfs.cache_db=/var/lib/dcfs/nas.db             0 0
+/mnt/disk         /mnt/fast      dcfs  dcfs.cache_db=/var/lib/dcfs/fast.db                                                                 0 0
 ```
 
-- **`dcfs.fstype`** says how SOURCE is reached. Absent: `mount(8)` finds the
-  type of the device itself, as it does for a plain `mount`. A native type
-  (`ext4`, `xfs`, `btrfs`, `nfs`, `fuse.sshfs`, ...): that type, with the
-  other options handed to the native mount (`subvol=vol`, `vers=4.2`).
-  `bind`: SOURCE is a directory dcfs serves live, opened in place, usually
-  the mount point of a filesystem mounted by an earlier fstab line (see
-  [The bind form and the native bind recipe](#the-bind-form-and-the-native-bind-recipe)). See
-  the [Options](#options) table.
 - **`dcfs.cache_db` is required** on every line, one database per mount
   (never shared: dcfs refuses a second instance on a database that is in
   use). The database's directory is created mode 0700 if it does not exist,
   but only that one level, and on whatever filesystem holds it at that
   moment: if the cache lives on a filesystem of its own, mount that first.
-- **Options are not shared**: everything not prefixed `dcfs.` goes to the
-  underlying mount (`noatime`, `subvol=vol`, `vers=4.2`), and `ro` makes
-  that mount read-only while `dcfs.ro` makes the dcfs mount read-only.
-  `defaults`, `rw`, `noauto`, `nofail`, `_netdev` and `x-*` options are
-  accepted on every form, `bind` included, since mount(8) adds or reads them
-  itself; any other native option on a `bind` line is an error, because dcfs
-  makes no underlying mount to give it to.
-- **The sixth field** (the fsck pass) works as on any line: `2` on a line
-  whose backing is a device (`UUID=...`) makes `fsck -A` and systemd's
-  `systemd-fsck@.service` run `fsck.dcfs` on it before the mount, `0` skips
-  the check. Use `0` on `bind` and network lines: there is no device
-  to check, and systemd would wait for one. See
+- **Options**: `defaults`, `rw`, `noauto`, `nofail`, `_netdev` and `x-*`
+  options are accepted, since mount(8) adds or reads them itself; any other
+  native option is an error, because dcfs makes no underlying mount to give it
+  to. `dcfs.ro` makes the dcfs mount read-only.
+- **The sixth field** (the fsck pass): dcfs only checks its cache database;
+  it runs no checker on the backing filesystem (there is no device: dcfs serves
+  a directory). Use `0` on the dcfs line, or `2` to check the cache database
+  before mounting. See
   [Checking a dcfs filesystem](#checking-a-dcfs-filesystem).
 - **A line is a mount**: `mount /data`, `umount /data`, `mount -a` and
   `umount -R /data` work as for any fstab entry, and `mount /data` takes
@@ -515,7 +480,7 @@ kernel's first request, so units that depend on the mount start when dcfs is
 serving. A mount unit requires and orders after the mount units of the
 directories above its mount point, so parents mount first and stopping a
 parent stops its children. systemd does not see what a line needs besides its
-mount point: a `bind` SOURCE that is itself a mount, and a cache
+mount point: a SOURCE that is itself a mount, and a cache
 database on another filesystem, need `x-systemd.requires-mounts-for=` on the
 line (for example `x-systemd.requires-mounts-for=/var/lib/dcfs`).
 Restart one instance with `systemctl restart data-sub.mount`: systemd calls
@@ -623,9 +588,7 @@ After a crash the dead FUSE mount stays in place, and accessing it fails
 with `ENOTCONN`. Unmount it (`umount -l <mountpoint>`) before mounting dcfs
 there again; `mount.dcfs` does not do this for you. When dcfs is mounted over
 its own source this is mandatory, since dcfs would otherwise try to open the
-dead mount as its source. A filesystem that dcfs captured itself (any
-`dcfs.fstype` but `bind`) needs no cleanup: it is released when the daemon
-dies, however it dies.
+dead mount as its source.
 
 Only one dcfs may use a cache database at a time: dcfs takes an exclusive
 lock on it at startup and refuses to start if another process holds it.
@@ -638,17 +601,10 @@ a different source directory; delete it to start with a cold cache.
 
 `fsck.dcfs` is what `fsck(8)` and systemd's `systemd-fsck@.service` run for a
 `dcfs` fstab line with a non-zero sixth field, before the mount (install it
-like the other helpers, [Building](#building)). It checks two things and
-combines their results as `fsck(8)` combines the results of several
-checkers:
+like the other helpers, [Building](#building)). It checks the cache database:
 
-1. **The backing filesystem**, if it has a device. With a native
-   `dcfs.fstype` (or none, in which case `blkid` names the type) it runs that
-   type's `fsck.<type>` on the device with the flags it was given (`-a`, `-p`,
-   `-n`, `-y`, `-f`, `-C`) and passes its exit status on. dcfs does not check
-   the filesystem itself: `e2fsck`, `xfs_repair` and `btrfs check` know their
-   formats, and a passno on a dcfs line means what it means on a plain one.
-   For `bind` (a directory) there is no device: it says so and goes on.
+1. **The backing filesystem**: dcfs serves a directory, so there is no device
+   to check; it notes that and goes on.
 2. **The cache database**: that no daemon holds it (reported, never waited
    for), SQLite's `integrity_check`, the schema version, and the dirty set
    (every dirty row names an inode that exists, and a clean-shutdown flag
@@ -662,9 +618,8 @@ checkers:
 
 The exit status is `fsck(8)`'s: 0 no errors, 1 errors corrected (the cache was
 rebuilt), 4 errors left uncorrected, 8 operational error (a database a daemon
-holds, no `fsck.<type>`, no fstab line, no `dcfs.cache_db`), 16 usage, 32
-cancelled; several are added together (a backing that exits 4 and a cache
-rebuilt exit 5).
+holds, no fstab line, no `dcfs.cache_db`), 16 usage, 32
+cancelled; several are added together.
 
 By hand, with the filesystem unmounted:
 
@@ -672,7 +627,7 @@ By hand, with the filesystem unmounted:
 sudo fsck /data                  # the line in /etc/fstab, interactively where the type asks
 sudo fsck /data -- -n            # report only: nothing is changed
 sudo fsck /data -- -y            # repair; a corrupt cache is deleted
-sudo fsck.dcfs -n -o dcfs.fstype=ext4,dcfs.cache_db=/var/lib/dcfs/data.db /dev/vdb
+sudo fsck.dcfs -n -o dcfs.cache_db=/var/lib/dcfs/data.db /srv/raw/data
 ```
 
 `fsck.dcfs` finds the line's `dcfs.` options through `findmnt --fstab` (from
@@ -730,8 +685,8 @@ sudo umount -R /data
 sudo mount -a      # or per instance, parents first
 ```
 
-`/sbin/mount.dcfs`, `/sbin/mount.fuse.dcfs`, `/sbin/umount.fuse.dcfs` (and
-`/sbin/umount.fuse`, if you chose it) are symbolic links to the
+`/sbin/mount.dcfs`, `/sbin/mount.fuse.dcfs`, `/sbin/umount.fuse.dcfs`,
+`/sbin/fsck.dcfs` (and `/sbin/umount.fuse`, if you chose it) are symbolic links to the
 binary (see [Building](#building)) and need no change. Unmounting shuts the
 daemon down cleanly (see "Shutdown, crashes and restarts"), so the cache is
 kept; a new version upgrades the database's schema at its first start, and
@@ -766,7 +721,7 @@ dcfs itself failed at; warnings are what it noticed or survived.
 | WARNING `pid N: supplementary groups unreadable ...; using none` | A request came from a process whose groups dcfs could not read; it was checked without them and may have got `EACCES`. At most once a minute. |
 
 A start that fails prints its reason on the standard error of `mount`, with
-exit status 32 (or the native mount's own, or 1 for a usage mistake). The
+exit status 32 (or 1 for a usage mistake). The
 common reasons:
 
 - `Cache database X is in use by another dcfs process`: another instance has

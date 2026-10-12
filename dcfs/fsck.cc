@@ -23,7 +23,6 @@
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/ascii.h"
-#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
@@ -45,21 +44,8 @@ namespace {
 // findmnt(8) (util-linux) is run by this path, as /bin/mount is in the capture;
 // /bin is a symlink to /usr/bin on merged-usr systems.
 constexpr char kFindmntProgram[] = "/bin/findmnt";
-// Where util-linux's fsck looks for fsck.<type> (and where blkid is).
-constexpr std::string_view kCheckerDirs[] = {
-    "/sbin", "/usr/sbin", "/sbin/fs.d", "/sbin/fs", "/etc/fs", "/etc"};
-
 constexpr char kUsage[] =
     "usage: fsck.dcfs [-apynf] [-C[FD]] [-o OPTIONS] DEVICE";
-
-// The first `name` in the usual places for fsck's checkers, or empty.
-std::string FindProgram(std::string_view name) {
-  for (std::string_view dir : kCheckerDirs) {
-    std::string path = absl::StrCat(dir, "/", name);
-    if (syscalls::fstatat(AT_FDCWD, path).ok()) return path;
-  }
-  return "";
-}
 
 // Everything `fd` yields until its end.
 std::string ReadAll(int fd) {
@@ -136,56 +122,6 @@ absl::StatusOr<std::string> FstabOptions(const std::string &device) {
            << "; name the dcfs options with -o to check a filesystem by hand";
   }
   return first;
-}
-
-// The type of the filesystem on `device`, as blkid says.
-absl::StatusOr<std::string> DetectType(const std::string &device) {
-  const std::string blkid = FindProgram("blkid");
-  if (blkid.empty()) {
-    return NotFoundErrorBuilder()
-           << "dcfs.fstype is not set and blkid is not installed to find the "
-              "type of "
-           << EscapeBytes(device);
-  }
-  std::string out;
-  ASSIGN_OR_RETURN(
-      int ran,
-      RunProgram(blkid, "blkid", {"-o", "value", "-s", "TYPE", device}, &out));
-  const std::string type(absl::StripAsciiWhitespace(out));
-  if (ran != 0 || type.empty()) {
-    return NotFoundErrorBuilder() << "blkid finds no filesystem type on "
-                                  << EscapeBytes(device) << "; set dcfs.fstype";
-  }
-  return type;
-}
-
-// The backing filesystem's fsck, with the flags fsck was given, on `device`.
-// Its status is the result.
-int CheckBacking(const std::string &type, const std::string &device,
-                 const std::vector<std::string> &flags) {
-  if (absl::StrContains(type, '/')) {
-    LOG(ERROR) << "dcfs.fstype=" << EscapeBytes(type) << " is not a type";
-    return kFsckOperational;
-  }
-  const std::string name = absl::StrCat("fsck.", type);
-  const std::string path = FindProgram(name);
-  if (path.empty()) {
-    LOG(ERROR) << name << " not found: nothing can check the " << type
-               << " filesystem of " << EscapeBytes(device);
-    return kFsckOperational;
-  }
-  std::vector<std::string> words = flags;
-  words.push_back(device);
-  absl::StatusOr<int> ran = RunProgram(path, name, words, nullptr);
-  if (!ran.ok()) {
-    LOG(ERROR) << ran.status();
-    return kFsckOperational;
-  }
-  if (*ran == 127) {
-    LOG(ERROR) << name << " could not be run (" << path << ")";
-    return kFsckOperational;
-  }
-  return *ran;
 }
 
 // What looking at an open cache database found.
@@ -460,25 +396,8 @@ int FsckMain(std::span<const std::string> words) {
 
   int status = kFsckOk;
   // 1. The backing filesystem.
-  if (split->backing == HelperOptions::Backing::kNative) {
-    std::string type;
-    if (split->native_type.has_value()) {
-      type = *split->native_type;
-    } else if (absl::StatusOr<std::string> detected = DetectType(args->device);
-               detected.ok()) {
-      type = *std::move(detected);
-    } else {
-      LOG(ERROR) << detected.status().message();
-      return kFsckOperational;
-    }
-    status = CombineFsckStatus(
-        status, CheckBacking(type, args->device, args->backing_flags));
-  } else {
-    std::cout << EscapeBytes(args->device)
-              << ": dcfs.fstype=bind serves a directory: there is no device "
-                 "to check"
-              << '\n';
-  }
+  std::cout << EscapeBytes(args->device)
+            << ": dcfs serves a directory: there is no device to check" << '\n';
 
   // 2. The cache database.
   if (!split->cache_db.has_value()) {

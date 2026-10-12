@@ -44,7 +44,6 @@
 #include "absl/time/time.h"
 #include "dcfs/absolute_paths.h"
 #include "dcfs/backing.h"
-#include "dcfs/backing_capture.h"
 #include "dcfs/context.h"
 #include "dcfs/device_id.h"
 #include "dcfs/dir_cache_fs.h"
@@ -58,6 +57,7 @@
 #include "dcfs/mount_dcfs.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/mount_options.h"
+#include "dcfs/mounts_below.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/remount.h"
 #include "dcfs/session_loop.h"
@@ -316,12 +316,15 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
             << " sync_interval_sec=" << absl::GetFlag(FLAGS_sync_interval_sec)
             << " foreground=" << options.foreground;
 
-  // The backing tree is reached through `backing.root` alone from here on:
+  // The backing tree is reached through `source_fd` alone from here on:
   // never through a path again, which is what makes mounting dcfs back over
-  // SOURCE itself (a supported configuration) safe. `backing.tree` keeps a
-  // captured clone alive.
-  ASSIGN_OR_RETURN(OpenedBacking backing_tree, OpenBacking(args, options));
-  FileDescriptor source_fd = std::move(backing_tree.root);
+  // SOURCE itself (a supported configuration) safe.
+  ASSIGN_OR_RETURN(
+      FileDescriptor source_fd,
+      syscalls::openat(AT_FDCWD, args.source, O_RDONLY | O_DIRECTORY),
+      _ << "SOURCE " << args.source);
+  RETURN_IF_ERROR(RefuseMountsBelow(args.source));
+  RETURN_IF_ERROR(RefuseIfForcedReadOnly(*source_fd, args.source));
   ASSIGN_OR_RETURN(struct stat backing_root, syscalls::fstat(*source_fd));
 
   // The cache database holds metadata as sensitive as the backing tree's --
@@ -609,8 +612,7 @@ absl::Status RequireRoot(std::string_view program) {
       PermissionDeniedErrorBuilder()
       << program
       << " must run as root (fstab's user option does not "
-         "work): FUSE passthrough, the private mount namespace and "
-         "open_tree need CAP_SYS_ADMIN, open_by_handle_at needs "
+         "work): FUSE passthrough needs CAP_SYS_ADMIN, open_by_handle_at needs "
          "CAP_DAC_READ_SEARCH, and acting with each caller's credentials "
          "needs setfsuid, setfsgid and setgroups");
 }
@@ -633,10 +635,8 @@ int MountHelperMain(int argc, char *argv[]) {
   absl::Status checked = options.status();
   if (checked.ok()) checked = RequireRoot(kMountHelperName);
   if (checked.ok() && args->mount_namespace.has_value()) {
-    checked = MarkUsageError(
-        UnimplementedErrorBuilder()
-        << "Option -N is not supported: mount.dcfs mounts in its own "
-           "namespace");
+    checked = MarkUsageError(UnimplementedErrorBuilder()
+                             << "Option -N is not supported");
   }
   if (checked.ok()) {
     for (const auto &[name, value] : options->flags) {
@@ -744,7 +744,7 @@ int UmountHelperMain(int argc, char *argv[]) {
 int PlainMain(int argc, char *argv[]) {
   absl::SetProgramUsageMessage(
       "dcfs is started by mount(8) as mount.dcfs: mount -t dcfs -o "
-      "dcfs.fstype=bind,dcfs.cache_db=PATH SOURCE MOUNTPOINT (see README)");
+      "dcfs.cache_db=PATH SOURCE MOUNTPOINT (see README)");
   std::vector<char *> args = absl::ParseCommandLine(argc, argv);
   absl::Status usage = UsageError(
       "dcfs mounts through its mount.dcfs name: run mount.dcfs SOURCE "

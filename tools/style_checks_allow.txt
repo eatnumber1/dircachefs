@@ -54,10 +54,6 @@ dcfs/backing.cc|VerifyBackingIdentity|misc-include-cleaner|1
 dcfs/backing.cc|VerifyBackingIdentity|misc-use-internal-linkage|1
 dcfs/backing.cc|VerifyBackingIdentity|modernize-use-integer-sign-comparison|1
 dcfs/backing.cc|XattrOf|misc-redundant-expression|1
-dcfs/backing_capture.cc|<file scope>|misc-include-cleaner|1
-dcfs/backing_capture.cc|AnswerAndExit|misc-include-cleaner|2
-dcfs/backing_capture.cc|RunNativeMount|misc-include-cleaner|4
-dcfs/backing_capture_fault_test.cc|Request|readability-convert-member-functions-to-static|1
 dcfs/backing_fault_test.cc|SetUp|concurrency-mt-unsafe|1
 dcfs/backing_test.cc|DbPath|concurrency-mt-unsafe|1
 dcfs/backing_test.cc|SetUp|concurrency-mt-unsafe|1
@@ -172,8 +168,6 @@ dcfs/fd_test.cc|TEST|bugprone-use-after-move|2
 dcfs/file_handle_test.cc|SetUp|concurrency-mt-unsafe|1
 dcfs/fork_split.h|__attribute__|check_in_production|1
 dcfs/fsck.cc|<file scope>|modernize-deprecated-headers|1
-dcfs/fsck.cc|DetectType|performance-no-automatic-move|1
-dcfs/fsck.cc|FsckMain|readability-function-cognitive-complexity|1
 dcfs/fsck.cc|FstabOptions|performance-no-automatic-move|1
 dcfs/fsck.cc|Inspect|capturing_mutating_lambda|2
 dcfs/fsck.cc|Inspect|readability-function-cognitive-complexity|1
