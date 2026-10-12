@@ -209,9 +209,11 @@ To eliminate variance and noise from SMT (hyperthreading) sibling contention,
 `run-qemu.sh` detects physical cores (one logical CPU per physical core from
 `/sys/devices/system/cpu/cpu*/topology/thread_siblings_list`, e.g. `0,2,4,6`) and
 pins QEMU with `taskset -c <cpulist>` when `taskset` and sysfs are present.
-The environment variable `DCFS_PIN_NON_SMT=0` provides an escape hatch that
-disables pinning. The serial log records whether the VM was pinned or unpinned
-(`run-qemu.sh: CPU affinity: pinned to non-SMT cores (...)` or `unpinned`).
+Pinning is off by default and enabled only for budget-measuring runs via
+`DCFS_PIN_NON_SMT=1` (the default path never pins; `DCFS_PIN_NON_SMT=0` or unset
+leaves QEMU unpinned). The serial log records whether the VM was pinned or
+unpinned (`run-qemu.sh: CPU affinity: pinned to non-SMT cores (...)` or
+`unpinned`).
 
 ## Test tiers
 

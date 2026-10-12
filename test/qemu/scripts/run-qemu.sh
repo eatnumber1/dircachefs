@@ -71,6 +71,12 @@
 #       the host's, and a guest that was killed by the time limit, which says
 #       nothing about itself, can be told from one that hung.
 #
+#   Affinity (step 26.17): DCFS_PIN_NON_SMT=1 pins QEMU to non-SMT cores (one
+#       logical CPU per physical core from sysfs thread_siblings_list) to
+#       eliminate SMT sibling contention and noise during budget-measuring
+#       runs. Off by default (unpinned); DCFS_PIN_NON_SMT=0 or unset leaves QEMU
+#       unpinned.
+#
 #   --power-cut SCENARIO[,SCENARIO...] (step 11.2; e2e only): a real power cut
 #       per scenario. Each is two boots over the same disk images: the first
 #       (dcfs_cut=kill dcfs_scenario=<s> dcfs_boot=1 on the kernel command
@@ -922,10 +928,11 @@ LOAD_TAG=""
 PRESSURE_BEFORE=$(pressure_us)
 # Step 26.17: pin QEMU to non-SMT cores (one logical CPU per physical core from
 # /sys/devices/system/cpu/cpu*/topology/thread_siblings_list, e.g. 0,2,4,6) to
-# eliminate SMT sibling contention / noise. DCFS_PIN_NON_SMT=0 disables.
+# eliminate SMT sibling contention / noise. Off by default; enabled by
+# DCFS_PIN_NON_SMT=1 for budget-measuring runs.
 QEMU_TASKSET=""
 CPU_SYSFS=${DCFS_CPU_SYSFS:-/sys/devices/system/cpu}
-if [ "${DCFS_PIN_NON_SMT:-1}" != "0" ] && command -v taskset >/dev/null 2>&1 && [ -d "$CPU_SYSFS" ]; then
+if [ "${DCFS_PIN_NON_SMT:-0}" = "1" ] && command -v taskset >/dev/null 2>&1 && [ -d "$CPU_SYSFS" ]; then
 	NON_SMT_CPUS=$(
 		for f in "$CPU_SYSFS"/cpu[0-9]*/topology/thread_siblings_list; do
 			[ -f "$f" ] || continue

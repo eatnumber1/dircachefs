@@ -75,7 +75,7 @@ run() {
 	shift
 	RC=0
 	rm -f "$WORK/out/serial.log"
-	env -u DCFS_NOISY -u DCFS_FORCE_TCG TEST_TARGET="$r_target" "$@" TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
+	env -u DCFS_NOISY -u DCFS_FORCE_TCG -u DCFS_PIN_NON_SMT TEST_TARGET="$r_target" "$@" TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
 		sh "$RUN_QEMU" --unit --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
 		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
 		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
@@ -339,35 +339,40 @@ echo "PASS: flushes count 20 ms each, and a target without budgets has no floor"
 
 # --- CPU affinity (non-SMT pinning) -------------------------------------------
 #
-# A host with sysfs and taskset pins QEMU to one logical CPU per physical core.
+# Off by default: QEMU runs unpinned unless DCFS_PIN_NON_SMT=1 is set.
 canned "COST cpu_us=400000"
 run //t:x
+[ "$RC" -eq 0 ] || fail "a default unpinned run failed: $(cat "$WORK/stdout")"
+grep -q "run-qemu.sh: CPU affinity: unpinned" "$WORK/out/serial.log" ||
+	fail "default run not logged as unpinned: $(cat "$WORK/out/serial.log")"
+
+# DCFS_PIN_NON_SMT=0 is unpinned.
+run //t:x DCFS_PIN_NON_SMT=0
+[ "$RC" -eq 0 ] || fail "an unpinned run with DCFS_PIN_NON_SMT=0 failed: $(cat "$WORK/stdout")"
+grep -q "run-qemu.sh: CPU affinity: unpinned" "$WORK/out/serial.log" ||
+	fail "affinity not logged as unpinned with DCFS_PIN_NON_SMT=0: $(cat "$WORK/out/serial.log")"
+# DCFS_PIN_NON_SMT=1 pins QEMU to one logical CPU per physical core.
+run //t:x DCFS_PIN_NON_SMT=1
 [ "$RC" -eq 0 ] || fail "a pinned run failed: $(cat "$WORK/stdout")"
 if command -v taskset >/dev/null 2>&1 && [ -d /sys/devices/system/cpu ]; then
 	grep -q "run-qemu.sh: CPU affinity: pinned to non-SMT cores" "$WORK/out/serial.log" ||
-		fail "affinity not logged as pinned: $(cat "$WORK/out/serial.log")"
+		fail "affinity not logged as pinned with DCFS_PIN_NON_SMT=1: $(cat "$WORK/out/serial.log")"
 fi
 
-# DCFS_PIN_NON_SMT=0 disables pinning.
-run //t:x DCFS_PIN_NON_SMT=0
-[ "$RC" -eq 0 ] || fail "an unpinned run failed: $(cat "$WORK/stdout")"
-grep -q "run-qemu.sh: CPU affinity: unpinned" "$WORK/out/serial.log" ||
-	fail "affinity not logged as unpinned with DCFS_PIN_NON_SMT=0: $(cat "$WORK/out/serial.log")"
-
-# Synthetic sysfs parsing: thread siblings 0-1 and 2-3 yield 0,2.
+# Synthetic sysfs parsing with DCFS_PIN_NON_SMT=1: thread siblings 0-1 and 2-3 yield 0,2.
 mkdir -p "$WORK/fake_cpu/cpu0/topology" "$WORK/fake_cpu/cpu1/topology" \
 	"$WORK/fake_cpu/cpu2/topology" "$WORK/fake_cpu/cpu3/topology"
 printf "0-1\n" >"$WORK/fake_cpu/cpu0/topology/thread_siblings_list"
 printf "0-1\n" >"$WORK/fake_cpu/cpu1/topology/thread_siblings_list"
 printf "2-3\n" >"$WORK/fake_cpu/cpu2/topology/thread_siblings_list"
 printf "2-3\n" >"$WORK/fake_cpu/cpu3/topology/thread_siblings_list"
-run //t:x DCFS_CPU_SYSFS="$WORK/fake_cpu"
+run //t:x DCFS_PIN_NON_SMT=1 DCFS_CPU_SYSFS="$WORK/fake_cpu"
 [ "$RC" -eq 0 ] || fail "a synthetic sysfs run failed: $(cat "$WORK/stdout")"
 if command -v taskset >/dev/null 2>&1; then
 	grep -q "run-qemu.sh: CPU affinity: pinned to non-SMT cores (0,2)" "$WORK/out/serial.log" ||
 		fail "synthetic affinity not logged as pinned to 0,2: $(cat "$WORK/out/serial.log")"
 fi
-echo "PASS: non-SMT pinning is applied and DCFS_PIN_NON_SMT=0 disables it"
+echo "PASS: non-SMT pinning is off by default, enabled by DCFS_PIN_NON_SMT=1"
 
 # The checked-in budgets: every line is OP KIND MAX with a number, the kind a
 # COST field, and no target twice (a second line would be ignored by the awk
