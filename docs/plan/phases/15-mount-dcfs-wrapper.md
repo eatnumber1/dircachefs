@@ -711,7 +711,7 @@ until 15.3 decides the cache path. 15.6's util-linux guest is where the
 helper protocol gets its real test.
 
 
-## 15.11 Delete the native-type capture (russ, 2026-10-11; after a good spare-disk trial on the bind form)
+## 15.11 Delete the native-type capture (done 2026-10-11, aa47d11; after a good spare-disk trial on the bind form)
 
 russ: "Let's delete the namespace capture assuming the trial goes well."
 Over-mount support is unaffected (the bind form opens SOURCE before the
