@@ -130,6 +130,10 @@ coverage --copt=-runtime-counter-relocation
 # llvm-cov shows as a branch count of 2^32-1 (a negative difference).
 coverage --copt=-fprofile-update=atomic
 
+# Coverage with sanitizers (step 7.2/7.4):
+coverage:asan --config=asan
+coverage:ubsan --config=ubsan
+
 # Per-checkout settings that are not committed (e.g. the agent lane
 # clones' `startup --max_idle_secs=...`). See docs/plan/process.md.
 try-import %workspace%/user.bazelrc

@@ -64,6 +64,25 @@ config_setting(
     values = {"define": "dcfs_sanitizer=ubsan"},
 )
 
+# Coverage with sanitizers (step 7.2/7.4): combining coverage instrumentation
+# with ASan/UBSan roughly doubles the initramfs size (instrumented binaries and
+# sysroot libraries), requiring extra guest RAM to unpack and run.
+config_setting(
+    name = "coverage_asan_build",
+    values = {
+        "collect_code_coverage": "true",
+        "define": "dcfs_sanitizer=asan",
+    },
+)
+
+config_setting(
+    name = "coverage_ubsan_build",
+    values = {
+        "collect_code_coverage": "true",
+        "define": "dcfs_sanitizer=ubsan",
+    },
+)
+
 # Guest initramfs shared by every qemu_test in this package: busybox,
 # dcfs (statically linked, see //dcfs:main_static), fhtest, testutil,
 # guest/init, every guest/*.sh test script (installed as /tests/<basename>;

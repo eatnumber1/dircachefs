@@ -26,18 +26,34 @@
 
 namespace dcfs {
 
+template <typename T>
+struct ForkSplitReturnType {
+  using type = absl::StatusOr<T>;
+};
+
+template <typename T>
+struct ForkSplitReturnType<absl::StatusOr<T>> {
+  using type = absl::StatusOr<T>;
+};
+
 // Not instrumented: it is the one function that does return twice, and it has
 // no branch worth counting. `child` and `parent` are ordinary, counted
 // functions that each run once per call. Returns the fork's error in the
 // parent when the fork fails.
 template <typename Child, typename Parent>
-__attribute__((no_profile_instrument_function)) std::invoke_result_t<Child>
+__attribute__((no_profile_instrument_function))
+ForkSplitReturnType<std::invoke_result_t<Child>>::type
 ForkSplit(Child child, Parent parent) {
   absl::StatusOr<pid_t> pid = syscalls::fork();
   if (!pid.ok()) return pid.status();
   if (*pid == 0) return child();
-  int status = parent(*pid);
-  syscalls::_exit(status);
+  if constexpr (std::is_void_v<std::invoke_result_t<Parent, pid_t>>) {
+    parent(*pid);
+    syscalls::_exit(0);
+  } else {
+    int status = parent(*pid);
+    syscalls::_exit(status);
+  }
 }
 
 }  // namespace dcfs

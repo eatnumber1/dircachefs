@@ -67,10 +67,13 @@ def initramfs_for(size, plain_dcfs = False, checked_dcfs = False):
         return ":initramfs_checked"
     return ":initramfs_checked" if size in ("small", "medium") else ":initramfs"
 
-def mem_args_for(mem, asan_mem):
+def mem_args_for(mem, asan_mem, cov_extra = 256):
     """run-qemu.sh's --mem flag for the build configuration (a select())."""
     sanitizer_args = ["--mem", str(asan_mem)]
+    sanitizer_cov_args = ["--mem", str(asan_mem + cov_extra)]
     return select({
+        "//test/qemu:coverage_asan_build": sanitizer_cov_args,
+        "//test/qemu:coverage_ubsan_build": sanitizer_cov_args,
         "//test/qemu:asan_build": sanitizer_args,
         "//test/qemu:ubsan_build": sanitizer_args,
         "//conditions:default": ["--mem", str(mem)],
