@@ -1703,11 +1703,11 @@ ext4, xfs and btrfs.
   `dcfs.fuse_opt` (good, bad and redundant options), a clean SIGTERM
   shutdown (exit 0, unmounted, WAL checkpointed), mounting dcfs back over
   its own SOURCE, and restarting against a previously-used cache
-  database. All of it through `mount.dcfs -o dcfs.fstype=bind,...,
+  database. All of it through `mount.dcfs -o dcfs.cache_db=...,
   dcfs.foreground` (step 15.2: the plain `--source` command line is gone).
 - `mount_dcfs_test` (`guest/mount_dcfs.sh`): the `mount.dcfs` wrapper
   (steps 15.1-15.2) on the ext4 image -- the capture of the backing
-  filesystem (`dcfs.fstype` absent or `ext4`: served, the FUSE mount's
+  filesystem (the FUSE mount's
   source is the spec, no backing mount in the caller's namespace, `umount`
   stops dcfs, SIGKILL releases the superblock), the option split (`ro` vs
   `dcfs.ro`, `remount` touching only the dcfs mount, an unknown `dcfs.`
@@ -1981,13 +1981,13 @@ disabled console login and the `nofail` boot, do not depend on the wrapper):
   missing device), each with dcfs's one `E...` ERROR line on mount's stderr
   and nothing mounted;
 - fstab: a native ext4 by `UUID=` (type autodetected, `noatime` passed to the
-  native mount), an xfs (`dcfs.fstype=xfs`) and a btrfs (autodetected) by
+  native mount), an xfs and a btrfs (autodetected) by
   `UUID=` (the kernel mounts them; the image has no xfsprogs or btrfs-progs,
   `run-qemu.sh` made the filesystems), a nested bind form (`dcfs.ro`), the
   `bind` form with `_netdev` and a `nofail` mount of a device that is not there,
   mounted by `mount -a` and then by the units systemd generates from them
   (`systemctl start`, `status`, `findmnt`), with one daemon and one cache
-  database each (not hosted: `dcfs.fstype=nfs`, the image has no NFS client
+  database each (not hosted: NFS, the image has no NFS client
   and the guest no network; `nfs_test` covers NFS on the other side); a child
   requires its parent; stopping the child leaves the parent and stopping the
   parent stops the child; a start that fails marks the unit failed with

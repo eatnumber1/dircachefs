@@ -336,10 +336,10 @@ quiesce_daemon() {
 }
 
 # dcfs_options [--flag[=value]...]: the -o string of a foreground
-# dcfs.fstype=bind mount of $DB, with each flag as the dcfs.<flag> option
+# mount of $DB, with each flag as the dcfs.<flag> option
 # (phase 15: the plain --source command line is gone).
 dcfs_options() {
-	do_opts="dcfs.fstype=bind,dcfs.cache_db=$DB,dcfs.foreground"
+	do_opts="dcfs.cache_db=$DB,dcfs.foreground"
 	for do_flag in "$@"; do
 		do_opts="$do_opts,dcfs.${do_flag#--}"
 	done

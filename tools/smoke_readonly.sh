@@ -88,7 +88,7 @@ mkdir -p "$MNT"
 
 # --- Mount -------------------------------------------------------------------
 
-"$HELPER" -o "dcfs.fstype=bind,dcfs.cache_db=$DB,dcfs.foreground" "$SRC" "$MNT" \
+"$HELPER" -o "dcfs.cache_db=$DB,dcfs.foreground" "$SRC" "$MNT" \
     > "$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 
