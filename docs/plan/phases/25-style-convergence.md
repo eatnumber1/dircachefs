@@ -905,3 +905,30 @@ existing file that is not owned by root or not 0600 (no fix-up, no
 WARNING path: the administrator fixes it), and the README's section on
 cache permissions says that one rule. Tests: the permission-comparison
 tests become the two refusals. No back-compat. Mechanical.
+
+## 25.27 Mechanical duplicate-code detection (russ, 2026-10-11; parked, after the reset)
+
+russ: "let's schedule some time to investigate mechanical tools for
+measuring code duplication. I've seen several cases where there's clearly
+duplicate code in our codebase, and I want to catch that without relying
+on AI or human review and prompt the code author to refactor instead of
+duplicate." Investigation first, then a gate: (1) candidates that work on
+tokens or the AST rather than text, pinned through Bazel: PMD's CPD (token
+based, C++ supported, Java runtime, which the TLA+ tooling already pins),
+jscpd (token based, Node), Simian, and clang's own `clang-query` for the
+structural near-duplicates CPD misses (two functions whose statement
+sequences match modulo identifiers), plus the LLVM `llvm-cov`-independent
+option of a small AST hash per function (a clang tool built in the
+toolchain we pin); shell is in scope too (26.18 shrinks it, but what
+remains is where copies hide); (2) measure each on the tree: the known
+duplicates as the labelled set (the three fork/exec copies in fsck.cc,
+backing_capture.cc and umount_helper.cc that 26.22 noted; the xattr
+reopen branch 25.11 removes; the two size helpers 26.17a merged; the
+`uptime_ms` copies 26.20 merged; the private `loop()` in
+sqlite_durability.sh that 26.17a folded) and the false-positive rate on
+honest repetition (BUILD files, the fault scripts' check blocks); (3) the
+gate: a `small` test with a baseline that only shrinks (the shape every
+other check has), failing on a new duplicate above the threshold and
+naming both sites, so the author sees it before the reviewer does; a
+report of existing duplicates ordered by size as the backlog. Owner:
+dcfs-investigator. Not before the reset.

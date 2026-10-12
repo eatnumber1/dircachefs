@@ -3232,3 +3232,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 
 
 
+- russ: investigate mechanical duplicate-code detection later (token/AST tools pinned through
+  Bazel, a shrinking baseline, named sites); parked as 25.27 with the known duplicates as the
+  labelled set. Not now: overage credits.
