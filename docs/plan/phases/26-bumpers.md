@@ -515,6 +515,10 @@ Merged 2026-10-11:
   xfstests cost lines and side-by-side native comparison (scripts/xfstests_costs.py,
   xfstests_costs_test, xfstests_notrun_test); xfstests_1_test_ext4 shard budgets
   calibrated. Full suites green: fast (299 pass), presubmit (444 pass), tools (38 pass).
+- 26.17 non-SMT pinning off by default (ef8145e): Finding 6 from trial-2026-10-11
+  applied; non-SMT core pinning is off by default and enabled only for budget-measuring
+  runs (DCFS_PIN_NON_SMT=1); run-qemu.sh header, test/qemu/README.md, and
+  run_qemu_cost_test self-check updated.
 
 ## 26.18 End-to-end tests: assertions and oracles in C++ (russ, 2026-10-09, approved; start after the weekly quota resets, Friday 2026-10-16)
 
