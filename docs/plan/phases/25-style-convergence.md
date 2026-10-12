@@ -286,15 +286,15 @@ consider on a case-by-case basis."
   holds exactly his approvals.
 Owner: dcfs-implementer, after the current rounds land (budget), before
 25.2.
-Status 2026-10-11: audit completed (bd0083b, lane-3; docs/plan/notes/crash-audit-25.9.md).
-Census found 25 CHECK sites in production (1 clean conversion to RET_CHECK in
-`ReplyNone`; 17 FUSE pointer checks convertible to RET_CHECK_NE inside Serve
-lambdas; 1 formal case for crash in `RestoreRoot`; 6 lifecycle/session checks),
-0 LOG(FATAL), 1 abort() (fork_split.h parent return guard: case for abort vs _exit(127)),
-0 assert(), 0 std::terminate, and 10 exit()/_exit() sites (8 subprocess exits,
-2 CLI wrapper exits, 1 detachment failure convertible to Status).
-Constructor audit confirmed zero fallible work in constructors across production.
-All 38 tools tests passed. Awaiting Russ's ruling on the formal cases.
+Status 2026-10-12: Step 25.9 complete (merged b08f37a). Converted all first-party
+crashes in production code:
+- `dcfs/fuse_request.h/.cc`: `ReplyNone` converted to `RET_CHECK(req_.has_value())` returning `absl::Status`.
+- `dcfs/fuse_ops.cc`: All 17 pointer null checks converted to `RET_CHECK_NE` inside `Serve` lambdas; redundant `Link` check removed; `Init`/`Destroy` null handling safely logged.
+- `dcfs/fork_split.h`: Parent callback returns `int` exit code; `ForkSplit` calls `syscalls::_exit(status)` instead of `std::abort()`.
+- `dcfs/startup_channel.cc`: `BecomeDaemon` returns `absl::StatusOr<StartupReporter>`; `DetachDaemon` errors surfaced via `Status`.
+- `dcfs/syscalls_backing.h/.cc`: Implemented `PoisonBacking()` and `IsBackingPoisoned()`. Backing syscalls check `IsBackingPoisoned()` and return `absl::InternalError`.
+- `dcfs/backing.cc`: `RestoreRoot` sets `syscalls::PoisonBacking()` and calls `fuse_session_exit` on credential restoration failure instead of `CHECK`.
+- `tools/style_checks_allow.txt`: All 23 `check_in_production` allowlist entries completely removed and enforced by style checks.
 
 Exception and its inverse (russ, 2026-10-09): "crashes are permitted in
 tests when invariants fail that aren't under test. Like if we fail to
