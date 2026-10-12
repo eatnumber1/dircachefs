@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
@@ -186,7 +187,7 @@ class Statement {
   // SQL text, which is not cheap.
   std::string ExpandedSql() const;
 
-  sqlite3_stmt *Get() const;
+  sqlite3_stmt *absl_nullable Get() const;
 
   Statement(Statement &&) noexcept;
   Statement(const Statement &) = delete;
@@ -202,7 +203,7 @@ class Statement {
   // SQLITE_OK.
   absl::Status StatusFromRc(int rc) const;
 
-  sqlite3_stmt *stmt_ = nullptr;
+  sqlite3_stmt *absl_nullable stmt_ = nullptr;
 };
 
 // A single SQLite connection. Move-only: exactly one Connection should own a
@@ -232,7 +233,7 @@ class Connection {
   // text twice returns the *same* underlying Statement -- do not hold the
   // returned pointer across another Prepared() call for the same SQL, since
   // that call will reset and clear the bindings out from under you.
-  absl::StatusOr<Statement *> Prepared(std::string_view sql);
+  absl::StatusOr<Statement *absl_nonnull> Prepared(std::string_view sql);
 
   // Runs `body` inside a transaction: BEGIN IMMEDIATE, then COMMIT if body()
   // returns OK, else ROLLBACK and return body's status (annotated with the
@@ -265,17 +266,26 @@ class Connection {
   // handle (sqlite3_set_clientdata), so it follows a moved Connection and
   // reaches statements prepared outside the cache. Context's Observe sets
   // it.
-  void set_observer(ProtocolEvents *observer);
+  void set_observer(ProtocolEvents *absl_nullable observer);
 
-  // Runs a WAL checkpoint that writes every committed frame back into the
-  // main database file and then truncates the WAL file to zero bytes
-  // (SQLITE_CHECKPOINT_TRUNCATE), so nothing is left in it for the next
-  // startup (or another process) to replay. A no-op (returns OkStatus)
-  // when the database isn't in WAL mode (e.g. ":memory:"). See
-  // https://www.sqlite.org/c3ref/wal_checkpoint_v2.html
-  absl::Status Checkpoint();
+  enum class CheckpointMode {
+    kPassive = SQLITE_CHECKPOINT_PASSIVE,
+    kFull = SQLITE_CHECKPOINT_FULL,
+    kRestart = SQLITE_CHECKPOINT_RESTART,
+    kTruncate = SQLITE_CHECKPOINT_TRUNCATE,
+  };
 
-  ::sqlite3 *Get() const;
+  // Runs a WAL checkpoint (sqlite3_wal_checkpoint_v2). Writes committed frames
+  // back into the main database file. Under kTruncate, truncates the WAL file
+  // to zero bytes. Under kPassive, checkpoints as many frames as possible
+  // without blocking active readers and returns OkStatus even if some frames
+  // could not be checkpointed due to read locks (SQLITE_BUSY). A no-op (returns
+  // OkStatus) when the database isn't in WAL mode (e.g. ":memory:").
+  absl::Status Checkpoint(CheckpointMode mode = CheckpointMode::kTruncate,
+                          int *absl_nullable log_frames = nullptr,
+                          int *absl_nullable checkpointed_frames = nullptr);
+
+  ::sqlite3 *absl_nullable Get() const;
 
   // Finalizes cached statements and closes the underlying database. Safe to
   // call more than once. The destructor calls this and discards any error,
@@ -309,7 +319,7 @@ class Connection {
   // Transaction() without the durability handling.
   absl::Status RunTransaction(absl::FunctionRef<absl::Status()> body);
 
-  ::sqlite3 *db_ = nullptr;
+  ::sqlite3 *absl_nullable db_ = nullptr;
   // Owns every Statement handed out by Prepared(). unique_ptr so that
   // pointers returned by Prepared() stay valid across map rehashes.
   absl::flat_hash_map<std::string, std::unique_ptr<Statement>> statement_cache_;

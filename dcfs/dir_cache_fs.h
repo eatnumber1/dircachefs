@@ -216,6 +216,12 @@ class DirCacheFS : private events::Bookkeeping {
   // next fsync, or a clean shutdown. That is safe; it only makes the
   // re-read after a crash larger.
   void MaybeSyncBacking();
+  // Periodic WAL checkpoint tied to --sync_interval_sec (russ, 2026-10-12:
+  // permitted exception to the "no timers" rule). Folds committed WAL frames
+  // into the database file on request arrival if opts_.sync_interval has
+  // elapsed since the last checkpoint, preventing WAL starvation under
+  // read-heavy workloads.
+  void MaybeCheckpointWal(absl::Time now);
   // Whether a sync point has a reason to run now (see SyncBackingNow).
   bool SyncDue(absl::Time now) const;
 
@@ -658,6 +664,9 @@ class DirCacheFS : private events::Bookkeeping {
   absl::flat_hash_set<int64_t> open_files_held_;
   // When the last sync point ran (or was attempted); see MaybeSyncBacking.
   absl::Time last_sync_;
+  // When the last periodic WAL checkpoint ran (or was attempted); see
+  // MaybeCheckpointWal.
+  absl::Time last_wal_checkpoint_;
   // When a request last reached the backing filesystem; InfinitePast before
   // the first (the start's own reads are not requests).
   absl::Time last_backing_access_ = absl::InfinitePast();

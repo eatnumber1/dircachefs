@@ -11,6 +11,7 @@
 #include <string_view>
 #include <utility>
 
+#include "absl/base/nullability.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/function_ref.h"
@@ -327,11 +328,22 @@ absl::Status Connection::Close() {
   return absl::OkStatus();
 }
 
-absl::Status Connection::Checkpoint() {
-  int rc = sqlite3_wal_checkpoint_v2(
-      db_, /*zDb=*/nullptr, SQLITE_CHECKPOINT_TRUNCATE, /*pnLog=*/nullptr,
-      /*pnCkpt=*/nullptr);
-  if (rc != SQLITE_OK) return LastErrorStatus();
+absl::Status Connection::Checkpoint(CheckpointMode mode,
+                                    int *absl_nullable log_frames,
+                                    int *absl_nullable checkpointed_frames) {
+  if (db_ == nullptr) return absl::OkStatus();
+  int log = 0;
+  int ckpt = 0;
+  int rc = sqlite3_wal_checkpoint_v2(db_, /*zDb=*/nullptr,
+                                     static_cast<int>(mode), &log, &ckpt);
+  if (log_frames != nullptr) *log_frames = log;
+  if (checkpointed_frames != nullptr) *checkpointed_frames = ckpt;
+  if (rc != SQLITE_OK) {
+    if (mode == CheckpointMode::kPassive && rc == SQLITE_BUSY) {
+      return absl::OkStatus();
+    }
+    return LastErrorStatus();
+  }
   return absl::OkStatus();
 }
 

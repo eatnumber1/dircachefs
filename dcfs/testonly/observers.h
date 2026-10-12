@@ -219,6 +219,9 @@ class Observers final : public ProtocolEvents {
   void Checkpointed(Context &ctx) override {
     for (ProtocolEvents *o : observers_) o->Checkpointed(ctx);
   }
+  void WalCheckpointed(Context &ctx) override {
+    for (ProtocolEvents *o : observers_) o->WalCheckpointed(ctx);
+  }
   void CleanShutdownRecorded(Context &ctx) override {
     for (ProtocolEvents *o : observers_) o->CleanShutdownRecorded(ctx);
   }

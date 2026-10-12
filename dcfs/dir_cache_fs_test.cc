@@ -548,9 +548,9 @@ class DirCacheFSTest : public ::testing::Test {
 
   // Starts the filesystem over the source tree built so far: a fresh
   // cache, a DirCacheFS, and a libfuse session that has seen FUSE_INIT.
-  void Start() {
-    ASSERT_OK_AND_ASSIGN(db_,
-                         sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
+  void Start(std::string_view db_path = ":memory:") {
+    ASSERT_OK_AND_ASSIGN(
+        db_, sqlite3::ConnectionFactory{.path = std::string(db_path)}.Open());
     // Every request (and backing syscall) checks the invariants
     // (dcfs/testonly/invariant_checker.h); a violation aborts the test.
     checker_ = std::make_unique<testonly::InvariantChecker>();
@@ -3270,6 +3270,42 @@ TEST_F(ClockTest, PeriodicSyncPointFollowsTheInjectedClock) {
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
   EXPECT_TRUE(attr.valid);
   EXPECT_EQ(attr.st.st_size, 5);
+}
+
+// The periodic WAL checkpoint runs once opts_.sync_interval has elapsed on the
+// injected clock, even if there are no dirty rows, checkpointing accumulated
+// WAL frames passively without blocking readers or requiring timers.
+TEST_F(ClockTest, PeriodicWalCheckpointFollowsTheInjectedClock) {
+  std::string db_file = absl::StrCat(source_, "_wal.sqlite");
+  WriteFile(Path("f"));
+  Start(db_file);
+
+  // Clear the initial startup dirty state so that ctx_.dirty.any is false.
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());
+  counter_.Reset();
+
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+
+  EXPECT_EQ(counter_.counts().wal_checkpoints, 0);
+
+  clock_.AdvanceTime(absl::Seconds(4));
+  Tick();
+  EXPECT_EQ(counter_.counts().wal_checkpoints, 0)
+      << "before the interval has elapsed";
+
+  clock_.AdvanceTime(absl::Seconds(2));
+  Tick();
+  EXPECT_EQ(counter_.counts().wal_checkpoints, 1)
+      << "once, after the interval has elapsed";
+  Tick();
+  EXPECT_EQ(counter_.counts().wal_checkpoints, 1)
+      << "not again until another interval has elapsed";
+
+  clock_.AdvanceTime(absl::Seconds(5));
+  Tick();
+  EXPECT_EQ(counter_.counts().wal_checkpoints, 2)
+      << "again after the second interval has elapsed";
 }
 
 // Collects every log line, VLOG lines included, with its severity while it

@@ -168,7 +168,10 @@ absl::Status CreatedButNotCompleted(InodeId parent, std::string_view name,
 }  // namespace
 
 DirCacheFS::DirCacheFS(Context &ctx, const Options &opts)
-    : ctx_(ctx), opts_(opts), last_sync_(ctx.clock->TimeNow()) {
+    : ctx_(ctx),
+      opts_(opts),
+      last_sync_(ctx.clock->TimeNow()),
+      last_wal_checkpoint_(ctx.clock->TimeNow()) {
   ctx_.open_for_write = &open_for_write_;
   ctx_.open_files = &open_files_held_;
   std::string source;
@@ -619,9 +622,28 @@ bool DirCacheFS::SyncDue(absl::Time now) const {
                                                     ctx_.dirty.atime_expiry);
 }
 
+void DirCacheFS::MaybeCheckpointWal(absl::Time now) {
+  if (opts_.sync_interval <= absl::ZeroDuration()) return;
+  if (now - last_wal_checkpoint_ < opts_.sync_interval) return;
+  last_wal_checkpoint_ = now;
+  // Periodic WAL checkpoint tied to --sync_interval_sec (russ, 2026-10-12:
+  // permitted exception to the "no timers" rule). Prevents WAL accumulation
+  // and reader starvation during continuous read workloads.
+  absl::Status s =
+      ctx_.db.Checkpoint(sqlite3::Connection::CheckpointMode::kPassive);
+  if (!s.ok()) {
+    LOG(WARNING) << "periodic WAL checkpoint failed: " << s;
+    return;
+  }
+  ctx_.events->WalCheckpointed(ctx_);
+}
+
 void DirCacheFS::MaybeSyncBacking() {
   absl::Time now = ctx_.clock->TimeNow();
-  if (!SyncDue(now)) return;
+  if (!SyncDue(now)) {
+    MaybeCheckpointWal(now);
+    return;
+  }
   if (now - last_sync_ < opts_.sync_interval) return;
   SyncBackingNow("periodic");
 }
@@ -639,6 +661,7 @@ void DirCacheFS::NoteBackingAccess(std::string_view what, absl::Time at) {
 void DirCacheFS::SyncBackingNow(std::string_view why) {
   if (!SyncDue(ctx_.clock->TimeNow())) return;
   last_sync_ = ctx_.clock->TimeNow();
+  last_wal_checkpoint_ = last_sync_;
   // Only the periodic sync points are announced at INFO: an fsync runs one
   // per call, while the dirty set is non-empty.
   if (absl::Status status = backing::SyncBacking(ctx_, why == "periodic");

@@ -37,6 +37,7 @@ class CostCounter final : public ProtocolEvents {
     int64_t transactions = 0;          // outermost transactions begun
     int64_t durable_transactions = 0;  // ... of them committed with a WAL fsync
     int64_t backing_calls = 0;         // ProtocolEvents::BackingCall hooks
+    int64_t wal_checkpoints = 0;       // ProtocolEvents::WalCheckpointed hooks
     std::map<std::string, int64_t> requests;  // FUSE requests, by opcode
   };
 
@@ -50,6 +51,7 @@ class CostCounter final : public ProtocolEvents {
   void SqliteTransaction(bool durable) override;
   void BackingCall(Context &ctx, std::string_view what,
                    absl::SourceLocation site) override;
+  void WalCheckpointed(Context &ctx) override;
   void CheckRequestBegin(Context &ctx, const events::Bookkeeping &fs,
                          const events::Request &request) override;
   void CheckRequestEnd(Context &ctx, const events::Bookkeeping &fs,

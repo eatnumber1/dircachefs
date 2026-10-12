@@ -148,6 +148,53 @@ TEST(ConnectionTest, CheckpointTruncatesWal) {
   EXPECT_EQ(select->Column<int64_t>(0), 1);
 }
 
+TEST(ConnectionTest, CheckpointPassiveCheckpointsFramesWithoutTruncating) {
+  std::string path = TestTmpFile("checkpoint_passive.sqlite");
+  ASSERT_OK_AND_ASSIGN(Connection conn, ConnectionFactory{.path = path}.Open());
+  ASSERT_THAT(conn.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
+  ASSERT_THAT(conn.Exec("INSERT INTO t (id) VALUES (1)"), IsOk());
+
+  std::string wal_path = absl::StrCat(path, "-wal");
+  ASSERT_OK_AND_ASSIGN(struct stat before_stat,
+                       syscalls::fstatat(AT_FDCWD, wal_path));
+  EXPECT_GT(before_stat.st_size, 0);
+
+  int log_frames = 0;
+  int ckpt_frames = 0;
+  ASSERT_THAT(conn.Checkpoint(Connection::CheckpointMode::kPassive, &log_frames,
+                              &ckpt_frames),
+              IsOk());
+  EXPECT_GT(log_frames, 0);
+  EXPECT_EQ(ckpt_frames, log_frames);
+
+  ASSERT_OK_AND_ASSIGN(struct stat after_stat,
+                       syscalls::fstatat(AT_FDCWD, wal_path));
+  EXPECT_EQ(after_stat.st_size, before_stat.st_size);
+
+  ASSERT_OK_AND_ASSIGN(Statement * select, conn.Prepared("SELECT id FROM t"));
+  ASSERT_THAT(select->Step(), IsOkAndHolds(true));
+  EXPECT_EQ(select->Column<int64_t>(0), 1);
+}
+
+TEST(ConnectionTest, CheckpointPassiveWithReaderReturnsOkStatus) {
+  std::string path = TestTmpFile("checkpoint_passive_reader.sqlite");
+  ASSERT_OK_AND_ASSIGN(Connection conn, ConnectionFactory{.path = path}.Open());
+  ASSERT_THAT(conn.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
+  ASSERT_THAT(conn.Exec("INSERT INTO t (id) VALUES (1)"), IsOk());
+
+  ASSERT_OK_AND_ASSIGN(Connection reader,
+                       ConnectionFactory{.path = path}.Open());
+  ASSERT_THAT(reader.Exec("BEGIN"), IsOk());
+  ASSERT_THAT(reader.Exec("SELECT count(*) FROM t"), IsOk());
+
+  EXPECT_THAT(conn.Checkpoint(Connection::CheckpointMode::kPassive), IsOk());
+
+  EXPECT_THAT(conn.Checkpoint(Connection::CheckpointMode::kTruncate),
+              StatusIs(absl::StatusCode::kUnavailable));
+
+  ASSERT_THAT(reader.Exec("ROLLBACK"), IsOk());
+}
+
 TEST(ConnectionTest, CheckpointOnInMemoryDatabaseIsANoOp) {
   ASSERT_OK_AND_ASSIGN(Connection conn, OpenMemory());
   ASSERT_THAT(conn.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
