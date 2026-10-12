@@ -56,13 +56,22 @@ process (its waves and file ownership table) is in `history.md`.
 4. **Report.** The agent ends with: a diff summary, the test commands it
    ran with results (including the failing-first run), coverage of the
    code it added (from Phase 7), and any deviation from the plan.
-5. **Review** (orchestrator, in the lane): read the full diff and run the step's tests
-   and the tier russ expects for the phase (see "Running tests"). Check:
+5. **Review** (dedicated reviewer subagent `dcfs-code-reviewer` plus
+   orchestrator, in the lane): before any code is committed, the full diff
+   is reviewed by the dedicated Code Reviewer subagent (`dcfs-code-reviewer`),
+   which enforces `AGENTS.md`, `docs/style.md` (including section 1.9's
+   Comments & Documentation Standards), Abseil Tips of the Week, and the
+   project invariants before giving an APPROVAL. The orchestrator runs the
+   step's tests and the tier russ expects for the phase (see "Running tests").
+   Check:
    - the rules in `/AGENTS.md` (test first, fakes not mocks, test code
      out of production files, warnings, names as bytes, `third_party/`)
      and `/docs/style.md` (StatusBuilder helpers, flat namespaces,
      `syscalls::` call form, manpage-named wrappers only in `syscalls.h`,
-     `enum class`, message wording, comment style);
+     `enum class`, message wording, and the new Comments & Documentation
+     Standards: Self-Explanatory Code First, Document Timeless Invariants /
+     Deliberate Omissions / Subtle Caveats, and Ban Redundant Method-Name-Echoing
+     Docstrings);
    - the dcfs invariants: every cache/backing function takes `Context&`;
      no paths after startup (objects are reached by fd or handle; Phase 13
      opens names relative to a parent fd, which is still not a path); no

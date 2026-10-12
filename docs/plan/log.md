@@ -3233,12 +3233,23 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 17.2 merged 0503f91 (lane-2): setgid dropped on unprivileged writes (finding from 17.1): FallocateFd, WriteFile (fallback) and CopyFileRangeFd in dcfs/backing.cc now run under AsCaller(caller, ...); unit tests in dir_cache_fs_test.cc verify setgid dropped (02666 -> 0666) for callers outside the file's group while root and group members retain it; guest credentials.sh tests all write-family operations against native filesystem and cold cache; generic/683-685 removed from xfstests expected failure lists across ext4/xfs/btrfs. All unit and tools tests pass. Push point: main at this commit.
 - 15.11 follow-up merged 6249b99 (lane-1): removed obsolete dcfs.fstype=bind from guest test scripts (guest/lib.sh, lifecycle.sh, sqlite_durability.sh), tools (smoke_readonly.sh), benchmarks (bench/process.cc) and docs (test/qemu/README.md), and deleted obsolete ro-capture-$form-refused block from fault_shutdown.sh left behind when native namespace capture was deleted in aa47d11; resolved 46 QEMU test failures under local CI (act -j fast). Lane-1 free. Push point: main at this commit.
 - 25.9 merged b08f37a (lane-1): converted remaining first-party crashes in production code to Status returns, RET_CHECK macros, and backing self-poisoning; converted ReplyNone to return Status; converted 17 FUSE pointer null checks to RET_CHECK_NE inside Serve lambdas; parent callback in ForkSplit returns exit status and ForkSplit calls _exit(status) instead of std::abort(); BecomeDaemon returns StatusOr; implemented syscalls::PoisonBacking() and IsBackingPoisoned() in syscalls_backing; RestoreRoot poisons backing and requests session exit on credential restoration failure; removed all 23 check_in_production allowlist entries from tools/style_checks_allow.txt. Lane-1 free. Push point: main at this commit.
-- 7.2/7.4 merged a2cf18d (lane-1): support coverage builds with sanitizers active (ASan and UBSan); defined coverage_asan_build and coverage_ubsan_build config_settings in test/qemu/BUILD.bazel, updated mem_args_for in test/qemu/qemu_test.bzl to supply 256 MiB additional RAM to QEMU guests when both coverage and sanitizer instrumentation are active (preventing early kernel panic during initramfs unpacking); added coverage:asan and coverage:ubsan configs to .bazelrc; updated ForkSplit in dcfs/fork_split.h to unwrap nested StatusOr and support void/int parent return types, fixing cov_fork_fixture compilation; verified all 109 fast tests pass under `bazel coverage --config=asan --config=fast //...`, style_checks_test and format_test pass, and local CI `act -j subjects` and `act -j fast` pass with 298 tests passing. Push point: main at this commit.
-
-
-
-
+- russ (2026-10-12): strategic directives and review process established:
+  1. Memory Fragmentation / RSS: confirmed non-issue for dcfs due to bounded SQLite page cache,
+     transient request buffers, and disk-backed metadata. No custom allocator needed.
+  2. Code review process: established dedicated pre-commit Code Reviewer subagent (`dcfs-code-reviewer`)
+     equipped with all style guides and the new Comments & Documentation Standards in style 1.9
+     (Self-Explanatory Code First, Document Timeless Invariants/Footguns/Deliberate Omissions, Ban
+     Redundant Method-Name-Echoing Docstrings). Updated docs/style.md and docs/plan/process.md.
+  3. Minimum-Kernel Compatibility Testing: scheduled Step 5.5 in phases/05-ci.md and README.md to test
+     Linux 6.9 in CI alongside Alpine's 6.18.
+  4. SQLite WAL Checkpointing: approved tying periodic WAL checkpoints to --sync_interval_sec to
+     prevent WAL starvation under read-heavy workloads.
+  5. Link-time --wrap removal: approved complete elimination of link-time -Wl,--wrap flags, replacing
+     interception with a dependency-injected virtual inheritance `Syscalls` interface class (keeping
+     lowercase libc/syscall names as an exception to PascalCase).
+  6. Technical debt burn-down: approved pruning legacy allowlists and target proliferation.
 
 - russ: investigate mechanical duplicate-code detection later (token/AST tools pinned through
   Bazel, a shrinking baseline, named sites); parked as 25.27 with the known duplicates as the
   labelled set. Not now: overage credits.
+

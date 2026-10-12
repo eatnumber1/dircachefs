@@ -976,21 +976,52 @@ each.
   100 ms checks for interruption at safe points and has a cancellation
   test.
 
-### 1.9 Comments
+### 1.9 Comments and documentation standards
 
-Google asks for comments on non-obvious declarations; the norm here is
-more: about one line in four (3,706 of 15,580), saying why, not what.
-- Code added for a reason names its source: the plan step (`step 23.2`,
+russ, 2026-10-12: "Comments explain invariants and the non-obvious why, never
+the obvious what or how." Apply the core principles:
+
+- **Self-explanatory code first.** Express preconditions, valid states, and
+  argument order through the type system (`DEFINE_STRONG_INT_TYPE`), RAII
+  wrappers (`FdHolder`, `FileDescriptor`), `static_assert`, and C++20 `requires`
+  concepts. Zero comments on obvious accessors, getters, setters, or standard
+  operators (`operator*`, `operator->`). If a comment merely restates what the
+  types, names, or compiler checks say, delete the comment.
+- **Document timeless invariants, footguns, and deliberate omissions.** Comments
+  are strictly reserved for things the type system cannot express:
+  - *Deliberate design omissions*: Why an obvious method or capability was
+    intentionally excluded (e.g. `RunningUnderBorglet is intentionally not
+    available here...`).
+  - *Subtle kernel / hardware caveats*: Traps, signal safety, or platform
+    behaviors (e.g., why ASan shadow memory must be excluded from userfaultfd).
+  - *Concurrency & memory-ordering protocols*: Non-obvious memory orders (e.g.,
+    explaining why `active_start` relaxed stores are paired with
+    `sys_membarrier(MEMBARRIER_CMD_GLOBAL_EXPEDITED)` on the evictor side).
+  - *Permanent bug workarounds*: Workarounds for infrastructure defects citing
+    permanent trackers (e.g., `// Per github.com/torvalds/linux/bug/...,
+    prevents ext4 corruption`).
+- **Ban redundant method-name-echoing docstrings.** Never write a docstring
+  whose words simply mirror the function name and arguments:
+  - ❌ `// Prefaults a virtual address range into memory.`
+    `absl::Status PrefaultRange(uintptr_t vaddr, size_t len);`
+  - ❌ `// Discards pages in range.`
+    `absl::Status DiscardRange(...);`
+  - ❌ `// Returns the page state.`
+    `PageState GetPageState(...);`
+  Only document a method if it has non-obvious lifetime bindings
+  (`ABSL_ATTRIBUTE_LIFETIME_BOUND`), transfer of ownership, side-effects, or
+  concurrency preconditions.
+- **Code added for a reason names its source**: the plan step (`step 23.2`,
   `dir_cache_fs.cc:532`), the audit finding (`audit-tristate F1`,
   `context.h:37`), the conformance case ("found via pjdfstest's chmod/02.t:
   a name one byte past NAME_MAX got ENOENT ... instead of ENAMETOOLONG",
   `backing.cc:1185`), the model step (`// Model: UnlinkPhase1's ENOENT
   branch`, `dir_cache_fs.cc:836`) or the commit (`fuse_request_channel_
   test.cc:1`: "Regression test for 0795d12").
-- Length: one to three lines for a block, up to about ten for a non-local
-  invariant; longer reasoning goes in `docs/design.md` and the comment
-  points to it. No restating the code, no changelog ("fixed in step N" is
-  the commit's).
+- **Length**: one to three lines for a block, up to about ten for a non-local
+  invariant; longer reasoning goes in `docs/design.md` and the comment points
+  to it. No restating the code, no changelog ("fixed in step N" is the
+  commit's).
 - `/* */` only for argument names (`/*is_dir=*/false`) and in `tools/*.c`.
 
 ### 1.10 One abstraction over variants; branching is discouraged
