@@ -3249,7 +3249,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
      lowercase libc/syscall names as an exception to PascalCase).
   6. Technical debt burn-down: approved pruning legacy allowlists and target proliferation.
 
-- russ: investigate mechanical duplicate-code detection later (token/AST tools pinned through
-  Bazel, a shrinking baseline, named sites); parked as 25.27 with the known duplicates as the
-  labelled set. Not now: overage credits.
+- 25.28 merged ae8db94 (lane-1): periodic SQLite WAL checkpoints tied to
+  --sync_interval_sec; Connection::Checkpoint supports CheckpointMode::kPassive;
+  DirCacheFS::MaybeCheckpointWal passively checkpoints committed WAL frames
+  upon request arrival if opts_.sync_interval has elapsed and no sync point
+  is due; ProtocolEvents::WalCheckpointed hook and CostCounter tracking; unit
+  test ClockTest.PeriodicWalCheckpointFollowsTheInjectedClock verifies passive
+  checkpoints run under pure read workloads. Push point: main at this commit.
 

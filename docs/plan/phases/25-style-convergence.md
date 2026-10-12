@@ -932,3 +932,16 @@ other check has), failing on a new duplicate above the threshold and
 naming both sites, so the author sees it before the reviewer does; a
 report of existing duplicates ordered by size as the backlog. Owner:
 dcfs-investigator. Not before the reset.
+
+## 25.28 Periodic SQLite WAL checkpoints tied to sync_interval (russ, 2026-10-12)
+
+Under continuous read loads, WAL checkpoint starvation can occur because
+no mutations trigger write transactions and readers hold locks.
+On request arrival, if `opts_.sync_interval` has elapsed and no sync
+point is due (`!SyncDue(now)`), run `sqlite3_wal_checkpoint_v2` with
+`SQLITE_CHECKPOINT_PASSIVE`, which folds committed frames back into the
+main database without blocking readers or requiring timers (a permitted
+exception to the "no timers" rule per russ, 2026-10-12). If a sync point
+is due, `SyncBackingNow` performs the sync point and updates
+`last_wal_checkpoint_ = last_sync_`. Completed in ae8db94.
+
