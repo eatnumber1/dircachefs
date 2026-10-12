@@ -46,6 +46,10 @@ KVM_GID="$(getent group kvm | cut -d: -f3)"
 # The memory cap keeps a job's out-of-memory kill inside its own container
 # (a global OOM kill on a shared machine picks the biggest process of anyone).
 OPTS="--label dcfs.owner=act --memory ${DCFS_ACT_MEMORY:-6g}"
+HOST_REPO_CACHE="${HOME}/.cache/bazel/_bazel_${USER:-$(id -un)}/cache/repos"
+if [ -d "$HOST_REPO_CACHE" ]; then
+	OPTS="$OPTS -v $HOST_REPO_CACHE:/root/.cache/bazel/_bazel_root/cache/repos:ro"
+fi
 if [ -c /dev/kvm ] && [ -z "${DCFS_ACT_NO_KVM:-}" ]; then
 	OPTS="$OPTS --device /dev/kvm"
 	[ -n "$KVM_GID" ] && OPTS="$OPTS --group-add $KVM_GID"
