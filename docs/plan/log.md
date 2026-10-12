@@ -3256,4 +3256,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   is due; ProtocolEvents::WalCheckpointed hook and CostCounter tracking; unit
   test ClockTest.PeriodicWalCheckpointFollowsTheInjectedClock verifies passive
   checkpoints run under pure read workloads. Push point: main at this commit.
+- 5.2 merged 490b667: third_party/act mounts host repository cache into runner container at
+  /root/.cache/bazel/_bazel_root/cache/repos:ro. This enables fully offline local CI workflows
+  under act (`bazel run //third_party/act -- -j fast`) without 504 Gateway Time-out errors on
+  remote external dependencies. Verified 298 passed, 2 skipped, 278/278 KVM accelerated.
+- russ: Agent operation and review process policies (2026-10-12):
+  1. Capture everything in the repository: design decisions, postmortems, review guidelines, and logs
+     are tracked in docs/plan/, docs/design.md, and docs/style.md; nothing remains ephemeral.
+  2. Orchestrator liveness invariant: when working unattended, orchestrator enforces active worker
+     execution via manage_subagents(Action='list'); idle listeners are not counted as active work;
+     watchdog timers (schedule tool, 300s) actively monitor long-running background tasks.
+
 
