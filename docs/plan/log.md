@@ -3265,6 +3265,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
      are tracked in docs/plan/, docs/design.md, and docs/style.md; nothing remains ephemeral.
   2. Orchestrator liveness invariant: when working unattended, orchestrator enforces active worker
      execution via manage_subagents(Action='list'); idle listeners are not counted as active work;
-     watchdog timers (schedule tool, 300s) actively monitor long-running background tasks.
+     mechanical watchdog monitoring is delegated to `tools/agent_watchdog.py` running continuously
+     in the background to keep `/tmp/dcfs_status.md` fresh without consuming orchestrator turn cycles.
+
+- tools: tools/agent_watchdog.py and tools/agent_watchdog_test.py: standalone mechanical
+  subagent watchdog daemon monitoring ~/.gemini/antigravity-cli/brain/ transcripts, active tasks,
+  and liveness, atomically maintaining /tmp/dcfs_status.md. Fully covered by //tools:agent_watchdog_test.
 
 
