@@ -3984,3 +3984,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   their reviews go to agy's Claude pool (reset to 100%); non-protocol fix
   rounds go to Gemini (week 55% left, five-hour pool 8%). The quota panel
   now refreshes with every lanes upload (staleAfterHours 6).
+- 2026-10-17, russ agrees to the proposals, scheduling aside: 12.21 (the
+  model's environment assumptions registered and enforced, drafted by a
+  Flash-versus-Argon tracing experiment, guard mutation, a signal sweep),
+  12.22 (worst cases by exhaustive and guided search, after M1), and
+  worst-case families in 26.41.

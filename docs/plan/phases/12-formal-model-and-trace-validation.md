@@ -662,3 +662,52 @@ expires or dcfs invalidates them.
 
 Owner: dcfs-protocol, after 25.28b and 22.5 (all three touch dcfs.tla).
 
+## 12.21 The model's environment assumptions, registered and enforced (russ, 2026-10-17: "I agree with your proposals"; queued)
+
+Found because russ asked whether the model covers signal delivery: the
+model starts a clean shutdown only with no request in flight
+(`BeginShutdown`), and the code did not enforce that (25.10's signalfd
+will). Nothing checks the model's guards against the code.
+
+- **The register:** every guard or abstraction in `dcfs.tla` that claims
+  something of the environment (shutdown only when idle, requests never
+  overlap, the kernel waits for a reply after FUSE_INTERRUPT, a backing
+  syscall succeeds or fails cleanly, ...), each with its enforcement: a
+  trace-validation check, a code assertion or a test. An entry without
+  one is a finding. Kept in `formal/README.md`.
+- **First draft by spec-to-code tracing,** run as a measured experiment
+  (process.md rule 5): Gemini Flash as about six narrow jobs (one per
+  group of actions) and Argon as one broad job, on the same frozen commit;
+  about six guards labelled beforehand (BeginShutdown unenforced; no
+  overlap, interrupts only at checkpoints, no checkpoint between a
+  syscall and phase 3 enforced, ...); scored on the known answers,
+  precision (each finding verified by its quote), recall against the union
+  of verified findings, citation accuracy, and quota spent per job
+  (`agy -p "/usage"` before and after). Results in
+  `notes/gemini-sweep-2026-10-17.md`.
+- **Guard mutation (12.13):** a mutant class that removes or weakens one
+  guard at a time; a load-bearing guard must be in the register with its
+  enforcement, a guard whose removal breaks nothing is deleted.
+- **Signal sweep (26.6):** SIGTERM/SIGHUP to the daemon at each backing
+  call site in a guest test, alongside the syscall-fault sweep.
+
+## 12.22 Worst cases nobody listed: exhaustive and guided search (russ, 2026-10-17; after M1)
+
+Prior art: PerfFuzz (Lemieux et al., ISSTA 2018), SlowFuzz (Petsios et
+al., CCS 2017), Singularity (Wei et al., FSE 2018), WISE (Burnim et al.,
+ICSE 2009), Badger (Noller et al., ISSTA 2018); the small scope hypothesis
+and bounded exhaustive testing (Jackson's Alloy; Korat, TestEra).
+
+1. **Model, exhaustive:** 12.20's per-request cost counters; TLC visits
+   every reachable state within the bounds, so an invariant `cost <=
+   f(size)` is proved there or returns the worst state, which becomes a
+   named worst-case scenario.
+2. **Code, exhaustive at small sizes:** every tree and short operation
+   sequence up to a small bound through the in-process harness (forged
+   requests), exact counts recorded, the maximiser kept per size.
+3. **Code, guided search at larger sizes:** a PerfFuzz-style loop over
+   operation sequences with the exact counts (requests, syscalls, SQL
+   steps, per-function coverage counts) as its objective.
+4. Every family found joins 26.41's exact-collinearity slope tests, next
+   to each operation's typical family and a hand-listed worst-case family.
+

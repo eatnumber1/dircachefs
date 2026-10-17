@@ -1294,6 +1294,11 @@ proposal"):
    largest size is the stated limit.
 3. CPU work is instructions retired (user and kernel, 26.36's PMU
    findings) in a few dedicated benchmark scenarios, unheld without a PMU.
+2a. Each operation gets a worst-case input family next to its typical one
+   (readdir with every attribute unknown, lookup among many negative
+   entries, recovery with N dirty rows, rename of a directory with N
+   descendants, unlink of a file with N links), listed in the test file;
+   12.22 searches for the ones nobody listed.
 3a. Internal work, exactly (russ, 2026-10-17: "Agreed to adding (1) and
    (2), with the adjustments you mentioned for deterministic execution"):
    (1) the slope scenarios also run under the coverage build and record
