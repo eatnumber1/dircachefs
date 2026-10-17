@@ -130,7 +130,10 @@ credentials, while the request header's uid and gid are subjective. For
 kernel callers that override credentials (nfsd once dcfs is exported,
 ksmbd, overlayfs) the groups can be wrong. Confirm with a test (nfsd in
 the guest exporting a dcfs mount), then decide the fix. Before dcfs is
-NFS-exported in earnest. dcfs-protocol.
+NFS-exported in earnest. The same root cause, the request not carrying
+the caller's full credentials, leaves one 17.2b edge: a uid 0 caller
+without CAP_FSETID writing a setgid file outside its group keeps setgid
+through dcfs where the backing clears it. dcfs-protocol.
 
 ## 17.3 Performance finding (done 2026-10-11, 313bff6)
 
