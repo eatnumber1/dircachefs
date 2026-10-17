@@ -77,6 +77,38 @@ outside-group callers while root and group members retain it; guest
 credentials.sh tests all write-family operations against native filesystem and
 cold cache; generic/683-685 removed from expected failure lists.
 
+## 17.2b Setgid through passthrough, and a non-owner's EPERM (from the 2026-10-16 review of 15.11)
+
+The review of Gemini's week found two suspected setgid bugs that 17.2's
+tests do not reach. Reproduce each first (test failing on today's code,
+quoted), then fix.
+
+1. **Passthrough writes keep S_ISGID.** A caller outside the file's group
+   writes a 06666 (or 02666 group-executable) file opened with FUSE
+   passthrough: the write never reaches dcfs, and the kernel's FUSE path
+   applies the pre-6.2 rule (`fuse_setattr` drops ATTR_KILL_SGID;
+   notes/kernel-patches.md row 4), and passthrough I/O runs with the
+   backing file's saved credentials (root, CAP_FSETID), so the backing's
+   `file_remove_privs` keeps the bit too. The workaround-first rule
+   applies: dcfs declines passthrough for a writable open of a file with
+   S_ISGID (or S_ISUID) set, so such writes come through dcfs's own write
+   path, which 17.2 already runs inside `AsCaller`; the kernel patch later
+   retires the workaround (recorded in kernel-patches.md row 4). Measure
+   the cost (a guest bench line for writes to a setgid file) and say it in
+   design.md.
+2. **A non-owner's write to a world-writable setgid file fails EPERM**
+   through dcfs where the native filesystem allows it and clears the bit.
+   Find the cause (likely a mode change dcfs issues on the caller's behalf
+   that only the owner may make) and fix it so dcfs answers what the
+   backing answers.
+
+Tests: harness tests for both with forged credentials (outside group,
+group member and root controls), and guest `credentials.sh` checks against
+the same operations on a native directory, warm and after a cold cache;
+xfstests lists updated only if a listed test changes outcome. No protocol
+change is expected (`BeginAttrChange` already marks the record unknown);
+if one appears, the model changes in the same step. Protocol agent.
+
 ## 17.3 Performance finding (done 2026-10-11, 313bff6)
 
 29 metadata-heavy tests run 20-50x slower through dcfs (4-37 s natively,
