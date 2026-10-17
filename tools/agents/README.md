@@ -37,3 +37,27 @@ writing a stale dashboard.
 It polls on a timer, as `docs/style.md` 1.11 allows when nothing can signal:
 a stall is the absence of activity in the harness's transcript files, which
 no event reports. The `--interval` bounds how stale the status file may be.
+
+## claude_usage
+
+Prints the usage panel of Claude Code's `/usage` command as plain text. It
+starts an interactive `claude` in a pseudo-terminal, sends `/usage`, keeps the
+panel and exits.
+
+Run it from the repository root, with a logged-in `claude` on the `PATH`:
+
+```
+timeout 90 python3 -I tools/agents/claude_usage.py
+```
+
+- It prints the panel's lines, one per line, with runs of spaces collapsed.
+- The figures are approximate: they count this machine's local sessions only,
+  not the account's usage elsewhere.
+- It exits 1 with `usage panel not found` when the panel does not appear within
+  its own 60 s deadline, and it kills `claude` before exiting. The `timeout 90`
+  is the outer bound.
+- It has no test and no Bazel test target: it needs a logged-in CLI. The
+  `py_binary` target `//tools/agents:claude_usage` runs it through Bazel too.
+
+Its waits are bounded deadlines, as `docs/style.md` 1.11 allows: the pty has no
+event for "the panel has drawn" or "the prompt is up", so it polls.
