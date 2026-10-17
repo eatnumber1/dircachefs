@@ -946,6 +946,37 @@ is due, `SyncBackingNow` performs the sync point and updates
 `last_wal_checkpoint_ = last_sync_`. Completed in 3a0785a.
 
 
+## 25.9b Finish "no intentional crashes" (review of Gemini's 25.9, 2026-10-16; protocol agent)
+
+The 2026-10-16 review of 25.9 (which went in unreviewed) found the
+conversion incomplete and some of it wrong. Test first for every item.
+
+1. **A setgroups fault test.** The credential switch's `setgroups` failure
+   path has no fault test; add one with the link-time `--wrap` fakes.
+2. **Banned symbols.** `abort`, `exit` in the daemon, `CHECK*`,
+   `LOG(FATAL)`, `assert` and `std::terminate` go in the banned-symbols
+   gate for production code, each existing use converted or listed with
+   russ's approval (no-intentional-crashes rule).
+3. **Delete unreachable null checks** added by 25.9 where the type or the
+   caller already guarantees a value.
+4. **INIT cannot refuse.** When INIT fails in a way the kernel offers no
+   refusal for, the daemon calls `fuse_session_exit` and leaves, rather
+   than carrying on half-initialised.
+5. **No `g_fuse_session`.** Remove the mutable global; `SessionLoop` checks
+   the poisoned state itself (style 1.6b, the poisoned-subsystem pattern).
+6. **Nonzero exit when poisoned.** A daemon that stopped because the
+   backing was poisoned exits nonzero, and a test asserts it.
+7. **One poison guard.** A single guard on the way into every backing
+   wrapper, and a test that walks every wrapper and shows it refuses once
+   poisoned (the 49-site sweep's list is the inventory).
+8. **ForkSplit.** Revert the void-parent branch added to
+   `dcfs/fork_split.h` under 7.2/7.4 (test-only code in production) and fix
+   `cov_fork_fixture` in its own test code instead.
+9. **FORGET double reply.** The FORGET path logs and replies twice on one
+   error path; one reply, one log line, with a test.
+10. **Docs.** style.md 1.6/1.6b, design.md and the README's log-message
+    table match what the code does.
+
 ## 25.28b The sync interval bounds the cache's durability lag (russ, 2026-10-16; protocol agent, after 25.9b)
 
 Replaces 25.28's separate WAL-checkpoint clock (reviewed: it never runs

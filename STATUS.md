@@ -31,7 +31,7 @@ _Last updated: 2026-10-16._
 
 | Step | What | State |
 |---|---|---|
-| 25.9b | Finish "no intentional crashes": the poisoned-backing shutdown test, banned symbols, remove unreachable checks | next |
+| 25.9b | Finish "no intentional crashes": the poisoned-backing shutdown test, banned symbols, remove unreachable checks | in flight |
 | 25.28b | The sync interval bounds the cache's own durability lag after a power cut | queued |
 | 17.2b | Setgid on writes through passthrough: reproduce, then fix | queued |
 | 12.18b | SibylFS's checker as a second oracle on a dcfs mount | queued |
