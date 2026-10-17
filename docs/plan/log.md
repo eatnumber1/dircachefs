@@ -3897,3 +3897,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   default is open: no kernel default exists; an inventory of changes dcfs
   makes behind the kernel's back (and whether it invalidates) is proposed
   before choosing between an effectively infinite timeout and a bound.
+- 2026-10-17, russ: run the kernel-cache invalidation inventory (Gemini
+  Flash, started on main 8278bcc), and "this kind of subtle cache
+  invalidation interaction with the kernel needs to be part of the formal
+  model." 12.20 queued (the kernel's caches, expiry and invalidations in
+  the model, with a property over any timeout).

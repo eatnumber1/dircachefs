@@ -627,3 +627,31 @@ backing barriers and cache fsyncs budgeted exactly in
 `syscall_budgets.txt`, so an extra one fails. Owner: dcfs-protocol, after
 25.28b.
 
+## 12.20 The kernel's caches in the model (russ, 2026-10-17; queued)
+
+russ, on the attr/entry timeouts: "this kind of subtle cache invalidation
+interaction with the kernel needs to be part of the formal model." The
+model has dcfs's cache, the backing and the requests; it does not have the
+kernel's dentry, negative-dentry and attribute caches between the client
+and dcfs, which serve a client without asking dcfs until their timeout
+expires or dcfs invalidates them.
+
+- **State:** what the kernel holds for each name and inode (an entry or
+  attributes, with a validity that is either "until invalidated" or
+  expires on the model's clock), set from dcfs's replies.
+- **Actions:** a client served from the kernel's cache with no request;
+  expiry; dcfs's invalidations (`notify_inval_entry`, `notify_inval_inode`,
+  `notify_delete`); every place dcfs changes or learns something behind
+  the kernel's back (the inventory below).
+- **Property:** what a client observes through the kernel is what 12.16's
+  ideal filesystem allows (or, before 12.16, what the backing holds where
+  the cache is complete), for any timeout, including an effectively
+  infinite one, given the invalidations dcfs makes; a change with no
+  invalidation is a counterexample whose length shows the staleness it
+  causes. A `known_bugs/` variant drops one invalidation.
+- **Input:** the Gemini Flash inventory of such places (2026-10-17,
+  verified by the orchestrator), which also decides 26.39's attr/entry
+  default.
+
+Owner: dcfs-protocol, after 25.28b and 22.5 (all three touch dcfs.tla).
+
