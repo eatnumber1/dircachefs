@@ -284,6 +284,20 @@ Google publishes no per-model numbers):
 Guidelines:
 1. Read `agy -p "/usage"` before every dispatch and note the figures in
    log.md when a job starts.
+What Gemini is good at (2026-10-16, published figures, mostly Google's own,
+so treat them as leads): both Argon and 3.8 Flash take about a million
+tokens of input, and Argon's long-context retrieval is reported best in
+class (GraphWalks 84% at 256K-1M tokens, against Opus 5.5's 67%), so the
+whole dcfs tree (dcfs/, the TLA+ models, the guest scripts, the plan) fits
+in one Argon prompt. It is also positioned for defensive security work.
+Its general coding and agentic scores are weaker than Opus's, and
+independent rankings put it below Opus 5.5. So Gemini's work is
+whole-repository reading that our Claude subagents, which read excerpts,
+do badly: consistency between code, comments, README, design.md and the
+plan; duplicate code across the tree; dead code and stale references
+(15.11's leftovers are the kind); spec-to-code tracing (every TLA+ action
+to its code site and back; every README promise to a test); and security
+reading. Not for writing code, nor for subtle protocol judgement.
 2. Gemini 3.8 Flash for volume (censuses, surveys, mechanical reading);
    Gemini 4 Argon for medium work (reviews, investigations), about ten jobs
    a week, stopping at 10% of its limit; the general pool down to 5%.
