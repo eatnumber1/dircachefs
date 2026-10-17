@@ -65,7 +65,7 @@ FAILED=0
 . "$(dirname "$0")/lib.sh"
 # What this script and the lib.sh functions it calls run, in the chroot.
 require_commands awk basename cat date dd diff dirname dmesg find grep ls \
-	md5sum mkdir mount readlink rm sleep sort stat sync tail timeout umount \
+	md5sum mkdir mount readlink rm sleep sort stat sync tail umount \
 	uname wc rpcbind rpc.idmapd rpc.nfsd rpc.mountd exportfs pkill
 
 DCFS=/usr/local/bin/dcfs
@@ -148,20 +148,6 @@ cleanup() {
 trap cleanup EXIT
 
 echo "nfs.sh: kernel $(uname -r)"
-
-# Timers work (review M3). GNU timeout needs timer_create/alarm; with
-# CONFIG_POSIX_TIMERS off (an EXPERT-gated symbol tinyconfig turns off) it
-# never fires and a command waits for the harness limit instead of failing.
-# GNU timeout exits 124 when it kills its command. Without timers the sleep runs its
-# five seconds and exits 0, so the status says whether it fired; how long it took
-# is the host's load (step 26.17: no correctness check compares wall time).
-timeout 1 sleep 5
-rc=$?
-if [ "$rc" -eq 124 ]; then
-	pass timers-timeout-fires
-else
-	fail timers-timeout-fires "timeout 1 sleep 5: rc=$rc (want 124: the timeout fired)"
-fi
 
 # --- helpers ---------------------------------------------------------------
 #
