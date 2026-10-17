@@ -945,7 +945,7 @@ right quantity. Never widen a budget or add a retry to make it pass
 (AGENTS.md; no retry loops). A real dcfs race found this way is a result,
 not a nuisance. Investigator.
 
-## 26.35 CI run 39000396656 (58a1f17): causes, and the mutation job's missing base (2026-10-17)
+## 26.35 CI run 39000396656 (58a1f17): causes, and the mutation job's missing base (merged 2026-10-17, 8b46484)
 
 The first CI run after the 2026-10-16 trailer rewrite and force-push failed
 five ways. Three were already fixed on main when this step started

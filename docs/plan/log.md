@@ -3696,3 +3696,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   header-only library. Six new misc-include-cleaner findings, all fixed in
   the code (no NOLINT, no allowlist line). The newly analysed headers add
   report-only pointer_without_nullability findings. One style review.
+- 2026-10-17, 26.35 merged (bd486ab, 8b46484): CI run 39000396656 on
+  pushed main 58a1f17 failed. mount_dcfs_systemd_test and every xfstests
+  shard were already fixed on local main (8184e510, 2abffe7a); both pass
+  locally. The coverage gap was closed by 50645bbc. The mutation job's
+  `git diff` failed because the force-pushed main's old tip (d215c09) is
+  in no CI clone: mutate.py now mutates the tip against its parent when
+  the base is not a commit of the checkout, and says so on stderr.
+  Presubmit never runs the large tier, so these first ran on origin; a
+  pre-push run of the large tests the change reaches is put to russ.
