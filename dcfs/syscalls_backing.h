@@ -59,13 +59,16 @@ absl::StatusOr<FileDescriptor> open_by_handle_at(int mount_fd,
 
 absl::StatusOr<int> ioctl(int fd, unsigned long request, auto &&...args);
 
-// Definition from https://man7.org/linux/man-pages/man2/getdents.2.html
+// The record getdents64(2) writes into the caller's buffer. The kernel
+// defines it in include/linux/dirent.h, which is not an exported header (the
+// sysroot has no definition), so the layout, which is the syscall's ABI, is
+// restated here.
 struct linux_dirent64 {
-  ino64_t d_ino;            // 64-bit inode number
-  off64_t d_off;            // Not an offset; see getdents()
-  unsigned short d_reclen;  // Size of this dirent
-  unsigned char d_type;     // File type
-  char d_name[];            // Filename (null-terminated)
+  ino64_t d_ino;            // inode number
+  off64_t d_off;            // position of the next record, not a byte offset
+  unsigned short d_reclen;  // bytes in this record, name included
+  unsigned char d_type;     // DT_* file type
+  char d_name[];            // NUL-terminated name
 };
 
 absl::StatusOr<ssize_t> getdents64(int fd, void *dirp, size_t count);

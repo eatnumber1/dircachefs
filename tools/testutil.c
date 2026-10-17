@@ -286,9 +286,10 @@
  *       5.2's btrfs boundary-refusal check needs a subvolume boundary, and
  *       this minimal busybox initramfs has neither a `btrfs`(8) binary nor
  *       a busybox applet for it. The ioctl constants used are copied from
- *       the kernel's <linux/btrfs.h> UAPI header rather than included from
- *       it, since this toolchain's sysroot is not guaranteed to carry
- *       btrfs-specific UAPI headers.
+ *       the kernel's <linux/btrfs.h> UAPI header (GPL-2.0 WITH
+ *       Linux-syscall-note) rather than included from it, since this
+ *       toolchain's sysroot is not guaranteed to carry btrfs-specific UAPI
+ *       headers.
  *
  * Every subcommand prints "ERR <errno-name>" (via glibc's strerrorname_np)
  * and exits 1 on failure; on success it prints nothing (except
@@ -323,10 +324,11 @@
 #include <unistd.h>
 
 /* BTRFS_IOC_SUBVOL_CREATE, copied from the kernel's <linux/btrfs.h> UAPI
- * header (not included from it -- see the btrfs-subvol-create doc comment
- * above). BTRFS_PATH_NAME_MAX and the struct layout are stable UAPI, part
- * of the on-disk-adjacent ioctl ABI every btrfs-progs release also depends
- * on verbatim. */
+ * header (GPL-2.0 WITH Linux-syscall-note, whose note exists for programs that
+ * use these declarations; not included from it -- see the
+ * btrfs-subvol-create doc comment above). BTRFS_PATH_NAME_MAX and the struct
+ * layout are stable UAPI, part of the on-disk-adjacent ioctl ABI every
+ * btrfs-progs release also depends on verbatim. */
 #define BTRFS_IOCTL_MAGIC 0x94
 #define BTRFS_PATH_NAME_MAX 4087
 struct btrfs_ioctl_vol_args {
@@ -851,9 +853,9 @@ static int cmd_fsfreeze(const char *path, const char *how) {
 }
 
 /* FS_IOC_SHUTDOWN and its flags, from the kernel's <linux/fs.h> UAPI
- * header (Linux 7.1), defined here when the sysroot's header predates
- * them; ext4 and xfs had the same number and flags under their own names
- * since 4.x. */
+ * header (Linux 7.1; GPL-2.0 WITH Linux-syscall-note), defined here when the
+ * sysroot's header predates them; ext4 and xfs had the same number and flags
+ * under their own names since 4.x. */
 #ifndef FS_IOC_SHUTDOWN
 #define FS_IOC_SHUTDOWN _IOR('X', 125, uint32_t)
 #define FS_SHUTDOWN_FLAGS_DEFAULT 0x0
@@ -1513,8 +1515,8 @@ static int cmd_tmpfile(const char *dir, const char *name, const char *how) {
 }
 
 /* EXT4_IOC_{GET,SET}_TUNE_SB_PARAM, copied from the kernel's
- * <linux/ext4.h> UAPI header (as the btrfs ioctl above): the sysroot's
- * headers predate it. */
+ * <linux/ext4.h> UAPI header (GPL-2.0 WITH Linux-syscall-note, as the btrfs
+ * ioctl above): the sysroot's headers predate it. */
 struct ext4_tune_sb_params {
   uint32_t set_flags;
   uint32_t checkinterval;

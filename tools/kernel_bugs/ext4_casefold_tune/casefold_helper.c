@@ -27,7 +27,8 @@
 #include <unistd.h>
 
 /* Copied from the kernel's <linux/ext4.h> UAPI header (include/uapi/linux/
- * ext4.h): many C libraries' headers predate it. */
+ * ext4.h, GPL-2.0 WITH Linux-syscall-note): many C libraries' headers predate
+ * it. */
 struct ext4_tune_sb_params {
   uint32_t set_flags;
   uint32_t checkinterval;

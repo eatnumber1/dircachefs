@@ -2,5 +2,7 @@
 # tools/repo_shape.py, spdx_licenses). Format: path | licence | role | provenance.
 # A GPL or LGPL licence only with role test-only.
 third_party/tlaplus/overrides/tlc2/overrides/TLCOverrides.java | MIT | test-only | reduced copy of the class of the same name in TLA+ CommunityModules (MIT, its LICENSE inside the jar)
-third_party/xfstests/0001-dcfs-guest.patch | GPL-2.0-or-later | test-only | patches check and common/rc of xfstests, whose files carry GPL-2.0 and GPL-2.0+ (docs/licenses.md)
+third_party/xfstests/0001-dcfs-guest.patch | GPL-2.0-only | test-only | patches check (SPDX GPL-2.0) and common/rc (SPDX GPL-2.0+) of xfstests; a hunk against a GPL-2.0-only file makes the whole patch GPL-2.0-only (docs/licenses.md)
 third_party/pjdfstest/0001-linux-portability.patch | BSD-2-Clause | test-only | patches tests/conf and tests/misc.sh of pjdfstest (COPYING, two clauses)
+third_party/liburing/0001-absolute-cc-for-configure.patch | Apache-2.0 | build | edits the BCR overlay BUILD.bazel of liburing, whose line 1 is SPDX Apache-2.0; the added lines are ours (MIT), the context lines are the overlay's
+third_party/e2fsprogs/mke2fs.conf | GPL-2.0-only | test-only | e2fsprogs 1.47.4's misc/mke2fs.conf.in with one change (README.md); Debian's copyright file for e2fsprogs says GPL-2 for Files: * and the file has no header of its own

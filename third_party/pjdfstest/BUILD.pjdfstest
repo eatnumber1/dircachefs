@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # BUILD file for @pjdfstest (see MODULE.bazel's http_archive and
 # //docs:conformance.md). pjdfstest is normally autoconf-configured
 # (configure.ac generates config.h from AC_CHECK_FUNC/AC_CHECK_MEMBERS

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # BUILD file for @xfstests (see MODULE.bazel's http_archive and
 # third_party/xfstests/README.md): fsstress and fsx, the two programs of
 # xfstests' ltp/ directory, and replay-log (src/log-writes/, step 12.14), as

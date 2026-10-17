@@ -1474,4 +1474,8 @@ recovery protocol, concurrency, and the test strategy.
 
 ## License
 
-To be decided.
+dcfs is MIT ([`LICENSE`](LICENSE)). It links third-party libraries (Abseil,
+SQLite, libfuse, liburing, libnuma, the C++ runtime and, in the fully static
+build, glibc), some of them LGPL-2.1; what each one is, under which licence,
+and what shipping a binary would oblige is in
+[`docs/licenses.md`](docs/licenses.md).
