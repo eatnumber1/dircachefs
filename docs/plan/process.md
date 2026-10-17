@@ -338,9 +338,12 @@ reading. Not for writing code, nor for subtle protocol judgement.
    good, but be wary of Flash's limitations. Consider using multiple,
    narrowly targeted reviewers."). Give each job the whole tree as
    context but one question: one invariant, one document against the
-   code, one directory's dead code. Never a five-category sweep on
-   Flash. Run several such jobs instead of one broad one, and compare
-   their answers where they overlap.
+   code, one directory's dead code. Where Flash breaks down is not
+   known (russ: "Maybe it'll work as one big one? idk"), so it is
+   measured: once 26.31 has verified the Argon sweep's 35 findings,
+   Flash answers the same five questions as one broad job and as five
+   narrow ones, and both are scored for precision and recall against
+   the verified set. Until then, prefer narrow jobs.
 6. Vary the effort knob per job, for Gemini and Claude alike (russ,
    2026-10-17), and name the choice in the dispatch:
 
