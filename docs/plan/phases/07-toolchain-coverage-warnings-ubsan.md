@@ -231,7 +231,7 @@ without dcfs's libraries.
   cannot satisfy, a copied hunk with no provenance) are reported, not
   resolved.
 
-## 7.9 The release binary links libfuse dynamically (russ, 2026-10-17)
+## 7.9 The release binary links libfuse dynamically (russ, 2026-10-17; parked late: "I don't especially care")
 
 russ: shipping a binary is ideally a goal, "but I'm ok with it requiring
 libc and libfuse be installed. Let's keep the static target though for
