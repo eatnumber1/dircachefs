@@ -3539,3 +3539,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   time for test-only targets and never shipped: "Yes. That's fine." 12.18b
   keeps both commits; third_party/sibylfs/README.md records the ruling at
   merge. The CI-cache redistribution question stays open.
+- 2026-10-17: russ on the CI and Bazel caches holding fetched GPL/LGPL
+  archives and objects (4.15's and 12.18b's question): "No, it's fine since
+  we're not shipping it." docs/licenses.md moves it to settled (with the
+  25.29 dispatch's licenses.md edit or the next step that touches it).
