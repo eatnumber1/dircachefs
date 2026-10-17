@@ -361,9 +361,10 @@ reading. Not for writing code, nor for subtle protocol judgement.
    runs (the quoted output, a rerun of what looks doubtful) rather than
    rerunning everything, and the style review is the usual one. agy's
    print mode cannot ask for approval and `--mode auto` is not on this
-   account, so write jobs run with `--sandbox --dangerously-skip-permissions`
-   in their own lane checkout (russ, 2026-10-17, chosen over read-only
-   Gemini and over approving by hand). Read-only jobs still use
+   account, so write jobs run with `--dangerously-skip-permissions` in their
+   own lane checkout, without `--sandbox` (russ, 2026-10-17: "Maybe run it
+   without a sandbox, like the opus models"; the sandbox kept Bazel from
+   fetching, and a job hung on its first test run). Read-only jobs still use
    `--mode plan` and write to the orchestrator's scratchpad. No protocol,
    crash-safety or identity work (rule 6's table).
 5. Narrow jobs, several of them (russ, 2026-10-17: "The long context is
