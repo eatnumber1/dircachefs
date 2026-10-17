@@ -721,15 +721,22 @@ tlc_test(
     srcs = ["durability.tla"],
 )
 
-# What the bound's exception is for: a checkpoint that fails.
-tlc_test(
-    name = "limitation_durability_checkpoint_fails_test",
-    size = "small",
-    timeout = "short",
-    config = "limitations/durability_checkpoint_fails.cfg",
-    expect_violation = "Invariant BoundIgnoringFailures is violated",
-    spec = "durability.tla",
-)
+# What the bound leaves out: its exception, a checkpoint that fails; and,
+# with no timer, the moments between requests.
+[
+    tlc_test(
+        name = "limitation_durability_%s_test" % limitation,
+        size = "small",
+        timeout = "short",
+        config = "limitations/durability_%s.cfg" % limitation,
+        expect_violation = "Invariant %s is violated" % violation,
+        spec = "durability.tla",
+    )
+    for limitation, violation in {
+        "checkpoint_fails": "BoundIgnoringFailures",
+        "idle": "LostWithinInterval",
+    }.items()
+]
 
 # The lifetime model (lifetime.tla; README.md, "The lifetime model"): which
 # nodeids the kernel holds and what dcfs keeps for each. Every invariant in

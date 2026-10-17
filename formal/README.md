@@ -2803,7 +2803,7 @@ commit) if it may be non-empty, and leaves the checkpoint due, which the
 request's end runs. Commits may come at any moment, not only inside
 requests, in any number: a request may run for many intervals on a slow
 backing. That only adds behaviors. Requests do not overlap: dcfs serves
-one at a time, and the checkpoint comes before it reads the next.
+one at a time, and the checkpoint comes before it serves the next.
 
 Properties: `BoundAtRequestEnd`, the bound, says that a request that
 starts while a commit a power loss may lose is an interval old (`owed`)
@@ -2814,9 +2814,13 @@ since`), with the same exception. The bound is at requests, not at every
 moment: with no timer (docs/style.md, "No timers") an idle daemon runs
 nothing, so its last interval's commits wait for its next request.
 `MC_durability.cfg` checks both at an interval of three ticks (456
-distinct states). `limitations/durability_checkpoint_fails.cfg` checks the
-bound without its exception, `BoundIgnoringFailures`, and expects it
-violated (a failed checkpoint leaves its commits to the next sync point).
+distinct states). The limitations, each a small test that expects its
+property violated:
+
+| Configuration | Property | What it shows |
+|---|---|---|
+| `limitations/durability_checkpoint_fails.cfg` | `BoundIgnoringFailures`, the bound without its exception | a failed checkpoint leaves its commits losable until a later one completes |
+| `limitations/durability_idle.cfg` | `LostWithinInterval` (`oldest = None \/ oldest < Interval`), the bound at every moment | with no timer an idle daemon runs nothing: a commit, then time passing with no request |
 
 Known bugs, each the code before this step (`Bug*` constants, FALSE in
 the real configuration; small tests):
@@ -2839,5 +2843,6 @@ checkpoint, across the two WAL generations it makes.
 bazel test //formal:durability_test //formal:known_bug_durability_never_checkpoint_test \
            //formal:known_bug_durability_sync_point_skips_checkpoint_test \
            //formal:premise_lost_only_since_sync_test \
-           //formal:limitation_durability_checkpoint_fails_test
+           //formal:limitation_durability_checkpoint_fails_test \
+           //formal:limitation_durability_idle_test
 ```

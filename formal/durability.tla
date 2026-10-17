@@ -21,9 +21,11 @@
 (* first request once Interval ticks have passed since the last one        *)
 (* (DirCacheFS::MaybeSyncNow, SyncNow: the backing half), an FSYNC or      *)
 (* FSYNCDIR starts one too, and the request ends with the checkpoint,      *)
-(* after its reply and before the next request is read                     *)
+(* after its reply and before the next request is served                   *)
 (* (DirCacheFS::FinishSyncPoint). There is no timer (docs/style.md, "No    *)
-(* timers"): an idle daemon runs nothing, so the bound is at requests.     *)
+(* timers"): an idle daemon runs nothing, so the bound is at requests      *)
+(* (LostWithinInterval, the same bound at every moment, does not hold:     *)
+(* limitations/durability_idle.cfg).                                       *)
 (* BoundAtRequestEnd: a request that starts while a commit a power loss    *)
 (* may lose is an interval old ends with every commit durable, unless its  *)
 (* checkpoint failed (CheckpointFails: an I/O error of the cache disk,     *)
@@ -36,7 +38,7 @@
 (*  - Commits may happen at any moment, not only inside requests, and in   *)
 (*    any number (a request may run for many intervals on a slow backing). *)
 (*    That only adds behaviors. Requests do not overlap: dcfs serves one   *)
-(*    at a time, and the checkpoint comes before it reads the next.        *)
+(*    at a time, and the checkpoint comes before it serves the next.       *)
 (*  - The clock saturates: `since` and `oldest` at Interval stand for      *)
 (*    "Interval ticks or more".                                            *)
 (*  - SQLite's autocheckpoint (every 1000 pages) may make everything       *)
@@ -196,4 +198,9 @@ LostOnlySinceSync == ~busy /\ oldest # None /\ ~failed => oldest <= since
 \* The bound without its exception: what a failed checkpoint costs
 \* (limitations/durability_checkpoint_fails.cfg expects it violated).
 BoundIgnoringFailures == ended /\ owed => oldest = None
+
+\* The bound at every moment, not only at requests: what an idle daemon
+\* costs (limitations/durability_idle.cfg expects it violated: a commit,
+\* then time passing with no request).
+LostWithinInterval == oldest = None \/ oldest < Interval
 =============================================================================

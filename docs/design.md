@@ -1615,6 +1615,14 @@ a fill older than the interval surviving a cut and one after the sync
 point lost; `sqlite_durability_test` judges the crash states of the
 checkpoint itself.
 
+Between requests there is no such bound (`limitations/durability_idle.cfg`:
+a commit, then time passing with no request): an idle daemon's last
+commits wait for its next request. What a power loss can take away in that
+window is cache rows only, which recovery reads again from the backing.
+The one effect a user can see is on inode rows minted then (by lookups and
+listings): an NFS client holding a handle to one gets `ESTALE` after the
+restart (README, "Shutdown, crashes and restarts").
+
 The request whose sync point it is does not wait for the checkpoint
 (`DirCacheFS::FinishSyncPoint`): it runs after the reply of the request
 whose start ran the periodic sync point, or of the `FSYNC`/`FSYNCDIR`, and
