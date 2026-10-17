@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/base/log_severity.h"
 #include "absl/log/check.h"
 #include "absl/log/log_entry.h"
 #include "absl/log/log_sink.h"

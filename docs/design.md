@@ -2755,7 +2755,7 @@ threshold shows, with an example of a line (the `I20261008 12:00:00.001234
 
 | Level | Meaning | Example |
 |---|---|---|
-| `FATAL` | a broken invariant found by the testonly invariant checker (`dcfs/testonly/`); production code never crashes | `F... invariant_checker.cc] invariant violated: <what>` |
+| `FATAL` | a broken invariant found by the testonly invariant checker (`dcfs/testonly/`); production code never crashes | `F... invariant_checker.cc] invariant violated: FAILED_PRECONDITION: <what>` |
 | `ERROR` (default) | the caller got an error dcfs produced, or dcfs refused its job | `E... fuse_request.cc] INTERNAL: RET_CHECK failure: Read on unknown handle 7` |
 | `WARNING` (default) | nothing failed for the caller, state is degraded or surprising | `W... backing.cc] inode 42: out-of-band change on the backing filesystem (unsupported): size 4096 -> 8192; adopting the new attributes` |
 | `INFO` (`--stderrthreshold=0`) | the lifecycle: start, recovery, sync points, shutdown, the first backing access after an idle period | `I... main.cc] dcfs 1.0 starting: source=/srv/media cache_db=/var/lib/dcfs/media.db mountpoint=/mnt/media mount_options=default_permissions attr_timeout_sec=3600 entry_timeout_sec=3600 sync_interval_sec=5 foreground=true` |
@@ -2928,7 +2928,7 @@ records present again), so the checks are the one-way rules above; and
 file). Trace validation (`formal/`) checks what the checker cannot see
 from one moment's state: the order of a mutation's phases.
 
-A violation aborts the daemon (`LOG(FATAL)`: "invariant violated:
+A violation aborts the daemon (`LOG(FATAL)`: "invariant violated: FAILED_PRECONDITION:
 <invariant>: <what> (in request <OPCODE> nodeid <n>)") after writing the
 same line, as `DCFS-INVARIANT-VIOLATION ...`, to the console, where
 `run-qemu.sh` fails the run on it. Every `small` and `medium` `qemu_test`

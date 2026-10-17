@@ -75,9 +75,9 @@
 //  it, and its opens (the harness's, standing for a crash) are the crashed
 //  run's.
 //
-// A violation is fatal: LOG(FATAL) "invariant violated: <invariant>: <what>
-// (in request <OPCODE> nodeid <n>...)" (or "in Startup", "in DESTROY",
-// "outside any request"), after the same line, as
+// A violation is fatal: LOG(FATAL) "invariant violated: FAILED_PRECONDITION:
+// <invariant>: <what> (in request <OPCODE> nodeid <n>...)" (or "in Startup",
+// "in DESTROY", "outside any request"), after the same line, as
 // "DCFS-INVARIANT-VIOLATION <invariant>: ...", is written to `console_fd`
 // if there is one (the daemon's is /dev/console, the guest's serial log,
 // where test/qemu/scripts/run-qemu.sh fails the run on it: a daemon

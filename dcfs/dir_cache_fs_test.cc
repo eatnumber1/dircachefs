@@ -5628,7 +5628,8 @@ TEST_F(DirCacheFSDeathTest, TransactionOpenAtABackingSyscall) {
         ASSERT_THAT(db_.Exec("BEGIN"), IsOk());
         Getattr(f);
       },
-      "invariant violated: no-transaction-at-backing-call: a transaction is "
+      "invariant violated: FAILED_PRECONDITION: "
+      "no-transaction-at-backing-call: a transaction is "
       "open.*open_by_handle_at.*" +
           InRequest("GETATTR", f));
 }
@@ -5649,7 +5650,8 @@ TEST_F(DirCacheFSDeathTest, StatementMidStepAtABackingSyscall) {
         ASSERT_THAT(cursor->Step(), IsOkAndHolds(true));
         Getattr(f);
       },
-      "invariant violated: no-transaction-at-backing-call: a statement is "
+      "invariant violated: FAILED_PRECONDITION: "
+      "no-transaction-at-backing-call: a statement is "
       "part way through its rows: SELECT id FROM inodes.*" +
           InRequest("GETATTR", f));
 }
@@ -5662,7 +5664,8 @@ TEST_F(DirCacheFSDeathTest, TransactionOpenAtARequestEnd) {
         ASSERT_THAT(db_.Exec("BEGIN"), IsOk());
         Getattr(kRootInode);
       },
-      "invariant violated: no-transaction-at-request-end: a transaction is "
+      "invariant violated: FAILED_PRECONDITION: no-transaction-at-request-end: "
+      "a transaction is "
       "open.*" +
           InRequest("GETATTR", kRootInode));
 }
@@ -5677,7 +5680,8 @@ TEST_F(DirCacheFSDeathTest, MutationInFlightWithoutADirtyRow) {
         ctx_.dirty.durable.insert(kRootInode);
         Mkdir(kRootInode, "d");
       },
-      "invariant violated: dirty-set: inode 1 has a mutation in "
+      "invariant violated: FAILED_PRECONDITION: dirty-set: inode 1 has a "
+      "mutation in "
       "flight but no dirty row.*" +
           InRequest("MKDIR", kRootInode));
 }
@@ -5694,7 +5698,8 @@ TEST_F(DirCacheFSDeathTest, DurablyDirtyWithoutADirtyRow) {
         ctx_.dirty.durable.insert(f);
         Getattr(f);
       },
-      absl::StrCat("invariant violated: dirty-set: inode ", f,
+      absl::StrCat("invariant violated: FAILED_PRECONDITION: dirty-set: inode ",
+                   f,
                    " is in Context::dirty.durable but has no dirty "
                    "row.*",
                    InRequest("GETATTR", f)));
@@ -5709,11 +5714,13 @@ TEST_F(DirCacheFSDeathTest, AFillInsertsAnUnmarkedRowUnderAMarkedDirectory) {
   ASSERT_THAT(Dirty(), Not(Contains(f)));
   const InodeId root[] = {kRootInode};
   ASSERT_THAT(cache::MarkDirty(ctx_, root), IsOk());
-  EXPECT_DEATH(ctx_.events->ChildRowRecorded(ctx_, kRootInode, f,
-                                             /*filled=*/true, /*created=*/true),
-               absl::StrCat("invariant violated: dirty-set: inode ", f,
-                            " was inserted by a fill of directory 1, which "
-                            "has a mutation's dirty row, but has none"));
+  EXPECT_DEATH(
+      ctx_.events->ChildRowRecorded(ctx_, kRootInode, f,
+                                    /*filled=*/true, /*created=*/true),
+      absl::StrCat("invariant violated: FAILED_PRECONDITION: dirty-set: inode ",
+                   f,
+                   " was inserted by a fill of directory 1, which "
+                   "has a mutation's dirty row, but has none"));
 }
 
 TEST_F(DirCacheFSDeathTest, DirtySetSaidEmptyButIsNot) {
@@ -5725,7 +5732,8 @@ TEST_F(DirCacheFSDeathTest, DirtySetSaidEmptyButIsNot) {
         ctx_.dirty.any = false;
         Getattr(kRootInode);
       },
-      "invariant violated: dirty-set: Context::dirty.any is false "
+      "invariant violated: FAILED_PRECONDITION: dirty-set: Context::dirty.any "
+      "is false "
       "but the dirty table has rows.*" +
           InRequest("GETATTR", kRootInode));
 }
@@ -5743,7 +5751,8 @@ TEST_F(DirCacheFSDeathTest, DirtyAtimeSaidEmptyButIsNot) {
         ctx_.dirty.atime = false;
         Getattr(kRootInode);
       },
-      "invariant violated: dirty-set: Context::dirty.atime is false "
+      "invariant violated: FAILED_PRECONDITION: dirty-set: "
+      "Context::dirty.atime is false "
       "but the dirty table has atime-only rows.*" +
           InRequest("GETATTR", kRootInode));
 }
@@ -5761,8 +5770,8 @@ TEST_F(DirCacheFSDeathTest, OpenFileWithoutADirtyRow) {
             IsOk());
         Getattr(f);
       },
-      absl::StrCat("invariant violated: open-file: inode ", f,
-                   " has an open backing file but no dirty row.*") +
+      absl::StrCat("invariant violated: FAILED_PRECONDITION: open-file: inode ",
+                   f, " has an open backing file but no dirty row.*") +
           InRequest("GETATTR", f));
 }
 
@@ -5779,8 +5788,8 @@ TEST_F(DirCacheFSDeathTest, AttributesCurrentWithNoLinks) {
                     IsOk());
         Getattr(kRootInode);
       },
-      absl::StrCat("invariant violated: tri-state: inode ", f,
-                   ": attributes recorded as current with nlink 0"));
+      absl::StrCat("invariant violated: FAILED_PRECONDITION: tri-state: inode ",
+                   f, ": attributes recorded as current with nlink 0"));
 }
 
 TEST_F(DirCacheFSDeathTest, RefusedDentryWithoutAStub) {
@@ -5795,7 +5804,8 @@ TEST_F(DirCacheFSDeathTest, RefusedDentryWithoutAStub) {
             IsOk());
         Getattr(kRootInode);
       },
-      "invariant violated: tri-state: dentry \"f\" of inode 1 is "
+      "invariant violated: FAILED_PRECONDITION: tri-state: dentry \"f\" of "
+      "inode 1 is "
       "refused but has no stub");
 }
 
@@ -5812,8 +5822,8 @@ TEST_F(DirCacheFSDeathTest, NonRootGenerationZero) {
                     IsOk());
         Getattr(kRootInode);
       },
-      absl::StrCat("invariant violated: identity: inode ", f,
-                   " has FUSE generation 0"));
+      absl::StrCat("invariant violated: FAILED_PRECONDITION: identity: inode ",
+                   f, " has FUSE generation 0"));
 }
 
 TEST_F(DirCacheFSDeathTest, AttributesCurrentWhileOpenForWriting) {
@@ -5830,9 +5840,10 @@ TEST_F(DirCacheFSDeathTest, AttributesCurrentWhileOpenForWriting) {
                     IsOk());
         Getattr(kRootInode);
       },
-      absl::StrCat("invariant violated: writable-open: inode ", f,
-                   " is open for writing but its attributes are "
-                   "recorded as current"));
+      absl::StrCat(
+          "invariant violated: FAILED_PRECONDITION: writable-open: inode ", f,
+          " is open for writing but its attributes are "
+          "recorded as current"));
 }
 
 TEST_F(DirCacheFSDeathTest, OpenForWritingWithoutADirtyRow) {
@@ -5849,8 +5860,9 @@ TEST_F(DirCacheFSDeathTest, OpenForWritingWithoutADirtyRow) {
             IsOk());
         Getattr(kRootInode);
       },
-      absl::StrCat("invariant violated: writable-open: inode ", f,
-                   " is open for writing but has no dirty row"));
+      absl::StrCat(
+          "invariant violated: FAILED_PRECONDITION: writable-open: inode ", f,
+          " is open for writing but has no dirty row"));
 }
 
 TEST_F(DirCacheFSDeathTest, OpenForWritingButNotInWritten) {
@@ -5866,9 +5878,10 @@ TEST_F(DirCacheFSDeathTest, OpenForWritingButNotInWritten) {
             [&](FakeBookkeeping &book) { book.written.erase(f); });
         Getattr(f);
       },
-      absl::StrCat("invariant violated: writable-open: inode ", f,
-                   " is open for writing but not in written_.*",
-                   InRequest("GETATTR", f)));
+      absl::StrCat(
+          "invariant violated: FAILED_PRECONDITION: writable-open: inode ", f,
+          " is open for writing but not in written_.*",
+          InRequest("GETATTR", f)));
 }
 
 TEST_F(DirCacheFSDeathTest, ForgetOfMoreLookupsThanCounted) {
@@ -5877,10 +5890,12 @@ TEST_F(DirCacheFSDeathTest, ForgetOfMoreLookupsThanCounted) {
   auto [lookup, entry] = Lookup(kRootInode, "f");
   ASSERT_EQ(lookup.error, 0);
   const InodeId f = static_cast<InodeId>(entry.nodeid);
-  EXPECT_DEATH(Forget(f, 2),
-               absl::StrCat("invariant violated: lookup-count: FORGET of 2 "
-                            "lookups of nodeid ",
-                            f, ", but 1 counted.*", InRequest("FORGET", f)));
+  EXPECT_DEATH(
+      Forget(f, 2),
+      absl::StrCat(
+          "invariant violated: FAILED_PRECONDITION: lookup-count: FORGET of 2 "
+          "lookups of nodeid ",
+          f, ", but 1 counted.*", InRequest("FORGET", f)));
 }
 
 // The same nodeid twice in one BATCH_FORGET counts as one FORGET of both.
@@ -5892,9 +5907,10 @@ TEST_F(DirCacheFSDeathTest, BatchForgetOfMoreLookupsThanCounted) {
   const InodeId f = static_cast<InodeId>(entry.nodeid);
   EXPECT_DEATH(
       BatchForget({{f, 1}, {f, 1}}),
-      absl::StrCat("invariant violated: lookup-count: FORGET of 2 "
-                   "lookups of nodeid ",
-                   f, ", but 1 counted.*", InRequest("BATCH_FORGET", f)));
+      absl::StrCat(
+          "invariant violated: FAILED_PRECONDITION: lookup-count: FORGET of 2 "
+          "lookups of nodeid ",
+          f, ", but 1 counted.*", InRequest("BATCH_FORGET", f)));
 }
 
 TEST_F(DirCacheFSDeathTest, ZeroLookupCountKept) {
@@ -5909,8 +5925,9 @@ TEST_F(DirCacheFSDeathTest, ZeroLookupCountKept) {
             [&](FakeBookkeeping &book) { book.lookups[f] = 0; });
         Getattr(f);
       },
-      absl::StrCat("invariant violated: lookup-count: nodeid ", f,
-                   " has a lookup count of 0"));
+      absl::StrCat(
+          "invariant violated: FAILED_PRECONDITION: lookup-count: nodeid ", f,
+          " has a lookup count of 0"));
 }
 
 // A held descriptor dropped without telling held_fds_.
@@ -5926,7 +5943,8 @@ TEST_F(DirCacheFSDeathTest, HeldDescriptorDroppedBehindTheCount) {
             [&](FakeBookkeeping &book) { book.written[f.id] = false; });
         Getattr(kRootInode);
       },
-      "invariant violated: held-fds: held_fds_ is 1 but 0 entries "
+      "invariant violated: FAILED_PRECONDITION: held-fds: held_fds_ is 1 but 0 "
+      "entries "
       "of written_ hold a descriptor");
 }
 
@@ -5939,7 +5957,8 @@ TEST_F(DirCacheFSDeathTest, RemovedRecordWithoutALookup) {
             [&](FakeBookkeeping &book) { book.removed.insert(kGone); });
         Getattr(kRootInode);
       },
-      "invariant violated: removed-record: nodeid 12345 has a "
+      "invariant violated: FAILED_PRECONDITION: removed-record: nodeid 12345 "
+      "has a "
       "removed record but the kernel holds no lookup of it");
 }
 
@@ -6002,9 +6021,10 @@ TEST_F(DirCacheFSDeathTest, DirtyRowOfAnOpenFileTruncatedAway) {
         ASSERT_THAT(db_.Exec("DELETE FROM dirty"), IsOk());
         Getattr(kRootInode);
       },
-      absl::StrCat("invariant violated: writable-open: inode ", f,
-                   " is open for writing but has no dirty row.*",
-                   InRequest("GETATTR", kRootInode)));
+      absl::StrCat(
+          "invariant violated: FAILED_PRECONDITION: writable-open: inode ", f,
+          " is open for writing but has no dirty row.*",
+          InRequest("GETATTR", kRootInode)));
 }
 
 // The same for a durably dirty inode the request does not name.
@@ -6025,9 +6045,10 @@ TEST_F(DirCacheFSDeathTest, DurableDirtyRowTruncatedAway) {
         ASSERT_THAT(db_.Exec("DELETE FROM dirty"), IsOk());
         Getattr(f);
       },
-      absl::StrCat("invariant violated: dirty-set: inode (1|", d,
-                   ") is in Context::dirty.durable but has no dirty row.*",
-                   InRequest("GETATTR", f)));
+      absl::StrCat(
+          "invariant violated: FAILED_PRECONDITION: dirty-set: inode (1|", d,
+          ") is in Context::dirty.durable but has no dirty row.*",
+          InRequest("GETATTR", f)));
 }
 
 constexpr std::string_view kInsertStub =
@@ -6045,7 +6066,8 @@ TEST_F(DirCacheFSDeathTest, StubWithoutARefusedDentry) {
                     IsOk());
         Getattr(kRootInode);
       },
-      "invariant violated: tri-state: stub [0-9]+ of dentry \"x\" of inode 1 "
+      "invariant violated: FAILED_PRECONDITION: tri-state: stub [0-9]+ of "
+      "dentry \"x\" of inode 1 "
       "whose dentry is missing");
 }
 
@@ -6062,7 +6084,8 @@ TEST_F(DirCacheFSDeathTest, DentryWithAStubButNotRefused) {
                     IsOk());
         Getattr(kRootInode);
       },
-      "invariant violated: tri-state: dentry \"f\" of inode 1 is present but "
+      "invariant violated: FAILED_PRECONDITION: tri-state: dentry \"f\" of "
+      "inode 1 is present but "
       "has a stub");
 }
 
@@ -6079,8 +6102,8 @@ TEST_F(DirCacheFSDeathTest, AttributesCurrentWithAColumnNull) {
                     IsOk());
         Getattr(kRootInode);
       },
-      absl::StrCat("invariant violated: tri-state: inode ", f,
-                   ": attributes recorded as current with a column NULL"));
+      absl::StrCat("invariant violated: FAILED_PRECONDITION: tri-state: inode ",
+                   f, ": attributes recorded as current with a column NULL"));
 }
 
 TEST_F(DirCacheFSDeathTest, GenerationAbove32Bits) {
@@ -6097,8 +6120,8 @@ TEST_F(DirCacheFSDeathTest, GenerationAbove32Bits) {
             IsOk());
         Getattr(kRootInode);
       },
-      absl::StrCat("invariant violated: identity: inode ", f,
-                   " has FUSE generation 4294967296"));
+      absl::StrCat("invariant violated: FAILED_PRECONDITION: identity: inode ",
+                   f, " has FUSE generation 4294967296"));
 }
 
 TEST_F(DirCacheFSDeathTest, HeldDescriptorsAboveTheCap) {
@@ -6109,7 +6132,8 @@ TEST_F(DirCacheFSDeathTest, HeldDescriptorsAboveTheCap) {
             [](FakeBookkeeping &book) { book.held_fds = 65; });
         Getattr(kRootInode);
       },
-      "invariant violated: held-fds: held_fds_ is 65, above max_held_fds_ "
+      "invariant violated: FAILED_PRECONDITION: held-fds: held_fds_ is 65, "
+      "above max_held_fds_ "
       "64");
 }
 
@@ -6126,8 +6150,9 @@ TEST_F(DirCacheFSDeathTest, SharedFileWithNoRefs) {
             [&](FakeBookkeeping &book) { book.shared.at(f).refs = 0; });
         Getattr(f);
       },
-      absl::StrCat("invariant violated: writable-open: inode ", f,
-                   "'s shared backing file has refs 0 and writable_refs 1"));
+      absl::StrCat(
+          "invariant violated: FAILED_PRECONDITION: writable-open: inode ", f,
+          "'s shared backing file has refs 0 and writable_refs 1"));
 }
 
 TEST_F(DirCacheFSDeathTest, SharedFileWithMoreWritableRefsThanRefs) {
@@ -6144,8 +6169,9 @@ TEST_F(DirCacheFSDeathTest, SharedFileWithMoreWritableRefsThanRefs) {
         });
         Getattr(f);
       },
-      absl::StrCat("invariant violated: writable-open: inode ", f,
-                   "'s shared backing file has refs 1 and writable_refs 2"));
+      absl::StrCat(
+          "invariant violated: FAILED_PRECONDITION: writable-open: inode ", f,
+          "'s shared backing file has refs 1 and writable_refs 2"));
 }
 
 TEST_F(DirCacheFSDeathTest, WritableSharedFileNotOpenForWriting) {
@@ -6161,8 +6187,9 @@ TEST_F(DirCacheFSDeathTest, WritableSharedFileNotOpenForWriting) {
             [&](FakeBookkeeping &book) { book.open_for_write.erase(f); });
         Getattr(f);
       },
-      absl::StrCat("invariant violated: writable-open: inode ", f,
-                   " has writable opens but is not open for writing"));
+      absl::StrCat(
+          "invariant violated: FAILED_PRECONDITION: writable-open: inode ", f,
+          " has writable opens but is not open for writing"));
 }
 
 TEST_F(DirCacheFSDeathTest, OpenForWriteSetNotDirCacheFSs) {
@@ -6173,7 +6200,8 @@ TEST_F(DirCacheFSDeathTest, OpenForWriteSetNotDirCacheFSs) {
         ctx_.open_for_write = &other;
         Getattr(kRootInode);
       },
-      "invariant violated: writable-open: Context::open_for_write is not "
+      "invariant violated: FAILED_PRECONDITION: writable-open: "
+      "Context::open_for_write is not "
       "DirCacheFS's set");
 }
 
@@ -6191,8 +6219,9 @@ TEST_F(DirCacheFSDeathTest, RemovedRecordBesideAWrittenEntry) {
         });
         Getattr(kRootInode);
       },
-      absl::StrCat("invariant violated: removed-record: nodeid ", f,
-                   " has both a removed record and a written_ entry"));
+      absl::StrCat(
+          "invariant violated: FAILED_PRECONDITION: removed-record: nodeid ", f,
+          " has both a removed record and a written_ entry"));
 }
 
 // Startup's full check (after its probe of the recovered rows) finds what
@@ -6210,7 +6239,8 @@ TEST_F(DirCacheFSDeathTest, FullCheckAtStartup) {
                     IsOk());
         ASSERT_THAT(Restart("boot"), IsOk());
       },
-      absl::StrCat("invariant violated: tri-state: inode ", f,
+      absl::StrCat("invariant violated: FAILED_PRECONDITION: tri-state: inode ",
+                   f,
                    ": attributes recorded as current with nlink 0 \\(in "
                    "Startup\\)"));
 }
@@ -6250,9 +6280,10 @@ TEST_F(DirCacheFSDeathTest, FullCheckAtDestroy) {
             IsOk());
         fuse_session_destroy(se_);
       },
-      absl::StrCat("invariant violated: writable-open: inode ", f,
-                   " is open for writing but has no dirty row \\(in "
-                   "DESTROY\\)"));
+      absl::StrCat(
+          "invariant violated: FAILED_PRECONDITION: writable-open: inode ", f,
+          " is open for writing but has no dirty row \\(in "
+          "DESTROY\\)"));
 }
 
 // The exemption itself: DESTROY with a file still open for writing (a lazy
@@ -6299,8 +6330,9 @@ TEST_F(DirCacheFSDeathTest, OpenOlderThanTheRunIsLeftOutUntilReleased) {
             IsOk());
         Getattr(kRootInode);
       },
-      absl::StrCat("invariant violated: writable-open: inode ", f,
-                   " is open for writing but has no dirty row"));
+      absl::StrCat(
+          "invariant violated: FAILED_PRECONDITION: writable-open: inode ", f,
+          " is open for writing but has no dirty row"));
 }
 
 // Above kRecountLimit written_ entries a request's check no longer recounts
@@ -7276,7 +7308,8 @@ TEST_F(DirCacheFSDeathTest, UnhookedBackingSyscallInATransaction) {
         }),
                     IsOk());
       },
-      "invariant violated: no-transaction-at-backing-call \\(the harness's "
+      "invariant violated: no-transaction-at-backing-call "
+      "\\(the harness's "
       "backstop\\): statx while a transaction is open");
 }
 
