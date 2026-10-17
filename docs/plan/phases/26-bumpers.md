@@ -993,7 +993,7 @@ pre-push run of the large tests a change reaches was proposed and declined
 (russ, 2026-10-17: "No. Until we ship, a red CI is not a problem."): CI is
 where the large tier runs, and its failures are fixed forward.
 
-## 26.36 Load-agnostic tests: CPU budgets, a PMU, and an audit (russ, 2026-10-17)
+## 26.36 Load-agnostic tests: CPU budgets, a PMU, and an audit (russ, 2026-10-17) (merged 2026-10-17, 816f150)
 
 russ, on 26.34's backing_test CPU budget: "yes. But in general for all our
 tests I'm interested in them being load-agnostic." The first half is the

@@ -3927,3 +3927,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   is safe synchronously before a reply. 26.40 queued (chattr and the
   MAP_SHARED-after-close case, failing first, synchronous invalidation);
   kernel-patches.md gains a fuse_fileattr_set ctime row.
+- 2026-10-17, 26.36 merged (816f150): CPU budgets unheld on load-starved runs;
+  the guests see a vPMU (user instructions spread 0.01-2.1% under load vs
+  49-326% for CPU time; switching is follow-up A, provisional on the
+  dashboard); 13 event-standing sleeps fixed (testutil waitexit/waitpath);
+  the load-agnostic rule and russ's hang-guard and whole-target rulings in
+  docs/style.md. A Gemini Flash review found three tests that could pass
+  without the change; Gemini fixed them (0fbd76d6), the orchestrator read
+  the diff and checked the reruns. Disk I/O budgets under load:
+  follow-up I, provisional on the dashboard.
