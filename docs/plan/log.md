@@ -3535,3 +3535,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   reviews wait for agy's Claude/GPT pool (refills 19:55 UTC) instead of the
   Claude plan; no new Claude writing dispatches today beyond fix rounds
   already open.
+- 2026-10-17: russ on the unlicensed SibylFS test suite, fetched at build
+  time for test-only targets and never shipped: "Yes. That's fine." 12.18b
+  keeps both commits; third_party/sibylfs/README.md records the ruling at
+  merge. The CI-cache redistribution question stays open.
