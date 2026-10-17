@@ -70,14 +70,14 @@ copy_file_range/truncate comparing against the same operation on a native
 directory, rechecked after a cold cache; then 683-685 leave the lists.
 Owner: dcfs-implementer (Opus review of the credentials change), after
 17.1 merges and 23.11's code half lands (backing.cc).
-Status 2026-10-11: done, merged 0503f91 (lane-2). As built: FallocateFd,
+Status 2026-10-11: done, merged bc010b9 (lane-2). As built: FallocateFd,
 WriteFile (fallback) and CopyFileRangeFd run under AsCaller(req.Caller(), ...);
 unit tests in dir_cache_fs_test.cc verify setgid dropped (02666 -> 0666) for
 outside-group callers while root and group members retain it; guest
 credentials.sh tests all write-family operations against native filesystem and
 cold cache; generic/683-685 removed from expected failure lists.
 
-## 17.3 Performance finding (done 2026-10-11, 1f499bc)
+## 17.3 Performance finding (done 2026-10-11, 313bff6)
 
 29 metadata-heavy tests run 20-50x slower through dcfs (4-37 s natively,
 200 s or more through dcfs), the daemon CPU-bound in the stall reports,
@@ -87,7 +87,7 @@ a remeasure on a quiet host with the daemon's CPU seconds per test
 (17.1's results line), then the `xfstests_slow` set's numbers after
 23.11; the tmpfs cache understates production on an SSD (WAL fsync cost):
 say so in the note. Owner: dcfs-investigator.
-Status 2026-10-11: done, merged 1f499bc. Full report in `docs/plan/notes/slowness-17.3.md`.
+Status 2026-10-11: done, merged 313bff6. Full report in `docs/plan/notes/slowness-17.3.md`.
 Measured side-by-side with `xfstests_costs.py`: daemon CPU accounts for 80-98%
 of extra latency (single-threaded CPU bound at 100% of a core). Waiting/IO accounts
 for only 2-20%; extra disk flushes are negligible (-4 to +21). Conclusion: the

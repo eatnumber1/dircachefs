@@ -286,7 +286,7 @@ consider on a case-by-case basis."
   holds exactly his approvals.
 Owner: dcfs-implementer, after the current rounds land (budget), before
 25.2.
-Status 2026-10-12: Step 25.9 complete (merged b08f37a). Converted all first-party
+Status 2026-10-12: Step 25.9 complete (merged cee5005). Converted all first-party
 crashes in production code:
 - `dcfs/fuse_request.h/.cc`: `ReplyNone` converted to `RET_CHECK(req_.has_value())` returning `absl::Status`.
 - `dcfs/fuse_ops.cc`: All 17 pointer null checks converted to `RET_CHECK_NE` inside `Serve` lambdas; redundant `Link` check removed; `Init`/`Destroy` null handling safely logged.
@@ -943,5 +943,5 @@ point is due (`!SyncDue(now)`), run `sqlite3_wal_checkpoint_v2` with
 main database without blocking readers or requiring timers (a permitted
 exception to the "no timers" rule per russ, 2026-10-12). If a sync point
 is due, `SyncBackingNow` performs the sync point and updates
-`last_wal_checkpoint_ = last_sync_`. Completed in ae8db94.
+`last_wal_checkpoint_ = last_sync_`. Completed in 3a0785a.
 

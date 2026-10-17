@@ -17,16 +17,16 @@
 ## 1. Executive Summary & Current State
 
 1. **Watchdog Daemon**:
-   - `tools/agent_watchdog.py` was developed, tested, reviewed, committed to `main` at `9efbcef`, and has been **completely shut down** per maintainer request (`task-5096` terminated).
+   - `tools/agent_watchdog.py` was developed, tested, reviewed, committed to `main` at `0ae01c4`, and has been **completely shut down** per maintainer request (`task-5096` terminated).
 2. **Subagents**:
    - All background subagents have been terminated (`manage_subagents(Action='kill_all')`). No background tasks or subagents are currently running.
 3. **Host `main` Status**:
-   - Clean working tree at commit `9efbcef`:
-     - `9efbcef`: `agents: implement mechanical watchdog daemon and tests`
-     - `0dabe61`: `plan: 5.2 act repository cache mount and agent operational policies`
-     - `490b667`: `5.2: third_party/act: mount host repository cache into runner container`
-     - `77a7c5d`: `plan: 25.28 periodic SQLite WAL checkpoints merged (ae8db94)`
-     - `ae8db94`: `25.28: dcfs: periodic SQLite WAL checkpoints tied to sync_interval`
+   - Clean working tree at commit `0ae01c4`:
+     - `0ae01c4`: `agents: implement mechanical watchdog daemon and tests`
+     - `36ea865`: `plan: 5.2 act repository cache mount and agent operational policies`
+     - `098323a`: `5.2: third_party/act: mount host repository cache into runner container`
+     - `45863dd`: `plan: 25.28 periodic SQLite WAL checkpoints merged (3a0785a)`
+     - `3a0785a`: `25.28: dcfs: periodic SQLite WAL checkpoints tied to sync_interval`
 4. **Active Task in Progress (`lane-1`)**:
    - **Task**: Complete elimination of all link-time `-Wl,--wrap` flags across `dcfs/`, replacing them with a dependency-injected virtual inheritance `Syscalls` class hierarchy.
    - **Branch**: `step-virtual-syscalls` in `/home/russ/Sources/dircachefs-lanes/lane-1`.

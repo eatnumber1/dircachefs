@@ -538,7 +538,7 @@ Order after 12.12's audit, which may reorder them with the approved
   design is warranted (the one place judgement, not labour, is the
   bottleneck).
 - 12.18 SibylFS's trace checker as a second oracle (spike; russ,
-  2026-10-10). Done 2026-10-11, merged 2ebc325. Report in `docs/plan/notes/sibylfs-checker-12.18.md`.
+  2026-10-10). Done 2026-10-11, merged 849f372. Report in `docs/plan/notes/sibylfs-checker-12.18.md`.
   Findings: source compilation is intractable under Bazel (ancient Lem/OCaml 4.02);
   prebuilt x86_64 binaries (2015-08-20 release) run against glibc and can be pinned,
   but are frozen snapshots. Fundamental impedance mismatch: FUSE requests with nodeids/64-bit fh

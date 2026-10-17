@@ -505,7 +505,7 @@ files. The Gantt is updated when it is dispatched.
 Merged 2026-10-11:
 - 26.17a RAM-backed guest disks (3e0c778): loop over tmpfs, 13 fault targets,
   guest RAM sized from measurements, fault_recover silent pass found.
-- 26.17b deterministic budgets (2330209, five commits a565c32..e073bc0):
+- 26.17b deterministic budgets (7b713f6, five commits a565c32..e073bc0):
   CPU time of dcfs per test held to cpu_budgets.txt with 100% tolerance;
   I/O operations of the disks and dcfs held to io_budgets.txt; wall time
   hang guard refused in run-qemu.sh if allowance is shorter than formula;
@@ -515,7 +515,7 @@ Merged 2026-10-11:
   xfstests cost lines and side-by-side native comparison (scripts/xfstests_costs.py,
   xfstests_costs_test, xfstests_notrun_test); xfstests_1_test_ext4 shard budgets
   calibrated. Full suites green: fast (299 pass), presubmit (444 pass), tools (38 pass).
-- 26.17 non-SMT pinning off by default (ef8145e): Finding 6 from trial-2026-10-11
+- 26.17 non-SMT pinning off by default (927e8ca): Finding 6 from trial-2026-10-11
   applied; non-SMT core pinning is off by default and enabled only for budget-measuring
   runs (DCFS_PIN_NON_SMT=1); run-qemu.sh header, test/qemu/README.md, and
   run_qemu_cost_test self-check updated.

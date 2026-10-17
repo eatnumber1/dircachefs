@@ -182,4 +182,4 @@ lower the coverage baseline. That's why it exists. Only ever increase it"):
 - Registered `qemu_cc_test` target `:fuse_ops_test`.
 - Coverage rose from 96.04% lines / 80.85% branches to 96.50% lines / 81.25% branches.
 - Baseline raised to `lines 96.50`, `branches 81.24`.
-- Refinement (Finding 1, merged bf91e61): converted `OpName` and `DescribeRequest` into `AbslStringify` hidden friends on `events::Op` and `events::Request` in `dcfs/protocol_events.h` (style 1.2 ADL rule). Dropped declarations from `dcfs/fuse_ops.h` and definitions from `dcfs/fuse_ops.cc`. Tested via `absl::StrCat` in `dcfs/fuse_ops_test.cc`.
+- Refinement (Finding 1, merged aad3117): converted `OpName` and `DescribeRequest` into `AbslStringify` hidden friends on `events::Op` and `events::Request` in `dcfs/protocol_events.h` (style 1.2 ADL rule). Dropped declarations from `dcfs/fuse_ops.h` and definitions from `dcfs/fuse_ops.cc`. Tested via `absl::StrCat` in `dcfs/fuse_ops_test.cc`.

@@ -33,7 +33,7 @@ are then the same on every machine and in CI.
   --combined_report=lcov //...` covers unit and e2e tests alike. CI
   publishes the report (no threshold gate at first); the first report is
   reviewed with russ to pick untested paths worth tests.
-  Coverage under sanitizers (ASan and UBSan, 2026-10-12 a2cf18d): `coverage_asan_build`
+  Coverage under sanitizers (ASan and UBSan, 2026-10-12 db7f38b): `coverage_asan_build`
   and `coverage_ubsan_build` give QEMU guests 256 MiB additional RAM to
   unpack and run the dual-instrumented binaries and sysroot libraries;
   `coverage:asan` and `coverage:ubsan` in `.bazelrc`.
