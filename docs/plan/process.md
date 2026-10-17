@@ -338,9 +338,11 @@ reading. Not for writing code, nor for subtle protocol judgement.
    the same rules as a Claude subagent: its own lane checkout and step
    branch, `--sandbox`, the brief's AGENTS.md/CLAUDE.md rules spelled out
    in the prompt (never push, Docker is production, no timers or retry
-   loops, test first), and the orchestrator reviews every diff and reruns
-   the checks itself before a merge, plus the usual style review. Its
-   claims of tests run are verified, not trusted. Read-only jobs still use
+   loops, test first), and the orchestrator reviews every diff before a
+   merge, as it would a Claude subagent's (russ, the same day: "you can
+   even be a little looser than that"): it spot-checks the claimed test
+   runs (the quoted output, a rerun of what looks doubtful) rather than
+   rerunning everything, and the style review is the usual one. Read-only jobs still use
    `--mode plan` and write to the orchestrator's scratchpad. No protocol,
    crash-safety or identity work (rule 6's table).
 5. Narrow jobs, several of them (russ, 2026-10-17: "The long context is
