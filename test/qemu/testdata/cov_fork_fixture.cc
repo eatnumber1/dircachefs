@@ -16,10 +16,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include <cstdlib>
 #include <cstring>
 #include <optional>
 
+#include "absl/status/statusor.h"
 #include "dcfs/fork_split.h"
 
 namespace {
@@ -49,11 +49,11 @@ int Twice() {
 // The same job with ForkSplit: only the child returns.
 int Split() {
   absl::StatusOr<int> child =
-      dcfs::ForkSplit([] { return Child(); },
+      dcfs::ForkSplit([]() -> absl::StatusOr<int> { return Child(); },
                       [](pid_t pid) {
                         int wait_status = 0;
                         waitpid(pid, &wait_status, 0);
-                        std::exit(WIFEXITED(wait_status) ? Parent() : 1);
+                        return WIFEXITED(wait_status) ? Parent() : 1;
                       });
   return child.ok() ? *child : 1;
 }

@@ -1682,7 +1682,10 @@ cc_binary(
     name = "cov_fork_fixture",
     testonly = 1,
     srcs = ["testdata/cov_fork_fixture.cc"],
-    deps = ["//dcfs:fork_split"],
+    deps = [
+        "//dcfs:fork_split",
+        "@absl//absl/status:statusor",
+    ],
     copts = [
         "-fprofile-instr-generate",
         "-fcoverage-mapping",
