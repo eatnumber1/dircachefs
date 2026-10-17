@@ -3781,3 +3781,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   to 25.28b's round 2: FSYNC/FSYNCDIR are no longer sync points (backing
   fsync only, no clock reset), the periodic sync point's durable point is
   one kSync commit instead of a checkpoint, the model and oracle follow.
+- 2026-10-17, 25.32 merged (8158196): abseil/abseil.github.io pinned at
+  e9e24835cb88 (Apache-2.0); //third_party/abseil_tips:tips gives index.tsv
+  and tips.md (85 posts, 83 published tips; TotW 132 unpublished); the
+  citation check (tools/totw_citations.py) finds nothing today (only TotW
+  42 and 103 are cited). No style review: host tooling (russ, 2026-10-17);
+  reviewed by the orchestrator.

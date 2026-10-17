@@ -1140,7 +1140,7 @@ the guest.
 Owner: dcfs-implementer; an Opus review of the helper API before the
 port is merged, since every future guest test is written against it.
 
-## 25.32 A pinned copy of Abseil's Tips of the Week (russ, 2026-10-17: "OK")
+## 25.32 A pinned copy of Abseil's Tips of the Week (russ, 2026-10-17: "OK") (merged 2026-10-17, 8158196)
 
 The Tips of the Week are adopted as design guidance (`docs/style.md`,
 russ 2026-10-09) and cited by number in reviews, from memory today, and
