@@ -1163,3 +1163,17 @@ The first CI run after 12.18b, 26.30 and 26.34 failed in two places.
    what it writes. If it should have one, the timed tests have to leave the
    shard that carries it (a new shard split, or a `xfstests.timed` list
    run apart), which is a change to which tests run where.
+
+## 26.37b Style fixes for 26.37 (post-merge Flash review, 2026-10-17; queued for Gemini)
+
+- `run_qemu_cost_test.sh:397-401`: the new check passes on the old budgets
+  too; make it fail without 26.37's io_budgets change (e.g. assert the
+  dropped write lines are absent, or that CI's line fails the old file).
+- `dcfs/sanitizer_cmdline_test.cc:34`: a matcher, `EXPECT_THAT(words,
+  Contains(kBuiltWith))`, instead of `EXPECT_TRUE` on a search.
+- History in comments and docs (1.9): `qemu_test.bzl:39-41`,
+  `dcfs/BUILD.bazel:1902-1903`, `test/qemu/README.md:510, 726, 1455`,
+  `io_budgets.txt:173`, `run_qemu_cost_test.sh:387-388` state the rule and
+  the current numbers; the before/after goes to the commit and the log.
+- The dropped write-side lines are the dashboard's provisional ruling
+  (restore a write budget over the shard's non-timed tests), not this step.
