@@ -12,7 +12,12 @@ merge); this file orders the steps.
   (`process.md`, budget paragraph: about three lanes), not the machine:
   every lane's `user.bazelrc` caps it at `--jobs=4`, `--local_test_jobs=4`
   and 20 GB of build memory, which three lanes share comfortably; raise
-  the caps before the lane count. Non-building lanes (reviews, the TLA+
+  the caps before the lane count. The binding budget is guests, not
+  lanes (2026-10-17: load 120 on 8 cores with three lanes running guest
+  tests at `--local_test_jobs=4` each): the lanes' `--local_test_jobs`
+  together stay at or under the core count, so each lane runs `2`, at
+  most three lanes run guest tests at once, and the orchestrator's own
+  pre-merge checks count as a lane. Non-building lanes (reviews, the TLA+
   model, docs) cost nothing here. Watch for guest-test timeouts caused by contention; if they
   appear, pause the newest lane rather than raise timeouts. Phases may
   start out of the listed order when they depend on nothing in flight.
