@@ -1208,7 +1208,7 @@ The first CI run after 12.18b, 26.30 and 26.34 failed in two places.
    shard that carries it (a new shard split, or a `xfstests.timed` list
    run apart), which is a change to which tests run where.
 
-## 26.37b Style fixes for 26.37 (post-merge Flash review, 2026-10-17; queued for Gemini)
+## 26.37b Style fixes for 26.37 (post-merge Flash review, 2026-10-17; merged 2026-10-17, d0c51c8, Gemini Flash)
 
 - `run_qemu_cost_test.sh:397-401`: the new check passes on the old budgets
   too; make it fail without 26.37's io_budgets change (e.g. assert the

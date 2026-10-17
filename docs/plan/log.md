@@ -3936,3 +3936,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   without the change; Gemini fixed them (0fbd76d6), the orchestrator read
   the diff and checked the reruns. Disk I/O budgets under load:
   follow-up I, provisional on the dashboard.
+- 2026-10-17, 26.37b merged (d0c51c8, Gemini Flash): the 26.37 review's fixes
+  (a cost test that fails on the old budget file, a matcher, history out
+  of comments). Reviewed by the orchestrator.
