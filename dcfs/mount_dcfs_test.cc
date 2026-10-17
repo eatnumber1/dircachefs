@@ -8,6 +8,7 @@
 
 #include <sys/mount.h>  // IWYU pragma: keep (MS_* macros)
 
+#include <cerrno>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -16,6 +17,8 @@
 #include "absl/flags/flag.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
+#include "absl/status/statusor.h"
+#include "dcfs/status.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -262,6 +265,32 @@ TEST(SplitHelperOptionsTest, RemountIsRecognizedAndNotPassedOn) {
 }
 
 // --- exit statuses and the startup report ----------------------------------
+
+// The daemon's end after its session loop: a session that ended exits 0; a
+// loop stopped by a poisoned backing door, a failed device read or a refused
+// INIT is a failure (MountHelperMain exits with ExitStatusFor of it).
+TEST(DaemonOutcomeTest, AnEndedSessionExitsZero) {
+  EXPECT_THAT(DaemonOutcome(absl::OkStatus(), ""), IsOkAndHolds(0));
+}
+
+TEST(DaemonOutcomeTest, APoisonedDoorIsAFailure) {
+  absl::Status poisoned =
+      ProducedErrnoToStatus(EIO, "The backing filesystem is poisoned");
+  absl::StatusOr<int> outcome = DaemonOutcome(poisoned, "");
+  EXPECT_THAT(outcome, StatusIs(poisoned.code(), HasSubstr("is poisoned")));
+  EXPECT_EQ(ExitStatusFor(outcome.status()), 32);
+}
+
+TEST(DaemonOutcomeTest, ARefusedInitSaysWhy) {
+  absl::Status refused = ProducedErrnoToStatus(EPROTO, "refused");
+  EXPECT_THAT(DaemonOutcome(refused, "default_permissions is required"),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("dcfs refused the kernel's FUSE_INIT: "
+                                 "default_permissions is required")));
+  // With no ERROR to say why, the loop's own status.
+  EXPECT_THAT(DaemonOutcome(refused, ""),
+              StatusIs(refused.code(), HasSubstr("refused")));
+}
 
 // mount(8) takes a helper's status verbatim and 1 means "incorrect
 // invocation or permissions": 1 for usage and non-root, 32 for a failed start.

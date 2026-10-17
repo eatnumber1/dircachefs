@@ -3,7 +3,9 @@
 
 #include <sys/mount.h>  // IWYU pragma: keep (MS_* macros)
 
+#include <cerrno>
 #include <cstddef>
+#include <cstdlib>
 #include <optional>
 #include <span>
 #include <string>
@@ -374,6 +376,17 @@ int ExitStatusFor(const absl::Status &status) {
     }
   }
   return status.GetPayload(kUsageTypeUrl).has_value() ? 1 : 32;
+}
+
+absl::StatusOr<int> DaemonOutcome(const absl::Status &served,
+                                  std::string_view init_refusal) {
+  if (GetErrnoFromStatus(served).value_or(0) == EPROTO &&
+      !init_refusal.empty()) {
+    return InternalErrorBuilder()
+           << "dcfs refused the kernel's FUSE_INIT: " << init_refusal;
+  }
+  RETURN_IF_ERROR(served) << "while serving the mount";
+  return EXIT_SUCCESS;
 }
 
 std::string EncodeStartupReport(const StartupReport &report) {

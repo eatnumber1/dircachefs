@@ -170,6 +170,17 @@ absl::Status NativeMountError(int exit_status, std::string_view message);
 // errno-derived InvalidArgument from mount(2) is a failed start).
 int ExitStatusFor(const absl::Status &status);
 
+// What the daemon's run comes to once its session loop returned `served`
+// (SessionLoop::Run): EXIT_SUCCESS for a session that ended (unmounted, or
+// stopped by a signal), otherwise the failure (a poisoned backing door, a
+// failed read of the device, a refused FUSE_INIT), which MountHelperMain
+// exits with ExitStatusFor of. `init_refusal`: the text of the last ERROR
+// logged before the kernel's FUSE_INIT was answered (DirCacheFS::Init's
+// reason for refusing it; libfuse gives it no other way to say), empty once
+// it was answered.
+absl::StatusOr<int> DaemonOutcome(const absl::Status &served,
+                                  std::string_view init_refusal);
+
 // Sets the Abseil flag `name` (one of the dcfs.<flag> options) from `value`.
 // InvalidArgument for a value the flag does not parse, Internal for a name
 // that is no flag.

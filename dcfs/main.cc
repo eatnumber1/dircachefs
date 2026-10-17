@@ -559,7 +559,7 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
     request.reporter.Ready();
   });
   ctx.interrupts = &loop;
-  const absl::Status served = loop.Run();
+  absl::Status served = loop.Run();
   ctx.interrupts = &NoInterrupts();
 
   // Shutdown order matters: unmount first, so the kernel stops sending new
@@ -590,17 +590,7 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   }
   RemoveDaemonLockFile(*daemon_lock);
 
-  // SessionLoop::Run() is OK when the kernel connection was closed (e.g. the
-  // mount was unmounted externally) or a signal handler stopped the loop; a
-  // failure (a refused INIT, a device that could not be read, a poisoned
-  // backing door) is the daemon's, and a non-zero exit.
-  if (GetErrnoFromStatus(served).value_or(0) == EPROTO &&
-      last_error.has_value() && !last_error->text.empty()) {
-    return InternalErrorBuilder()
-           << "dcfs refused the kernel's FUSE_INIT: " << last_error->text;
-  }
-  RETURN_IF_ERROR(served) << "while serving the mount";
-  return EXIT_SUCCESS;
+  return DaemonOutcome(served, last_error.has_value() ? last_error->text : "");
 }
 
 // Why dcfs refuses to run as anyone but root (README, "Why root"; decision

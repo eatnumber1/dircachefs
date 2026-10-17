@@ -926,9 +926,11 @@ qemu_cc_test(
     srcs = ["mount_dcfs_test.cc"],
     deps = [
       ":mount_dcfs",
+      ":status",
       "@absl//absl/flags:flag",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
+      "@absl//absl/status:statusor",
       "@googletest//:gtest_main",
     ],
 )

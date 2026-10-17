@@ -6712,10 +6712,10 @@ TEST_F(DirCacheFSTest, SwitchWhoseSetgroupsFailsFailsTheRequestAsRoot) {
   ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("pub"), 0777, 0), IsOk());
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId pub, Id("pub"));
-  const std::vector<gid_t> groups = ThreadGroups();
+  std::vector<gid_t> groups = ThreadGroups();
 
   Setgroups() = {.fail_at = 1, .err = EPERM};
-  const Reply refused = Send(FUSE_MKDIR, pub, MkdirBody("d"), 1000, 1000);
+  Reply refused = Send(FUSE_MKDIR, pub, MkdirBody("d"), 1000, 1000);
   Setgroups() = {};
   EXPECT_EQ(refused.error, -EPERM);
   EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("pub/d")).status(),
@@ -6735,9 +6735,12 @@ TEST_F(DirCacheFSTest, SwitchWhoseSetgroupsFailsFailsTheRequestAsRoot) {
 // (setgroups ENOMEM: the kernel could not allocate the list) poisons the
 // backing door. The request that did it fails with the door's EIO, what its
 // mutation made unknown stays unknown and dirty, and SessionLoop serves
-// nothing more: it returns the refusal, which RunDaemon returns, so the
-// daemon exits non-zero. Its own target (dir_cache_fs_poisoned_test), since
-// the door stays poisoned for the rest of the process.
+// nothing more: it returns the refusal, which the daemon's outcome
+// (DaemonOutcome, RunDaemon's end) keeps as a failure, so the daemon exits
+// non-zero. The shutdown's final sync fails at the door, so the
+// clean-shutdown flag stays unset and the next start recovers. Its own
+// target (dir_cache_fs_poisoned_test), since the door stays poisoned for the
+// rest of the process.
 class PoisonedBackingTest : public DirCacheFSTest {};
 
 TEST_F(PoisonedBackingTest, RestoreFailurePoisonsTheDoorAndEndsTheLoop) {
@@ -6745,23 +6748,27 @@ TEST_F(PoisonedBackingTest, RestoreFailurePoisonsTheDoorAndEndsTheLoop) {
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId pub, Id("pub"));
   ASSERT_THAT(List(pub, false), IsOk());
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());  // A running daemon.
   struct fuse_getattr_in getattr_in = {};
   std::string getattr_body;
   AppendBytes(getattr_body, getattr_in);
-  const uint64_t mkdir = QueueRequest(FUSE_MKDIR, pub, MkdirBody("d"));
+  uint64_t mkdir = QueueRequest(FUSE_MKDIR, pub, MkdirBody("d"));
   QueueRequest(FUSE_GETATTR, kRootInode, getattr_body);
   SessionLoop loop(se_);
 
   // The mkdirat's switch is the first setgroups, its restore the second.
   Setgroups() = {.fail_at = 2, .err = ENOMEM};
-  const absl::Status served = loop.Run();
+  absl::Status served = loop.Run();
   EXPECT_EQ(KernelReadsLeft(), 1u) << "a request was served after poisoning";
   EXPECT_EQ(TakeReply(mkdir).error, -EIO);
   EXPECT_THAT(BackingDoor(), Not(IsOk()));
   EXPECT_EQ(served, BackingDoor());
-  EXPECT_NE(ExitStatusFor(served), 0);
+  EXPECT_THAT(DaemonOutcome(served, ""), Not(IsOk()));
   EXPECT_EQ(Cached(pub, "d").first, LookupResult::Kind::kUnknown);
   EXPECT_THAT(Dirty(), Contains(pub));
+
+  EXPECT_THAT(backing::FinishRun(ctx_), Not(IsOk()));
+  EXPECT_THAT(GetCleanShutdown(db_), IsOkAndHolds(false));
 }
 
 // A RELEASE says whether the open it ends could write (the lifetime model's
