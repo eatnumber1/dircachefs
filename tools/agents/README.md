@@ -112,8 +112,8 @@ agent but an `agy` process whose working directory is the lane shows
 otherwise it is `idle`.
 
 State is in `$DCFS_DASHBOARD_DIR` (default `~/.cache/dcfs-dashboard/`):
-`running.json`, `finished.json`, `lanes.json`, `uploaded.sha256`, and an optional
-`config.json` (`{"model": ..., "effort": ...}`) for the orchestrator row.
+`running.json`, `finished.json`, `lanes.json`, `uploaded.sha256`, and an
+optional `config.json` (`{"model": ..., "effort": ...}`) for the orchestrator row.
 A malformed input or an unreadable state file prints one line to stderr and
 exits 0, because a failing hook can wedge the session.
 

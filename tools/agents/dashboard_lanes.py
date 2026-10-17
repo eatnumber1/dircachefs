@@ -16,8 +16,8 @@ directory for the hook configuration.
     dashboard_lanes.py show            print the lanes file
 
 State lives in $DCFS_DASHBOARD_DIR (default ~/.cache/dcfs-dashboard):
-running.json, finished.json, lanes.json, uploaded.sha256, and an optional config.json with
-"model" and "effort" for the orchestrator row.
+running.json, finished.json, lanes.json, uploaded.sha256, and an optional
+config.json with "model" and "effort" for the orchestrator row.
 """
 
 import dataclasses
@@ -278,7 +278,8 @@ def subagent_stop(env, event):
     if record is not None:
         finished = load_json(env.path("finished.json"), {})
         finished.pop(event["agent_id"], None)
-        finished[event["agent_id"]] = record  # the most recent last
+        # Re-insert so a resumed agent counts as most recent.
+        finished[event["agent_id"]] = record
         kept = dict(list(finished.items())[-FINISHED_KEPT:])
         write_atomic(env.path("finished.json"), json.dumps(kept, indent=2))
     regenerate(env)

@@ -339,10 +339,14 @@ class PostMessageTest(Fixture):
         self.assertIn("a10", finished)
         self.assertIn("a59", finished)
 
-    def test_malformed_message_event(self):
+    def test_message_without_target_prints_nothing(self):
         out, err = self.run_hook("post-message", {"tool_input": {}})
+        self.assertEqual((out, err), ("", ""))
+
+    def test_malformed_message_event(self):
+        out, err = self.run_hook("post-message", {})
         self.assertEqual(out, "")
-        self.assertEqual(len(err.splitlines()), 0)
+        self.assertEqual(len(err.splitlines()), 1)
 
 
 class WriteAtomicTest(unittest.TestCase):
