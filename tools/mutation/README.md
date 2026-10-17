@@ -81,17 +81,18 @@ mutant of the function, in source order), with a `reason` that
 `mutate_test.py` insists on. `run` and `changed` do not run a listed mutant:
 its result is `suppressed` (with the reason) and the summary counts it apart.
 Today it holds the 11 `End()` deletions on a path that returns at once after
-a refused Checkpoint (`if (interrupted) { mutation.End(); return interrupted;
-}`): the destructor ends the mutation at the return and nothing runs between
-the two. (The `End()` before phase-3 refreshes is not equivalent: see the
-`...EndsItsMutationBeforeItsRefreshes` tests.) To add one: copy the `SURVIVOR`
-line's function and text, find `nth` with `generate --all` (always give it: an
-entry without `nth` suppresses every identical mutant, also ones added
-later), and write the reason. `nth` counts in source order, so editing the
-function can re-target an entry: `generate` warns about every entry that
-matches no mutant (its code went: delete or re-key it) or several (add `nth`),
-so re-key from `generate --all` when it does. Equivalents are split off
-before sampling, so they take no line or function slot from live mutants.
+a refused interruption point (`if (interrupted) { mutation.End(); return
+interrupted; }`): the destructor ends the mutation at the return and nothing
+runs between the two. (The `End()` before phase-3 refreshes is not
+equivalent: see the `...EndsItsMutationBeforeItsRefreshes` tests.) To add
+one: copy the `SURVIVOR` line's function and text, find `nth` with
+`generate --all` (always give it: an entry without `nth` suppresses every
+identical mutant, also ones added later), and write the reason. `nth` counts
+in source order, so editing the function can re-target an entry: `generate`
+warns about every entry that matches no mutant (its code went: delete or
+re-key it) or several (add `nth`), so re-key from `generate --all` when it
+does. Equivalents are split off before sampling, so they take no line or
+function slot from live mutants.
 
 ## Running it
 

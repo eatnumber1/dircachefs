@@ -679,11 +679,11 @@ will). Nothing checks the model's guards against the code.
   (process.md rule 5): Gemini Flash as about six narrow jobs (one per
   group of actions) and Argon as one broad job, on the same frozen commit;
   about six guards labelled beforehand (BeginShutdown unenforced; no
-  overlap, interrupts only at checkpoints, no checkpoint between a
-  syscall and phase 3 enforced, ...); scored on the known answers,
-  precision (each finding verified by its quote), recall against the union
-  of verified findings, citation accuracy, and quota spent per job
-  (`agy -p "/usage"` before and after). Results in
+  overlap, interrupts only at interruption points, no interruption point
+  between a syscall and phase 3 enforced, ...); scored on the known
+  answers, precision (each finding verified by its quote), recall
+  against the union of verified findings, citation accuracy, and quota
+  spent per job (`agy -p "/usage"` before and after). Results in
   `notes/gemini-sweep-2026-10-17.md`.
 - **The abstraction map, checked (code side; russ, 2026-10-17: "Yes"):**
   every backing call the code makes (`ProtocolEvents::BackingCall`) must

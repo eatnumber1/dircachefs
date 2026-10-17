@@ -626,11 +626,11 @@ TEST_F(TraceRecorderTest, FileRequestsBecomeLinesOfItsTrace) {
 
 // --- Interrupts (formal/dcfs.tla's Interrupt) -----------------------------
 
-// A checkpoint's interrupt (ProtocolEvents::Interrupted) is an "interrupt"
-// line of each directory the request is the model's request of, and its
-// EINTR reply a "reply" line, not a cut: a lookup interrupted before its
-// population, and a mkdir interrupted between its phase 1 and its syscall,
-// whose line comes with its End (the model's Interrupt Ends it).
+// An interruption point's interrupt (ProtocolEvents::Interrupted) is an
+// "interrupt" line of each directory the request is the model's request of,
+// and its EINTR reply a "reply" line, not a cut: a lookup interrupted
+// before its population, and a mkdir interrupted between its phase 1 and its
+// syscall, whose line comes with its End (the model's Interrupt Ends it).
 TEST_F(TraceRecorderTest, InterruptedRequestsReplyEintr) {
   ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
   StartTrace();

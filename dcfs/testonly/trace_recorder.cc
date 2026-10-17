@@ -1716,7 +1716,7 @@ void TraceRecorder::FileOpened(Context &ctx, Ino id, int flags, bool shared,
                                const absl::Status &status,
                                const events::SharedFd &after) {
   Enter("FileOpened");
-  // An open stopped at its checkpoint (EINTR) opened nothing.
+  // An open stopped at its interruption point (EINTR) opened nothing.
   if (ErrnoOf(status) == EINTR) {
     After(ctx);
     return;

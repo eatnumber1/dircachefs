@@ -7,12 +7,12 @@
 # dcfs: its population is one request of many seconds (cancel_inventory_test
 # measured 13.6-19.5 s for 20000 entries at 10 ms before Phase 22). The
 # kernel waits for dcfs's reply even for a SIGKILLed caller, so without
-# checkpoints an interrupted `ls` waits for the whole population.
+# interruption points an interrupted `ls` waits for the whole population.
 #
 #   - `timeout -s INT 1 ls` of it returns within BOUND_MS of the signal;
 #   - `kill -9` of a `find` blocked in another such directory (k/big, so
-#     the first one's population, complete when checkpoints are missing,
-#     cannot make it pass) returns within BOUND_MS;
+#     the first one's population, complete when interruption points are
+#     missing, cannot make it pass) returns within BOUND_MS;
 #   - dcfs serves a stat elsewhere afterwards;
 #   - a full listing then completes, and equals the backing directory's
 #     (an interrupted population recorded nothing wrong).
@@ -29,8 +29,8 @@ BIG=${BIG:-20000}
 # slower (Phase 5.1 measured 2-9x), so the bound scales by 4 there: 8 s
 # (1.2 s and 0.8 s measured under TCG on 2026-10-07, much of the wait being
 # DELAY_MS per I/O, which TCG does not lengthen) still fails a run without
-# checkpoints, whose wait is the rest of the population (12.1 s after the
-# signal under KVM).
+# interruption points, whose wait is the rest of the population (12.1 s after
+# the signal under KVM).
 if [ "${DCFS_ACCEL:-kvm}" = tcg ]; then
 	BOUND_MS=${BOUND_MS:-8000}
 else

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
-#ifndef DCFS_CHECKPOINT_H_
-#define DCFS_CHECKPOINT_H_
+#ifndef DCFS_INTERRUPTION_POINT_H_
+#define DCFS_INTERRUPTION_POINT_H_
 
-// A checkpoint (docs/design.md, "Cancellation"; formal/dcfs.tla's
+// An interruption point (docs/design.md, "Cancellation"; formal/dcfs.tla's
 // Interrupt): OK, or, if the request being served was interrupted
 // (Context::interrupts), ProtocolEvents::Interrupted and EINTR naming
 // `where`, which the request replies. Called only just before a backing
@@ -20,8 +20,8 @@
 
 namespace dcfs {
 
-absl::Status Checkpoint(Context &ctx, std::string_view where);
+absl::Status CheckInterrupted(Context &ctx, std::string_view where);
 
 }  // namespace dcfs
 
-#endif  // DCFS_CHECKPOINT_H_
+#endif  // DCFS_INTERRUPTION_POINT_H_

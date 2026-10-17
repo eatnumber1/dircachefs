@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "dcfs/checkpoint.h"
+#include "dcfs/interruption_point.h"
 
 #include <cerrno>
 #include <string_view>
@@ -12,7 +12,7 @@
 
 namespace dcfs {
 
-absl::Status Checkpoint(Context &ctx, std::string_view where) {
+absl::Status CheckInterrupted(Context &ctx, std::string_view where) {
   if (!ctx.interrupts->Interrupted()) return absl::OkStatus();
   // Model: Interrupt.
   ctx.events->Interrupted(ctx);

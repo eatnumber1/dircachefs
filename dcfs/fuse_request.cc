@@ -225,8 +225,8 @@ void FuseRequest::ReplyFailureAndLogIfNotOk(const absl::Status &status) {
   // (docs/style.md 1.7), with all the context the call chain added. At
   // ERROR if dcfs produced the error; an errno forwarded from the backing
   // filesystem (ENOENT, EEXIST, ...) is the answer to the request, not a
-  // failure of dcfs, and an interrupted request (dcfs/checkpoint.h) is no
-  // error either: `--v=2` shows the replies (Serve's LogRequest).
+  // failure of dcfs, and an interrupted request (dcfs/interruption_point.h)
+  // is no error either: `--v=2` shows the replies (Serve's LogRequest).
   if (ProducedByDcfs(status)) LOG(ERROR) << status;
   // A failed success reply used the request up (the status is the failure
   // of that reply, logged above): there is nothing left to reply to.

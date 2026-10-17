@@ -1005,7 +1005,7 @@ cc_library(
     srcs = ["dir_cache_fs.cc"],
     hdrs = ["dir_cache_fs.h"],
     deps = [
-      ":checkpoint",
+      ":interruption_point",
       ":protocol_events",
       ":escape",
       ":backing",
@@ -1619,9 +1619,9 @@ cc_library(
 )
 
 cc_library(
-    name = "checkpoint",
-    srcs = ["checkpoint.cc"],
-    hdrs = ["checkpoint.h"],
+    name = "interruption_point",
+    srcs = ["interruption_point.cc"],
+    hdrs = ["interruption_point.h"],
     deps = [
       ":context",
       ":protocol_events",
@@ -1709,7 +1709,7 @@ cc_library(
     hdrs = ["backing.h"],
     deps = [
       ":backing_door",
-      ":checkpoint",
+      ":interruption_point",
       ":protocol_events",
       ":escape",
       ":context",

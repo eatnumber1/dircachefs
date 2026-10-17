@@ -13,15 +13,16 @@
 // /dev/fuse only once the current request's handler has returned, and the
 // kernel queues a request's FUSE_INTERRUPT only after dcfs has read the
 // request, so a single-threaded dcfs would never see an interrupt of the
-// request it serves. This loop is libfuse's, plus Interrupted(): at a
-// checkpoint it drains what /dev/fuse already holds without blocking. A
-// FUSE_INTERRUPT goes to libfuse at once (fuse_session_process_buf: its
-// do_interrupt marks the request it names, which fuse_req_interrupted then
-// reports); the first other message ends the drain and is served after the
-// current request, before the loop reads again (at most one read ahead per
-// checkpoint). The kernel delivers interrupts ahead of forgets and
-// requests (fuse_dev_do_read), so the drain finds a request's own. No
-// thread, no wakeup while idle: draining happens only inside a request.
+// request it serves. This loop is libfuse's, plus Interrupted(): at an
+// interruption point it drains what /dev/fuse already holds without
+// blocking. A FUSE_INTERRUPT goes to libfuse at once
+// (fuse_session_process_buf: its do_interrupt marks the request it names,
+// which fuse_req_interrupted then reports); the first other message ends the
+// drain and is served after the current request, before the loop reads
+// again (at most one read ahead per interruption point). The kernel delivers
+// interrupts ahead of forgets and requests (fuse_dev_do_read), so the drain
+// finds a request's own. No thread, no wakeup while idle: draining happens
+// only inside a request.
 
 #include <deque>
 #include <utility>
@@ -74,8 +75,9 @@ class SessionLoop final : public Interrupts {
   // The requests being served, innermost last (one at a time in the
   // blocking loop; Begin and End pair like a stack).
   std::vector<fuse_req *> serving_;
-  // Messages drained at a checkpoint, to serve after the current request.
-  // Each buffer's memory is libfuse's malloc (fuse_session_receive_buf).
+  // Messages drained at an interruption point, to serve after the current
+  // request. Each buffer's memory is libfuse's malloc
+  // (fuse_session_receive_buf).
   std::deque<struct fuse_buf> queued_;
 };
 

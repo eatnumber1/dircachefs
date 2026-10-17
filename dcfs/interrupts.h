@@ -7,13 +7,14 @@
 // FUSE_INTERRUPT for a request whose caller got a signal and keeps waiting
 // for the reply (even a SIGKILLed caller waits for one: fs/fuse/dev.c,
 // request_wait_answer), so a request dcfs abandons must still be replied:
-// EINTR. dcfs serves one request at a time and looks only at checkpoints
-// (dcfs/checkpoint.h), each just before a backing syscall; a syscall
-// already blocked in the kernel (a disk spinning up, a hung network mount,
-// syncfs) cannot be interrupted until the coroutine and io_uring rewrite.
+// EINTR. dcfs serves one request at a time and looks only at interruption
+// points (dcfs/interruption_point.h), each just before a backing syscall;
+// a syscall already blocked in the kernel (a disk spinning up, a hung
+// network mount, syncfs) cannot be interrupted until the coroutine and
+// io_uring rewrite.
 //
 // Production: SessionLoop (dcfs/session_loop.h), which drains /dev/fuse at
-// a checkpoint and asks libfuse (fuse_req_interrupted). Tests: a fake.
+// an interruption point and asks libfuse (fuse_req_interrupted). Tests: a fake.
 
 struct fuse_req;
 
@@ -32,8 +33,8 @@ class Interrupts {
   virtual void Begin(fuse_req *req) {}
   virtual void End() {}
 
-  // Whether the request being served was interrupted. Only checkpoints
-  // ask.
+  // Whether the request being served was interrupted. Only interruption
+  // points ask.
   virtual bool Interrupted() { return false; }
 };
 

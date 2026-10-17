@@ -97,7 +97,7 @@ bool SessionLoop::Interrupted() {
 void SessionLoop::Drain() {
   // The kernel hands out interrupts before forgets and requests
   // (fuse_dev_do_read), so the drain stops at the first other message: at
-  // most one request is read ahead per checkpoint, and the rest stay
+  // most one request is read ahead per interruption point, and the rest stay
   // queued in the kernel, where an interrupt or a killed caller can still
   // take them back.
   const int fd = fuse_session_fd(se_);

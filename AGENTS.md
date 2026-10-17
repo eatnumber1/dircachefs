@@ -74,9 +74,9 @@ Rules marked "(from phase N)" take effect when that plan phase lands.
   something the model does not allow.
 - **Requests are cancellable** (from phase 22): any operation that can
   take more than about 100 ms on a slow backing checks for interruption
-  at checkpoints (`dcfs/checkpoint.h`), each just before a backing
-  syscall and never between a mutation's syscall and its phase 3, and has
-  a cancellation test; cancellation never breaks the tri-state rule.
+  at interruption points (`dcfs/interruption_point.h`), each just before
+  a backing syscall and never between a mutation's syscall and its phase 3,
+  and has a cancellation test; cancellation never breaks the tri-state rule.
 - **File names are bytes.** Never treat a name, symlink target or xattr
   name as text; escape it whenever it is printed (from phase 9).
 - **Third-party code is fetched and built by Bazel** (from phase 4), not

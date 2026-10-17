@@ -71,10 +71,10 @@ a root-level file costs no extra syscall; any other parent opens by
 handle, so the cost does not grow with depth: 6 announced calls instead of
 3 for a file below the root, 3 extra SQLite steps); ENOENT or an identity
 mismatch logs the out-of-band WARNING, marks the name unknown and falls
-back to the handle open; other openat errors are returned; no checkpoint
-before the named open (it runs inside phase 3); no parent-fd cache (the
-measurement does not call for one). ident.tla gains a present-dentry
-field, `NamedHit`, `NamedMismatch`, and known_bug
+back to the handle open; other openat errors are returned; no
+interruption point before the named open (it runs inside phase 3); no
+parent-fd cache (the measurement does not call for one). ident.tla gains
+a present-dentry field, `NamedHit`, `NamedMismatch`, and known_bug
 `ident_named_open_no_fallback`; a finding while modelling: without durably
 clearing the dentry in phase 1 and in recovery, `ident_power` reaches a
 recycled inode through a rolled-back dentry (the code already clears it).

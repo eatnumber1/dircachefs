@@ -554,8 +554,8 @@ T_Syncfs ==
 T_SyncClearDirty ==
     /\ Ev("sync_clear") /\ SyncClearDirty(P) /\ Matches(E, {})
 
-\* A checkpoint found the request interrupted (FUSE_INTERRUPT): it replies
-\* EINTR, ending a mutation past phase 1 without phase 3.
+\* An interruption point found the request interrupted (FUSE_INTERRUPT):
+\* it replies EINTR, ending a mutation past phase 1 without phase 3.
 T_Interrupt == Ev("interrupt") /\ Interrupt(P) /\ Matches(E, {})
 
 \* The errno of the request's reply, as the reply line records it (Linux's

@@ -73,7 +73,7 @@ void Serve(fuse_req_t req, const events::Request &request, Handler handler) {
   const uint64_t backing_before = ctx.backing_calls;
   ctx.first_backing_call = {};
   ctx.events->CheckRequestBegin(ctx, fs.bookkeeping(), request);
-  // The request checkpoints ask about (dcfs/interrupts.h).
+  // The request interruption points ask about (dcfs/interrupts.h).
   ctx.interrupts->Begin(req);
   {
     events::RequestScope scope(*ctx.events, ctx, request);

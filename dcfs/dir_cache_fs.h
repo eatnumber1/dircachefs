@@ -521,8 +521,8 @@ class DirCacheFS : private events::Bookkeeping {
   // After a failed phase 2 (the backing syscall) of Unlink/Rmdir/Rename:
   // re-resolves `names` in `parent` (LookupOrPopulate) so that the state
   // phase 1 made unknown is known again. Errors are ignored, except an
-  // interrupt (EINTR, dcfs/checkpoint.h), which stops it and is returned:
-  // the request replies it.
+  // interrupt (EINTR, dcfs/interruption_point.h), which stops it and is
+  // returned: the request replies it.
   absl::Status ReresolveAfterFailure(InodeId parent,
                                      std::span<const std::string> names);
 

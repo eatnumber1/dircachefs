@@ -269,9 +269,9 @@ ask its own parent the same way: the recursion climbs the cached
 ancestors one level per call, so it is bounded by the depth, and ends at
 the root, which is opened through the mount fd (no handle). The checks
 cost a parent open and a `name_to_handle_at` per name, on an error path
-only, with no checkpoint before them: `OpenNode` also runs inside some
-mutations' phase 3 (Setattr's attribute refresh), where an interruption
-must not happen.
+only, with no interruption point before them: `OpenNode` also runs inside
+some mutations' phase 3 (Setattr's attribute refresh), where an
+interruption must not happen.
 
 ### Why handles survive restarts but not a cache wipe
 
@@ -1237,7 +1237,7 @@ success, phase 3 records it as `RecordNewChild` records a created object
 (`backing::RecordRelinked`): the object's row comes back under the record's
 nodeid and FUSE generation (`cache::ReinstateInode`), the name links to it
 if the mutation still owns the parent, and the row is dirty, in one
-transaction, with no checkpoint after the syscall; the record goes.
+transaction, with no interruption point after the syscall; the record goes.
 
 An unlinked file that dcfs itself still has open keeps its row until the
 last release (above); changing it goes the ordinary way, by handle:
@@ -1555,11 +1555,12 @@ btrfs alike):
   outstanding") and the next start recovers the dirty entry, which is correct
   and only costs a re-read.
 
-For the cancellation phase (22): a checkpoint is before a backing syscall, so
-a request held inside one cannot be interrupted, and with one thread the whole
-daemon is held with it. Only running requests on more threads (coroutines
-with a thread per queue) would let the rest of the filesystem go on, and then
-only for requests that touch no inode the held one has unknown.
+For the cancellation phase (22): an interruption point is before a backing
+syscall, so a request held inside one cannot be interrupted, and with one
+thread the whole daemon is held with it. Only running requests on more
+threads (coroutines with a thread per queue) would let the rest of the
+filesystem go on, and then only for requests that touch no inode the held
+one has unknown.
 
 ### Rules that hold now so that coroutines need no redesign
 
@@ -1653,10 +1654,11 @@ request's reply, even for a SIGKILLed caller (`request_wait_answer` in
 `fs/fuse/dev.c`: once dcfs has read a request, only its reply ends the
 wait). So a request dcfs stops must still be replied: `EINTR`.
 
-**Checkpoints, not threads** (russ approved option (b), 2026-10-07). dcfs
-serves one request at a time, so an interrupt cannot stop a backing
-syscall already issued; dcfs looks for one at checkpoints
-(`Checkpoint`, `dcfs/checkpoint.h`), each just before a backing syscall:
+**Interruption points, not threads** (russ approved option (b), 2026-10-07).
+dcfs serves one request at a time, so an interrupt cannot stop a backing
+syscall already issued; dcfs looks for one at interruption points
+(`CheckInterrupted`, `dcfs/interruption_point.h`), each just before a backing
+syscall:
 
 - before `LookupOrPopulate`'s probe of a name or population of a
   directory, and every 16 probes inside `PopulateDirectory` (the slow
@@ -1668,25 +1670,25 @@ syscall already issued; dcfs looks for one at checkpoints
 - before a cold open's open by handle, and before `FSYNC`'s and
   `FSYNCDIR`'s fsync and their sync point.
 
-How a checkpoint learns of the interrupt: the kernel queues a request's
-`FUSE_INTERRUPT` only after dcfs read the request, and libfuse's own loop
-reads the next message only once the handler has returned, so a request
-never saw its own interrupt. `SessionLoop` (`dcfs/session_loop.h`, the
-daemon's loop) drains `/dev/fuse` without blocking at each checkpoint (one
-`poll`): an interrupt goes to libfuse at once (`do_interrupt` marks the
-request, `fuse_req_interrupted` reports it), and the drain stops at the
-first other message, which is queued and served after the current request:
-at most one request is read ahead per checkpoint, so a long request does
-not pull the kernel's whole queue into dcfs's memory. The kernel delivers
-interrupts ahead of queued requests (`fuse_dev_do_read`), so the drain
-finds an interrupt before any request. dcfs turns `FUSE_CAP_SPLICE_READ`
-off, so every message arrives in memory and a drained one is never a pipe
-that libfuse would have to read during the current request. No thread, and
-nothing runs while dcfs is idle. In `cancel_test` (dm-delay, 10 ms per
-I/O) an interrupted `ls` of an unlisted 20,000-entry directory returns
-0.7-0.9 s after the signal (12.1 s without checkpoints), and a SIGKILLed
-`find` of another one 0.7-1.0 s after the kill (under TCG: 1.2 s and
-0.8 s).
+How an interruption point learns of the interrupt: the kernel queues a
+request's `FUSE_INTERRUPT` only after dcfs read the request, and libfuse's
+own loop reads the next message only once the handler has returned, so a
+request never saw its own interrupt. `SessionLoop` (`dcfs/session_loop.h`,
+the daemon's loop) drains `/dev/fuse` without blocking at each interruption
+point (one `poll`): an interrupt goes to libfuse at once (`do_interrupt`
+marks the request, `fuse_req_interrupted` reports it), and the drain stops
+at the first other message, which is queued and served after the current
+request: at most one request is read ahead per interruption point, so a long
+request does not pull the kernel's whole queue into dcfs's memory. The
+kernel delivers interrupts ahead of queued requests (`fuse_dev_do_read`),
+so the drain finds an interrupt before any request. dcfs turns
+`FUSE_CAP_SPLICE_READ` off, so every message arrives in memory and a drained
+one is never a pipe that libfuse would have to read during the current
+request. No thread, and nothing runs while dcfs is idle. In `cancel_test`
+(dm-delay, 10 ms per I/O) an interrupted `ls` of an unlisted 20,000-entry
+directory returns 0.7-0.9 s after the signal (12.1 s without interruption
+points), and a SIGKILLed `find` of another one 0.7-1.0 s after the kill
+(under TCG: 1.2 s and 0.8 s).
 
 Owning the loop also means owning its end. libfuse refuses an `INIT` it
 cannot accept (a `max_read` the kernel did not offer, an old protocol
@@ -1708,27 +1710,28 @@ nothing (a population's probes so far are dropped, the directory stays
 incomplete); a mutation interrupted after its phase 1 and before its
 syscall ends (`Mutation::End`, releasing its guard) with its names and
 attributes still unknown and dirty, which is sound because the backing
-filesystem is unchanged; a mutation has no checkpoint after its syscall,
-so it is never interrupted between its syscall and its phase 3: the change
-exists, phase 3 records it, and the request replies success. A failed
-mutation's re-resolution of its names (`ReresolveAfterFailure`) is a fill
-with checkpoints of its own: its first `EINTR` ends the request with
-`EINTR` (the names stay unknown), and a rename skips its second name. An
-interrupted `FSYNC` may have synced (its sync point has a checkpoint after
-the backing `fsync`); repeating it is harmless. The model's variants show what breaks otherwise (an
-interrupt after the syscall that puts the old name back: `CacheNeverWrong`;
-the same before the syscall without the kernel's lock: `TriState`; an
-interrupted mutation that never Ends: `GuardsBalanced`).
+filesystem is unchanged; a mutation has no interruption point after its
+syscall, so it is never interrupted between its syscall and its phase 3:
+the change exists, phase 3 records it, and the request replies success.
+A failed mutation's re-resolution of its names (`ReresolveAfterFailure`)
+is a fill with interruption points of its own: its first `EINTR` ends the
+request with `EINTR` (the names stay unknown), and a rename skips its second
+name. An interrupted `FSYNC` may have synced (its sync point has an
+interruption point after the backing `fsync`); repeating it is harmless.
+The model's variants show what breaks otherwise (an interrupt after the
+syscall that puts the old name back: `CacheNeverWrong`; the same before
+the syscall without the kernel's lock: `TriState`; an interrupted mutation
+that never Ends: `GuardsBalanced`).
 
 **What cannot be interrupted yet**: a backing syscall already blocked in
 the kernel: the first I/O to a disk spinning up (seconds), a hung network
 mount, `syncfs` or `fsync` of much dirty data, DESTROY's reconciliation
 and start-up recovery (no caller). The request answers at its next
-checkpoint after the syscall returns. The coroutine and io_uring rewrite
-lifts this: each request carries a cancellation token checked at every
-await (the same checkpoints), and `IORING_OP_ASYNC_CANCEL` cancels
-in-flight backing I/O that io_uring can cancel; the rules above carry over
-unchanged.
+interruption point after the syscall returns. The coroutine and io_uring
+rewrite lifts this: each request carries a cancellation token checked at
+every await (the same interruption points), and `IORING_OP_ASYNC_CANCEL`
+cancels in-flight backing I/O that io_uring can cancel; the rules above
+carry over unchanged.
 
 ## Writable opens and file contents
 

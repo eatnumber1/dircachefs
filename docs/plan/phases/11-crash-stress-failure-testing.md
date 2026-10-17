@@ -144,7 +144,7 @@ blocks only its client; each mutation blocks in its backing syscall
 non-empty, and completes after the thaw; **while a mutation is held the
 whole single-threaded daemon is blocked, cached reads included**, so
 "reads of cached state keep working" above is false in that case
-(README limitations, design.md); a cancellation checkpoint cannot help
+(README limitations, design.md); a cancellation interruption point cannot help
 inside a syscall: this is the case for serving threads or coroutines.
 `syncfs` of a frozen filesystem returns at once, so a sync point is no
 deadlock; SIGTERM behind a held create waits for the thaw and may end

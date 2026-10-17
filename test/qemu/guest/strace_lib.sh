@@ -135,7 +135,7 @@ strace_reduce() {
 			fdpath = substr(head, index(head, "<") + 1)
 			fdpath = substr(fdpath, 1, length(fdpath) - 1)
 		} else if (match(line, /^poll\(\[\{fd=[0-9]+<[^>]*>/)) {
-			# poll of one descriptor (the drain of /dev/fuse at a checkpoint).
+			# poll of one descriptor (the drain of /dev/fuse at an interruption point).
 			head = substr(line, 1, RLENGTH)
 			fdpath = substr(head, index(head, "<") + 1)
 			fdpath = substr(fdpath, 1, length(fdpath) - 1)

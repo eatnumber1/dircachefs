@@ -222,7 +222,7 @@ class TraceRecorder final : public ProtocolEvents {
     bool syscall_ok = false;
     bool probe_absent = false;  // a create's probe found nothing
     bool owned = false;         // Mutation::Owns at its End
-    bool interrupted = false;   // a checkpoint found it interrupted
+    bool interrupted = false;   // an interruption point found it interrupted
     // A lookup's: what LookupOrPopulate answered (JSON: "neg", "refused" or
     // the object's key), for its reply line.
     std::string answer;

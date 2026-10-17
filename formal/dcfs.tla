@@ -888,7 +888,7 @@ Fail(p, label, name, cont) ==
 (* fails (a trace with a failed one is cut there).                         *)
 
 \* Phase 1 (cache::BeginAttrChange, BeginXattrChange): D's attributes
-\* unknown, D dirty. Then the checkpoint and the syscall.
+\* unknown, D dirty. Then the interruption point and the syscall.
 A1From(p, r) ==
     /\ BeginMutation({}, TRUE)
     /\ Syscall(p, InFlight(r, "A_sys"))
@@ -1140,18 +1140,18 @@ WReply(p) ==
 
 (***************************************************************************)
 (* FUSE_INTERRUPT (Phase 22; docs/design.md, "Cancellation"). dcfs serves  *)
-(* one request at a time and cannot stop a backing syscall once issued;   *)
-(* it looks for an interrupt of the request it serves at checkpoints      *)
-(* (Checkpoint in dcfs/interrupts.h), each just before a backing syscall: *)
+(* it looks for an interrupt of the request it serves at interruption     *)
+(* points (CheckInterrupted in dcfs/interruption_point.h), each just      *)
+(* before a backing syscall:                                              *)
 (* before LookupOrPopulate's probe or population (RN_probe, PD_read),     *)
-(* between the population's probe batches (PD_commit: its reads are      *)
+(* between the population's probe batches (PD_commit: its reads are       *)
 (* abandoned, nothing is committed), and before a mutation's phase-2      *)
 (* syscall (C_sys, U_sys, R_sys). There an interrupted request replies    *)
 (* EINTR; a mutation past phase 1 ends (Mutation::End) without a phase 3, *)
 (* its names and D's attributes left unknown and D dirty, as phase 1 left *)
-(* them: the backing filesystem is unchanged, so unknown is sound. From    *)
-(* the syscall through phase 3 there is no checkpoint: the change exists  *)
-(* and is recorded, and the request replies success.                      *)
+(* them: the backing filesystem is unchanged, so unknown is sound. From   *)
+(* the syscall through phase 3 there is no interruption point: the change *)
+(* exists and is recorded, and the request replies success.               *)
 (*                                                                         *)
 (* BugInterruptAfterSyscall: also interruptible after the syscall, before *)
 (* phase 3, cancelling the mutation by putting its resolved name back.    *)

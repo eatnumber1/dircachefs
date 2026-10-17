@@ -549,7 +549,7 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
     return daemon_lock.status();
   }
 
-  // libfuse's loop, plus draining /dev/fuse at a checkpoint so that a
+  // libfuse's loop, plus draining /dev/fuse at an interruption point so that a
   // request sees its own FUSE_INTERRUPT (dcfs/session_loop.h). The wrapper
   // waiting for this daemon is told when the kernel's FUSE_INIT has been
   // answered: from then on dcfs is serving.

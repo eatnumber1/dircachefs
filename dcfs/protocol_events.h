@@ -640,8 +640,8 @@ class ProtocolEvents {
 
   // --- Interrupts (formal/dcfs.tla's Interrupt) ----------------------
 
-  // A checkpoint (dcfs/checkpoint.h) found the request being served
-  // interrupted: it replies EINTR, a mutation past phase 1 Ending first
+  // An interruption point (dcfs/interruption_point.h) found the request being
+  // served interrupted: it replies EINTR, a mutation past phase 1 Ending first
   // (MutationEnding/MutationEnded follow) without its phase 3. Model:
   // Interrupt.
   virtual void Interrupted(Context &ctx) {}

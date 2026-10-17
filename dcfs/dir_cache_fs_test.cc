@@ -630,7 +630,8 @@ class DirCacheFSTest : public ::testing::Test {
     ASSERT_NE(se_, nullptr);
     struct fuse_custom_io io = {};
     // Requests come in through Send(); a read is SessionLoop draining
-    // the device at a checkpoint, which gets what a test queued (Kernel).
+    // the device at an interruption point, which gets what a test queued
+    // (Kernel).
     io.read = [](int, void *buf, size_t size, void *) -> ssize_t {
       return current_->ReadQueued(buf, size);
     };
@@ -7278,15 +7279,16 @@ TEST_F(DirCacheFSDeathTest, UnhookedBackingSyscallInATransaction) {
 
 // --- Cancellation (Phase 22; docs/design.md, "Cancellation") -------------
 //
-// An interrupted request stops at a checkpoint (dcfs/checkpoint.h) just
-// before a backing syscall and replies EINTR, leaving the cache as the
-// tri-state rule wants: nothing recorded it did not finish, a mutation's
-// phase-1 records unknown and dirty, every guard released, no transaction
-// open (formal/dcfs.tla's Interrupt, GuardsBalanced).
+// An interrupted request stops at an interruption point
+// (dcfs/interruption_point.h) just before a backing syscall and replies
+// EINTR, leaving the cache as the tri-state rule wants: nothing recorded it
+// did not finish, a mutation's phase-1 records unknown and dirty, every guard
+// released, no transaction open (formal/dcfs.tla's Interrupt,
+// GuardsBalanced).
 
 // The harness's interruption source: the request being served is
-// interrupted from the `at`-th checkpoint on (0: never), counting from
-// when the test set it.
+// interrupted from the `at`-th interruption point on (0: never), counting
+// from when the test set it.
 class FakeInterrupts final : public Interrupts {
  public:
   bool Interrupted() override {
@@ -7311,7 +7313,7 @@ std::shared_ptr<int> CountProbes() {
   return count;
 }
 
-// Interrupted on arrival (its first checkpoint): a lookup that needs a
+// Interrupted on arrival (its first interruption point): a lookup that needs a
 // population replies EINTR without touching the backing filesystem, and
 // the next one, not interrupted, is served.
 TEST_F(DirCacheFSTest, InterruptedLookupRepliesEintrWithoutTheBacking) {
@@ -7349,7 +7351,7 @@ TEST_F(DirCacheFSTest, InterruptedPopulationRecordsNothing) {
   ctx_.interrupts = &interrupts;
   // (Not traced: the trace spec's initial states range over every subset
   // of the names, 2^200 here; InterruptedPopulationIsTraced is.)
-  // Its first checkpoints pass: probes run, then the interrupt is seen.
+  // Its first interruption points pass: probes run, then the interrupt is seen.
   interrupts.at = 3;
   std::shared_ptr<int> probes = CountProbes();
   EXPECT_EQ(ErrnoOf(List(d, false).status()), EINTR);
@@ -7424,7 +7426,7 @@ TEST_F(DirCacheFSTest, MutationInterruptedAfterItsSyscallCompletes) {
   FakeInterrupts interrupts;
   ctx_.interrupts = &interrupts;
   StartTrace();
-  // The first open by handle comes after the checkpoint: the backing
+  // The first open by handle comes after the interruption point: the backing
   // unlink's or phase 3's.
   OpenByHandleHook() = [&] { interrupts.at = 1; };
   EXPECT_EQ(Unlink(kRootInode, "f").error, 0);
@@ -7436,8 +7438,8 @@ TEST_F(DirCacheFSTest, MutationInterruptedAfterItsSyscallCompletes) {
 }
 
 // End to end: the kernel's FUSE_INTERRUPT for the request being served,
-// read from the device by SessionLoop at a checkpoint (as the daemon's
-// loop does), stops a population.
+// read from the device by SessionLoop at an interruption point (as the
+// daemon's loop does), stops a population.
 TEST_F(DirCacheFSTest, ForgedFuseInterruptStopsAPopulation) {
   ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   for (int i = 0; i < 200; ++i) WriteFile(Path(absl::StrCat("d/f", i)));
@@ -7713,7 +7715,7 @@ TEST_F(DirCacheFSTest, InterruptedReresolveStopsAFailedRename) {
   ASSERT_THAT(List(kRootInode, false), IsOk());
   FakeInterrupts interrupts;
   ctx_.interrupts = &interrupts;
-  // The first checkpoint (before renameat2) passes; renameat2 fails
+  // The first interruption point (before renameat2) passes; renameat2 fails
   // (ENOTEMPTY); the re-resolve of "a" is interrupted.
   interrupts.at = 2;
   EXPECT_EQ(Rename(kRootInode, "a", kRootInode, "b").error, -EINTR);
@@ -7740,8 +7742,8 @@ TEST_F(DirCacheFSTest, InterruptedReresolveIsTraced) {
   ctx_.interrupts = &NoInterrupts();
 }
 
-// What a checkpoint drains besides the interrupt: the first other message
-// ends the drain (one read ahead, the rest left to the kernel) and is
+// What an interruption point drains besides the interrupt: the first other
+// message ends the drain (one read ahead, the rest left to the kernel) and is
 // served after the interrupted request (SessionLoop::Run).
 TEST_F(DirCacheFSTest, DrainedRequestIsServedAfterTheInterruptedOne) {
   ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
@@ -7771,11 +7773,11 @@ TEST_F(DirCacheFSTest, DrainedRequestIsServedAfterTheInterruptedOne) {
   ctx_.interrupts = &NoInterrupts();
 }
 
-// Every checkpoint before a backing syscall (AGENTS.md: each has a
-// cancellation test): interrupted at its first checkpoint, the request
-// replies EINTR, the backing file is unchanged, no mutation is in flight,
-// no transaction is open, and what phase 1 made unknown stays unknown and
-// dirty.
+// Every interruption point before a backing syscall (AGENTS.md: each has a
+// cancellation test): interrupted at its first interruption point, the
+// request replies EINTR, the backing file is unchanged, no mutation is in
+// flight, no transaction is open, and what phase 1 made unknown stays unknown
+// and dirty.
 struct CheckpointCase {
   std::string name;
   // Sends the request (handles opened before are in `fh`); its reply.

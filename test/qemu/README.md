@@ -734,11 +734,11 @@ gate is disabled.
 | shipped dependency golden (26.9) | `//tools:shipped_deps_self_check_test` (the real comparison over a golden with a line removed) |
 | repository shape: third_party READMEs, guest scripts used, DISABLED_ checks listed (26.13), no bare `sleep` in a guest script beyond the shrinking list (15.6b) | `//tools:repo_shape_self_check_test` (fixture trees with a missing README, an unreferenced script, an unlisted check) |
 | commit subjects on the CI push range (26.13) | `//tools:commit_subjects_test` (canned subject lists through the real `.github/ci/commit_subjects.sh`) |
-| syscall-trace goldens and budgets (26.3, 26.4: the reducer, the golden comparison, the budget comparison) | `//test/qemu:strace_lib_test` (the real `guest/strace_lib.sh` over canned strace output, including a golden that differs and a checkpoint's `poll` of `/dev/fuse`) |
+| syscall-trace goldens and budgets (26.3, 26.4: the reducer, the golden comparison, the budget comparison) | `//test/qemu:strace_lib_test` (the real `guest/strace_lib.sh` over canned strace output, including a golden that differs and an interruption point's `poll` of `/dev/fuse`) |
 | runtime invariant checks (26.2: each invariant the checker enforces) | `//dcfs:dir_cache_fs_test`'s `DirCacheFSDeathTest.*` (each breaks one invariant on purpose and expects the abort naming it) and `InvariantChecksReportAsAStatus` |
 | run-qemu.sh invariant-violation verdict (26.2) | `//test/qemu:run_qemu_verdict_test` (a canned `DCFS-INVARIANT-VIOLATION` line fails the run; the words mid-line do not) |
 | fast and presubmit tiers boot the checking build (26.2) | `//test/qemu:invariant_checks_on_test` (a small test whose daemon must say `invariant checks: on`) |
-| interrupt checkpoints (Phase 22: an interrupted request replies `EINTR` at its next checkpoint) | `//dcfs:dir_cache_fs_test`'s cancellation tests (a fake interruption source, and a forged `FUSE_INTERRUPT` read by the real `SessionLoop`) and `//test/qemu:cancel_test`; without the checkpoints the harness tests fail, and `cancel_test`'s interrupted listing took 12.1 s after the signal (the population's 13.6-19.5 s in `cancel_inventory_test`) |
+| interruption points (Phase 22: an interrupted request replies `EINTR` at its next interruption point) | `//dcfs:dir_cache_fs_test`'s cancellation tests (a fake interruption source, and a forged `FUSE_INTERRUPT` read by the real `SessionLoop`) and `//test/qemu:cancel_test`; without the interruption points the harness tests fail, and `cancel_test`'s interrupted listing took 12.1 s after the signal (the population's 13.6-19.5 s in `cancel_inventory_test`) |
 | fault sweep: every backing call site a short workload reaches, failed once (26.6) | `//dcfs:dir_cache_fs_fault_sites_test`'s `FaultSitesTest.SweepReportsABrokenInvariant` (an iteration that breaks an invariant is reported, naming the site it failed) |
 | slopes: every operation class's steps, transactions, WAL fsyncs and backing syscalls at N = 100 and 1000 bounded by a * N + b (26.4b) | `//dcfs:dir_cache_fs_slope_test`'s `SlopeTest.AnExtraCostPerOperationIsCaught` (two more statement steps per create exceed the bound) |
 | FUSE requests per user-level operation (26.4b: `guest/request_budgets.txt`) | `//test/qemu:request_lib_test` (the real `guest/request_lib.sh` delta over canned counter snapshots, and a request count above its budget failing) |
@@ -2528,8 +2528,8 @@ ioctls; the guest has no dmsetup) are subcommands of the same binary.
 The cancellation inventory (`cancel_inventory_test`, 10 ms per backing I/O,
 fastbuild dcfs, a loaded host, 2026-10-07; each one request unless noted).
 Run it again after a change to a request path: a path above about 100 ms
-needs checkpoints (AGENTS.md, "Requests are cancellable"; docs/design.md,
-"Cancellation").
+needs interruption points (AGENTS.md, "Requests are cancellable";
+docs/design.md, "Cancellation").
 
 | Path | Time |
 |---|---|

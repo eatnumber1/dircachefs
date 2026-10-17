@@ -1233,7 +1233,8 @@ recovery protocol, concurrency, and the test strategy.
   backing syscall, and since dcfs serves one request at a time, so does
   every request behind it, a read of cached state included: nothing is
   served until the thaw, and a signal to the waiting process cannot help (the
-  daemon is inside the syscall; the checkpoints before it have passed).
+  daemon is inside the syscall; the interruption points before it have
+  passed).
   Measured (`//test/qemu:fault_freeze_test`, `test/qemu/README.md`): while
   nothing is held, a frozen backing filesystem does not stop reads: stat,
   listings of cached directories, lookups, opens and reads (including
@@ -1265,9 +1266,9 @@ recovery protocol, concurrency, and the test strategy.
   tolerates exactly that warning).
 - **Interrupting a request is prompt only between backing syscalls.** A
   signal to a process waiting on dcfs (Ctrl+C, `timeout`, even `kill -9`)
-  ends the wait with `EINTR` at dcfs's next checkpoint, just before its
-  next backing syscall: within about a second while dcfs lists a large
-  uncached directory on a slow disk. A backing syscall already blocked in
+  ends the wait with `EINTR` at dcfs's next interruption point, just
+  before its next backing syscall: within about a second while dcfs lists a
+  large uncached directory on a slow disk. A backing syscall already blocked in
   the kernel (a disk spinning up, a hung network mount, a long `fsync`)
   is waited out first. A change that already reached the backing
   filesystem is completed and reported as done, never as `EINTR`. The

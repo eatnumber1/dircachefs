@@ -46,13 +46,13 @@
 #include "absl/time/time.h"
 #include "absl/types/source_location.h"
 #include "dcfs/backing_door.h"
-#include "dcfs/checkpoint.h"
 #include "dcfs/context.h"
 #include "dcfs/credentials.h"
 #include "dcfs/device_id.h"
 #include "dcfs/escape.h"
 #include "dcfs/fd.h"
 #include "dcfs/file_handle.h"
+#include "dcfs/interruption_point.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/migrate.h"
 #include "dcfs/protocol_events.h"
@@ -848,10 +848,10 @@ namespace {
 // recursion climbs the cached ancestors, one level per call, and ends at the
 // root, which OpenRoot opens through the mount fd (no handle, no ESTALE).
 //
-// No checkpoint (dcfs/checkpoint.h) before these backing calls: OpenNode
-// runs inside some mutations' phase 3 (Setattr's RefreshAttrs -> StatNode
-// records the outcome), where an interruption must not happen, and this is
-// an error path whose cost is a few opens.
+// No interruption point (dcfs/interruption_point.h) before these backing
+// calls: OpenNode runs inside some mutations' phase 3 (Setattr's RefreshAttrs
+// -> StatNode records the outcome), where an interruption must not happen, and
+// this is an error path whose cost is a few opens.
 constexpr size_t kUnknownNamesToAsk = 16;
 
 absl::Status StaleOrUnreadable(Context &ctx, InodeId id,
@@ -1445,7 +1445,7 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
     // an interrupted population stops here and records nothing.
     constexpr size_t kProbesPerCheckpoint = 16;
     if (i % kProbesPerCheckpoint == 0) {
-      RETURN_IF_ERROR(Checkpoint(ctx, "a directory's probes"));
+      RETURN_IF_ERROR(CheckInterrupted(ctx, "a directory's probes"));
     }
     const std::string &name = names[i];
     std::optional<struct statx> refused;
@@ -1605,8 +1605,8 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
                               0);
     // Before the probe or the population's I/O (formal/dcfs.tla's
     // Interrupt at RN_probe, PD_read).
-    RETURN_IF_ERROR(
-        Checkpoint(ctx, listed ? "resolving a name" : "listing a directory"));
+    RETURN_IF_ERROR(CheckInterrupted(
+        ctx, listed ? "resolving a name" : "listing a directory"));
     if (listed) {
       ASSIGN_OR_RETURN(result, ResolveName(ctx, parent, name));
       return WithStub(result, parent, name);
