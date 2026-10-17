@@ -76,14 +76,17 @@ class FuseRequest {
   FuseRequest &operator=(const FuseRequest &) = delete;
 
   // The caller's filesystem identity: the uid/gid the kernel sent with the
-  // request (fuse_req_ctx) and the calling thread's supplementary groups
-  // (fuse_req_getgroups, which reads them from /proc/<tid>/task/<tid>/status
-  // -- the kernel does not send them). If the groups cannot be read (the
-  // caller already exited, or lives in a pid namespace the daemon cannot
-  // see, where the kernel sends pid 0), the result has NO supplementary
-  // groups: never more than the caller has, at worst a spurious EACCES for
-  // access granted only through one of them. Does not consume the request;
-  // must be called before a Reply*.
+  // request (fuse_req_ctx), and the calling thread's supplementary groups
+  // and whether it holds CAP_FSETID (ReadProcCredentials, from
+  // /proc/<tid>/task/<tid>/status -- the kernel sends neither). CAP_FSETID
+  // counts only where /proc shows the request's uid and dcfs's own user
+  // namespace. If /proc cannot be read (the caller already exited, or
+  // lives in a pid namespace the daemon cannot see, where the kernel sends
+  // pid 0), the result has NO supplementary groups and no CAP_FSETID: never
+  // more than the caller has, at worst a spurious EACCES for access granted
+  // only through a group, or setuid and setgid cleared by a write that
+  // would keep them. Does not consume the request; must be called before a
+  // Reply*.
   absl::StatusOr<Credentials> Caller() const;
 
   // Fills in a fuse_entry_param from `attr` and replies with it.

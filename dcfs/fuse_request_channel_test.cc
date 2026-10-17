@@ -54,6 +54,7 @@
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
+#include "dcfs/testonly/thread_without_cap_fsetid.h"
 #include "fuse_kernel.h"
 #include "fuse_lowlevel.h"
 #include "gmock/gmock.h"
@@ -260,6 +261,13 @@ class WarningCapture : public absl::LogSink {
   std::vector<std::string> lines;
 };
 
+// Matches a FakeChannel::caller that read Credentials whose cap_fsetid is
+// `want`.
+auto HasCapFsetid(bool want) {
+  return testing::Optional(absl_testing::IsOkAndHolds(
+      testing::Field(&Credentials::cap_fsetid, want)));
+}
+
 // Step 26.14d: Caller() reads the supplementary groups of the request's pid
 // (libfuse's fuse_req_getgroups: /proc/<pid>/task/<pid>/status), takes the
 // ids from the header, and logs nothing when it can read them.
@@ -309,9 +317,38 @@ TEST(FuseRequestChannelTest, CallerOfPidZeroHasNoGroupsAndIsWarnedAbout) {
   EXPECT_EQ((*channel.caller)->uid, 1000u);
   EXPECT_EQ((*channel.caller)->gid, 2000u);
   EXPECT_THAT((*channel.caller)->groups, testing::IsEmpty());
+  EXPECT_THAT(channel.caller, HasCapFsetid(false));
   EXPECT_THAT(capture.lines, testing::ElementsAre(testing::HasSubstr(
-                                 "pid 0: supplementary groups unreadable")))
+                                 "pid 0: credentials unreadable (NOT_FOUND")))
       << absl::StrJoin(capture.lines, "\n");
+}
+
+// Step 17.2e: CAP_FSETID counts where /proc shows it for the request's uid
+// in dcfs's user namespace: this process (root, every capability) as uid 0,
+// but not as uid 1000 (a kernel caller acting with overridden credentials
+// shows its own uid in /proc, not the request's).
+TEST(FuseRequestChannelTest, CallerHasCapFsetidWhereProcShowsItForItsUid) {
+  for (uid_t uid : {0u, 1000u}) {
+    FakeChannel channel;
+    channel.read_caller = true;
+    channel.request_pid = static_cast<uint32_t>(syscalls::getpid());
+    channel.request_uid = uid;
+    channel.request_gid = 0;
+    RunGetattr(channel);
+    EXPECT_THAT(channel.caller, HasCapFsetid(uid == 0)) << uid;
+  }
+}
+
+// A thread whose effective set lacks CAP_FSETID has none, as its own uid.
+TEST(FuseRequestChannelTest, CallerWithoutCapFsetidInProcHasNone) {
+  testonly::ThreadWithoutCapFsetid thread;
+  FakeChannel channel;
+  channel.read_caller = true;
+  channel.request_pid = static_cast<uint32_t>(thread.tid());
+  channel.request_uid = 1000;
+  channel.request_gid = 0;
+  RunGetattr(channel);
+  EXPECT_THAT(channel.caller, HasCapFsetid(false));
 }
 
 // docs/style.md 1.7: the handler that replies is the one place that logs a

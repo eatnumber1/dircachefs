@@ -633,13 +633,13 @@ absl::Status FinishRun(Context &ctx);
 // those for a real fd could block or have a side effect); a symlink's
 // mode cannot be changed at all on Linux (there is no lchmod) and this
 // fails with EOPNOTSUPP. FUSE_SET_ATTR_KILL_PRIV without FUSE_SET_ATTR_MODE
-// clears from the node's *current* mode the setuid and setgid bits that a
-// write by `caller` would clear on the backing filesystem
-// (setattr_should_drop_suidgid, with uid 0 taken to hold CAP_FSETID): for
-// any caller but uid 0, S_ISUID, and S_ISGID if the node is group-executable
-// or `caller` is outside its group. FUSE_SET_ATTR_KILL_SUID (the kernel's
+// sets the mode the node had when SetAttr began less the setuid and setgid
+// bits that a write by `caller` clears (setattr_should_drop_suidgid): for a
+// caller without `cap_fsetid`, S_ISUID, and S_ISGID if the node is
+// group-executable or `caller` is outside its group; nothing is cleared
+// for one with it. FUSE_SET_ATTR_KILL_SUID (the kernel's
 // FATTR_KILL_SUIDGID) is not acted on: the chown and the ftruncate run as
-// `caller`, so the backing filesystem clears the bits by its own rule.
+// `caller`.
 // Owner and times use the same regular/dir-vs-other-types split as mode,
 // except that both are unremarkable on a symlink (unlike mode); size is
 // only ever valid for a regular file -- EISDIR/EINVAL otherwise, as the

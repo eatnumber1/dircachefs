@@ -10,10 +10,11 @@ namespace dcfs {
 
 // The filesystem identity of whoever a backing operation is performed for:
 // a FUSE request's caller (FuseRequest::Caller), as the kernel reported it
-// (fuse_req_ctx) plus the caller's supplementary groups (read from
-// /proc by fuse_req_getgroups). The backing layer switches the thread's
-// filesystem credentials to this around the syscalls whose outcome depends
-// on who asks (see backing.cc's AsCaller).
+// (fuse_req_ctx) plus the caller's supplementary groups and whether it
+// holds CAP_FSETID (both read from /proc/<pid>/task/<pid>/status, the
+// caller's objective credentials: see FuseRequest::Caller). The backing
+// layer switches the thread's filesystem credentials to this around the
+// syscalls whose outcome depends on who asks (see backing.cc's AsCaller).
 struct Credentials {
   uid_t uid;
   gid_t gid;
@@ -25,6 +26,10 @@ struct Credentials {
   // syscall, so that the backing filesystem applies it, or does not where
   // the parent directory has a default ACL, exactly as for a local create.
   mode_t umask = 0;
+  // Whether CAP_FSETID is in the caller's effective set: a write or
+  // truncate by a caller without it clears setuid and setgid
+  // (setattr_should_drop_suidgid). False where /proc could not tell.
+  bool cap_fsetid = false;
 };
 
 }  // namespace dcfs

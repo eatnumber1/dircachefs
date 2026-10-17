@@ -24,6 +24,20 @@ cc_library(
     ],
 )
 
+# A thread whose /proc shows no CAP_FSETID (step 17.2e).
+cc_library(
+    name = "thread_without_cap_fsetid",
+    hdrs = ["thread_without_cap_fsetid.h"],
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        "//dcfs:syscalls",
+        "@absl//absl/log:check",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+        "@absl//absl/synchronization",
+    ],
+)
+
 # File helpers for tests, over the syscalls:: wrappers.
 cc_library(
     name = "files",

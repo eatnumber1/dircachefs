@@ -2521,18 +2521,26 @@ and nfsd take:
   request had made unknown stays unknown and dirty: the tri-state rule
   holds. The flag is the process's one global (russ, 2026-10-11).
 
-Caller identity comes from the FUSE request (`fuse_req_ctx`) and the
-supplementary groups from `fuse_req_getgroups`, which reads
-`/proc/<pid>/task/<pid>/status` for the request's pid. Only requests a
-process makes (the mutations above) read them; the kernel's own requests
-(`FORGET`, `BATCH_FORGET`, `INTERRUPT`) carry no caller and never do. A
-pid of 0 reaches the reader only for a caller outside the daemon's pid
-namespace (the kernel sends `pid_nr_ns` of the caller in the mount's
-namespace, 0 if it has none there): its uid and gid are real, its groups
-are unreadable, and the request runs with none, with a WARNING (at most
-one per minute for the daemon) for the administrator, who can run the
-daemon in the callers' pid namespace. The unit tests forge requests with
-their own pid, so they read real groups and log nothing.
+Caller identity comes from the FUSE request (`fuse_req_ctx`), and the
+supplementary groups and `CAP_FSETID` from `/proc/<pid>/task/<pid>/status`
+for the request's pid (`ReadProcCredentials`, `dcfs/proc_status.h`).
+`/proc` shows a task's objective credentials, and its capabilities in its
+own user namespace, so `CAP_FSETID` counts only where the status file's
+filesystem uid is the request's (a kernel caller acting with overridden
+credentials, nfsd for a client, shows its own) and the task's
+`/proc/<pid>/ns/user` is dcfs's (a namespaced root's `CAP_FSETID` covers
+only inodes whose owner and group its namespace maps:
+`capable_wrt_inode_uidgid`); anywhere else the caller is taken to lack it.
+Only requests a process makes (the mutations above) read them; the
+kernel's own requests (`FORGET`, `BATCH_FORGET`, `INTERRUPT`) carry no
+caller and never do. A pid of 0 reaches the reader only for a caller
+outside the daemon's pid namespace (the kernel sends `pid_nr_ns` of the
+caller in the mount's namespace, 0 if it has none there): its uid and gid
+are real, its groups and capabilities are unreadable, and the request runs
+with no groups and no `CAP_FSETID`, with a WARNING (at most one per minute
+for the daemon) for the administrator, who can run the daemon in the
+callers' pid namespace. The unit tests forge requests with their own pid,
+so they read real groups and log nothing.
 
 **Run as the caller:** `mkdirat`, `mknodat`, `symlinkat`,
 `openat(O_CREAT)`, `unlinkat`, `renameat2`, the chown (including the
@@ -2581,8 +2589,11 @@ kernel sends with it:
   open's (dcfs leaves `FUSE_CAP_ATOMIC_O_TRUNC` off, so the kernel strips
   `O_TRUNC` from the OPEN, and `FUSE_OPEN_KILL_SUIDGID` with it). A chown
   arrives with `FATTR_KILL_SUIDGID` always. Both run as the caller, so the
-  backing filesystem clears the bits by its own rule; dcfs acts on the flag
-  in neither. A write that does not go through passthrough carries
+  backing filesystem clears the bits by its own rule, except that `AsCaller`
+  keeps `CAP_FSETID` for fsuid 0: a truncate by uid 0 with the flag (root
+  without `CAP_FSETID`; the kernel decides that with the caller's own
+  credentials) is followed by the clear a write's removal makes (below), for
+  a caller without `CAP_FSETID`. A write that does not go through passthrough carries
   `FUSE_WRITE_KILL_SUIDGID`, and `WriteFile` runs as the caller too (the
   pinned libfuse 3.18.2 does not hand that flag over; 3.18.3 does). A
   CREATE with `O_TRUNC` carries `FUSE_OPEN_KILL_SUIDGID`, but it makes a new
@@ -2597,26 +2608,36 @@ kernel sends with it:
   which keeps both bits. The removal always comes while the file is open
   for writing, so dcfs takes a SETATTR that sets nothing on a file open for
   writing for the write's (`DirCacheFS::Setattr`, `FUSE_SET_ATTR_KILL_PRIV`):
-  it clears, as root, the bits the backing filesystem's own write by the
-  caller would clear (uid 0 taken to hold `CAP_FSETID`), and runs no chown.
-  Run as the caller's chown, it failed a non-owner's write with `EPERM`
+  it clears, as root, the bits a write by the caller clears natively
+  (`SuidgidClearedByWrite`: by capability, never by uid, and the caller has
+  `CAP_FSETID` only where `/proc` shows it, above), and runs no chown. Run
+  as the caller's chown, it failed a non-owner's write with `EPERM`
   (clearing the bits is a mode change only the owner may make; the native
   filesystem allows the write and clears them). The prices: while anyone
   has a setuid or setgid file open for writing, a non-owner's
   `chown(path, -1, -1)` of it succeeds and clears the bits where the native
   filesystem refuses it with `EPERM`, and root's keeps setuid where the
-  native filesystem clears it. With no writable open it is the caller's
-  chown.
+  native filesystem clears it (root's write of a file with
+  `security.capability` sends the same request, and keeps setuid); with no
+  writable open it is the caller's chown. And a caller whose `CAP_FSETID`
+  `/proc` cannot vouch for loses the bits where the native filesystem might
+  keep them: the root of a user namespace that maps the file's owner and
+  group, a kernel caller with overridden credentials that keeps
+  `CAP_FSETID`, a caller outside dcfs's pid namespace. The error is on the
+  safe side; the kernel patch of `docs/plan/notes/kernel-patches.md` row 4
+  (the kernel's own decision, sent on that SETATTR) makes it exact.
 - Once a write finds an inode with nothing to remove, the kernel marks it
   `S_NOSEC` and skips the check on its later writes, until its attributes
   are refreshed from dcfs or a `security.*` xattr is set. A setuid or
   setgid file is never `S_NOSEC`, so each of its passthrough writes still
   asks for `security.capability` with a `GETXATTR` (answered from the
   cache).
-- A caller with uid 0 but without `CAP_FSETID` cannot be told from root
-  (step 17.2d): its write or truncate of a setuid or setgid file keeps both
-  bits through dcfs, where the backing filesystem clears them. (Before
-  17.2e the kernel's re-derived mode cleared setuid for it.)
+- `fallocate`, the write fallback and `copy_file_range` run as the caller,
+  so the backing filesystem's own `file_remove_privs` decides with fsuid
+  0's `CAP_FSETID` for root and none for anyone else: a non-root caller
+  that holds `CAP_FSETID` loses bits there that the native filesystem
+  keeps. The kernel's empty SETATTR before them has already cleared what a
+  root without it would lose.
 
 The cost (2026-10-17, `dcfs_bench`'s Write and SetidWrite, ext4 in the
 QEMU guest, 1 MiB overwritten in 64 KiB writes on one open, mean of 5, on

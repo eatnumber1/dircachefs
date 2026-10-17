@@ -1241,15 +1241,18 @@ recovery protocol, concurrency, and the test strategy.
   (plan phase 15). The paths given on the command line (SOURCE, the
   mount point, `dcfs.cache_db`) are not escaped in startup messages yet.
 - **Setuid and setgid bits on writes follow the backing filesystem, with
-  three gaps.** A write, fallocate, copy_file_range or truncate through
+  some gaps.** A write, fallocate, copy_file_range or truncate through
   dcfs clears setuid and setgid as the backing filesystem would for the
-  writer. The gaps: while a setuid or setgid file is open for writing,
-  `chown(path, -1, -1)` by someone who does not own it succeeds and clears
-  the bits, where the backing filesystem refuses it with `EPERM`, and
-  root's keeps setuid, where the backing filesystem clears it; and a
-  process running as root without `CAP_FSETID` keeps both bits through a
-  write or truncate, where the backing filesystem clears them (dcfs cannot
-  tell it from root). dcfs needs a kernel with
+  writer, root without `CAP_FSETID` included. The gaps: while a setuid or
+  setgid file is open for writing, `chown(path, -1, -1)` by someone who
+  does not own it succeeds and clears the bits, where the backing
+  filesystem refuses it with `EPERM`, and root's keeps setuid, where the
+  backing filesystem clears it. And where dcfs cannot confirm from `/proc`
+  that the writer holds `CAP_FSETID` (the root of a user namespace, a
+  process outside dcfs's pid namespace, a kernel service such as nfsd
+  writing for a client), a write clears the bits even where the backing
+  filesystem would keep them; a non-root process that holds `CAP_FSETID`
+  loses them on a fallocate or copy_file_range. dcfs needs a kernel with
   `FUSE_CAP_HANDLE_KILLPRIV_V2` (Linux 5.11 and later) and refuses to mount
   without it (`docs/design.md`, "Caller credentials").
 - **A backing filesystem that stops taking writes holds the whole daemon.**

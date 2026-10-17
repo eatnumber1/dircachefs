@@ -796,6 +796,7 @@ absl::Status DirCacheFS::Setattr(FuseRequest &req, fuse_ino_t ino,
                                  fuse_file_info *fi) {
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "setattr");
+  ASSIGN_OR_RETURN(Credentials caller, req.Caller());
   // A SETATTR that sets nothing is a chown(path, -1, -1) or the kernel's
   // privilege removal before a write (fuse_setattr sends no mode under
   // FUSE_CAP_HANDLE_KILLPRIV_V2), which always comes while the file is
@@ -805,13 +806,22 @@ absl::Status DirCacheFS::Setattr(FuseRequest &req, fuse_ino_t ino,
   if (backing::SetsNothing(to_set) && open_for_write_.contains(id)) {
     to_set |= FUSE_SET_ATTR_KILL_PRIV;
   }
+  // A truncate with FATTR_KILL_SUIDGID (libfuse's FUSE_SET_ATTR_KILL_SUID):
+  // the kernel found the caller without CAP_FSETID, whatever /proc says.
+  // As uid 0 the truncate, run as the caller, keeps the bits all the same
+  // (AsCaller keeps CAP_FSETID for fsuid 0), so they go as for that
+  // caller's write; any other uid's truncate clears them itself.
+  constexpr int kTruncateKill = FUSE_SET_ATTR_SIZE | FUSE_SET_ATTR_KILL_SUID;
+  if ((to_set & kTruncateKill) == kTruncateKill && caller.uid == 0) {
+    caller.cap_fsetid = false;
+    to_set |= FUSE_SET_ATTR_KILL_PRIV;
+  }
   if (auto it = removed_.find(id); it != removed_.end()) {
     // A removed object (step 23.2): through the descriptor its record
     // holds. No phase 1 or 3: nothing about it is cached, in the database
     // or in the record (whose every read goes to the descriptor), so there
     // is nothing to mark unknown or record, and a crash loses nothing that
     // could be stale (the record is in memory only).
-    ASSIGN_OR_RETURN(Credentials caller, req.Caller());
     BackingCall("SetAttrFd");
     RETURN_IF_ERROR(backing::SetAttrFd(caller, *it->second.fd, *attr, to_set));
     ASSIGN_OR_RETURN(cache::CachedAttr fresh, RequireAttrOrRemoved(id));
@@ -825,7 +835,6 @@ absl::Status DirCacheFS::Setattr(FuseRequest &req, fuse_ino_t ino,
   // handle for whatever access each change needs (even when this inode has
   // a shared, possibly O_RDWR, backing fd open).
   RETURN_IF_ERROR(RequireAttr(id).status());
-  ASSIGN_OR_RETURN(Credentials caller, req.Caller());
 
   // Phase 1 of the write-through rule (see backing.cc's file comment):
   // mark the cached attributes, and the xattrs the backing filesystem

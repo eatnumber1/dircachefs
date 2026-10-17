@@ -417,7 +417,7 @@ expect_stat sgid-group-member-keeps '%a' pub/sgid_ops/f_grp 2666
 # mount, and checks that the mount answers what the native filesystem
 # answers (the exit status, and the mode left behind on /mnt and /src) and
 # that this is what the kernel's rule gives (the last field, "status:mode"):
-# any caller but root drops setuid, and setgid if the file is
+# any caller without CAP_FSETID drops setuid, and setgid if the file is
 # group-executable or the caller is outside its group.
 #
 # dcfs negotiates FUSE_CAP_HANDLE_KILLPRIV_V2, so before a write by a
@@ -437,6 +437,10 @@ expect_stat sgid-group-member-keeps '%a' pub/sgid_ops/f_grp 2666
 #   FATTR_KILL_SUIDGID from a caller without CAP_FSETID.
 # - Root (CAP_FSETID) clears nothing; "capwrite" sets security.capability
 #   first, so the kernel removes it and sends a SETATTR that sets nothing.
+# - Root without CAP_FSETID ("nofsetid"), and the root of a user namespace
+#   that maps neither the file's group nor its CAP_FSETID over it
+#   ("userns"), clear what bob would: dcfs trusts CAP_FSETID only where
+#   /proc shows it in its own user namespace (step 17.2e).
 #
 # Each case runs twice: on files made warm, and on files made at the same
 # time whose operation runs after the caches are dropped.
@@ -452,6 +456,11 @@ chmod 0666 "$NAT2/src" "$MNT/$P2/src"
 CAPHEX=0000000200200000000000000000000000000000
 
 root() { "$@"; }
+# Root without CAP_FSETID (outside group 2000): clears what bob would.
+nofsetid() { "$TESTUTIL" nofsetid -- "$@"; }
+# Root of a user namespace mapping only uid and gid 0: its CAP_FSETID does
+# not cover a file of group 2000, so it clears what bob would.
+userns() { "$TESTUTIL" userns -- "$@"; }
 
 # sgid_op USER OP DIR FILE: OP on DIR/FILE as USER; prints its exit status,
 # 0 or 1.
@@ -539,6 +548,14 @@ suid-gx-member-write 0:2000 6776 alice write 0:776
 suid-gx-member-fallocate 0:2000 6776 alice fallocate 0:776
 suid-other-chmodheld 0:2000 0666 bob chmodheld 0:666
 suid-member-chmodheld 0:2000 0666 alice chmodheld 0:2666
+setuid-nofsetid-write 0:2000 4666 nofsetid write 0:666
+setuid-nofsetid-fallocate 0:2000 4666 nofsetid fallocate 0:666
+setuid-nofsetid-copy 0:2000 4666 nofsetid copy 0:666
+setuid-nofsetid-truncate 0:2000 4666 nofsetid truncate 0:666
+sgid-nofsetid-write 0:2000 2666 nofsetid write 0:666
+sgid-nofsetid-otrunc 0:2000 2666 nofsetid otrunc 0:666
+setuid-userns-write 0:2000 4666 userns write 0:666
+suid-userns-write 0:2000 6666 userns write 0:666
 "
 
 while read -r name owner mode who op want; do

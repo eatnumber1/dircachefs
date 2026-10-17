@@ -170,8 +170,6 @@ dcfs/fsck.cc|RunProgram|misc-include-cleaner|4
 dcfs/fsck_test.cc|<file scope>|misc-include-cleaner|1
 dcfs/fsck_test.cc|TestFile|concurrency-mt-unsafe|1
 dcfs/fuse_ops.cc|Ioctl|misc-unused-parameters|1
-dcfs/fuse_request.cc|FuseRequest::Caller|bugprone-narrowing-conversions|2
-dcfs/fuse_request.cc|FuseRequest::Caller|modernize-use-integer-sign-comparison|2
 dcfs/fuse_request.cc|FuseRequest::FuseRequest|performance-move-const-arg|1
 dcfs/fuse_request.cc|FuseRequest::~FuseRequest|bugprone-exception-escape|1
 dcfs/fuse_request.cc|FuseRequest::~FuseRequest|misc-include-cleaner|1

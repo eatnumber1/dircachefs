@@ -3,5 +3,3 @@
 # refuses a new one; a count here must equal the file's, and the list only
 # shrinks (an empty list is the goal). FORMAT: path count | reason
 
-dcfs/fuse_request.cc 1 | the groups buffer (line 177) is resized to the count fuse_req_getgroups returns on a second call, and the vector is the caller's Credentials::groups, so it stays a vector (style 1.2 exception: the size changes after construction)
-

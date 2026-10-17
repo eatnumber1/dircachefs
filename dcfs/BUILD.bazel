@@ -446,6 +446,7 @@ cc_library(
     srcs = ["fuse_request.cc"],
     deps = [
       ":credentials",
+      ":proc_status",
       ":ret_check",
       ":status",
       ":syscalls",
@@ -457,6 +458,41 @@ cc_library(
       "@absl//absl/status:statusor",
       "@absl//absl/time",
       "@libfuse//:libfuse",
+    ],
+)
+
+# Step 17.2e: a FUSE caller's ids, groups, capabilities and user namespace
+# from /proc (FuseRequest::Caller).
+cc_library(
+    name = "proc_status",
+    hdrs = ["proc_status.h"],
+    srcs = ["proc_status.cc"],
+    deps = [
+      ":ret_check",
+      ":status",
+      ":syscalls",
+      ":syscalls_backing",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+    ],
+)
+
+qemu_cc_test(
+    name = "proc_status_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["proc_status_test.cc"],
+    deps = [
+      ":proc_status",
+      ":syscalls",
+      "//dcfs/testonly:assert_ok_and_assign",
+      "//dcfs/testonly:thread_without_cap_fsetid",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@absl//absl/strings",
+      "@googletest//:gtest_main",
     ],
 )
 
@@ -496,6 +532,7 @@ qemu_cc_test(
       ":syscalls",
       ":syscalls_backing",
       "//dcfs/testonly:assert_ok_and_assign",
+      "//dcfs/testonly:thread_without_cap_fsetid",
       "@absl//absl/log:log_sink",
       "@absl//absl/log:log_sink_registry",
       "@absl//absl/strings",
@@ -1101,6 +1138,7 @@ DIR_CACHE_FS_TEST_DEPS = [
     ":syscalls",
     ":syscalls_backing",
     "//dcfs/testonly:assert_ok_and_assign",
+    "//dcfs/testonly:thread_without_cap_fsetid",
     "//dcfs/testonly:fake_bookkeeping",
     "//dcfs/testonly:files",
     "//dcfs/testonly:cost_counter",

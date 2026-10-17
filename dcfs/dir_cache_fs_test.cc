@@ -119,6 +119,7 @@
 #include "dcfs/testonly/files.h"
 #include "dcfs/testonly/invariant_checker.h"
 #include "dcfs/testonly/observers.h"
+#include "dcfs/testonly/thread_without_cap_fsetid.h"
 #include "dcfs/testonly/trace_recorder.h"
 #include "fuse_kernel.h"
 #include "fuse_lowlevel.h"
@@ -835,13 +836,14 @@ class DirCacheFSTest : public ::testing::Test {
     hdr.nodeid = nodeid;
     hdr.uid = uid;
     hdr.gid = gid;
-    // Root, from this process: the pid whose /proc/<pid>/task/<pid>/status
-    // FuseRequest::Caller reads the supplementary groups from. pid 0 (what
-    // the kernel sends for a caller outside the daemon's pid namespace)
-    // has none to read, and Caller logs a WARNING for it, rate limited to
-    // one per 60 s for the whole process, so whichever test first
-    // mutated after the window lapsed saw an unrelated WARNING (step 26.14d).
-    hdr.pid = static_cast<uint32_t>(syscalls::getpid());
+    // Root, from this process (or request_pid_): the pid whose
+    // /proc/<pid>/task/<pid>/status FuseRequest::Caller reads the
+    // supplementary groups and capabilities from. pid 0 (what the kernel
+    // sends for a caller outside the daemon's pid namespace) has none to
+    // read, and Caller logs a WARNING for it, rate limited to one per 60 s
+    // for the whole process, so whichever test first mutated after the
+    // window lapsed saw an unrelated WARNING (step 26.14d).
+    hdr.pid = static_cast<uint32_t>(request_pid_.value_or(syscalls::getpid()));
     AppendBytes(buf, hdr);
     buf.append(body);
     ProcessInMemory(se, buf);
@@ -1414,6 +1416,8 @@ class DirCacheFSTest : public ::testing::Test {
   }
 
  protected:
+  // The pid requests come from, when not this process's (Send).
+  std::optional<pid_t> request_pid_;
   // The unique of the next request Send() sends.
   uint64_t NextUnique() const { return next_unique_; }
   size_t KernelReadsLeft() const { return kernel_reads_.size(); }
@@ -6978,12 +6982,14 @@ TEST_F(DirCacheFSTest, CopyFileRangeByCallerOutsideGroupClearsSetgid) {
 // makes. While the file is open for writing it is the write's: setuid and
 // setgid go as the backing filesystem's own write would take them
 // (setattr_should_drop_suidgid), from a non-owner too, whose chown would be
-// refused: setuid from anyone but root, setgid with group execute from
-// anyone but root and without it from a caller outside the group. Root and
-// group members (by their group or a supplementary one) keep setgid without
-// group execute. Root's write sends the same SETATTR for a file carrying
-// security.capability (the kernel removes that first), group-executable or
-// not, and keeps both bits.
+// refused: setuid from a caller without CAP_FSETID, setgid with group
+// execute from one without it and without group execute from one outside
+// the group too. Root (with CAP_FSETID) and group members (by their group
+// or a supplementary one) keep setgid without group execute. Root's write
+// sends the same SETATTR for a file carrying security.capability (the
+// kernel removes that first), group-executable or not, and keeps both bits.
+// Root without CAP_FSETID (a pid whose /proc shows none) loses them as
+// anyone else does.
 TEST_F(DirCacheFSTest,
        EmptySetattrOfAFileOpenForWritingDropsSetuidAndSetgidAsAWrite) {
   struct Case {
@@ -6993,6 +6999,7 @@ TEST_F(DirCacheFSTest,
     gid_t gid;
     std::vector<gid_t> groups;
     mode_t want;
+    bool without_cap_fsetid = false;
   };
   Case cases[] = {
       {.name = "outside",
@@ -7073,6 +7080,13 @@ TEST_F(DirCacheFSTest,
        .gid = 1000,
        .groups = {1000},
        .want = 06676},
+      {.name = "root_without_cap_fsetid",
+       .mode = 06666,
+       .uid = 0,
+       .gid = 1000,
+       .groups = {1000},
+       .want = 0666,
+       .without_cap_fsetid = true},
   };
   for (const Case &c : cases) {
     WriteFile(Path(c.name), "data");
@@ -7086,7 +7100,11 @@ TEST_F(DirCacheFSTest,
     ASSERT_EQ(open.error, 0);
     {
       auto restore_groups = WithThreadGroups(c.groups);
+      // Started here, the thread has this thread's groups.
+      std::optional<testonly::ThreadWithoutCapFsetid> thread;
+      if (c.without_cap_fsetid) request_pid_ = thread.emplace().tid();
       EXPECT_EQ(SetNothing(f, c.uid, c.gid).error, 0);
+      request_pid_.reset();
     }
     ASSERT_OK_AND_ASSIGN(struct stat st,
                          syscalls::fstatat(AT_FDCWD, Path(c.name)));
@@ -7135,7 +7153,9 @@ TEST_F(DirCacheFSTest, EmptySetattrOfAFileNotOpenForWritingIsTheCallersChown) {
 // FUSE_CAP_HANDLE_KILLPRIV_V2) and never with a mode. The truncate, as the
 // caller, removes privileges by the current rule: a caller outside the
 // group loses both bits, a group member setuid alone, root (whose truncate
-// carries no FATTR_KILL_SUIDGID) neither.
+// carries no FATTR_KILL_SUIDGID) neither. Root's with the flag (root without
+// CAP_FSETID, though /proc, this process's, shows it) loses both too: the
+// truncate as fsuid 0 keeps them, so Setattr clears them after it.
 TEST_F(DirCacheFSTest, TruncateRemovesPrivilegesAsTheCaller) {
   struct Case {
     std::string name;
@@ -7156,6 +7176,11 @@ TEST_F(DirCacheFSTest, TruncateRemovesPrivilegesAsTheCaller) {
        .kill = FATTR_KILL_SUIDGID,
        .want = 02666},
       {.name = "root", .uid = 0, .gid = 1000, .kill = 0, .want = 06666},
+      {.name = "root_without_cap_fsetid",
+       .uid = 0,
+       .gid = 1000,
+       .kill = FATTR_KILL_SUIDGID,
+       .want = 0666},
   };
   for (const Case &c : cases) {
     WriteFile(Path(c.name), "data");

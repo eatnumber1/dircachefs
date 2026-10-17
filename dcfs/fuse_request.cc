@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "dcfs/fuse_request.h"
 
+#include <linux/capability.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 
@@ -19,6 +20,7 @@
 #include "absl/status/status.h"
 #include "absl/time/time.h"
 #include "dcfs/credentials.h"
+#include "dcfs/proc_status.h"
 #include "dcfs/ret_check.h"
 #include "dcfs/status.h"
 #include "fuse_lowlevel.h"
@@ -179,26 +181,26 @@ absl::StatusOr<Credentials> FuseRequest::Caller() const {
   const fuse_ctx *ctx = fuse_req_ctx(*req_);
   Credentials caller{
       .uid = ctx->uid, .gid = ctx->gid, .groups = {}, .umask = ctx->umask};
-  // Usually a handful of groups; fuse_req_getgroups returns the full count
-  // even when it exceeds the buffer, so one retry at the right size
-  // suffices (NGROUPS_MAX is 65536).
-  std::vector<gid_t> groups(32);
-  int n = fuse_req_getgroups(*req_, groups.size(), groups.data());
-  if (n > static_cast<int>(groups.size())) {
-    groups.resize(n);
-    n = fuse_req_getgroups(*req_, groups.size(), groups.data());
-  }
-  if (n < 0 || n > static_cast<int>(groups.size())) {
+  // pid 0 (a caller outside dcfs's pid namespace) has no /proc entry, and
+  // a caller that already exited has none any more.
+  absl::StatusOr<ProcCredentials> proc = ReadProcCredentials(ctx->pid);
+  if (!proc.ok()) {
     // Rate limited: one per request while it lasts.
     LOG_EVERY_N_SEC(WARNING, 60)
-        << "pid " << ctx->pid << ": supplementary groups unreadable ("
-        << (n < 0 ? ErrnoToStatus(-n, "fuse_req_getgroups").ToString()
-                  : std::string("list grew"))
-        << "); using none";
+        << "pid " << ctx->pid << ": credentials unreadable (" << proc.status()
+        << "); using no supplementary groups and no CAP_FSETID";
     return caller;
   }
-  groups.resize(n);
-  caller.groups = std::move(groups);
+  caller.groups = std::move(proc->groups);
+  // /proc shows the task's objective credentials, and its capabilities in
+  // its own user namespace. They are the caller's only where they are the
+  // ones the request came with (a kernel caller acting with overridden
+  // credentials, nfsd for a client, shows its own fsuid there, not the
+  // request's) and count only in dcfs's user namespace, whose capabilities
+  // cover every inode (a namespaced root's CAP_FSETID covers only inodes
+  // whose owner and group its namespace maps: capable_wrt_inode_uidgid).
+  caller.cap_fsetid = proc->same_user_namespace && proc->fsuid == ctx->uid &&
+                      (proc->cap_effective & (uint64_t{1} << CAP_FSETID)) != 0;
   return caller;
 }
 
