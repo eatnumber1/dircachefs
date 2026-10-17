@@ -1473,14 +1473,13 @@ static int cmd_fsuuid(const char *path) {
   struct fsuuid2 u;
   int fd = open(path, O_RDONLY | O_NONBLOCK);
 
-  memset(&u, 0, sizeof(u));
   if (fd == -1 || ioctl(fd, FS_IOC_GETFSUUID, &u) == -1) {
     print_err(errno);
     return 1;
   }
+  /* The kernel copies the whole struct, len at most sizeof(u.uuid). */
   printf("%u ", (unsigned)u.len);
-  for (unsigned i = 0; i < u.len && i < sizeof(u.uuid); i++)
-    printf("%02x", u.uuid[i]);
+  for (unsigned i = 0; i < u.len; i++) printf("%02x", u.uuid[i]);
   printf("\n");
   return 0;
 }

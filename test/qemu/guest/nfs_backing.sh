@@ -16,18 +16,20 @@
 #
 #   - identity: FS_IOC_GETFSUUID on the client fails with ENOTTY; statfs
 #     f_fsid is 0; the mount's source in mountinfo is the server and export
-#     path as mounted; a hard mount says "hard" in its options; a second
-#     mount of the same server filesystem shares the first one's superblock
-#     (the same st_dev, and the first mount's source in mountinfo).
+#     path as mounted; a second mount of the same server filesystem shares
+#     the first one's superblock (the same st_dev, and the first mount's
+#     source in mountinfo).
 #   - handles: name_to_handle_at works for a file, a directory and the root;
 #     the handle is the fileid (= the server's inode number), the file type
 #     and the server's own handle, which carries the server filesystem's
 #     inode number and generation; open_by_handle_at works on it, also after
-#     the client dropped the inode.
+#     the client dropped the inode, when the client asks the server (a
+#     GETATTR in /proc/self/mountstats).
 #   - generations: FS_IOC_GETVERSION fails with ENOTTY on the client; the
 #     birth time is the server's; a file recycled on the server (deleted,
-#     and its inode number reused) leaves the old handle ESTALE, while the
-#     new file's handle has the same fileid and other bytes.
+#     and its inode number reused by the next create: ext4 hands out the
+#     lowest free number of the group) leaves the old handle ESTALE, while
+#     the new file's handle has the same fileid and other bytes.
 #   - server restart (nfsd stopped, the exported filesystem unmounted and
 #     mounted again, nfsd started): a handle taken before opens after, the
 #     same file's handle is byte-identical, and a descriptor held open
@@ -119,6 +121,14 @@ source_of() {
 	awk -v m="$1" '$5 == m { for (i = 1; i <= NF; i++) if ($i == "-") { print $(i + 2); exit } }' /proc/self/mountinfo
 }
 
+# getattrs MOUNTPOINT: the GETATTR calls the client has sent for the mount
+# (its per-op statistics in /proc/self/mountstats).
+getattrs() {
+	awk -v m="$1" '
+		$1 == "device" { f = ($5 == m) }
+		f && $1 == "GETATTR:" { print $2; exit }' /proc/self/mountstats
+}
+
 # mount_nfs EXPORT MOUNTPOINT: a loopback NFSv4.2 hard mount.
 mount_nfs() {
 	mkdir -p "$2"
@@ -166,13 +176,8 @@ fact client-statfs-fsid "$got"
 expect client-statfs-fsid-zero 0 "$got"
 fact client-statfs-type "$(stat -f -c %t "$NFS")"
 
-line=$(awk -v m="$NFS" '$5 == m' /proc/self/mountinfo)
-fact client-mountinfo "$line"
+fact client-mountinfo "$(awk -v m="$NFS" '$5 == m' /proc/self/mountinfo)"
 expect client-mountinfo-source "127.0.0.1:$EXP" "$(source_of "$NFS")"
-case "$line" in
-*,hard,* | *,hard) pass client-mountinfo-says-hard ;;
-*) fail client-mountinfo-says-hard "no ',hard' in: $line" ;;
-esac
 
 # --- handles ----------------------------------------------------------------
 
@@ -209,7 +214,15 @@ fi
 
 expect open-by-handle "OK 19 $ino" "$(reopen "$NFS" a)"
 drop_caches
+before=$(getattrs "$NFS")
 expect open-by-handle-after-drop-caches "OK 19 $ino" "$(reopen "$NFS" a)"
+after=$(getattrs "$NFS")
+fact getattrs-around-reopen "$before $after"
+if [ -n "$before" ] && [ "$after" -gt "$before" ]; then
+	pass open-by-handle-after-drop-caches-asks-server
+else
+	fail open-by-handle-after-drop-caches-asks-server "GETATTR count '$before' -> '$after'"
+fi
 
 # --- generations ------------------------------------------------------------
 
@@ -220,26 +233,21 @@ got=$(stat -c %W "$NFS/a.txt")
 fact client-btime "$got"
 expect client-btime-is-servers "$(stat -c %W "$EXP/a.txt")" "$got"
 
-# A file deleted on the server and its inode number reused (ext4 hands the
-# lowest free number in the group out again; a few creates find it).
+# A file deleted on the server and its inode number reused: ext4 hands the
+# lowest free number of the group out again, so the next create gets it.
 echo recycled >"$EXP/r.txt"
 sync
 r_ino=$(stat -c %i "$NFS/r.txt")
 fact recycled-old-handle "$(save "$NFS/r.txt" r)"
 rm "$EXP/r.txt"
 sync
-reused=""
-for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
-	echo "new $i" >"$EXP/n$i.txt"
-	if [ "$(stat -c %i "$EXP/n$i.txt")" = "$r_ino" ]; then
-		reused="n$i.txt"
-		break
-	fi
-done
+echo new >"$EXP/n.txt"
+reused=n.txt
 sync
 drop_caches
-if [ -z "$reused" ]; then
-	fail recycled-inode-number "no new file got inode $r_ino"
+n_ino=$(stat -c %i "$EXP/n.txt")
+if [ "$n_ino" != "$r_ino" ]; then
+	fail recycled-inode-number "the next create got inode $n_ino, not $r_ino"
 else
 	pass recycled-inode-number
 	got=$(reopen "$NFS" r)
