@@ -3864,3 +3864,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   non-blank non-comment lines at 74f45bf); the stale steps, CI and quota
   panels were refreshed. 25.34's two questions are on it with provisional
   rulings (guest_cc under the raw-syscall scan; its location).
+- 2026-10-17, russ on 25.34: guest C++ under the raw-syscall scan with
+  wrappers, "Yes"; no test/qemu/guest_cc: "Why make a separate directory
+  for the C++? The _cc naming will be obsolete as soon as the migration is
+  complete". The helpers and ports move to test/qemu/guest/.
