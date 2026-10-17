@@ -2385,6 +2385,16 @@ absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
   return FchmodOPath(opath_fd, mode);
 }
 
+// Whether the backing filesystem's own write by `caller` would clear the
+// setgid bit, if set, of the object `stx` describes (setattr_should_drop_sgid,
+// under AsCaller, where only fsuid 0 keeps CAP_FSETID): the object is
+// group-executable, or the caller is neither root nor in its group.
+bool WriteClearsSetgid(const Credentials &caller, const struct statx &stx) {
+  if ((stx.stx_mode & S_IXGRP) != 0) return true;
+  return caller.uid != 0 && caller.gid != stx.stx_gid &&
+         !absl::c_linear_search(caller.groups, stx.stx_gid);
+}
+
 // FUSE_SET_ATTR_SIZE: only ever valid for a regular file, same as the
 // kernel's own VFS-level check (notify_change() rejects ATTR_SIZE on
 // anything else before a filesystem ever sees it).
@@ -2429,8 +2439,8 @@ absl::Status SetAttrFd(const Credentials &caller, int fd,
   // Every call below works on any descriptor, O_PATH or not: the reopens go
   // through /proc/self/fd, fchownat and the *OPath helpers take an empty
   // path.
-  ASSIGN_OR_RETURN(struct statx stx,
-                   syscalls::statx(fd, "", AT_EMPTY_PATH, STATX_MODE));
+  ASSIGN_OR_RETURN(struct statx stx, syscalls::statx(fd, "", AT_EMPTY_PATH,
+                                                     STATX_MODE | STATX_GID));
   mode_t type = stx.stx_mode & S_IFMT;
 
   if (to_set & FUSE_SET_ATTR_SIZE) {
@@ -2454,11 +2464,15 @@ absl::Status SetAttrFd(const Credentials &caller, int fd,
              !S_ISLNK(type)) {
     // KILL_SUID/KILL_SGID sent without MODE: the kernel wants the
     // setuid/setgid bits cleared from whatever the node's mode already
-    // is (e.g. after a write), not set to any particular new mode.
-    // Nothing to do for a symlink, which has no meaningful mode bits.
+    // is (e.g. after a write), not set to any particular new mode; setgid
+    // only where the backing filesystem's own write by the caller would
+    // clear it. Nothing to do for a symlink, which has no meaningful mode
+    // bits.
     mode_t current_mode = stx.stx_mode & 07777;
     if (to_set & FUSE_SET_ATTR_KILL_SUID) current_mode &= ~S_ISUID;
-    if (to_set & FUSE_SET_ATTR_KILL_SGID) current_mode &= ~S_ISGID;
+    if ((to_set & FUSE_SET_ATTR_KILL_SGID) && WriteClearsSetgid(caller, stx)) {
+      current_mode &= ~S_ISGID;
+    }
     RETURN_IF_ERROR(ApplyMode(fd, type, current_mode));
   }
 

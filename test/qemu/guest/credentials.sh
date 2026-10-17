@@ -18,9 +18,10 @@
 # what the same operations do on a local filesystem: ownership of every
 # create-family op, setgid-directory group inheritance, supplementary
 # groups, chown/chgrp rules, sticky-directory rules, truncate, utimes,
-# chmod and user xattrs, allowed and denied, and POSIX ACLs (named entries
-# that deny or grant access against the mode bits, default ACL inheritance
-# and where the umask applies). Finally it checks that the
+# chmod and user xattrs, allowed and denied, the setuid and setgid bits
+# write-family operations leave (steps 17.2, 17.2b), and POSIX ACLs (named
+# entries that deny or grant access against the mode bits, default ACL
+# inheritance and where the umask applies). Finally it checks that the
 # daemon itself is back to root afterwards (its own creates are owned by
 # root, and its /proc status shows fsuid/fsgid 0 and its original groups).
 #
@@ -408,6 +409,100 @@ chown 1001:2000 "$MNT/pub/sgid_ops/f_grp"
 chmod 02666 "$MNT/pub/sgid_ops/f_grp"
 expect_ok sgid-group-member-write alice sh -c "echo 'x' >>'$MNT/pub/sgid_ops/f_grp'"
 expect_stat sgid-group-member-keeps '%a' pub/sgid_ops/f_grp 2666
+
+# --- step 17.2b: setuid and setgid through passthrough, and non-owners -----
+#
+# Each case runs one write-family operation as one user on a file of a
+# given owner and mode, once in a native directory and once through the
+# mount, and checks that the mount answers what the native filesystem
+# answers (the exit status, and the mode left behind on /mnt and /src) and
+# that this is what the kernel's rule gives (the last field, "status:mode"):
+# a caller outside the file's group without CAP_FSETID drops setgid, and any
+# caller but root drops setuid.
+#
+# - 6666 (setuid and setgid, no group execute): the kernel's FUSE side
+#   clears setuid itself (a SETATTR of the mode minus S_ISUID) but keeps
+#   setgid by its pre-6.2 rule, and a passthrough write reaches the backing
+#   file as the daemon (root, CAP_FSETID), which keeps it too.
+# - 2666 owned by root and written by bob (outside group 2000): the
+#   kernel's FUSE side asks to remove privileges with a SETATTR that sets
+#   nothing, the same request a chown(path, -1, -1) makes ("chown").
+# - "held": root holds a read-only open while bob writes (one backing file,
+#   and so one passthrough choice, per inode).
+
+NAT2=/src/native2b
+P2=pub/sgid2b
+mkdir -p "$NAT2" "$MNT/$P2"
+chmod 0777 "$NAT2" "$MNT/$P2"
+echo "source" >"$NAT2/src"
+echo "source" >"$MNT/$P2/src"
+chmod 0666 "$NAT2/src" "$MNT/$P2/src"
+
+# sgid_op USER OP DIR FILE: OP on DIR/FILE as USER; prints its exit status,
+# 0 or 1.
+sgid_op() {
+	who=$1
+	op=$2
+	dir=$3
+	file=$4
+	case $op in
+	write) $who sh -c "echo x >>'$dir/$file'" ;;
+	held) { $who sh -c "echo x >>'$dir/$file'"; } 3<"$dir/$file" ;;
+	fallocate) $who "$TESTUTIL" fallocate "$dir/$file" 0 0 4096 ;;
+	copy) $who "$TESTUTIL" copyrange-into "$dir/src" "$dir/$file" ;;
+	truncate) $who "$TESTUTIL" truncate "$dir/$file" 4 ;;
+	chown) $who "$TESTUTIL" lchown "$dir/$file" -1 -1 ;;
+	esac </dev/null >/dev/null 2>&1
+	if [ $? -eq 0 ]; then echo 0; else echo 1; fi
+}
+
+# name owner mode user op want
+SGID2B_CASES="
+suid-owner-write 1001:2000 6666 bob write 0:666
+suid-other-write 0:2000 6666 bob write 0:666
+suid-other-held 0:2000 6666 bob held 0:666
+suid-member-write 0:2000 6666 alice write 0:2666
+sgid-other-write 0:2000 2666 bob write 0:666
+sgid-other-held 0:2000 2666 bob held 0:666
+sgid-other-fallocate 0:2000 2666 bob fallocate 0:666
+sgid-other-copy 0:2000 2666 bob copy 0:666
+sgid-other-truncate 0:2000 2666 bob truncate 0:666
+sgid-other-chown 0:2000 2666 bob chown 1:2666
+sgid-member-write 0:2000 2666 alice write 0:2666
+"
+
+while read -r name owner mode who op want; do
+	[ -n "$name" ] || continue
+	for d in "$NAT2" "$MNT/$P2"; do
+		echo "test-data" >"$d/$name"
+		chown "$owner" "$d/$name"
+		chmod "$mode" "$d/$name"
+	done
+	nat="$(sgid_op "$who" "$op" "$NAT2" "$name"):$(stat -c '%a' "$NAT2/$name")"
+	mnt="$(sgid_op "$who" "$op" "$MNT/$P2" "$name"):$(stat -c '%a' "$MNT/$P2/$name")"
+	src="${mnt%%:*}:$(stat -c '%a' "$SRC/$P2/$name")"
+	if [ "$nat" = "$want" ] && [ "$mnt" = "$want" ] && [ "$src" = "$want" ]; then
+		pass "sgid2b-$name"
+	else
+		fail "sgid2b-$name" "want $want, native $nat, mount $mnt, src $src"
+	fi
+done <<EOF
+$SGID2B_CASES
+EOF
+
+drop_caches_quiesced
+while read -r name owner mode who op want; do
+	[ -n "$name" ] || continue
+	nat=$(stat -c '%a' "$NAT2/$name")
+	cold=$(stat -c '%a' "$MNT/$P2/$name")
+	if [ "$cold" = "$nat" ]; then
+		pass "sgid2b-$name-cold-cache"
+	else
+		fail "sgid2b-$name-cold-cache" "native $nat, cold $cold"
+	fi
+done <<EOF
+$SGID2B_CASES
+EOF
 
 # --- the daemon is root again afterwards ----------------------------------
 

@@ -637,13 +637,16 @@ class DirCacheFS : private events::Bookkeeping {
   };
 
   // Opens a fresh shared backing descriptor for `id` (not yet in
-  // backing_files_) and registers it for passthrough: O_RDWR if possible,
-  // falling back to O_RDONLY only for a failure that specifically means
-  // "this object cannot be opened for writing" (EACCES/EROFS/EPERM) --
-  // anything else (e.g. ESTALE) is returned unchanged, exactly as a single
-  // OpenNode call would report it. The returned BackingFile has refs == 0
-  // and writable_refs == 0; the caller (Open()/Create()) sets those.
-  absl::StatusOr<BackingFile> MakeBackingFile(InodeId id, FuseRequest &req);
+  // backing_files_), whose mode is `mode`, and registers it for passthrough
+  // unless the mode makes dcfs decline it (dir_cache_fs.cc's
+  // PassthroughFor): O_RDWR if possible, falling back to O_RDONLY only for
+  // a failure that specifically means "this object cannot be opened for
+  // writing" (EACCES/EROFS/EPERM) -- anything else (e.g. ESTALE) is
+  // returned unchanged, exactly as a single OpenNode call would report it.
+  // The returned BackingFile has refs == 0 and writable_refs == 0; the
+  // caller (Open()/Create()) sets those.
+  absl::StatusOr<BackingFile> MakeBackingFile(InodeId id, mode_t mode,
+                                              FuseRequest &req);
 
   Context &ctx_;
   Options opts_;

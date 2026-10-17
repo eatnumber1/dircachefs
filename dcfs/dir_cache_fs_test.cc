@@ -871,17 +871,19 @@ class DirCacheFSTest : public ::testing::Test {
     return {reply, out.fh};
   }
 
-  // A create of `name` in `parent` with `flags`, and the new inode and file
-  // handle it returned (0 on error).
+  // A create of `name` in `parent` with `flags` and `mode`, and the new
+  // inode, file handle and passthrough backing id it returned (0 on error).
   struct Created {
     Reply reply;
     InodeId id = 0;
     uint64_t fh = 0;
+    int32_t backing_id = 0;
   };
-  Created Create(InodeId parent, std::string_view name, int flags) {
+  Created Create(InodeId parent, std::string_view name, int flags,
+                 mode_t mode = 0644) {
     struct fuse_create_in in = {};
     in.flags = static_cast<uint32_t>(flags);
-    in.mode = S_IFREG | 0644;
+    in.mode = S_IFREG | mode;
     std::string body;
     AppendBytes(body, in);
     body.append(name);
@@ -899,6 +901,7 @@ class DirCacheFSTest : public ::testing::Test {
                 sizeof(open));
     created.id = static_cast<InodeId>(entry.nodeid);
     created.fh = open.fh;
+    created.backing_id = open.backing_id;
     return created;
   }
 
@@ -1046,12 +1049,12 @@ class DirCacheFSTest : public ::testing::Test {
     ProcessInMemory(se, buf);
   }
 
-  // A TMPFILE in `parent` with `flags`: the new inode and file handle (0
-  // on error).
-  Created Tmpfile(InodeId parent, int flags) {
+  // A TMPFILE in `parent` with `flags` and `mode`: the new inode, file
+  // handle and passthrough backing id (0 on error).
+  Created Tmpfile(InodeId parent, int flags, mode_t mode = 0640) {
     struct fuse_create_in in = {};
     in.flags = static_cast<uint32_t>(flags);
-    in.mode = S_IFREG | 0640;
+    in.mode = S_IFREG | mode;
     std::string body;
     AppendBytes(body, in);
     body.append("/");
@@ -1069,6 +1072,7 @@ class DirCacheFSTest : public ::testing::Test {
                 sizeof(open));
     created.id = static_cast<InodeId>(entry.nodeid);
     created.fh = open.fh;
+    created.backing_id = open.backing_id;
     return created;
   }
 
@@ -1192,6 +1196,16 @@ class DirCacheFSTest : public ::testing::Test {
     std::string body;
     AppendBytes(body, in);
     return Send(FUSE_SETATTR, static_cast<uint64_t>(id), body);
+  }
+
+  // A SETATTR that sets nothing, from `uid`:`gid`: what chown(path, -1, -1)
+  // sends, and what the kernel sends to remove privileges before a write
+  // when its own rule clears no mode bit (fuse_setattr).
+  Reply SetNothing(InodeId id, uid_t uid, gid_t gid) {
+    struct fuse_setattr_in in = {};
+    std::string body;
+    AppendBytes(body, in);
+    return Send(FUSE_SETATTR, static_cast<uint64_t>(id), body, uid, gid);
   }
 
   // Mounts a tmpfs on `rel` (a directory of the source): a filesystem
@@ -6458,20 +6472,27 @@ TEST_F(DirCacheFSTest, FallocateEndsItsMutationBeforeItsRefreshes) {
   EXPECT_EQ(Release(f, fh).error, 0);
 }
 
+// Makes `groups` the supplementary groups of this thread, which
+// FuseRequest::Caller reads for every forged request (they carry the
+// harness's own pid), until the returned cleanup runs. With {1000}, a
+// caller forged as 1000:1000 is outside group 0, the test files' group.
+[[nodiscard]] auto WithThreadGroups(const std::vector<gid_t> &groups) {
+  std::vector<gid_t> saved(64);
+  const absl::StatusOr<int> n =
+      syscalls::getgroups(static_cast<int>(saved.size()), saved.data());
+  CHECK_OK(n);
+  saved.resize(static_cast<size_t>(*n));
+  CHECK_OK(syscalls::setgroups(groups));
+  return absl::Cleanup([saved = std::move(saved)] {
+    EXPECT_THAT(syscalls::setgroups(saved), IsOk());
+  });
+}
+
 // Step 17.2: fallocate by a caller outside the file's group clears the setgid
 // bit on a file without group execute (02666 -> 0666). Group-member and root
 // callers keep it.
 TEST_F(DirCacheFSTest, FallocateByCallerOutsideGroupClearsSetgid) {
-  std::vector<gid_t> saved_groups(64);
-  ASSERT_OK_AND_ASSIGN(
-      int n, syscalls::getgroups(static_cast<int>(saved_groups.size()),
-                                 saved_groups.data()));
-  saved_groups.resize(static_cast<size_t>(n));
-  const gid_t unpriv_groups[] = {1000};
-  ASSERT_THAT(syscalls::setgroups(unpriv_groups), IsOk());
-  absl::Cleanup restore_groups = [&] {
-    (void)syscalls::setgroups(saved_groups);
-  };
+  const auto restore_groups = WithThreadGroups({1000});
 
   WriteFile(Path("f_root"), "data");
   ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("f_root"), 02666, 0), IsOk());
@@ -6535,16 +6556,7 @@ TEST_F(DirCacheFSTest, FallocateByCallerOutsideGroupClearsSetgid) {
 // setgid bit on a file without group execute (02666 -> 0666). Group-member and
 // root callers keep it.
 TEST_F(DirCacheFSTest, WriteByCallerOutsideGroupClearsSetgid) {
-  std::vector<gid_t> saved_groups(64);
-  ASSERT_OK_AND_ASSIGN(
-      int n, syscalls::getgroups(static_cast<int>(saved_groups.size()),
-                                 saved_groups.data()));
-  saved_groups.resize(static_cast<size_t>(n));
-  const gid_t unpriv_groups[] = {1000};
-  ASSERT_THAT(syscalls::setgroups(unpriv_groups), IsOk());
-  absl::Cleanup restore_groups = [&] {
-    (void)syscalls::setgroups(saved_groups);
-  };
+  const auto restore_groups = WithThreadGroups({1000});
 
   WriteFile(Path("f_root"), "data");
   ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("f_root"), 02666, 0), IsOk());
@@ -6606,16 +6618,7 @@ TEST_F(DirCacheFSTest, WriteByCallerOutsideGroupClearsSetgid) {
 // the setgid bit on a file without group execute (02666 -> 0666). Group-member
 // and root callers keep it.
 TEST_F(DirCacheFSTest, CopyFileRangeByCallerOutsideGroupClearsSetgid) {
-  std::vector<gid_t> saved_groups(64);
-  ASSERT_OK_AND_ASSIGN(
-      int n, syscalls::getgroups(static_cast<int>(saved_groups.size()),
-                                 saved_groups.data()));
-  saved_groups.resize(static_cast<size_t>(n));
-  const gid_t unpriv_groups[] = {1000};
-  ASSERT_THAT(syscalls::setgroups(unpriv_groups), IsOk());
-  absl::Cleanup restore_groups = [&] {
-    (void)syscalls::setgroups(saved_groups);
-  };
+  const auto restore_groups = WithThreadGroups({1000});
 
   WriteFile(Path("src"), "source data");
   WriteFile(Path("dst_root"), "destination");
@@ -6684,6 +6687,175 @@ TEST_F(DirCacheFSTest, CopyFileRangeByCallerOutsideGroupClearsSetgid) {
   }
 
   EXPECT_EQ(Release(src, in_fh).error, 0);
+}
+
+// Step 17.2b: before a write by a caller outside a setgid file's group, the
+// kernel asks to remove privileges with a SETATTR that sets nothing (its own
+// pre-6.2 rule clears setgid only with group execute), the request a
+// chown(path, -1, -1) makes. While the file is open for writing it is the
+// write's: setgid goes as the backing filesystem's own write would take it
+// (setattr_should_drop_sgid), from a non-owner too, whose chown would be
+// refused. Root and group members (by their group or a supplementary one)
+// keep it; with group execute it goes for everyone but root.
+TEST_F(DirCacheFSTest, EmptySetattrOfAFileOpenForWritingDropsSetgidAsAWrite) {
+  struct Case {
+    std::string name;
+    mode_t mode;
+    uid_t uid;
+    gid_t gid;
+    std::vector<gid_t> groups;
+    mode_t want;
+  };
+  const Case cases[] = {
+      {.name = "outside",
+       .mode = 02666,
+       .uid = 1000,
+       .gid = 1000,
+       .groups = {1000},
+       .want = 0666},
+      {.name = "member",
+       .mode = 02666,
+       .uid = 1000,
+       .gid = 0,
+       .groups = {1000},
+       .want = 02666},
+      {.name = "supplementary",
+       .mode = 02666,
+       .uid = 1000,
+       .gid = 1000,
+       .groups = {1000, 0},
+       .want = 02666},
+      {.name = "root",
+       .mode = 02666,
+       .uid = 0,
+       .gid = 1000,
+       .groups = {1000},
+       .want = 02666},
+      {.name = "gx",
+       .mode = 02676,
+       .uid = 1000,
+       .gid = 0,
+       .groups = {1000},
+       .want = 0676},
+  };
+  for (const Case &c : cases) {
+    WriteFile(Path(c.name), "data");
+    ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path(c.name), c.mode, 0), IsOk());
+  }
+  Start();
+  for (const Case &c : cases) {
+    SCOPED_TRACE(c.name);
+    ASSERT_OK_AND_ASSIGN(InodeId f, Id(c.name));
+    auto [open, fh] = Open(f, O_WRONLY);
+    ASSERT_EQ(open.error, 0);
+    {
+      const auto restore_groups = WithThreadGroups(c.groups);
+      EXPECT_EQ(SetNothing(f, c.uid, c.gid).error, 0);
+    }
+    ASSERT_OK_AND_ASSIGN(struct stat st,
+                         syscalls::fstatat(AT_FDCWD, Path(c.name)));
+    EXPECT_EQ(st.st_mode & 07777, c.want);
+    auto [ga, attr] = Getattr(f);
+    ASSERT_EQ(ga.error, 0);
+    EXPECT_EQ(attr.mode & 07777, c.want);
+    EXPECT_EQ(Release(f, fh).error, 0);
+  }
+}
+
+// Step 17.2b: with no writable open the same SETATTR is the caller's
+// chown(path, -1, -1), which the backing filesystem refuses a non-owner
+// outside a setgid file's group (it would clear the bit, a mode change only
+// the owner may make; a read-only open changes nothing) and lets the owner
+// make, clearing the bit.
+TEST_F(DirCacheFSTest, EmptySetattrOfAFileNotOpenForWritingIsTheCallersChown) {
+  const auto restore_groups = WithThreadGroups({1000});
+  WriteFile(Path("others"), "data");
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("others"), 02666, 0), IsOk());
+  WriteFile(Path("own"), "data");
+  ASSERT_THAT(syscalls::fchownat(AT_FDCWD, Path("own"), 1000, 0, 0), IsOk());
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("own"), 02666, 0), IsOk());
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId others, Id("others"));
+  ASSERT_OK_AND_ASSIGN(InodeId own, Id("own"));
+
+  auto [open, fh] = Open(others, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  EXPECT_EQ(SetNothing(others, 1000, 1000).error, -EPERM);
+  ASSERT_OK_AND_ASSIGN(struct stat st,
+                       syscalls::fstatat(AT_FDCWD, Path("others")));
+  EXPECT_EQ(st.st_mode & 07777, 02666u);
+  auto [ga, attr] = Getattr(others);
+  ASSERT_EQ(ga.error, 0);
+  EXPECT_EQ(attr.mode & 07777, 02666u);
+  EXPECT_EQ(Release(others, fh).error, 0);
+
+  EXPECT_EQ(SetNothing(own, 1000, 1000).error, 0);
+  ASSERT_OK_AND_ASSIGN(st, syscalls::fstatat(AT_FDCWD, Path("own")));
+  EXPECT_EQ(st.st_mode & 07777, 0666u);
+}
+
+// Step 17.2b: a file with setuid and setgid but not group execute gets no
+// passthrough, from any open (one registration serves every open of an
+// inode, and the kernel refuses a non-passthrough open of an inode that has
+// one), nor from a create or O_TMPFILE that makes it: written through
+// passthrough, its setgid would stay for a writer outside its group (the
+// kernel's SETATTR clears setuid alone, and the write runs as the daemon).
+// Its writes come to Write, as the caller. Every other mode keeps it.
+TEST_F(DirCacheFSTest, NoPassthroughForASetuidSetgidFileWithoutGroupExecute) {
+  struct Case {
+    std::string name;
+    mode_t mode;
+    bool passthrough;
+  };
+  const Case cases[] = {
+      {.name = "suid_sgid", .mode = 06666, .passthrough = false},
+      {.name = "suid_sgid_gx", .mode = 06676, .passthrough = true},
+      {.name = "sgid", .mode = 02666, .passthrough = true},
+      {.name = "suid", .mode = 04666, .passthrough = true},
+      {.name = "plain", .mode = 0666, .passthrough = true},
+  };
+  for (const Case &c : cases) {
+    WriteFile(Path(c.name), "data");
+    ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path(c.name), c.mode, 0), IsOk());
+  }
+  Start();
+  Passthrough().enabled = true;
+  auto backing_id_of = [](const Reply &reply) {
+    struct fuse_open_out out{};
+    EXPECT_GE(reply.payload.size(), sizeof(out));
+    std::memcpy(&out, reply.payload.data(), sizeof(out));
+    return out.backing_id;
+  };
+  for (const Case &c : cases) {
+    SCOPED_TRACE(c.name);
+    ASSERT_OK_AND_ASSIGN(InodeId f, Id(c.name));
+    auto [ro, ro_fh] = Open(f, O_RDONLY);
+    auto [rw, rw_fh] = Open(f, O_WRONLY);
+    ASSERT_EQ(ro.error, 0);
+    ASSERT_EQ(rw.error, 0);
+    EXPECT_EQ(backing_id_of(ro) > 0, c.passthrough);
+    EXPECT_EQ(backing_id_of(rw), backing_id_of(ro));
+    EXPECT_EQ(Release(f, ro_fh).error, 0);
+    EXPECT_EQ(Release(f, rw_fh).error, 0);
+  }
+
+  Created created = Create(kRootInode, "new", O_RDWR, 06666);
+  ASSERT_EQ(created.reply.error, 0);
+  EXPECT_EQ(created.backing_id, 0);
+  EXPECT_EQ(Release(created.id, created.fh).error, 0);
+  Created plain = Create(kRootInode, "new_plain", O_RDWR, 0666);
+  ASSERT_EQ(plain.reply.error, 0);
+  EXPECT_GT(plain.backing_id, 0);
+  EXPECT_EQ(Release(plain.id, plain.fh).error, 0);
+
+  Created tmpfile = Tmpfile(kRootInode, O_RDWR, 06666);
+  ASSERT_EQ(tmpfile.reply.error, 0);
+  EXPECT_EQ(tmpfile.backing_id, 0);
+  EXPECT_EQ(Release(tmpfile.id, tmpfile.fh).error, 0);
+  Created plain_tmpfile = Tmpfile(kRootInode, O_RDWR, 0666);
+  ASSERT_EQ(plain_tmpfile.reply.error, 0);
+  EXPECT_GT(plain_tmpfile.backing_id, 0);
+  EXPECT_EQ(Release(plain_tmpfile.id, plain_tmpfile.fh).error, 0);
 }
 
 // The thread's supplementary groups.

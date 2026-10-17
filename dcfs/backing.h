@@ -620,7 +620,10 @@ absl::Status FinishRun(Context &ctx);
 // fails with EOPNOTSUPP. FUSE_SET_ATTR_KILL_SUID/KILL_SGID without
 // FUSE_SET_ATTR_MODE clears S_ISUID/S_ISGID from the node's *current*
 // mode instead (the kernel already cleared them in attr.st_mode whenever
-// it also sent MODE, so that combination needs no extra handling here);
+// it also sent MODE, so that combination needs no extra handling here),
+// S_ISGID only where the backing filesystem's own write by `caller` would
+// clear it (group-executable, or `caller` neither root nor in the node's
+// group; DirCacheFS::Setattr asks for it for a write's privilege removal);
 // it is a no-op on a symlink, which has no meaningful mode bits to clear.
 // Owner and times use the same regular/dir-vs-other-types split as mode,
 // except that both are unremarkable on a symlink (unlike mode); size is

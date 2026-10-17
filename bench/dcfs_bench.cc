@@ -10,6 +10,9 @@
 // Anything else is a benchmark run; this binary's own flags (below) are
 // removed before google/benchmark sees the command line.
 //
+// Write and SetidWrite overwrite a MiB of a file whose mode gets
+// passthrough, and of one whose mode makes dcfs decline it.
+//
 // Targets: the same operations run on the backing filesystem directly
 // ("backing"), through dcfs with the default one-hour kernel timeouts
 // ("dcfs": the kernel answers repeats itself) and through dcfs with both
@@ -153,6 +156,26 @@ bool StartDcfs(const std::string &name, const std::string &src,
   return true;
 }
 
+// The files BM_Write and BM_SetidWrite write, at the top of each backing
+// tree, and their modes: an ordinary one, and one with setuid and setgid but
+// not group execute, for which dcfs declines passthrough
+// (docs/design.md "Caller credentials").
+constexpr std::pair<std::string_view, mode_t> kWriteFiles[] = {
+    {"write_plain", 0666},
+    {"write_setid", 06666},
+};
+
+// Creates kWriteFiles in the directory `src`; false if one cannot be made.
+bool MakeWriteFiles(const std::string &src) {
+  for (const auto &[name, mode] : kWriteFiles) {
+    absl::StatusOr<FileDescriptor> fd =
+        syscalls::openat(AT_FDCWD, src + "/" + std::string(name),
+                         O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (!fd.ok() || !syscalls::fchmod(**fd, mode).ok()) return false;
+  }
+  return true;
+}
+
 bool Setup() {
   struct Backing {
     std::string prefix, src;
@@ -166,7 +189,9 @@ bool Setup() {
   }
   for (const auto &b : backings) {
     uint64_t big = std::min(cfg.big, b.entries);
-    if (!MakeTree(b.src, b.entries, big)) return false;
+    if (!MakeTree(b.src, b.entries, big) || !MakeWriteFiles(b.src)) {
+      return false;
+    }
     syscalls::sync();
     targets.push_back(
         {.name = b.prefix + "backing", .root = b.src, .entries = b.entries});
@@ -266,6 +291,41 @@ void BM_Readdir(benchmark::State &state, const Target *t) {
     }
   }
   state.counters["entries"] = static_cast<double>(seen);
+}
+
+// Opens `name` (one of kWriteFiles) for writing, once (dcfs chooses
+// passthrough at the open), and overwrites its first MiB in 64 KiB writes
+// per iteration, as root (who keeps setuid and setgid, so the mode stays).
+// The wall time per iteration is the MiB's: the CPU time is this
+// process's alone, without the daemon's.
+void WriteMiB(benchmark::State &state, const Target &t, std::string_view name) {
+  constexpr off_t kMiB = off_t{1} << 20;
+  const std::string path = t.root + "/" + std::string(name);
+  const std::string chunk(size_t{64} << 10, 'x');
+  absl::StatusOr<FileDescriptor> fd =
+      syscalls::openat(AT_FDCWD, path, O_WRONLY);
+  if (!fd.ok()) {
+    state.SkipWithError("open failed on " + path);
+    return;
+  }
+  for (auto _ : state) {
+    for (off_t off = 0; off < kMiB; off += std::ssize(chunk)) {
+      absl::StatusOr<size_t> n =
+          syscalls::pwrite(**fd, chunk.data(), chunk.size(), off);
+      if (!n.ok() || *n != chunk.size()) {
+        state.SkipWithError("write failed on " + path);
+        return;
+      }
+    }
+  }
+}
+
+void BM_Write(benchmark::State &state, const Target *t) {
+  WriteMiB(state, *t, kWriteFiles[0].first);
+}
+
+void BM_SetidWrite(benchmark::State &state, const Target *t) {
+  WriteMiB(state, *t, kWriteFiles[1].first);
 }
 
 // -- whole-daemon cases --------------------------------------------------
@@ -371,6 +431,8 @@ void Register() {
       {.name = "SmallRead", .fn = BM_SmallRead, .full_iterations = 0},
       {.name = "Lookup", .fn = BM_Lookup, .full_iterations = 200},
       {.name = "Readdir", .fn = BM_Readdir, .full_iterations = 20},
+      {.name = "Write", .fn = BM_Write, .full_iterations = 0},
+      {.name = "SetidWrite", .fn = BM_SetidWrite, .full_iterations = 0},
   };
   for (const Case &c : cases) {
     for (const Target &t : targets) {

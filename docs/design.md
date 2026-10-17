@@ -1745,8 +1745,10 @@ only for `EACCES`, `EROFS` or `EPERM` (an immutable file, a read-only
 filesystem). Whether a given open may write is still decided by the
 kernel from the FUSE file's own mode; a read-only open cannot write
 through a shared mapping even though the backing descriptor is `O_RDWR`.
-If the kernel did not grant passthrough, `Read` and `Write` serve the data
-through the same descriptor.
+If the kernel did not grant passthrough, or dcfs declined it (a file with
+setuid and setgid but not group execute; see
+[Caller credentials](#caller-credentials)), `Read` and `Write` serve the
+data through the same descriptor.
 
 `FUSE_CAP_ATOMIC_O_TRUNC` is turned off, so an `O_TRUNC` open arrives as
 an OPEN followed by a separate `SETATTR(size=0)`, which the ordinary
@@ -2209,8 +2211,48 @@ reads the mode back from the backing filesystem.
 - chmod: the kernel itself sends a mode change to clear setuid and setgid
   after a truncate or chown by a non-owner, which the caller's own chmod
   would be refused; a chmod the caller asked for has already been checked
-  by the kernel;
+  by the kernel; and the setgid removal for a write (below);
 - opening an existing file, and every probe, read and refresh.
+
+**Setuid and setgid on writes the kernel handles** (step 17.2b). Before a
+write, fallocate or copy_file_range, the kernel's FUSE side removes
+privileges itself (`file_remove_privs`, with the writer's credentials), and
+since dcfs negotiates neither `FUSE_CAP_HANDLE_KILLPRIV` nor its `_V2`,
+`fuse_setattr` re-derives the mode by the pre-6.2 rule: setuid always,
+setgid only with group execute. The current rule (`setattr_should_drop_sgid`)
+also clears setgid without group execute for a writer outside the file's
+group without `CAP_FSETID`. Two cases follow, each with a workaround that
+the kernel fix (`docs/plan/notes/kernel-patches.md`, row 4: `fuse_setattr`
+calling `setattr_should_drop_sgid()` after refreshing `i_mode`) retires:
+
+- Setgid without group execute: the kernel's SETATTR sets nothing, the
+  same request a `chown(path, -1, -1)` makes. Run as that chown, as the
+  caller, it failed the write of a non-owner with `EPERM` (clearing the bit
+  is a mode change only the owner may make; the native filesystem allows
+  the write and clears it). The removal always comes while the file is
+  open for writing, so dcfs takes a SETATTR that sets nothing on a file open
+  for writing for the write's (`DirCacheFS::Setattr`): it clears setgid, as
+  root, where the backing filesystem's own write by the caller would
+  (`FUSE_SET_ATTR_KILL_SGID`), and runs no chown. The price is that a
+  non-owner's `chown(path, -1, -1)` of such a file, while anyone has it open
+  for writing, succeeds and clears the bit where the native filesystem
+  refuses it with `EPERM`. With no writable open it is the caller's chown,
+  as before. Passthrough writes need nothing more for this mode: the bit is
+  gone before the daemon's write.
+- Setuid and setgid without group execute: the kernel's SETATTR is the mode
+  minus setuid, which dcfs cannot tell from the owner's chmod, and a
+  passthrough write reaches the backing file as the daemon (`CAP_FSETID`),
+  which keeps setgid too. dcfs declines passthrough for a file with this
+  mode (`PassthroughFor`), so the kernel sends the writes and `WriteFile`
+  runs them as the caller. The choice is made at the inode's first open
+  (one registration serves every open of an inode, and the kernel refuses
+  an open without passthrough of an inode that has one, with `EIO`), so a
+  read-only open declines too, and a file given this mode while open keeps
+  passthrough until its last release: a write in that window keeps setgid.
+  The cost, for files with this mode only (`dcfs_bench`'s Write and
+  SetidWrite, ext4 in the guest, 1 MiB overwritten in 64 KiB writes on one
+  open, mean of 5): 9.1 ms through passthrough, 32.8 ms declined (the
+  backing filesystem directly: 0.14 ms).
 
 **`default_permissions` is required** (russ, 2026-10-08). The kernel
 checks the caller's permissions against dcfs's cached attributes before a
@@ -2919,7 +2961,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `atime_test` | A `stat` through dcfs reports exactly the access time the backing filesystem has: after an open that reads nothing (unchanged), a read, a read while the file stays open (a stat while held), `chattr +A` and `O_NOATIME` (unchanged), an mmap read, lsattr's private open (unchanged), and from the cache with no backing read once closed; a directory listing and a readlink stamp the relatime "now" in the cache only (the backing filesystem's stays), a second within the day changes nothing, and all of it survives a restart of dcfs. (The power cut after a read: `fault_power_test`'s `atime` scenario.) |
 | `copy_test` | `copy_file_range` through dcfs shares extents on btrfs and xfs as natively and leaves the copy's attributes cached; `FICLONE` fails `EOPNOTSUPP` (the VFS's answer); `lsattr`/`chattr` (`FS_IOC_GETFLAGS`/`SETFLAGS`, `FSGETXATTR`) and `FS_IOC_GETVERSION` match the backing file, `chattr +i` is enforced (also for a file already open for writing), other ioctls get `ENOTTY`; `O_TMPFILE` linked by `AT_EMPTY_PATH` and through `/proc/self/fd`, `O_EXCL` and never linked, each as on the backing filesystem; a warm metadata pass reads nothing. |
 | `write_test` | Writes, appends, `O_TRUNC`, a 64 MiB passthrough write, concurrent opens of one file (the one-backing-file rule), fsync, fallocate, xattrs on files, directories and symlinks, ACL read-back after setxattr and chmod, `security.capability` removal on chown, truncate and write; a store through a shared mapping after the last close is reconciled at the inode's last `FORGET` (no out-of-band warning); served from the cache after a restart. |
-| `credentials_test` | As two unprivileged users: ownership of every create, setgid inheritance, supplementary groups, chown and chgrp rules, sticky directories, truncate, utimes, chmod and user xattrs, allowed and denied, agree with the backing filesystem; POSIX ACLs (named entries denying and granting access, default ACL inheritance and the umask) are enforced as on the backing filesystem; the daemon is back to root afterwards. |
+| `credentials_test` | As two unprivileged users: ownership of every create, setgid inheritance, supplementary groups, chown and chgrp rules, sticky directories, truncate, utimes, chmod and user xattrs, allowed and denied, agree with the backing filesystem; so do the setuid and setgid bits left by writes, fallocate, copy_file_range and truncate from owners, non-owners outside the file's group and group members, through passthrough and with a read-only open held, warm and after the kernel's caches are dropped; POSIX ACLs (named entries denying and granting access, default ACL inheritance and the umask) are enforced as on the backing filesystem; the daemon is back to root afterwards. |
 | `crash_test` | `SIGKILL` while files are open for writing with unflushed passthrough writes: after a restart, sizes and mtimes match the backing files (this failed before writable opens marked attributes unknown). An out-of-band change is noticed on open and logged exactly once; dcfs's own mutations log no false positive. |
 | `power_test` | The state a power loss leaves, produced deterministically: mutate through the mount, `SIGKILL`, undo each mutation directly on the backing filesystem, restart. Recovery logs a warning, every touched entry shows the backing filesystem's truth, untouched entries stay warm. With recovery disabled, the checks fail. A periodic sync point empties the dirty set. It cannot produce a real power loss, since a guest's page cache survives anything short of a reboot. |
 | `enospc_backing_test`, `enospc_cache_test` | Out of space (step 11.4): the backing filesystem full (create, write, mkdir, setxattr, rename through dcfs fail with `ENOSPC`, as on the backing filesystem, and nothing is served as done; btrfs reserves metadata apart, so only the write must fail there), and the cache database's filesystem full before a create's phase 1, during its phase 3 and a rename's, and before a sync point. Requests fail with `ENOSPC` or are replied as done; the kernel never answers "no such file" for a created file; the dirty set survives; after space is freed (and a restart) everything served matches the backing filesystem. |
