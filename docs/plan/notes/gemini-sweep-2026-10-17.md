@@ -157,3 +157,25 @@ in 3.2, the version stamp in 3.4, 4.3, 4.4, 4.5, 5.1, 5.2.
 ours, but be exact anyway)": a retry loop and a 1.10a phrase, for russ to
 rule on (style.md 1.12). The `StartupPurge` comment and body carry "used to"
 history too (3.4).
+
+## The Flash experiment: one broad job against five narrow ones (2026-10-17)
+
+process.md rule 5's measurement. Six Gemini 3.8 Flash (medium) jobs, read-only,
+on the same tree (c645222): one prompt with the five questions above, and
+five prompts with one question each. A Flash (high) job then matched every
+finding to this note's key; the orchestrator spot-checked the matches (they
+name the same defect). The key has 34 CONFIRMED or PARTLY findings.
+
+| Shape | Findings | Matched a confirmed key row | Distinct key rows found (recall) | Matched a WRONG row | Not in the key |
+|---|---|---|---|---|---|
+| One broad job | 20 | 5 | 4 of 34 (12%) | 0 | 15 |
+| Five narrow jobs | 37 | 14 | 11 of 34 (32%) | 0 | 23 |
+
+Narrow jobs found almost three times as many of the known defects, and
+neither shape repeated a finding the key had shown wrong. Both are far
+below Argon's single broad sweep (the key itself). The 38 findings not in
+the key are unverified: some are real (the fsck rebuild promise, the 0400
+database "tightened" to 0600, which led to 26.38), so precision is a lower
+bound. Conclusion: for Flash, narrow jobs, as rule 5 already prefers;
+Argon for a broad sweep when its quota allows.
+

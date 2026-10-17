@@ -375,7 +375,9 @@ reading. Not for writing code, nor for subtle protocol judgement.
    measured: once 26.31 has verified the Argon sweep's 35 findings,
    Flash answers the same five questions as one broad job and as five
    narrow ones, and both are scored for precision and recall against
-   the verified set. Until then, prefer narrow jobs.
+   the verified set. Measured 2026-10-17 (notes/gemini-sweep-2026-10-17.md,
+   last section): five narrow Flash jobs found 11 of the 34 verified
+   defects, one broad Flash job 4; use narrow jobs for Flash.
 6. Vary the effort knob per job, for Gemini and Claude alike (russ,
    2026-10-17), and name the choice in the dispatch:
 
