@@ -305,9 +305,8 @@ the README go to 14.10b below. What was settled:
   guarded case.
 - russ confirmed the three guarantees (2026-10-17): exclusive access; a
   unique, fixed fsid per export; and no replacement (replica swap) while
-  dcfs runs, documented as "If the exported filesystem is ever replaced by
-  another copy of it, for example on failover to a replica, stop dcfs and
-  delete the cache database first." The design is final.
+  dcfs runs, documented as NFS failover to a replica being not recommended,
+  with why (README's wording in 14.10b's Docs below). The design is final.
 
 ## 14.10b Network backings: the implementation
 
@@ -385,9 +384,15 @@ supported, with exactly these three guarantees (russ, 2026-10-17):
 - exclusive access: nothing but dcfs changes the exported tree, on the
   server or from another client;
 - a unique, fixed fsid per export (as exports(5) requires);
-- no replacement while dcfs runs, in these words: "If the exported
-  filesystem is ever replaced by another copy of it, for example on
-  failover to a replica, stop dcfs and delete the cache database first.";
+- no replacement while dcfs runs, in these words (russ, 2026-10-17): "NFS
+  failover to a replica under a running dcfs is not recommended. The
+  replica answers with the same address, filesystem id and, for a
+  block-level copy, the same file handles, so dcfs cannot tell that the
+  server changed; and a replica can lag the primary, so dcfs would go on
+  serving metadata for changes the new server never received. If the
+  exported filesystem is replaced by another copy of it, for example on
+  failover to a replica, stop dcfs and delete the cache database before
+  using it again.";
 
 and the `async`-export note (after a server crash the cache may list
 changes the server lost, so delete the cache database), and nothing about

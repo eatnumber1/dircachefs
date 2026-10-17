@@ -458,12 +458,17 @@ check, is in README ("Network backings"):
   `fsid=`, or a filesystem with a UUID). This is also what makes the
   server's handles persistent; a server that hands out volatile handles
   cannot give it.
-- **No replacement while dcfs runs**: README says "If the exported
-  filesystem is ever replaced by another copy of it, for example on
-  failover to a replica, stop dcfs and delete the cache database first."
-  The server also does not serve the export's path before the filesystem
-  is mounted on it (knfsd's `mountpoint` export option). russ confirmed
-  the three guarantees on 2026-10-17.
+- **No replacement while dcfs runs**: README says (russ, 2026-10-17):
+  "NFS failover to a replica under a running dcfs is not recommended. The
+  replica answers with the same address, filesystem id and, for a
+  block-level copy, the same file handles, so dcfs cannot tell that the
+  server changed; and a replica can lag the primary, so dcfs would go on
+  serving metadata for changes the new server never received. If the
+  exported filesystem is replaced by another copy of it, for example on
+  failover to a replica, stop dcfs and delete the cache database before
+  using it again." The server also does not serve the export's path
+  before the filesystem is mounted on it (knfsd's `mountpoint` export
+  option). russ confirmed the three guarantees on 2026-10-17.
 
 Two things are deliberately not required (russ, 2026-10-17):
 
