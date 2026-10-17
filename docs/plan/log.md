@@ -3543,3 +3543,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   archives and objects (4.15's and 12.18b's question): "No, it's fine since
   we're not shipping it." docs/licenses.md moves it to settled (with the
   25.29 dispatch's licenses.md edit or the next step that touches it).
+
+- 2026-10-17: 25.29 merged: Google's C++, Python, Shell and Markdown style
+  guides pinned (google/styleguide b2a398d, 2026-10-16, CC-BY-3.0) and
+  rendered with the pinned pandoc to
+  bazel-bin/third_party/google_styleguide/{cpp,python,shell,markdown}.md,
+  with a heading test; style.md, four agent definitions and the Gemini rules
+  point at the local copy. docs/licenses.md records russ's rulings on the
+  release binary and the CI cache. Merged on the orchestrator's read (docs
+  and build rules only). Also: 9f66af6's subject ("execution: ...") failed
+  the CI subject gate; reworded to "process: execution.md: ..." before any
+  push (backup branch backup-before-reword).
