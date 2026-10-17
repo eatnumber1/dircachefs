@@ -3801,3 +3801,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   exception.
 - 2026-10-17, russ confirms 25.28c's one-shot timer is the 2026-10-12
   exception to the no-timers rule: "same intent".
+- 2026-10-17, russ confirms the checkpoint design: SQLite's automatic
+  checkpoint (1000 pages) bounds the WAL's size, the sync point bounds
+  durability in time, the 25.28c timer covers idle; no wal_hook. "This is
+  the behavior I want." With 25.28b's kSync durable point, the automatic
+  checkpoint is the only routine checkpoint (clean shutdown truncates).
