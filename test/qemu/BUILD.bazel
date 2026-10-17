@@ -1492,7 +1492,8 @@ qemu_test(
 )
 
 # Step 17.2c: just the Write and SetidWrite benchmarks, with the request log on
-# (guest/bench_write.sh). Run it by name.
+# (guest/bench_write.sh). It prints request counts and never fails on them, so
+# it is manual: run it by name.
 qemu_test(
     name = "bench_write_test",
     cpus = CONCURRENT_CPUS,
@@ -1501,9 +1502,11 @@ qemu_test(
         ("vdc", "ext4", "320M"),
     ],
     guest_script = "guest/bench_write.sh",
-    asan_mem = 1856,  # as bench_smoke's tiny trees (not run under ASan)
+    mem = 256,  # peak 107 MiB
+    asan_mem = 1856,  # not measured (manual): bench_smoke's, tiny trees
     modules = ["dm_delay"],
     size = "large",
+    tags = ["manual"],
     timeout = "moderate",
 )
 

@@ -68,13 +68,14 @@ for comparison. Same binary except for the one prototype line (below):
 
 | Run | backing | dcfs | dcfs0 |
 |---|---|---|---|
-| now, host loaded: baseline | 146 us | 5391 us | 4214 us |
-| later, host calmer: baseline | 125 us | 2373 us | 2000 us |
-| V2 prototype (the same minute as the calmer baseline) | 96-132 us | 126-155 us | 129-133 us |
+| 2026-10-17, load average 10 (15-minute mean 9.8): baseline | 146 us | 5391 us | 4214 us |
+| 2026-10-17, later, load average 8.6: baseline | 125 us | 2373 us | 2000 us |
+| 2026-10-17, load average 8.6, V2 prototype (two runs, either side of that baseline) | 96-132 us | 126-155 us | 129-133 us |
 
 The per-write cost of the `GETXATTR` is therefore (2373 - 126) / 16 =
-about 140 us on the calmer host and (5391 - 126) / 16 = about 330 us on the
-loaded one; 17.2b's 9.1 ms per MiB is 570 us per write, from a busier
+about 140 us in the second run and (5391 - 126) / 16 = about 330 us in the
+first; 17.2b's 9.1 ms per MiB (commit d181ed8 and `design.md`, "Caller
+credentials", 2026-10-17, mean of 5) is 570 us per write, from a busier
 moment still. With V2 the excess over the backing filesystem goes to
 30 us per MiB or less (the cost of the stacked passthrough file itself,
 within the noise of the backing's own spread): the `GETXATTR` explains
@@ -85,9 +86,13 @@ What a write's `GETXATTR` costs is a round trip (two context switches on a
 two-vCPU guest) plus the daemon's cache read, which is why it varies with
 load and why it dominates small writes: `generic/069`'s
 `append_writer 3000000` issues 3,000,000 writes of 4 bytes;
-at 70 us of daemon CPU each that is the ~210 s of daemon CPU
-`slowness-17.3.md` measured before the 300 s timeout. That attribution is
-an inference from the numbers, not a run of generic/069.
+`docs/plan/notes/slowness-17.3.md` (section 4.3, 2026-10) measured about
+210 s of daemon CPU before the 300 s timeout: at most 70 us of daemon CPU
+per write, since the test timed out before finishing its writes. That is
+CPU only; the 140-330 us above is the wall time of the whole round trip
+(two context switches, the kernel, the daemon's CPU), so the two figures
+are consistent, and the attribution of generic/069's CPU to this GETXATTR is
+an inference, not a run of generic/069.
 
 ## 4. Fix options (not implemented)
 
@@ -105,8 +110,10 @@ mount with V2 still sends the empty SETATTR that 17.2b's rule recognises,
 and fallocate, copy_file_range and truncate run as the caller), but the new
 cases added to `credentials.sh` by this step failed:
 
-    TEST sgid2b-setuid-other-write FAIL (want 0:666, native 0:666, mount 0:4666, src 0:4666)
-    TEST sgid2b-setuid-owner-write FAIL (want 0:666, native 0:666, mount 0:4666, src 0:4666)
+```text
+TEST sgid2b-setuid-other-write FAIL (want 0:666, native 0:666, mount 0:4666, src 0:4666)
+TEST sgid2b-setuid-owner-write FAIL (want 0:666, native 0:666, mount 0:4666, src 0:4666)
+```
 
 A non-owner's passthrough write to a file with only setuid (04666) keeps
 setuid: a security regression. The reason is in `fuse_setattr`
@@ -127,8 +134,10 @@ What A would take, so that the cost is not read off the one-line change:
   from root.
 - With that, the 06666 passthrough decline (`PassthroughFor`) can go: the
   empty SETATTR now clears both bits before the daemon's write. `SetidWrite`
-  would then cost what `Write` costs (now 13.7-38 ms per MiB with the
-  decline; the prototype alone did not change it: 15.4-16.5 ms, because the
+  would then cost what `Write` costs (with the
+  decline, 13.7 ms per MiB in the second run, 25.0 ms in the first, and
+  38.1 ms in the single 100-iteration run with `--v=2` logging; the
+  prototype alone did not change it: 15.4 and 16.5 ms in its two runs, because the
   declined file still takes a `WRITE` request, a backing `GETXATTR` and a
   credential switch per write).
 - The truncate case (SETATTR of size and of the mode minus setuid) becomes
@@ -160,10 +169,10 @@ answer) disables every xattr including the ACLs dcfs needs. A kernel patch
 ### C. Nothing
 
 The cost is 140-330 us per write however small the write, from one cached
-`GETXATTR`. A program that writes in 64 KiB or larger blocks pays 3% to 10%
-on a 1 MiB write at the calmer host's figures (not measured at other
-sizes); one that writes 4 bytes at a time pays 70 us of daemon CPU per
-write, which is the generic/069 timeout. The weekly slow set already lists
+`GETXATTR`. Against a page-cache write on the backing filesystem (8 us for
+64 KiB in these runs) that is a factor of 20 or more; it shrinks only where
+the backing write itself is slow. A program that writes 4 bytes at a time
+pays up to 70 us of daemon CPU per write, which is the generic/069 timeout. The weekly slow set already lists
 generic/069.
 
 ### Recommendation

@@ -2327,9 +2327,9 @@ needs network access), optimize just those sources:
     bazel test //test/qemu:bench_readdir_test --test_output=all \
       '--per_file_copt=^(dcfs|bench)/.*,external/(abseil-cpp|sqlite3|libfuse|google_benchmark)\+/.*@-O2,-DNDEBUG'
 
-`bench_write_test` (large tier) runs only `Write` and `SetidWrite`, with the
-daemons' request log on (`--dcfs_flags=--v=2,--stderrthreshold=0`), then
-prints the requests the daemons served by operation and which of them
+`bench_write_test` (manual: run it by name) runs only `Write` and
+`SetidWrite`, with the daemons' request log on
+(`--dcfs_flags=--v=2,--stderrthreshold=0`), then prints the requests the daemons served by operation and which of them
 reached the backing filesystem (step 17.2c,
 `docs/plan/notes/passthrough-write-cost-17.2c.md`): with passthrough, a
 `Write` should show no `WRITE` request.
@@ -2342,6 +2342,8 @@ ioctls; the guest has no dmsetup) are subcommands of the same binary.
 |---|---|---|
 | `bench_smoke_test` (matrix) | small (ext4), medium | every benchmark, one iteration, tiny trees |
 | `bench_full_test` | enormous | 100000-entry trees, real iteration counts; prints the numbers for `docs/plan/log.md` |
+| `bench_readdir_test` | large | only the three `Readdir` cases, on a `READDIR_ENTRIES`-entry directory; prints the numbers |
+| `bench_write_test` | large, manual | only `Write` and `SetidWrite` with the request log on; prints request counts by operation, never fails on them (step 17.2c) |
 | `idle_short_test` (matrix) | medium (ext4), large | pass/fail, 60 s: the backing device's `/proc/diskstats` read and write counts do not move while a warm dcfs serves `statfs`, `stat` and `ls` of cached paths (after the kernel's caches were dropped) |
 | `idle_long_test` | large | the same for 600 s |
 | `memory_test` (matrix) | medium (ext4), large | pass/fail: RSS after `find` is under 256 bytes per entry, and after a `drop_caches` of half the tree a find over the other half adds nothing; see the comment in `guest/memory.sh` for why "RSS shrinks back" cannot be asserted |
