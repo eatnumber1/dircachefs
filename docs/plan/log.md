@@ -3888,3 +3888,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 2026-10-17, russ reverses the cache database permission policy: create
   0600 (umask), never change or refuse what the administrator set; "you
   can just delete all the file permissions checking code." 26.38 queued.
+- 2026-10-17, russ: the three timing flags become absl::Duration flags
+  (`--attr_timeout=1h`), and asks whether 3600/3600/5 are the right
+  defaults. 26.39 queued after 25.28b; provisional defaults (1h, 1h, the
+  kernel's vm.dirty_expire_centisecs at start) on the dashboard.

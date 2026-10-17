@@ -1057,3 +1057,33 @@ permissions checking code."
   directory 0700.
 
 Owner: dcfs-implementer, effort low.
+
+## 26.39 Duration flags, and the sync interval from the kernel's writeback (russ, 2026-10-17; queued after 25.28b)
+
+russ: "Abseil flags support an absl::Duration type, meaning we can have
+`--attr_timeout=1h` instead of `--attr_timeout_sec=3600`. Please make that
+change." And: "Is 3600/3600/5 the right defaults? Maybe for
+--sync_interval_sec it should be set to the kernel's writeback time at
+start, or something?"
+
+- `attr_timeout`, `entry_timeout` and `sync_interval` become
+  `ABSL_FLAG(absl::Duration, ...)` (mount options `dcfs.attr_timeout=1h`
+  and so on); the `_sec` names go (nothing has shipped). 25.28b's refusals
+  (non-positive, NaN, infinite) carry over to what a Duration can say
+  (zero, negative, `inf`). README's option table, the man page, the mount
+  helper's pass-through, the guest scripts and fstab fixtures that set the
+  old names, and their tests.
+- Defaults, provisional (the dashboard's questions table): attr and entry
+  stay 1h (all changes go through the mount, so the kernel's caches stay
+  right; shorter only costs round trips). `sync_interval` defaults to the
+  kernel's `vm.dirty_expire_centisecs` read at start (30 s on a stock
+  kernel), the age at which the kernel itself writes dirty data back, as
+  dcfs already reads `vm.dirtytime_expire_seconds` for access times; the
+  flag overrides it. A sync point then never forces the backing's
+  writeback (syncfs) much sooner than the kernel would have.
+- Test first: `--attr_timeout=90m` parses and reaches the FUSE replies;
+  the old names are refused as unknown; the default sync interval follows
+  a changed `vm.dirty_expire_centisecs` in the guest.
+
+Owner: dcfs-implementer, effort medium (the default touches 25.28b's
+bound and its model's Interval; check the model's comment still holds).
