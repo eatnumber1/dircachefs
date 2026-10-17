@@ -949,6 +949,10 @@ other check has), failing on a new duplicate above the threshold and
 naming both sites, so the author sees it before the reviewer does; a
 report of existing duplicates ordered by size as the backlog. Owner:
 dcfs-investigator. Not before the reset.
+Reassigned (russ, 2026-10-17: "Sure"): to Gemini through agy, in lane-8
+after 25.32b and the dashboard's SLOC tool, under process.md rule 4
+(write work, reviewed by the orchestrator); the gate's threshold and any
+allowlist come back for review before they are committed.
 
 ## 25.28 Periodic SQLite WAL checkpoints tied to sync_interval (russ, 2026-10-12)
 
