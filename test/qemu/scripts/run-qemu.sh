@@ -75,7 +75,8 @@
 #       logical CPU per physical core from sysfs thread_siblings_list) to
 #       eliminate SMT sibling contention and noise during budget-measuring
 #       runs. Off by default (unpinned); DCFS_PIN_NON_SMT=0 or unset leaves QEMU
-#       unpinned.
+#       unpinned. Nothing in the repository sets it (no CI job does): a person
+#       sets it by hand for a measurement run.
 #
 #   --power-cut SCENARIO[,SCENARIO...] (step 11.2; e2e only): a real power cut
 #       per scenario. Each is two boots over the same disk images: the first
@@ -928,8 +929,8 @@ LOAD_TAG=""
 PRESSURE_BEFORE=$(pressure_us)
 # Step 26.17: pin QEMU to non-SMT cores (one logical CPU per physical core from
 # /sys/devices/system/cpu/cpu*/topology/thread_siblings_list, e.g. 0,2,4,6) to
-# eliminate SMT sibling contention / noise. Off by default; enabled by
-# DCFS_PIN_NON_SMT=1 for budget-measuring runs.
+# eliminate SMT sibling contention / noise. Off by default; a person sets
+# DCFS_PIN_NON_SMT=1 by hand for a budget-measuring run (no CI job does).
 QEMU_TASKSET=""
 CPU_SYSFS=${DCFS_CPU_SYSFS:-/sys/devices/system/cpu}
 if [ "${DCFS_PIN_NON_SMT:-0}" = "1" ] && command -v taskset >/dev/null 2>&1 && [ -d "$CPU_SYSFS" ]; then
