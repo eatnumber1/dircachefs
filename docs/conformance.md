@@ -396,18 +396,22 @@ today's kernel disagree (the suite's own "wontfix" cases among them) and dcfs is
 not blamed.
 
 ```bash
-bazel test //test/qemu:sibylfs_test_ext4       # the 51 hand-written scripts (also _xfs, _btrfs)
-bazel test //test/qemu:sibylfs_sample_test     # 1/40 of the generated scripts, ext4
-bazel test //test/qemu:sibylfs_full_test       # every generated script, 16 guests (manual)
-bazel test //test/qemu:sibylfs_selftest_test   # the wrapper and the gates, no dcfs
+# The 51 hand-written scripts (also _xfs, _btrfs):
+bazel test //test/qemu:sibylfs_test_ext4
+# 1/40 of the generated scripts, ext4:
+bazel test //test/qemu:sibylfs_sample_test
+# Every generated script, 16 guests (manual):
+bazel test //test/qemu:sibylfs_full_test
+# The test's own logic (host) and the wrapper, a real run and the account
+# commands (guest, no dcfs):
+bazel test //test/qemu:sibylfs_lib_test //test/qemu:sibylfs_selftest_test
 ```
 
 Measured on 2026-10-17 (KVM, a host with load far above its cores, so wall
 times are inflated; host CPU per script is about 0.26 s). The model rejects
 18% of the generated scripts on ext4 itself (3,840 of 21,018): in the shards'
 own counts the largest class, about 40%, is `EINVAL` where the model allows
-only `ENOENT`, `ENOTDIR` or `EISDIR` (not examined further: probably the 2015
-model against a newer kernel's checks of `open` flags), and the next, about
+only `ENOENT`, `ENOTDIR` or `EISDIR` (not examined further), and the next, about
 14%, `EINVAL` where it allows a success. Through dcfs every script gets the
 same verdict as on the backing file system, bar the one listed below:
 
@@ -416,7 +420,7 @@ same verdict as on the backing file system, bar the one listed below:
 | hand-written, ext4 | 51 | 42 | 41 | 1 (listed below) |
 | hand-written, xfs | 51 | 41 | 41 | 0 |
 | hand-written, btrfs | 51 | 33 | 33 | 0 |
-| 1/20 of the generated plus hand-written, ext4 | 1,102 | 901 | 900 | 1 (the same) |
+| `dcfs_sibylfs=adhoc,0/20`, ext4 (run once by hand, the figure the sane-run gate's 50% rests on) | 1,102 | 901 | 900 | 1 (the same) |
 | 1/40 of the generated, ext4 | 526 | 430 | 430 | 0 |
 | every generated script, ext4 (`sibylfs_full_test`, 16 guests of 11 to 28 minutes each) | 21,018 | 17,178 | 17,178 | 0 |
 

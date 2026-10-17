@@ -30,8 +30,9 @@ Both are declared in `MODULE.bazel`.
   - URL `https://github.com/sibylfs/sibylfs_binaries/releases/download/2015-10-05/sibylfs_linux_amd64.tar.gz`
   - sha256 `080c5bced08bbb34dedde43cdbd4f8fd3e1c5d678c60dff7067cc6f189208879`,
     from downloading the asset on 2026-10-16 (GitHub publishes no digest for
-    it); the investigation of 2026-10-16 (`docs/plan/notes/sibylfs-checker-12.18.md`,
-    correction header) found it behaves as the checker built from source.
+    it); the investigation of 2026-10-16
+    (`docs/plan/notes/sibylfs-checker-12.18.md`, correction header) found it
+    behaves as the checker built from source.
   - The guest runs only `fs_test_posix` and `fs_test_check`. The binaries
     are dynamically linked against glibc (`libc`, `libm`, `libdl`); the
     guest's loader and libraries come from the toolchain's sysroot like any
@@ -85,12 +86,15 @@ not in the binaries' symbols.
   their glibc and the suite tarball (`/sibylfs`), and the guest runs them.
   Nothing from either is linked into dcfs, installed by it, or part of a
   release artifact or package.
-- Open question for russ (2026-10-16): the test suite, and the binaries as a
-  distribution, have no stated licence, and a Bazel disk cache or CI cache
-  that stores the fetched tarballs (and the initramfs built from them) is
-  storage we run, not a redistribution to anyone, but nothing here decides
-  that. The code of the checker is ISC, which permits what we do if the
-  notice is kept; the prebuilt tarball carries none.
+- **russ ruled (2026-10-17)**: the test suite has no stated licence, and
+  using it only in our tests is fine; a Bazel disk cache or CI cache that
+  stores the fetched tarballs (and the initramfs built from them) is storage
+  we run, not a redistribution. The checker's code is ISC, which permits what
+  we do if the notice is kept; the prebuilt tarball carries none and has no
+  stated licence of its own, and the ruling is taken to cover it as the same
+  kind of test-only use (russ may correct that). Anything that would copy
+  either pin into a release artifact, a package or another repository is not
+  covered and needs a new decision.
 
 ## Updating the pin
 
@@ -99,8 +103,10 @@ not in the binaries' symbols.
    commit in the URL.
 2. Look the licences up again (the table above): a licence file may have
    appeared, and the checker's libraries change with a new build.
-3. Run `bazel test //test/qemu:sibylfs_test`. The guest's accounting shims,
-   the scripts it runs and the divergences it records
+3. Run `sibylfs_lib_test`, `sibylfs_selftest_test` and `sibylfs_test` of
+   `//test/qemu` (and `sibylfs_full_test`, which is manual). The guest's
+   account commands, the scripts it runs and the
+   divergences it records
    (`test/qemu/guest/sibylfs.<fstype>.expected_divergences`) may need to
    follow.
 4. Update `tools/sbom/pins.json` if the repository names changed.
