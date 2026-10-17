@@ -3737,3 +3737,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   item 6 and 1.6b with the other style answers: CHECK_OK for setup is the
   rule of thumb; ASSERT_THAT(..., IsOk()) on a setup line is also fine;
   reviewers do not flag either and nothing is converted for it.
+- 2026-10-17, russ on style question 2 (step numbers opening test
+  comments): B. To land in docs/style.md 1.9 / section 2: "A test comment
+  does not start with its step number; the test name states the behavior
+  and the commit names the step." Existing prefixes go when touched.
