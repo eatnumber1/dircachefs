@@ -13,6 +13,8 @@ not exist fail (`//tools:totw_citations_test`).
   `http_archive`).
   - URL: `https://github.com/abseil/abseil.github.io/archive/e9e24835cb889fe25251cb9ec6d51b79233e358d.tar.gz`
   - sha256: `39ef558457e44fa1908194a8f3db432c186779a438dd0a548c7959ceed90a178`
+  - How the sha256 was obtained: `curl -L` of the URL above and `sha256sum`
+    of the file, on 2026-10-17; Bazel verifies it on every fetch.
 - Licence: **Apache-2.0** (the archive's `LICENSE`, "Apache License Version
   2.0, January 2004"). The tips are Markdown posts in `_posts/`; this
   repository does not copy them, it only builds an index and a concatenation
@@ -41,12 +43,13 @@ Read tip 122 with `grep -n '^# TotW #122' tips.md`, then the lines after it.
 ## Checks
 
 - `//third_party/abseil_tips:index_test` fails if the index loses a tip
-  `docs/style.md` relies on (42, 103, 122) or is truncated.
+  `docs/style.md` relies on (42, 103), the uncited spot check (122) or is
+  truncated.
 - `//third_party/abseil_tips:make_index_test` covers which posts are tips.
 - `//tools:totw_citations_test` fails if a TotW number cited in
   `docs/style.md`, `docs/abseil-utilities.md`, `docs/design.md` or the C++
-  is not in `index.tsv`. Cite as `TotW #103`, `TotW 103`, `tips/103` or
-  `Tip of the Week #103`.
+  is not in `index.tsv`. Cite as `TotW #103`, `TotW 103`, `totw/103`,
+  `https://abseil.io/tips/103` or `Tip of the Week #103`.
 
 ## Updating the pin
 

@@ -40,7 +40,7 @@ py_test(
     name = "index_test",
     size = "small",
     timeout = "short",
-    srcs = ["test_index.py"],
+    srcs = ["index_test.py"],
     args = [
         "$(location :index.tsv)",
         "$(location :tips.md)",
@@ -49,7 +49,7 @@ py_test(
         ":index.tsv",
         ":tips.md",
     ],
-    main = "test_index.py",
+    main = "index_test.py",
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
