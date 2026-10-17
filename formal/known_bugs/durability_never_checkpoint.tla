@@ -9,9 +9,9 @@
 (* away hours of fills, which recovery then read again from the backing    *)
 (* disks.                                                                  *)
 (*                                                                         *)
-(* Re-introduced by BugNeverCheckpoint. Expected: AtRequestStart is        *)
-(* violated: a fill, an interval's ticks, and a request starts with the    *)
-(* fill still losable.                                                     *)
+(* Re-introduced by BugNeverCheckpoint. Expected: BoundAtRequestEnd is     *)
+(* violated: a fill, an interval's ticks, and a request starts and ends    *)
+(* with the fill still losable.                                            *)
 (***************************************************************************)
 EXTENDS durability
 =============================================================================

@@ -195,7 +195,10 @@ VARIABLES
                  \* is the regime's: BCrash)
     dbCur,       \* the cache database as the daemon sees it now
     dbOpts,      \* database states a crash may leave: the last fsynced
-                 \* commit and every later commit (a prefix of the WAL)
+                 \* commit and every later commit (a prefix of the WAL).
+                 \* Read it only universally (\A s \in dbOpts, or a choice
+                 \* among all of them): MC_large/MC_nolock leave
+                 \* WalCheckpoint out on that ground (MC.tla).
     mode,        \* the daemon: "up" serving, "down", or a start/stop step
     seq,         \* FillGuards::seq (D is the only inode tracked: README)
     inflight,    \* FillGuards::inflight[D]
@@ -1108,7 +1111,7 @@ RFail2(p) ==
 
 (***************************************************************************)
 (* A sync point (backing::SyncBacking): from the periodic                 *)
-(* DirCacheFS::MaybeSyncBacking, or after FSYNC/FSYNCDIR. Other requests  *)
+(* DirCacheFS::MaybeSyncNow, or after FSYNC/FSYNCDIR. Other requests      *)
 (* run while it waits on syncfs, as they will under coroutines.           *)
 (***************************************************************************)
 

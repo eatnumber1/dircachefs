@@ -26,7 +26,7 @@ namespace dcfs {
 struct DirtyState {
   // Whether the dirty table may hold a row that is not atime_only (a
   // mutation's). Conservatively true until startup recovery or a sync point
-  // has emptied it; lets the periodic sync (DirCacheFS::MaybeSyncBacking)
+  // has emptied it; lets the periodic sync (DirCacheFS::MaybeSyncNow)
   // skip idle periods without a query per request. Only these rows make a
   // sync point run (step 23.8): an atime_only row waits for one that runs
   // for another reason, for the clean shutdown's, or for recovery.
@@ -45,7 +45,7 @@ struct DirtyState {
   absl::Duration atime_expiry = absl::Hours(12);
   // When the oldest atime-only row may have been added (InfiniteFuture: none
   // since a sync point or recovery left none): with atime_expiry, when they
-  // drive a sync point (DirCacheFS::MaybeSyncBacking).
+  // drive a sync point (DirCacheFS::MaybeSyncNow).
   absl::Time atime_since = absl::InfiniteFuture();
   // Inodes whose dirty row is known to be durable: committed with
   // sqlite3::Durability::kSync since the table was last cleared. A phase 1

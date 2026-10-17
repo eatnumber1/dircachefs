@@ -3421,6 +3421,35 @@ TEST_F(ClockTest, FsyncdirCheckpointsTheWal) {
   EXPECT_EQ(counter_.counts().wal_checkpoints, 1);
 }
 
+// Records the replies and the sync points' checkpoints, in order.
+class ReplyAndCheckpointOrder : public ProtocolEvents {
+ public:
+  void Replied(Context &, int) override { order.emplace_back("reply"); }
+  void WalCheckpointed(Context &) override {
+    order.emplace_back("checkpoint");
+  }
+  std::vector<std::string> order;
+};
+
+// Step 25.28b: no request waits for the checkpoint: it runs after the reply
+// of the request whose start ran the periodic sync point, and of an
+// FSYNCDIR, before the next request is read.
+TEST_F(ClockTest, TheCheckpointComesAfterTheReply) {
+  Start(absl::StrCat(source_, "_wal.sqlite"));
+  ASSERT_EQ(Mkdir(kRootInode, "d").first.error, 0);
+  ReplyAndCheckpointOrder order;
+  observers_->Add(&order);
+  clock_.AdvanceTime(absl::Seconds(5));
+  Tick();
+  EXPECT_THAT(order.order, ElementsAre("reply", "checkpoint"))
+      << "the periodic sync point";
+  ASSERT_EQ(Mkdir(kRootInode, "e").first.error, 0);
+  order.order.clear();
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_THAT(order.order, ElementsAre("reply", "checkpoint")) << "FSYNCDIR";
+  observers_->Remove(&order);
+}
+
 // Collects every log line, VLOG lines included, with its severity while it
 // lives (the lines a daemon would write to stderr at --stderrthreshold=0
 // --v=N).
@@ -3459,25 +3488,30 @@ class ScopedVerbosity {
   int saved_;
 };
 
-// Once a sync point has cleared the dirty set, steps a read statement and
-// leaves it part way through its rows until the next request begins (the
-// periodic sync point runs before it): the connection holds a read
-// transaction meanwhile, in which SQLite refuses a checkpoint
-// (SQLITE_LOCKED), as a cache disk's I/O error would make it fail.
+// Simulates a checkpoint that cannot complete. Once a sync point has cleared
+// the dirty set, at the end of its request (after the invariant checks, before
+// the checkpoint that follows the reply), steps a read statement and leaves it
+// part way through its rows until Release(): the connection holds a read
+// transaction meanwhile, in which SQLite refuses a checkpoint (SQLITE_LOCKED),
+// as a cache disk's I/O error would make it fail.
 class HoldReadAfterSyncClear : public ProtocolEvents {
  public:
-  void SyncCleared(Context &ctx) override {
+  void SyncCleared(Context &) override { armed_ = true; }
+  void CheckRequestEnd(Context &ctx, const events::Bookkeeping &,
+                       const events::Request &) override {
+    if (!std::exchange(armed_, false)) return;
     absl::StatusOr<sqlite3::Statement> stmt =
         sqlite3::Statement::Prepare(ctx.db, "SELECT id FROM inodes");
-    ASSERT_THAT(stmt, IsOk());
-    ASSERT_THAT(stmt->Step(), IsOkAndHolds(true));
+    CHECK_OK(stmt.status());
+    absl::StatusOr<bool> row = stmt->Step();
+    CHECK_OK(row.status());
+    CHECK(*row);
     held_ = *std::move(stmt);
   }
-  void RequestBegin(Context &, const events::Request &) override {
-    held_ = sqlite3::Statement();
-  }
+  void Release() { held_ = sqlite3::Statement(); }
 
  private:
+  bool armed_ = false;
   sqlite3::Statement held_;
 };
 
@@ -3499,6 +3533,7 @@ TEST_F(ClockTest, FailedCheckpointIsLoggedAndLeftToTheNextSyncPoint) {
         << capture.Dump();
   }
   observers_->Remove(&hold);
+  hold.Release();
   EXPECT_THAT(Dirty(), ::testing::IsEmpty());
   EXPECT_EQ(counter_.counts().wal_checkpoints, 0);
 

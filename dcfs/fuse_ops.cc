@@ -31,10 +31,11 @@ DirCacheFS &FsOf(fuse_req_t req) {
 
 // Every request handler goes through this, so it is also where the
 // periodic sync point runs: at the start of a request, never in the middle
-// of one (see DirCacheFS::MaybeSyncBacking).
+// of one (see DirCacheFS::MaybeSyncNow). Each caller ends with
+// DirCacheFS::FinishSyncPoint, after the reply.
 DirCacheFS &GetFS(fuse_req_t req) {
   DirCacheFS &fs = FsOf(req);
-  fs.MaybeSyncBacking();
+  fs.MaybeSyncNow();
   return fs;
 }
 
@@ -85,6 +86,7 @@ void Serve(fuse_req_t req, const events::Request &request, Handler handler) {
   }
   ctx.interrupts->End();
   ctx.events->CheckRequestEnd(ctx, fs.bookkeeping(), request);
+  fs.FinishSyncPoint();
 }
 
 // `userdata` is the DirCacheFS main.cc gave fuse_session_new, `conn` libfuse's
@@ -130,6 +132,7 @@ void Forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
   ctx.events->CheckForgetting(ctx, fs.bookkeeping(), ino, nlookup);
   fs.Forget(fr, ino, nlookup);
   ctx.events->CheckRequestEnd(ctx, fs.bookkeeping(), request);
+  fs.FinishSyncPoint();
 }
 
 // `forgets` points into the request's buffer (libfuse's do_batch_forget).
@@ -146,6 +149,7 @@ void ForgetMulti(fuse_req_t req, size_t count, fuse_forget_data *forgets) {
   }
   fs.ForgetMulti(fr, std::span<const fuse_forget_data>(forgets, count));
   ctx.events->CheckRequestEnd(ctx, fs.bookkeeping(), request);
+  fs.FinishSyncPoint();
 }
 
 void Getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {

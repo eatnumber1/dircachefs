@@ -1533,7 +1533,7 @@ counts unchanged; `MC_atime.cfg`, `MC_atime_concurrent.cfg` and
 | `fset` (`Arrive`), `FileSetSyscall`, `FileSetEnd`, `FileSetStat`, `FileSetFill` | A setattr of F: phase 1 (unknown, a mutation's row, kSync unless durable), the syscall, `End`, the refresh as a fill | `DirCacheFS::Setattr` |
 | `SyncClearDirty` | Also clears F's row if it was in the snapshot (`fdirty`: a cold open's mark moves no clock), on the same terms as D's, and only if F was held neither at the snapshot nor now (`SyncKeepsHeld`); a covered row of a held F stays, as atime-only (the syncfs covered the mutation it stood for) | `cache::ClearDirty`, `SyncSnapshot::open_files` |
 | `AtimeExpiry` | Time passes: F's atime-only row reaches the kernel's dirtytime expiry (`fm.expired`), after which it drives a sync point too | `Context::dirty.atime_since`, `atime_expiry`, `DirCacheFS::SyncDue` |
-| (sync, first step) | Enabled only if D's row or a mutation row of F may exist, or F's atime-only row has expired (`SyncDriven`): an atime-only row does not drive a sync point before that | `Context::dirty.any`, `MaybeSyncBacking` |
+| (sync, first step) | Enabled only if D's row or a mutation row of F may exist, or F's atime-only row has expired (`SyncDriven`): an atime-only row does not drive a sync point before that | `Context::dirty.any`, `MaybeSyncNow` |
 
 Properties: `Correct` (so `CacheNeverWrong` and `CrashSafe`) also says
 F's cached attributes are never ahead of the backing filesystem's
@@ -2789,7 +2789,7 @@ keeps only what the question needs:
 | `Commit` | A normal commit (a fill, a phase 3) | every transaction at `Durability::kNormal` |
 | `Phase1` | A kSync commit that marks a row dirty: everything so far durable | `cache::BeginMutation` |
 | `AutoCheckpoint` | SQLite's own checkpoint, every 1000 pages | SQLite |
-| `Start` | A request starts: the periodic sync point first, once `Interval` ticks have passed since the last | `DirCacheFS::MaybeSyncBacking` |
+| `Start` | A request starts: the periodic sync point first, once `Interval` ticks have passed since the last | `DirCacheFS::MaybeSyncNow` |
 | `Fsync` | An FSYNC's or FSYNCDIR's sync point | `DirCacheFS::Fsync`, `Fsyncdir` |
 | `Tick` | One tick of time passes (saturating at `Interval`) | the clock |
 | `PowerLossAndRestart` | The commits a power loss may lose are lost; the next process's clock starts | `backing::StartRun` |

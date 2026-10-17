@@ -700,7 +700,7 @@ tlc_test(
         size = "small",
         timeout = "short",
         config = "known_bugs/%s.cfg" % bug,
-        expect_violation = "Invariant AtRequestStart is violated",
+        expect_violation = "Invariant BoundAtRequestEnd is violated",
         spec = "known_bugs/%s.tla" % bug,
         srcs = ["durability.tla"],
     )
@@ -719,6 +719,16 @@ tlc_test(
     expect_violation = "Invariant LostOnlySinceSync is violated",
     spec = "known_bugs/durability_sync_point_skips_checkpoint.tla",
     srcs = ["durability.tla"],
+)
+
+# What the bound's exception is for: a checkpoint that fails.
+tlc_test(
+    name = "limitation_durability_checkpoint_fails_test",
+    size = "small",
+    timeout = "short",
+    config = "limitations/durability_checkpoint_fails.cfg",
+    expect_violation = "Invariant BoundIgnoringFailures is violated",
+    spec = "durability.tla",
 )
 
 # The lifetime model (lifetime.tla; README.md, "The lifetime model"): which

@@ -1544,7 +1544,7 @@ Sync points run (`DirCacheFS::SyncNow`, but for the shutdown's):
   because the caller asked for what it did to be durable, and that
   includes what dcfs cached about it;
 - at the start of the first request `--sync_interval_sec` (default 5)
-  after the previous sync point (`DirCacheFS::MaybeSyncBacking`, called
+  after the previous sync point (`DirCacheFS::MaybeSyncNow`, called
   from `fuse_ops.cc`); its backing half (`syncfs`, `ClearDirty`) only
   while the dirty set may hold a row that is not `atime_only`
   (`Context::dirty.any`, `DirCacheFS::SyncDue`);
@@ -1570,7 +1570,7 @@ across the restart until then.
 **The clock.** dcfs reads the time only through `Context::clock`, an
 `absl::Clock`: the real clock in production, an `absl::SimulatedClock` in
 the tests (step 26.10). There are two readers: the periodic sync point
-(`DirCacheFS::MaybeSyncBacking`, `--sync_interval_sec`) and the relatime
+(`DirCacheFS::MaybeSyncNow`, `--sync_interval_sec`) and the relatime
 stamp of a directory's or symlink's access time
 ([Access times](#access-times)). `absl::Now`, `clock_gettime`, `time` and
 `gettimeofday` are banned from the shipped binary (`tools/banned_symbols.txt`)

@@ -73,7 +73,7 @@ mount /dev/vdb /src
 sync
 
 mkdir -p /cache /mnt
-# sync_interval_sec is pushed way out so DirCacheFS::MaybeSyncBacking's own
+# sync_interval_sec is pushed way out so DirCacheFS::MaybeSyncNow's own
 # periodic sync point (called at the start of every request, once 5s have
 # passed since the last one) never fires during the sqlite lock window
 # below and competes for it -- this test wants only Flush's and Release's

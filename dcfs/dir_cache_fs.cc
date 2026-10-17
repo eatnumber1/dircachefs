@@ -639,7 +639,7 @@ bool DirCacheFS::SyncDue(absl::Time now) const {
                                                     ctx_.dirty.atime_expiry);
 }
 
-void DirCacheFS::MaybeSyncBacking() {
+void DirCacheFS::MaybeSyncNow() {
   if (ctx_.clock->TimeNow() - last_sync_ < opts_.sync_interval) return;
   SyncNow("periodic");
 }
@@ -669,20 +669,29 @@ void DirCacheFS::SyncNow(std::string_view why) {
   // Only the periodic sync points are announced at INFO: an fsync runs one
   // per call, while the dirty set is non-empty. With nothing dirty no
   // backing syscall is made: the disks may be spun down.
-  const absl::Status synced =
-      SyncDue(last_sync_) ? backing::SyncBacking(ctx_, why == "periodic")
-                          : absl::OkStatus();
-  // Safe to carry on after either failure: the dirty entries stay, and the
-  // commits stay for SQLite's autocheckpoint or the next sync point; both
-  // only cost a larger re-read after a crash. The checkpoint comes after
-  // the backing half, so that it covers the dirty set's clearing too.
+  absl::Status synced = SyncDue(last_sync_)
+                            ? backing::SyncBacking(ctx_, why == "periodic")
+                            : absl::OkStatus();
+  // Safe to carry on: the dirty entries stay, and only cost a larger
+  // re-read after a crash.
   LOG_IF(WARNING, !synced.ok())
       << why << " sync of the backing filesystems failed, "
       << "keeping the dirty set: " << synced;
-  const absl::Status checkpointed = CheckpointCache();
+  // The checkpoint comes after the backing half, so that it covers the dirty
+  // set's clearing too, and after the request's reply (FinishSyncPoint), so
+  // that no request waits for it (step 25.28b).
+  checkpoint_due_ = true;
+}
+
+void DirCacheFS::FinishSyncPoint() {
+  if (!checkpoint_due_) return;
+  checkpoint_due_ = false;
+  absl::Status checkpointed = CheckpointCache();
+  // Safe to carry on: the commits stay for SQLite's autocheckpoint or the
+  // next sync point, and only cost a larger re-read after a power loss.
   LOG_IF(WARNING, !checkpointed.ok())
-      << why << " checkpoint of the cache's WAL failed, leaving its "
-      << "commits unsynced: " << checkpointed;
+      << "sync point: checkpoint of the cache's WAL failed, leaving its "
+      << "commits unsynced until the next sync point: " << checkpointed;
 }
 
 absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(

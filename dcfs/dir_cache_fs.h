@@ -63,7 +63,7 @@ class DirCacheFS : private events::Bookkeeping {
 
     // How often, at most, a request finding the dirty set non-empty first
     // runs a sync point (backing::SyncBacking: syncfs of the backing
-    // filesystems, then the dirty set is emptied). See MaybeSyncBacking().
+    // filesystems, then the dirty set is emptied). See MaybeSyncNow().
     absl::Duration sync_interval = absl::Seconds(5);
 
     // At most how many written files hold a descriptor until their last
@@ -210,15 +210,19 @@ class DirCacheFS : private events::Bookkeeping {
   bool IsUnnamedTmpfile(fuse_ino_t ino) const;
 
   // Called at the start of every request (see fuse_ops.cc): runs a sync
-  // point (SyncNow) once opts_.sync_interval has passed since the
-  // last one. dcfs is single-threaded inside libfuse's blocking session
-  // loop, which offers no idle hook, so there is no timer: an idle daemon
-  // keeps a non-empty dirty set and its unsynced cache commits until its
-  // next request, its next fsync, or a clean shutdown. That is safe; it
-  // only makes the re-read after a crash larger. So a power cut loses at
-  // most one interval of cache commits, counted up to the last request
-  // (formal/durability.tla, step 25.28b).
-  void MaybeSyncBacking();
+  // point (SyncNow) once opts_.sync_interval has passed since the last one.
+  // dcfs is single-threaded inside libfuse's blocking session loop, which
+  // offers no idle hook, so there is no timer: an idle daemon keeps a
+  // non-empty dirty set and its unsynced cache commits until its next
+  // request, its next fsync, or a clean shutdown. That is safe; it only
+  // makes the re-read after a crash larger. So when a request starts, a
+  // power cut can lose only cache commits younger than one interval, unless
+  // the last sync point's checkpoint failed (logged at WARNING;
+  // formal/durability.tla, step 25.28b).
+  void MaybeSyncNow();
+  // The sync point's last step, after the request's reply and before the
+  // next request is read (see fuse_ops.cc): the checkpoint SyncNow left due.
+  void FinishSyncPoint();
   // Whether a sync point's backing half has a reason to run now (see
   // SyncNow).
   bool SyncDue(absl::Time now) const;
@@ -508,10 +512,10 @@ class DirCacheFS : private events::Bookkeeping {
   void EndWriting(InodeId id);
 
   // A sync point now: the backing filesystems' syncfs and the dirty set's
-  // clearing (if it may be non-empty, SyncDue), then a checkpoint of the
-  // cache's WAL (if anything committed since the last, CheckpointCache).
-  // Logs a failure at WARNING: nothing that calls this may fail over it.
-  // `why` names the caller in the log line.
+  // clearing (if it may be non-empty, SyncDue); the checkpoint of the cache's
+  // WAL (CheckpointCache) follows after the reply (FinishSyncPoint). Logs a
+  // failure at WARNING: nothing that calls this may fail over it. `why`
+  // names the caller in the log line.
   void SyncNow(std::string_view why);
   // The sync point's checkpoint (step 25.28b): makes every cache commit so
   // far durable, so that a power cut cannot lose one older than the last
@@ -689,11 +693,14 @@ class DirCacheFS : private events::Bookkeeping {
   // (step 23.8); ctx_.open_files points here (see
   // Context::open_files).
   absl::flat_hash_set<int64_t> open_files_held_;
-  // When the last sync point ran (or was attempted); see MaybeSyncBacking.
-  // Set only by SyncNow, which then checkpoints: a reset without the
-  // checkpoint would let commits older than one interval wait
+  // When the last sync point ran (or was attempted); see MaybeSyncNow.
+  // Set only by SyncNow, which leaves a checkpoint due: a reset without one
+  // would let commits older than one interval wait
   // (formal/known_bugs/durability_sync_point_skips_checkpoint.tla).
   absl::Time last_sync_;
+  // A sync point ran in this request, and its checkpoint is due after the
+  // reply (FinishSyncPoint).
+  bool checkpoint_due_ = false;
   // When a request last reached the backing filesystem; InfinitePast before
   // the first (the start's own reads are not requests).
   absl::Time last_backing_access_ = absl::InfinitePast();
