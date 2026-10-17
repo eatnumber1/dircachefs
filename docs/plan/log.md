@@ -3591,3 +3591,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 2026-10-17: russ on xfstests' raw-device tests, which 26.30's directory
   sources make "not run" through dcfs: "agreed. leave them out." No
   dcfs.fsname option; the native comparison run still covers them.
+- Quota 2026-10-17 09:35 UTC (day 2 of the window began at 08:00 UTC):
+  Claude week 15%, about 11% a day budgeted for 5.9 days. russ asked why
+  only one lane was active: reviews had been parked ten hours for agy's
+  Claude pool and 25.28b deferred to "tomorrow", which had already begun.
+  Corrected: 25.28b dispatched (protocol, high, lane-1, the second guest
+  slot), 14.10's Opus review on Claude (identity work stays on Claude),
+  12.18b's review on Gemini 4 Argon medium (test infrastructure, sandboxed,
+  lane-3). The Flash scoring still waits for agy's Claude pool.
