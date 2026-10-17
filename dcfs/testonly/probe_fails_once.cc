@@ -21,9 +21,12 @@ absl::StatusOr<std::optional<uint64_t>>
 RealBackingNlink(Context &ctx, cache::InodeId id) asm(
     "__real__ZN4dcfs7backing12BackingNlinkERNS_7ContextEl");
 
+// NOLINTBEGIN(misc-use-internal-linkage): the linker resolves this name, so it
+// must be external
 absl::StatusOr<std::optional<uint64_t>>
 WrapBackingNlink(Context &ctx, cache::InodeId id) asm(
     "__wrap__ZN4dcfs7backing12BackingNlinkERNS_7ContextEl");
+// NOLINTEND(misc-use-internal-linkage)
 absl::StatusOr<std::optional<uint64_t>> WrapBackingNlink(Context &ctx,
                                                          cache::InodeId id) {
   static bool crashed = false;

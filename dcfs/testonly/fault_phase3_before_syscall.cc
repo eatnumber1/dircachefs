@@ -26,10 +26,13 @@ RealBeginRemove(Context &ctx, InodeId parent, std::string_view name, InodeId chi
     "__real__ZN4dcfs5cache11BeginRemoveERNS_7ContextElNSt3__117basic_string_"
     "viewIcNS3_11char_traitsIcEEEElNS0_12FillSnapshotE");
 
+// NOLINTBEGIN(misc-use-internal-linkage): the linker resolves this name, so it
+// must be external
 absl::StatusOr<Mutation>
 WrapBeginRemove(Context &ctx, InodeId parent, std::string_view name, InodeId child, FillSnapshot resolved) asm(
     "__wrap__ZN4dcfs5cache11BeginRemoveERNS_7ContextElNSt3__117basic_string_"
     "viewIcNS3_11char_traitsIcEEEElNS0_12FillSnapshotE");
+// NOLINTEND(misc-use-internal-linkage)
 absl::StatusOr<Mutation> WrapBeginRemove(Context &ctx, InodeId parent,
                                          std::string_view name, InodeId child,
                                          FillSnapshot resolved) {

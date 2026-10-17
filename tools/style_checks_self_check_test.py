@@ -215,6 +215,43 @@ class FixtureTest(unittest.TestCase):
         del texts["status_uninitialized"]
         self.assertEqual(3, len(style_checks.matcher_file_problems(texts)))
 
+    def test_a_suppression_names_its_checks_and_gives_a_reason(self):
+        good = {
+            "dcfs/g.cc": (
+                "int a;  // NOLINT(misc-a): the linker resolves this name\n"
+                "// The linker resolves this name, so it is external.\n"
+                "// NOLINTNEXTLINE(misc-a,misc-b)\n"
+                "int b;\n"
+                "// A macro cannot take the braces the check wants.\n"
+                "int c;  // NOLINTBEGIN(bugprone-x.y)\n"
+                "int d;  /* NOLINT(misc-a) the macro needs it here */\n"
+                "// NOLINTEND\n"),
+        }
+        self.assertEqual([], style_checks.suppression_problems(good))
+        bad = {
+            "dcfs/b.cc": (
+                "int a;  // NOLINT\n"
+                "int b;  // NOLINT(misc-a)\n"
+                "int c;  // NOLINT(*): because of reasons here\n"
+                "int d;  // NOLINTNEXTLINE(misc-a): short\n"
+                "int e;\n"
+                "// NOLINTBEGIN\n"
+                "int f;\n"
+                "// NOLINT(misc-a)\n"
+                "int g;  // NOLINT(misc-a)\n"
+                "int h;  // NOLINT(misc-a): a real reason here\n"),
+        }
+        problems = style_checks.suppression_problems(bad)
+        self.assertEqual(
+            ["dcfs/b.cc:%d" % n for n in (1, 2, 3, 4, 6, 8, 9)],
+            [p.split(": ")[0] for p in problems])
+
+    def test_run_reports_suppression_problems(self):
+        problems, _ = style_checks.run(
+            [], "", "Checks: 'misc-a'\nWarningsAsErrors: '*'\n",
+            {"dcfs/b.cc": "int a;  // NOLINT\n"})
+        self.assertEqual(1, len([p for p in problems if "NOLINT" in p]))
+
 
 if __name__ == "__main__":
     unittest.main()

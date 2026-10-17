@@ -278,9 +278,6 @@ dcfs/testonly/cost_counter.cc|CostCounter::BackingCall|misc-unused-parameters|3
 dcfs/testonly/cost_counter.cc|CostCounter::CheckRequestBegin|misc-unused-parameters|2
 dcfs/testonly/cost_counter.cc|CostCounter::CheckRequestEnd|misc-unused-parameters|3
 dcfs/testonly/cost_counter.cc|CostCounter::CheckRunStarted|misc-unused-parameters|1
-dcfs/testonly/create_syscall_before_phase1.cc|<file scope>|misc-use-internal-linkage|1
-dcfs/testonly/fault_phase3_before_syscall.cc|<file scope>|misc-use-internal-linkage|1
-dcfs/testonly/fault_syscall_before_phase1.cc|<file scope>|misc-use-internal-linkage|2
 dcfs/testonly/fault_syscall_before_phase1.cc|WrapUnlinkAt|misc-unused-parameters|5
 dcfs/testonly/files.h|ListTree|misc-no-recursion|1
 dcfs/testonly/invariant_checker.cc|HasDirtyRow|capturing_mutating_lambda|1
@@ -302,10 +299,6 @@ dcfs/testonly/invariant_checker.cc|InvariantChecker::SeeEveryDirtyDelete|capturi
 dcfs/testonly/invariant_checker.cc|InvariantChecker::Seen|bugprone-return-const-ref-from-parameter|1
 dcfs/testonly/invariant_checker.cc|NoneDirtyUnlessAny|capturing_mutating_lambda|1
 dcfs/testonly/main_recorder.cc|MainProtocolEvents|concurrency-mt-unsafe|2
-dcfs/testonly/probe_fails_once.cc|<file scope>|misc-use-internal-linkage|1
-dcfs/testonly/recover_dirty_fails_once.cc|<file scope>|misc-use-internal-linkage|1
-dcfs/testonly/snapshot_after_syncfs.cc|<file scope>|misc-use-internal-linkage|1
-dcfs/testonly/swallow_syscall_error.cc|<file scope>|misc-use-internal-linkage|1
 dcfs/testonly/trace_recorder.cc|FdJson|readability-avoid-nested-conditional-operator|2
 dcfs/testonly/trace_recorder.cc|JsonStr|cert-err33-c|1
 dcfs/testonly/trace_recorder.cc|TraceRecorder::After|readability-function-cognitive-complexity|1

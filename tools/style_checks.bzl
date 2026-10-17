@@ -180,7 +180,7 @@ _aspect = aspect(
 )
 
 def _findings_impl(ctx):
-    outputs = depset(transitive = [t[StyleInfo].outputs for t in ctx.attr.targets])
+    outputs = depset(ctx.files.sources, transitive = [t[StyleInfo].outputs for t in ctx.attr.targets])
     return [DefaultInfo(files = outputs, runfiles = ctx.runfiles(transitive_files = outputs))]
 
 style_findings = rule(
@@ -192,8 +192,12 @@ style_findings = rule(
             providers = [CcInfo],
         ),
         "tidy": attr.string(default = "yes", values = ["yes", "no"]),
+        "sources": attr.label_list(
+            allow_files = [".cc", ".h"],
+            doc = "Every source and header of the package, for the NOLINT gate (25.30).",
+        ),
     },
-    doc = "The clang-tidy and clang-query outputs for each of `targets`.",
+    doc = "The clang-tidy and clang-query outputs for each of `targets`, and the sources.",
 )
 
 def style_findings_here(name = "style_findings", tidy = "yes"):
@@ -213,8 +217,17 @@ def style_findings_here(name = "style_findings", tidy = "yes"):
     """
     seen = {}
     targets = []
+    sources = {}
     for r in native.existing_rules().values():
-        if r["kind"] not in _KINDS or r.get("target_compatible_with"):
+        if r["kind"] not in _KINDS:
+            continue
+
+        # Every file, whatever the target: the NOLINT gate reads them all, also
+        # those of the targets left out below and header-only libraries.
+        for f in list(r.get("srcs") or []) + list(r.get("hdrs") or []):
+            if f.endswith((".cc", ".h")):
+                sources[f] = True
+        if r.get("target_compatible_with"):
             continue
         srcs = str(r.get("srcs"))
         if srcs in seen:
@@ -225,6 +238,7 @@ def style_findings_here(name = "style_findings", tidy = "yes"):
         name = name,
         targets = targets,
         tidy = tidy,
+        sources = sorted(sources.keys()),
         testonly = True,
         visibility = ["//tools:__pkg__"],
     )

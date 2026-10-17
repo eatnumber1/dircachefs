@@ -27,6 +27,10 @@ none. A finding outside every function is keyed `<file scope>`.
 Rules listed in REPORT_ONLY are preferences or waiting for another step: they
 are counted and printed, never failed.
 
+Every `NOLINT`, `NOLINTNEXTLINE` and `NOLINTBEGIN` in our sources names its
+check(s) in parentheses and carries a reason (25.30, `suppression_problems`):
+a deliberate exception is an apology at the site, never a bare suppression.
+
 A tool that could not parse a file is a failure, and so is a
 `clang-diagnostic-*` finding: the file does not compile cleanly under the
 flags the build uses.
@@ -297,6 +301,49 @@ def matcher_file_problems(query_texts):
     return problems
 
 
+SUPPRESSION_RE = re.compile(r"\bNOLINT(?:NEXTLINE|BEGIN)?\b(?P<rest>.*)$")
+CHECKS_RE = re.compile(
+    r"^\((?P<checks>[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)*"
+    r"(?:,\s*[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)*)*)\)(?P<reason>.*)$")
+COMMENT_NOISE_RE = re.compile(r"/\*|\*/|//|[\\:;,.\-]")
+MIN_REASON_WORDS = 3
+
+
+def has_reason(text):
+    """True if `text`, less comment punctuation, has a few words."""
+    return len(COMMENT_NOISE_RE.sub(" ", text).split()) >= MIN_REASON_WORDS
+
+
+def suppression_problems(sources):
+    """Problems of the NOLINT comments of {path: text}: each names its check
+    or checks in parentheses (no wildcard) and has a reason, on the same line
+    after the parenthesis or in the comment on the line directly above."""
+    problems = []
+    for path, text in sorted(sources.items()):
+        lines = text.splitlines()
+        for number, line in enumerate(lines, 1):
+            match = SUPPRESSION_RE.search(line)
+            if not match:
+                continue
+            where = "%s:%d" % (path, number)
+            checks = CHECKS_RE.match(match.group("rest").strip())
+            if not checks:
+                problems.append("%s: NOLINT must name its check(s) in "
+                                "parentheses, e.g. NOLINT(misc-no-recursion)"
+                                % where)
+                continue
+            above = lines[number - 2].strip() if number > 1 else ""
+            above_is_comment = (above.startswith(("//", "/*")) or
+                                above.endswith("*/")) and not (
+                                    SUPPRESSION_RE.search(above))
+            if not (has_reason(checks.group("reason")) or
+                    (above_is_comment and has_reason(above))):
+                problems.append("%s: NOLINT needs a reason on the same line "
+                                "after the check names, or in the comment "
+                                "directly above" % where)
+    return problems
+
+
 def tidy_denials(text):
     """Problems with the deny-list of a .clang-tidy: every `-check` of Checks
     has a line `#   check: reason` above it."""
@@ -315,12 +362,13 @@ def tidy_denials(text):
     return problems
 
 
-def run(output_paths, allowlist_text, tidy_config_text):
-    """(problems, report lines)."""
+def run(output_paths, allowlist_text, tidy_config_text, sources=None):
+    """(problems, report lines). `sources` is {path: text} of our C++."""
     findings, functions, failures = read_outputs(output_paths)
     counts = keyed(findings, functions)
     enforced, report = split_report_only(counts)
     problems = (failures + tidy_denials(tidy_config_text) +
+                suppression_problems(sources or {}) +
                 compare(enforced, parse_allowlist(allowlist_text)))
     per_rule = collections.Counter()
     for key, count in counts.items():

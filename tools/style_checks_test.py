@@ -4,7 +4,8 @@
 Reads the clang-tidy and clang-query outputs that //tools:style_checks.bzl
 produced for dcfs/, dcfs/testonly/, bench/ and tools/ and fails on a finding
 that tools/style_checks_allow.txt does not list, and on a listed one that is
-gone (the list only shrinks). The report of every rule, report-only ones
+gone (the list only shrinks), and on a NOLINT with no named check or no
+reason (25.30). The report of every rule, report-only ones
 included, is printed. See style_checks.py.
 
 Arguments: allowlist=PATH tidy_config=PATH, then the output files.
@@ -15,7 +16,7 @@ import unittest
 
 import style_checks
 
-ARGS = {"outputs": []}
+ARGS = {"outputs": [], "sources": []}
 
 
 class StyleChecksTest(unittest.TestCase):
@@ -25,8 +26,12 @@ class StyleChecksTest(unittest.TestCase):
             allowlist = f.read()
         with open(ARGS["tidy_config"], encoding="utf-8") as f:
             tidy_config = f.read()
+        sources = {}
+        for path in ARGS["sources"]:
+            with open(path, encoding="utf-8") as f:
+                sources[style_checks.normalize(path)] = f.read()
         problems, report = style_checks.run(ARGS["outputs"], allowlist,
-                                            tidy_config)
+                                            tidy_config, sources)
         print("\n".join(report))
         if problems:
             self.fail("\n" + "\n".join(problems))
@@ -40,6 +45,8 @@ def main():
             ARGS[key] = value
         elif arg.endswith((".tidy.txt", ".query.txt")):
             ARGS["outputs"].append(arg)
+        elif arg.endswith((".cc", ".h")):
+            ARGS["sources"].append(arg)
         elif arg.endswith(".flags.txt"):
             # The compile flags of each file, for tools/style_fix.py (25.23).
             continue

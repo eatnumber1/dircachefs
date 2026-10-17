@@ -73,7 +73,14 @@ use it as design guidance rather than firm rules."
   fixed one must be taken off the list, and the list only shrinks.
   `status_uninitialized` and `pointer_without_nullability` are report-only
   (printed in the test log). Fix a finding in the code you touch; do not add
-  a line for new code.
+  a line for new code. The order is: fix the code so that it satisfies the
+  check; where it cannot (the link-time fakes of `dcfs/testonly/` must have
+  external linkage), a `NOLINT`, `NOLINTNEXTLINE` or `NOLINTBEGIN` naming
+  the check in parentheses with the reason beside it, on the same line or in
+  the comment directly above (russ, 2026-10-17: it is an apology for
+  breaking the guide, and it stays at the site). A bare `NOLINT`, a wildcard
+  and a check name with no reason fail `//tools:style_checks_test`. The
+  allowlist is legacy backlog only: it shrinks and never gains a line.
 - **Include what you use, enforced**: a target includes only headers of its
   direct deps (`layering_check`) and clang-tidy's `misc-include-cleaner`
   finds missing and unused includes, both with phase 7's clang toolchain

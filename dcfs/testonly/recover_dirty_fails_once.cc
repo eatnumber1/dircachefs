@@ -20,8 +20,11 @@ namespace dcfs::testonly {
 absl::StatusOr<int64_t> RealRecoverDirty(Context &ctx) asm(
     "__real__ZN4dcfs5cache12RecoverDirtyERNS_7ContextE");
 
+// NOLINTBEGIN(misc-use-internal-linkage): the linker resolves this name, so it
+// must be external
 absl::StatusOr<int64_t> WrapRecoverDirty(Context &ctx) asm(
     "__wrap__ZN4dcfs5cache12RecoverDirtyERNS_7ContextE");
+// NOLINTEND(misc-use-internal-linkage)
 absl::StatusOr<int64_t> WrapRecoverDirty(Context &ctx) {
   static bool crashed = false;
   if (!crashed) {

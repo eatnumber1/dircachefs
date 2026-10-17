@@ -23,10 +23,13 @@ RealBeginCreate(Context &ctx, cache::InodeId parent, std::string_view name) asm(
     "__real__ZN4dcfs5cache11BeginCreateERNS_7ContextElNSt3__117basic_string_"
     "viewIcNS3_11char_traitsIcEEEE");
 
+// NOLINTBEGIN(misc-use-internal-linkage): the linker resolves this name, so it
+// must be external
 absl::StatusOr<cache::Mutation>
 WrapBeginCreate(Context &ctx, cache::InodeId parent, std::string_view name) asm(
     "__wrap__ZN4dcfs5cache11BeginCreateERNS_7ContextElNSt3__117basic_string_"
     "viewIcNS3_11char_traitsIcEEEE");
+// NOLINTEND(misc-use-internal-linkage)
 absl::StatusOr<cache::Mutation> WrapBeginCreate(Context &ctx,
                                                 cache::InodeId parent,
                                                 std::string_view name) {

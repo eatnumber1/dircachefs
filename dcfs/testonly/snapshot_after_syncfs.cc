@@ -21,8 +21,11 @@ namespace dcfs::testonly {
 absl::StatusOr<cache::SyncSnapshot> RealBeginSync(Context &ctx) asm(
     "__real__ZN4dcfs5cache9BeginSyncERNS_7ContextE");
 
+// NOLINTBEGIN(misc-use-internal-linkage): the linker resolves this name, so it
+// must be external
 absl::StatusOr<cache::SyncSnapshot> WrapBeginSync(Context &ctx) asm(
     "__wrap__ZN4dcfs5cache9BeginSyncERNS_7ContextE");
+// NOLINTEND(misc-use-internal-linkage)
 absl::StatusOr<cache::SyncSnapshot> WrapBeginSync(Context &ctx) {
   // The syncfs calls, moved above the snapshot with their event. (The
   // calls SyncBacking still makes afterwards find nothing more to write.)
