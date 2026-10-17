@@ -22,8 +22,8 @@ the features (so changing the profile needs the test's expectation changed
 too), the block size at 2 MiB, 64 MiB and 256 MiB, and that the environment
 variable, not a baked-in path, decides.
 
-**Licence.** The profile is e2fsprogs's `misc/mke2fs.conf.in` with the header
-and one change (the 4 KiB `small` and `floppy` blocks), so it is derived from
+**Licence.** The profile is e2fsprogs's `misc/mke2fs.conf.in` apart from a header
+comment of ours and one change (the 4 KiB `small` and `floppy` blocks), so it is derived from
 e2fsprogs, not ours to license as MIT. Debian's `copyright` file for
 e2fsprogs 1.47 gives `GPL-2` for `Files: *`; the file has no header of its own
 and is not code the SPDX gate covers, so `tools/third_party_files.txt` lists

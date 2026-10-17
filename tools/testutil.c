@@ -324,8 +324,7 @@
 #include <unistd.h>
 
 /* BTRFS_IOC_SUBVOL_CREATE, copied from the kernel's <linux/btrfs.h> UAPI
- * header (GPL-2.0 WITH Linux-syscall-note, whose note exists for programs that
- * use these declarations; not included from it -- see the
+ * header (GPL-2.0 WITH Linux-syscall-note; not included from it -- see the
  * btrfs-subvol-create doc comment above). BTRFS_PATH_NAME_MAX and the struct
  * layout are stable UAPI, part of the on-disk-adjacent ioctl ABI every
  * btrfs-progs release also depends on verbatim. */

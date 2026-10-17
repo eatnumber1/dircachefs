@@ -5,7 +5,7 @@ dcfs itself is MIT (`LICENSE`: "MIT License, Copyright (c) 2023-2026 Russell
 Harmon"). This file is the inventory of everything else the repository
 fetches, builds, links, runs or copies, with the licence as read in the
 primary source, how we use it, and what that use triggers if dcfs is shipped
-as a binary. It is plan step 4.15 and finishes what step 7.8 started; the gate
+as a binary. It is plan step 4.15, which finishes what step 7.8 started; the gate
 that keeps our own files' headers honest is `tools/repo_shape.py`
 (`spdx_licenses`, with `tools/licenses_allowed.txt` and
 `tools/third_party_files.txt`).
@@ -47,8 +47,7 @@ the wording quoted.
 - **No GPL-only code is linked into dcfs** (only GPL-with-syscall-note
   headers, compile time). Three LGPL-2.1 libraries are (libfuse, libnuma, and
   glibc in `main_static`), which is what a shipped binary has to deal with.
-- **Fixes made in this step** are listed under "Our own tree"; **eight
-  open questions** are at the end.
+- **Eight open questions** are at the end.
 
 ## How dcfs is linked (evidence)
 
@@ -135,7 +134,7 @@ licence file was read there.
 | Input | Version | Licence as read | Where stated | Use |
 |---|---|---|---|---|
 | LLVM release (clang, lld, clang-tidy, llvm-nm, ...) | 22.1.8 (`LLVM-22.1.8-Linux-X64.tar.xz`) | Apache-2.0 WITH LLVM-exception | the headers carry the SPDX line (section 1); no LICENSE.TXT in the tarball | build tool; the runtime parts it supplies are in section 1 |
-| Toolchain runtime libraries (Debian bookworm `.deb`s: libgcc-s1, libstdc++6 12.2.0-14+deb12u1, libicu72, libxml2, liblzma5, zlib1g) | as pinned in `MODULE.bazel` | **unverified**: these debs were not read (libgcc-s1 and libstdc++6 have no `copyright` file of their own; GCC's runtime is GPL-3.0-or-later WITH GCC-exception-3.1 upstream, not read here) | | shared libraries the pinned clang needs to run: build tool only, never linked into dcfs |
+| Toolchain runtime libraries (the `runtime_debs` of `llvm_distribution`, a set of its own, not the rootfs packages of section 4 although some names coincide: libgcc-s1, libstdc++6 12.2.0-14+deb12u1, libicu72, libxml2, liblzma5, zlib1g) | as pinned in `MODULE.bazel` | **unverified**: these debs are not read (libgcc-s1 and libstdc++6 have no `copyright` file of their own; GCC's runtime is GPL-3.0-or-later WITH GCC-exception-3.1 upstream, not read here) | | shared libraries the pinned clang needs to run: build tool only, never linked into dcfs |
 | Python | 3.12 (python-build-standalone, via rules_python) | PSF-2.0 | `lib/python3.12/LICENSE.txt` ("A. HISTORY OF THE SOFTWARE", the PSF licence); the libraries bundled into the standalone build are **unverified** | build tool and the tests' Python (standard library only: every `import` in `*.py` is the standard library) |
 | JDK (`remotejdk21_linux`) | Azul Zulu 21.0.9+10 (`release`: `IMPLEMENTOR="Azul Systems, Inc."`) | GPL-2.0 WITH Classpath-exception | `legal/java.base/LICENSE` (GPL v2), `ASSEMBLY_EXCEPTION`, `ADDITIONAL_LICENSE_INFO` | runs TLC only; never distributed |
 | bazel_lib tool binaries (uutils coreutils, zstd, bsdtar) | per bazel_lib | uutils coreutils MIT (`coreutils/LICENSE`, "Copyright (c) uutils developers"); zstd and bsdtar **unverified** (the fetched directories hold the binary only) | | build tools |
@@ -159,8 +158,8 @@ dmsetup, gawk, patchelf and the xfstests userland). `L:` is Alpine's own
 licence field. The kernel is Alpine's `linux-virt` (origin `linux-lts`,
 `GPL-2.0-only`); this repository carries no patch to it (`third_party/linux/`
 holds the option list and its test only). Versions are what the fetch took;
-the pin is the branch, and the index moves (the index read today has
-`linux-virt` 6.18.57, the resolved fetch 6.18.55; three packages of QEMU's
+the pin is the branch, and the index moves (the index read on 2026-10-16
+has `linux-virt` 6.18.57, the resolved fetch 6.18.55; three packages of QEMU's
 closure show the index's newer licence field for the same reason).
 
 | Origin package | Version | `L:` | Repositories |
@@ -210,7 +209,7 @@ closure show the index's newer licence field for the same reason).
 | libtasn1 | 4.21.0-r0 | LGPL-2.1-or-later | qemu, qemu-img |
 | libunistring | 1.4.2-r0 | GPL-2.0-or-later OR LGPL-3.0-or-later | qemu, qemu-img |
 | liburing | 2.14-r0 | LGPL-2.1-or-later OR MIT | qemu, qemu-img |
-| linux-lts | 6.18.55-r0 | GPL-2.0-only (index now 6.18.57-r0) | kernel |
+| linux-lts | 6.18.55-r0 | GPL-2.0-only (index on 2026-10-16: 6.18.57-r0) | kernel |
 | lzo | 2.10-r5 | GPL-2.0-or-later | fstools, qemu, xfstests-tools |
 | musl | 1.2.6-r2 | MIT ; MIT AND BSD-2-Clause AND GPL-2.0-or-later | dmsetup, fstools, gawk, patchelf, qemu, qemu-img, strace, xfstests-tools |
 | musl-fts | 1.2.7-r7 | BSD-3-Clause | qemu, strace |
@@ -235,9 +234,9 @@ closure show the index's newer licence field for the same reason).
 | userspace-rcu | 0.15.3-r0 | LGPL-2.1-or-later | fstools, xfstests-tools |
 | util-linux | 2.42.3-r1 | LGPL-2.1-or-later ; BSD-3-Clause ; GPL-3.0-or-later AND GPL-2.0-or-later AND GPL-2.0-only AND GPL-1.0-only AND LGPL-2.1-or-later AND BSD-1-Clause AND BSD-3-Clause AND BSD-4-Clause-UC AND MIT AND Public-Domain ; GPL-2.0-or-later ; MIT ; BSD-4-Clause-UC ; GPL-1.0-only | fstools, qemu, qemu-img, xfstests-tools |
 | utmps | 0.1.3.3-r0 | ISC | xfstests-tools |
-| vde2 | 2.3.3-r6 | GPL (index now 2.3.3-r7) | qemu |
+| vde2 | 2.3.3-r6 | GPL (index on 2026-10-16: 2.3.3-r7) | qemu |
 | which | 2.23-r0 | GPL-2.0-or-later | xfstests-tools |
-| xen | 4.21.2-r1 | GPL-2.0-only (index now 4.21.2-r2) | qemu |
+| xen | 4.21.2-r1 | GPL-2.0-only (index on 2026-10-16: 4.21.2-r2) | qemu |
 | xfsprogs | 7.0.1-r0 | LGPL-2.1-or-later | fstools, xfstests-tools |
 | xz | 5.8.4-r0 | GPL-2.0-or-later AND 0BSD AND Public-Domain AND LGPL-2.1-or-later | qemu, strace, xfstests-tools |
 | yajl | 2.1.0-r9 | MIT | qemu |
@@ -345,11 +344,12 @@ the other licences the file names (a sample).
 
 Not read: 4 packages had no `copyright` file of their own (libgcc-s1,
 libstdc++6, libncursesw6, libpython3.11-stdlib: they point at their source
-package's directory) and 18 of the 149 `.deb`s were not on disk (libevent-core,
-libexpat1, libfile-find-rule-perl, libgcrypt20, libgnutls30,
-libgssapi-krb5-2, libicu72, libk5crypto3, libkrb5-3, libkrb5support0,
-liblzma5, libpcre2-8-0, libperl5.36, libssl3, libstdc++6, libtasn1-6,
-perl-base, perl-modules-5.36, perl). Their licences are **unverified**.
+package's directory) and 18 of the 149 `.deb`s were not fetched by the build
+into this output base, so not read (libevent-core, libexpat1,
+libfile-find-rule-perl, libgcrypt20, libgnutls30, libgssapi-krb5-2, libicu72,
+libk5crypto3, libkrb5-3, libkrb5support0, liblzma5, libpcre2-8-0, libperl5.36,
+libssl3, libtasn1-6, perl-base, perl-modules-5.36, perl). Their licences are
+**unverified**.
 
 ### 5. CI
 
@@ -413,27 +413,6 @@ text) was planned in 7.8 and is not built.
 `SPDX_*`). Every covered file has a header; every non-MIT header is listed in
 `tools/third_party_files.txt` with a provenance.
 
-Fixes made in step 4.15:
-
-- `# SPDX-License-Identifier: MIT` on the four `BUILD.<name>` overlays of
-  `third_party/` (`act`, `pandoc`, `pjdfstest`, `xfstests`), which the gate
-  does not see.
-- `third_party/xfstests/0001-dcfs-guest.patch` was listed `GPL-2.0-or-later`;
-  it patches `check` (`GPL-2.0` only) and `common/rc` (`GPL-2.0+`), so the
-  patch is `GPL-2.0-only`.
-- Rows for the liburing patch (`Apache-2.0`: it edits an Apache-2.0 overlay)
-  and `third_party/e2fsprogs/mke2fs.conf` (`GPL-2.0-only`, derived from
-  e2fsprogs's profile) in `tools/third_party_files.txt`; a licence note in
-  `third_party/e2fsprogs/README.md`.
-- The UAPI declarations copied into `tools/testutil.c` and
-  `tools/kernel_bugs/ext4_casefold_tune/casefold_helper.c` now name the
-  licence of their source (`GPL-2.0 WITH Linux-syscall-note`).
-- `struct linux_dirent64` in `dcfs/syscalls_backing.h` carried the getdents(2)
-  man page's field comments; they are reworded and the comment names the
-  kernel header, which is `GPL-2.0` without the syscall note and not exported.
-- README's "License" section said "To be decided"; it states MIT and links
-  this file.
-
 Outside the gate and without headers, by design: Markdown, `*.txt` lists,
 `*.cfg` model configurations, `*.query` matchers, fixture and testdata
 directories (sample inputs), `.claude/agents/` and `CLAUDE.md`, and
@@ -445,9 +424,9 @@ directories (sample inputs), `.claude/agents/` and `CLAUDE.md`, and
 |---|---|---|---|
 | `tools/fhtest.c`, `test/qemu/guest/init`, `test/qemu/scripts/mkinitramfs.sh`, `test/qemu/scripts/run-qemu.sh` | russ's own `fuse-generation-qemu` repository (one commit, by Russell Harmon, no licence file) | his own copyright | headed `MIT`, with "Copied from" / "Adapted from" |
 | `tools/testutil.c` (`BTRFS_IOC_SUBVOL_CREATE` and `struct btrfs_ioctl_vol_args`, `FS_IOC_SHUTDOWN`, the ext4 tune ioctl and `struct ext4_tune_sb_params`), `tools/kernel_bugs/ext4_casefold_tune/casefold_helper.c` | the kernel's UAPI headers `<linux/btrfs.h>`, `<linux/fs.h>`, `<linux/ext4.h>` | `GPL-2.0 WITH Linux-syscall-note` (line 1 of each header in the kernel tree) | headed `MIT`; the comments name the licence and the note |
-| `dcfs/syscalls_backing.h`: `struct linux_dirent64` | the kernel's `include/linux/dirent.h`: `SPDX-License-Identifier: GPL-2.0`, no syscall note, not a UAPI header (the sysroot defines no such struct) | GPL-2.0 for the header; the five-field layout is the getdents64 ABI | headed `MIT`; comments reworded, header named (step 4.15) |
+| `dcfs/syscalls_backing.h`: `struct linux_dirent64` | the kernel's `include/linux/dirent.h`: `SPDX-License-Identifier: GPL-2.0`, no syscall note, not a UAPI header (the sysroot defines no such struct) | GPL-2.0 for the header; the five-field layout is the getdents64 ABI | headed `MIT`; the comments are our own words and name the kernel header |
 | `third_party/tlaplus/overrides/tlc2/overrides/TLCOverrides.java` | CommunityModules' class of the same name | MIT | headed `MIT`, listed with provenance |
-| `third_party/e2fsprogs/mke2fs.conf` | e2fsprogs 1.47.4's `misc/mke2fs.conf.in`, "byte for byte apart from this header and the one change" | `GPL-2` for `Files: *` in Debian's e2fsprogs `copyright`; no header of its own | unheaded data file; listed test-only `GPL-2.0-only` in `tools/third_party_files.txt` and in `third_party/e2fsprogs/README.md` (question 5) |
+| `third_party/e2fsprogs/mke2fs.conf` | e2fsprogs 1.47.4's `misc/mke2fs.conf.in`, apart from a header comment of ours and one change | `GPL-2` for `Files: *` in Debian's e2fsprogs `copyright`; no header of its own | unheaded data file; listed test-only `GPL-2.0-only` in `tools/third_party_files.txt` and in `third_party/e2fsprogs/README.md` (question 5) |
 | `third_party/xfstests/shim/xfs/*.h`, `glibc_strerror.c` | written here as stand-ins that follow xfsprogs layouts "as far as the compiler needs" | n/a | headed `MIT` |
 | `tools/testutil.c` names corpus | written independently "in the spirit of" xfstests generic/453 and generic/454 (GPL-2.0, Oracle) without copying code | n/a | stated in its comment |
 
@@ -481,7 +460,7 @@ which is an idea, not text.
 
 ## Open questions
 
-Raised in the step 4.15 report; recorded here until russ decides.
+Pending russ's decision.
 
 1. **Shipping a binary.** `main_static` carries a static glibc and static
    libfuse and libnuma, all LGPL-2.1: a release needs the relink offer (object
@@ -498,10 +477,10 @@ Raised in the step 4.15 report; recorded here until russ decides.
    for tests and never distributed, but a file with only a 1991 NeXT
    copyright line is not covered by xfstests's GPL-2.0 tree. Keep, replace, or
    accept?
-5. **`third_party/e2fsprogs/mke2fs.conf`** is e2fsprogs's file with two edits;
-   it is test-only data. Keep marking it GPL, or treat the profile as
+5. **`third_party/e2fsprogs/mke2fs.conf`** is e2fsprogs's file apart from a header
+   comment of ours and one change; it is test-only data. Keep marking it GPL, or treat the profile as
    uncopyrightable configuration?
-6. **Alpine's `vde2-libs`** states `L: GPL` with no version in the index, so the
+6. **Alpine's `vde2`** (the origin of `vde2-libs`) states `L: GPL` with no version in the index, so the
    guest's QEMU closure has a package whose licence cannot be named exactly.
    Test-only; noted.
 7. **Unverified licences** (listed above): five unfetched Bazel modules, the
@@ -509,8 +488,6 @@ Raised in the step 4.15 report; recorded here until russ decides.
    image, the bundled libraries of the TLA+ jars and of the standalone Python,
    zstd, bsdtar and uv binaries, pandoc's Haskell libraries, the BCR
    overlay licence of numactl. All are build or test inputs. Reading them
-   needs fetches this step was told not to make; a later pass with the
-   budget can close them.
+   needs archives the build does not fetch; a later pass can close them.
 8. **The gate misses the `BUILD.<name>` overlays** and `.patch` files; making
-   it read both is a small change to `tools/repo_shape.py`, not made here
-   because its self-check test could not be run in this step.
+   it read both is a small change to `tools/repo_shape.py`, not made yet.
