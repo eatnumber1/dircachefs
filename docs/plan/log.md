@@ -3955,3 +3955,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   first (12.20), then attr/entry effectively infinite at the largest value
   the kernel takes (or above it, e.g. INT_MAX), and the two flags removed
   ("we're now doing the Right Thing"). 26.40 and 26.39 updated.
+- 2026-10-17, russ: synchronous invalidation; "If there's any cases you
+  think deferred invalidation is needed, bring them to me." In 26.40's
+  brief.

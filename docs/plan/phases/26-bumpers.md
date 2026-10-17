@@ -1238,6 +1238,11 @@ synchronous invalidation before the reply to a deferred one (racy).
   docs/design.md's "dcfs never notifies" paragraph is corrected: entry
   invalidation deadlocks in related operations (it locks the parent);
   attribute-only inode invalidation does not.
+- **No deferred invalidation without russ** (russ, 2026-10-17: "If there's
+  any cases you think deferred invalidation is needed, bring them to me."):
+  invalidations are synchronous before the reply; a case that seems to
+  need one after the reply (an entry invalidation in a related operation)
+  stops and goes to russ.
 - **Stores through a passthrough `MAP_SHARED` mapping after close:** dcfs
   refreshes the row only at FORGET; design the fix (e.g. the row's
   attributes unknown while the kernel may still hold a writable shared
