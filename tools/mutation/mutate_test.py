@@ -359,12 +359,32 @@ class ChangedTest(unittest.TestCase):
                         "end": {"offset": 5, "tokLen": 3}}}
         self.assertEqual(mutate.function_lines(fn, source), (2, 3))
 
-    def test_the_range_of_a_new_branch_is_its_tip_against_the_parent(self):
-        tip = "abc123"
-        self.assertEqual(mutate.normalize_range("%s..%s" % ("0" * 40, tip)),
-                         "abc123~1..abc123")
-        self.assertEqual(mutate.normalize_range("..abc123"), "abc123~1..abc123")
-        self.assertEqual(mutate.normalize_range("a..b"), "a..b")
+    def test_a_base_the_checkout_lacks_is_the_tip_against_its_parent(self):
+        """A new branch's all-zero (or empty) base, and the old tip of a
+        force-push (26.35: CI run 39000396656, whose `before` was rewritten
+        away), are not commits of the checkout: the tip is diffed against its
+        parent."""
+        repo = tempfile.mkdtemp(dir=os.environ.get("TEST_TMPDIR"))
+        os.makedirs(os.path.join(repo, "dcfs"))
+        for text in ("a\nb\nc\n", "a\nb\nc\nd\n", "a\nB\nc\nd\n"):
+            with open(os.path.join(repo, "dcfs/x.cc"), "w") as f:
+                f.write(text)
+            for cmd in (["init", "-q"], ["add", "."],
+                        ["-c", "user.name=t", "-c", "user.email=t@t",
+                         "commit", "-qm", "x"]):
+                subprocess.run(["git", *cmd], cwd=repo, check=True,
+                               capture_output=True)
+        first = subprocess.run(["git", "rev-parse", "HEAD~2"], cwd=repo,
+                               check=True, capture_output=True,
+                               text=True).stdout.strip()
+        # A base the checkout has: that range, both later commits' hunks.
+        self.assertEqual(
+            mutate.changed_hunks(repo, "%s..HEAD" % first, "dcfs/x.cc"),
+            [(2, 2), (4, 4)])
+        for base in ("0" * 40, "", "d215c098d5c208eda672d0d6535605351bed9f68"):
+            self.assertEqual(
+                mutate.changed_hunks(repo, "%s..HEAD" % base, "dcfs/x.cc"),
+                [(2, 2)], base)
 
     def test_a_range_with_no_hunks_selects_nothing(self):
         self.assertEqual(mutate.parse_hunks(""), [])

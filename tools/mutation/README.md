@@ -161,7 +161,10 @@ the next sweep can be judged against the last). `--survivors-out` and
   survivors grouped by function (`mutate.py report`), the `mutation-changed`
   artifact holds the results, and only a tooling error (exit status 2) fails
   the job (`--fail-on-survivor` is there for local use). A range that touches nothing in scope
-  runs nothing. A new branch's all-zero base means the tip against its parent.
+  runs nothing. A base the checkout does not have means the tip against its
+  parent: a new branch's all-zero base, and the old tip of a force-push (the
+  push replaced it and the clone never fetches it; `git diff` on it exits 128,
+  which failed CI run 39000396656, step 26.35).
 - **On a schedule** (`.github/workflows/mutation.yml`: weekly, and by
   `workflow_dispatch`): the sampled scope (about 340 mutants), split into six
   contiguous id ranges (`run --shard K/6`), one runner each. Survivors are

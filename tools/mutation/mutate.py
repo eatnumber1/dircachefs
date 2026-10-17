@@ -482,22 +482,22 @@ def touches(fn_lines, hunks):
     return any(a <= last and b >= first for a, b in hunks)
 
 
-ZEROS = "0" * 40
-
-
-def normalize_range(rev_range):
-    """A push of a new branch has an all-zero base (or none): diff the tip
-    against its parent then."""
+def normalize_range(workspace, rev_range):
+    """A base the checkout does not have (the all-zero base of a new branch,
+    or the old tip of a force-push, which the push replaced and the clone
+    never fetched: CI run 39000396656, 26.35) means the tip against its
+    parent."""
     base, _, tip = rev_range.partition("..")
     if not tip:
         return rev_range
-    if not base or base == ZEROS:
-        return "%s~1..%s" % (tip, tip)
-    return rev_range
+    known = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", base + "^{commit}"],
+        cwd=workspace, capture_output=True).returncode == 0
+    return rev_range if known else "%s~1..%s" % (tip, tip)
 
 
 def changed_hunks(workspace, rev_range, path):
-    rev_range = normalize_range(rev_range)
+    rev_range = normalize_range(workspace, rev_range)
     diff = subprocess.run(
         ["git", "diff", "-U0", "--no-color", rev_range, "--", path],
         cwd=workspace, capture_output=True, text=True, check=True).stdout

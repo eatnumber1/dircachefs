@@ -944,3 +944,42 @@ count what is deterministic, or make the budget robust by measuring the
 right quantity. Never widen a budget or add a retry to make it pass
 (AGENTS.md; no retry loops). A real dcfs race found this way is a result,
 not a nuisance. Investigator.
+
+## 26.35 CI run 39000396656 (58a1f17): causes, and the mutation job's missing base (2026-10-17)
+
+The first CI run after the 2026-10-16 trailer rewrite and force-push failed
+five ways. Three were already fixed on main when this step started
+(the failures are in the run's log; each test passes on main, run here):
+
+- `mount_dcfs_systemd_test` (full, asan, ubsan): the systemd fixture's
+  nested bind line named SOURCE=/srv/raw, which has the raw mounts below it,
+  and a grep for the old ro message. 15.11's capture deletion (95dafad)
+  introduced both; fixed by 8184e510. Passes on main (31 s here).
+- Every `xfstests_*` shard: xfstests passed the device as SOURCE
+  (`openat(-100, /dev/vdb): Not a directory`); 15.11 made SOURCE a directory.
+  Fixed by 2abffe7a (26.30: native mounts, a directory served from each).
+  `xfstests_1_test_ext4` passes on main (171 s here).
+- The coverage gate (lines 94.71, baseline 96.50): 25.9's uncovered poisoned-
+  backing guards and 26.7's plain failures; fixed by 50645bbc (26.30), which
+  raised the baseline to 96.95 / 82.90 (since 17.2: 83.25).
+
+The fourth, the `mutation-changed` job, was the push itself: `github.event.before`
+was d215c09, the old tip, which the force-push replaced (it exists only in
+`backup/pre-trailer-rewrite`), so `git diff d215c09..58a1f17` in the clone
+exits 128 even with `fetch-depth: 0`. `mutate.py changed` now treats any base
+the checkout does not have as the tip against its parent, which subsumes the
+all-zero base of a new branch (one mechanism, not two). Test first:
+`mutate_test` failed with `CalledProcessError ... 'd215c09...HEAD' ... exit
+status 128`.
+
+Why presubmit and the merge did not catch the first three: `mount_dcfs_systemd_test`
+and the xfstests shards are `large`/`enormous` (159 of the 597 tests are),
+which only `bazel test //...` in CI's `full` job runs after the push;
+`--config=presubmit` (the merge gate) is small and medium. The coverage gate
+runs in presubmit's tier but only in CI (`coverage.sh`). A merge that touches
+what a large test depends on is therefore first tested on origin. Guard to
+decide (not built here): a script, run by the orchestrator before a merge,
+that lists the large and enormous tests reachable from the branch's changed
+files (`bazel query 'attr(size, "large|enormous", rdeps(//..., <files>))'`
+filtered to `tests(...)`) and runs them, and the candidate-commit script of
+process.md's push points.
