@@ -115,28 +115,9 @@ fi
 same_dump dcfs-created-matches-backing "$MNT/viadcfs" /src/viadcfs
 mem_report after-direction-2
 
-exit "$FAILED"
-fi
-
-mem_report mounted
-
-# Direction 1: seen through dcfs.
-same_dump direct-seen-through-dcfs "$MNT/direct" /src/direct
-mem_report after-direction-1
-
-# Direction 2: created through dcfs, seen on the backing filesystem.
-mkdir "$MNT/viadcfs"
-if out=$($TESTUTIL names-random "$MNT/viadcfs" 11 "$PER_DIRECTION" 2>&1); then
-	pass dcfs-create
-else
-	fail dcfs-create "$out"
-fi
-same_dump dcfs-created-matches-backing "$MNT/viadcfs" /src/viadcfs
-mem_report after-direction-2
-
 # The same names, direct and through dcfs, give the same tree.
 mkdir /src/ref
-$TESTUTIL names-random /src/ref 11 "$RANDOM_COUNT" >/dev/null 2>&1
+$TESTUTIL names-random /src/ref 11 "$PER_DIRECTION" >/dev/null 2>&1
 same_dump dcfs-created-matches-reference "$MNT/viadcfs" /src/ref
 
 exit "$FAILED"

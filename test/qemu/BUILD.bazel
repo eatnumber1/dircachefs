@@ -11,6 +11,10 @@ load(":qemu_test.bzl", "CONCURRENT_CPUS", "qemu_test", "qemu_test_matrix")
 load(":xfstests.bzl", "xfstests_test")
 load("//third_party/xfstests:helpers.bzl", "XFSTESTS_HELPERS", "XFSTESTS_VFS_HELPERS")
 
+# Every shell script the guests run (the initramfs installs guest/*.sh as
+# /tests/ and guest/init as the init), for guest_syntax_test.
+GUEST_SHELL_SCRIPTS = ["guest/init"] + glob(["guest/*.sh"])
+
 # Guest memory classes (step 6.2), in MiB; the measurements behind each are in
 # README.md "Guest memory" (a test with neither mem= nor asan_mem= gets
 # qemu_test.bzl's E2E_MEM/E2E_ASAN_MEM). Plain-build allowances are peak +
@@ -207,6 +211,19 @@ qemu_test(
     size = "small",
     tags = ["manual"],
     timeout = "short",
+)
+
+# Step 26.33: every shell script the guests run (guest/*.sh, guest/init) parses
+# under the guest's own shell, busybox ash (`sh -n`).
+sh_test(
+    name = "guest_syntax_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["guest_syntax_test.sh"],
+    args = ["$(location @alpine_busybox//:root/bin/busybox.static)"] +
+           ["$(location %s)" % f for f in GUEST_SHELL_SCRIPTS],
+    data = ["@alpine_busybox//:root/bin/busybox.static"] + GUEST_SHELL_SCRIPTS,
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Step 26.14e: the check that tells a quiet guest from a noisy one
