@@ -293,7 +293,7 @@ sh_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
-# Step 26.36: does the guest see a hardware instruction counter? Reports it
+# Does the guest see a hardware instruction counter? Reports it
 # (guest/pmu.sh; .github/ci/pmu.sh collects the lines into the CI job summary)
 # and checks that the same work reads the same count twice.
 qemu_test(

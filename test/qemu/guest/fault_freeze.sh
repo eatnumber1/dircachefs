@@ -138,17 +138,20 @@ expect_answered() {
 thaw_and_wait() {
 	tw_label=$1
 	shift
+	tw_rc=0
 	for tw_pid in "$@"; do
 		if ! kill -0 "$tw_pid" 2>/dev/null; then
 			fail "$tw_label-held-at-the-thaw" "pid $tw_pid had already ended before the thaw: it was not held by the freeze"
+			tw_rc=1
 		fi
 	done
 	fd_thaw back
 	for tw_pid in "$@"; do
-		wait_exit "$tw_pid"
+		wait_exit "$tw_pid" || tw_rc=1
 		wait "$tw_pid" 2>/dev/null
 	done
 	PENDING=""
+	return "$tw_rc"
 }
 
 # same_as_backing: success if what dcfs serves is what the backing filesystem holds.
@@ -228,8 +231,12 @@ fi
 # Names the kernel has not looked up since quiet(), so that the daemon is asked.
 expect_answered stat-while-a-write-is-held stat "$MNT/d2/c"
 expect_answered readdir-while-a-write-is-held ls "$MNT/d2"
-thaw_and_wait write-through-passthrough "$write_pid"
-pass write-completes-after-thaw
+if thaw_and_wait write-through-passthrough "$write_pid"; then
+	pass write-completes-after-thaw
+else
+	fail write-completes-after-thaw \
+		"write probe $write_pid did not exit after thaw"
+fi
 if [ "$(cat "$SRC/d1/a")" = "aaaa
 x" ]; then
 	pass write-landed-on-backing
@@ -298,8 +305,12 @@ check_held() {
 	else
 		fail "$ch_name-nothing-served-while-held" "a request the daemon had to serve was answered while it was held in a syscall"
 	fi
-	thaw_and_wait "$ch_name" "$ch_pid" "$ch_read_pid"
-	pass "$ch_name-completes-after-thaw"
+	if thaw_and_wait "$ch_name" "$ch_pid" "$ch_read_pid"; then
+		pass "$ch_name-completes-after-thaw"
+	else
+		fail "$ch_name-completes-after-thaw" \
+			"$ch_name probes did not exit after thaw"
+	fi
 	served_equals_backing "$ch_name-served"
 }
 
@@ -354,8 +365,11 @@ touch "$MNT/d2/t1"
 quiet
 fd_freeze back || fail term-freeze "FIFREEZE failed"
 kill -TERM "$DAEMON_PID"
-wait_exit "$DAEMON_PID"
-pass term-frozen-exits
+if wait_exit "$DAEMON_PID"; then
+	pass term-frozen-exits
+else
+	fail term-frozen-exits "daemon $DAEMON_PID did not exit on SIGTERM"
+fi
 wait "$DAEMON_PID" 2>/dev/null
 DAEMON_PID=""
 MOUNTED=0
@@ -393,8 +407,12 @@ else
 	fail term-waits-behind-the-held-mutation "the daemon exited with a mutation held in its syscall"
 fi
 thaw_and_wait term-held-create "$held_pid"
-wait_exit "$DAEMON_PID"
-pass term-held-exits-after-thaw
+if wait_exit "$DAEMON_PID"; then
+	pass term-held-exits-after-thaw
+else
+	fail term-held-exits-after-thaw \
+		"daemon $DAEMON_PID did not exit after thaw"
+fi
 wait "$DAEMON_PID" 2>/dev/null
 DAEMON_PID=""
 MOUNTED=0

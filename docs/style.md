@@ -1374,10 +1374,10 @@ necessary, but if you think one is necessary, come to me."
 - **A test's verdict does not depend on host load or speed** (russ,
   2026-10-17: "in general for all our tests I'm interested in them being
   load-agnostic"). It counts events (syscalls, requests, I/O operations,
-  instructions retired), waits on events (`wait`, a pidfd, `testutil
-  waitline`, `waitmount`, `waitpath` or `waitexit`, a lock, a fifo read), and uses time only as a
-  hang guard that the harness sizes (`run-qemu.sh`'s allowance from the
-  target's budgets, Bazel's `timeout`): a guard that fires says the test
+  instructions retired), waits on events (`wait`, a pidfd, `testutil waitline`,
+  `waitmount`, `waitpath` or `waitexit`, a lock, a fifo read), and uses time
+  only as a hang guard that the harness sizes (`run-qemu.sh`'s allowance from
+  the target's budgets, Bazel's `timeout`): a guard that fires says the test
   hung, never that it was slow. Not a verdict: a duration or a CPU time
   compared with a bound, a `sleep` that stands in for an event (1.11), a
   window of a fixed length the operations must fit in. A budget that cannot

@@ -5,14 +5,14 @@
 exports_files([
     ".clang-format",  # //tools:format (7.6a)
     ".clang-tidy",  # //tools:style_checks_test (25.21)
-    "MODULE.bazel",
-    "README.md",
-    "MODULE.bazel.lock",
-    "osv-scanner.toml",
-    ".github/ci/pmu.sh",  # //tools:pmu_report_test (26.36)
-    ".github/ci/prepare.sh",
     ".github/ci/collect-logs.sh",  # //tools:collect_logs_test (26.22)
     ".github/ci/commit_subjects.sh",  # //tools:commit_subjects_test (26.13)
+    ".github/ci/pmu.sh",  # //tools:pmu_report_test (26.36)
+    ".github/ci/prepare.sh",
     ".github/ci/shard.sh",  # //tools:shard_test (7.4b)
     ".github/ci/test.sh",  # //tools:test_sh_test (17.1)
+    "MODULE.bazel",
+    "MODULE.bazel.lock",
+    "osv-scanner.toml",
+    "README.md",
 ])

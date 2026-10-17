@@ -304,11 +304,11 @@ run_loaded 0 2000000
 grep -q "^== RESULT: PASS .*\[load-starved\] ==" "$WORK/stdout" || fail "20% was not flagged: $(cat "$WORK/stdout")"
 echo "PASS: the flag starts at 20% of the wall time"
 
-# Step 26.36 (russ, 2026-10-17: "in general for all our tests I'm interested in
-# them being load-agnostic"): CPU time stretches with the host's load, so a run
-# the flag marks is not held to its CPU budget; the number is printed with the
-# reason, as for a sanitizer or TCG run. The I/O counts do not move with load
-# (26.34) and stay held, and a run that is not starved is held as before.
+# russ, 2026-10-17: "in general for all our tests I'm interested in them being
+# load-agnostic": CPU time stretches with the host's load, so a run the flag
+# marks is not held to its CPU budget; the number is printed with the reason,
+# as for a sanitizer or TCG run. The I/O counts do not move with load and stay
+# held, and a run that is not starved is held as before.
 canned "COST cpu_us=800001"
 run_loaded 0 3000000 //t:x
 [ "$RC" -eq 0 ] || fail "a load-starved run was held to its CPU budget: $(cat "$WORK/stdout")"

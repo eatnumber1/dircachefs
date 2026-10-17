@@ -1167,9 +1167,9 @@ if [ -n "$CPU_BUDGETS$IO_BUDGETS" ]; then
 	COST_REASON=$(budget_unheld_reason "$append")
 fi
 if [ -n "$CPU_BUDGETS" ]; then
-	# Step 26.36: CPU time stretches with the host's load (README, "Budgets in
-	# three parts"), so a run the load flag marks is not held to it; the counts
-	# of the I/O budgets do not move with load and stay held.
+	# CPU time stretches with the host's load (README, "Budgets in three
+	# parts"), so a run the load flag marks is not held to its CPU budget;
+	# the counts of the I/O budgets do not move with load and stay held.
 	CPU_REASON=$COST_REASON
 	if [ -z "$CPU_REASON" ] && [ -n "$LOAD_TAG" ]; then
 		CPU_REASON="host load-starved"

@@ -198,6 +198,7 @@ fi
 
 # waitpath: returns when the path exists (any kind of file), at once if it does,
 # and with 1 if the process it watches exits first.
+rm -f /tmp/wait-path.out
 "$TESTUTIL" waitpath /tmp/wait-path.out &
 WAITER=$!
 : >/tmp/wait-path.out
@@ -227,13 +228,16 @@ else
 fi
 
 # waitexit (guest/lib.sh wait_exit): returns when the process has exited, and
-# not before. The process reads a fifo, so it exits when the test writes to it.
+# not before. The watched process is a non-child that reads a fifo, so it exits
+# when the test writes to it.
 mkfifo /tmp/wait-exit.fifo
-sh -c 'read -r _ </tmp/wait-exit.fifo' &
-EXITER=$!
+( sh -c 'read -r _ </tmp/wait-exit.fifo' & echo $! >/tmp/wait-exit.pid )
+EXITER=$(cat /tmp/wait-exit.pid)
+rm -f /tmp/wait-exit.pid
 "$TESTUTIL" waitexit "$EXITER" &
 WAITER=$!
-if kill -0 "$WAITER" 2>/dev/null; then
+if kill -0 "$WAITER" 2>/dev/null &&
+	! grep -q '^State:[[:space:]]*Z' "/proc/$WAITER/status" 2>/dev/null; then
 	pass waitexit-blocks-while-the-process-runs
 else
 	fail waitexit-blocks-while-the-process-runs "waitexit returned while the process was still waiting to be released"
@@ -244,7 +248,7 @@ if wait "$WAITER"; then
 else
 	fail waitexit-returns-when-the-process-exits "waitexit did not return 0 once the process had exited"
 fi
-wait "$EXITER" 2>/dev/null
+wait_exit "$EXITER"
 # A process that is gone already counts, and so does each of several; a word
 # that is not a pid is the caller's mistake.
 if "$TESTUTIL" waitexit "$EXITER" "$EXITER"; then
