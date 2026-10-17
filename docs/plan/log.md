@@ -3977,3 +3977,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 2026-10-17, russ agrees to exact internal-work counts in 26.41 (coverage
   build per-function counts, SQLite stmt_status) with the deterministic
   execution caveat; 12.20 gains the TLA+ cost invariants.
+- 2026-10-17 ~15:10, quota: Claude week 46% (day 2; russ flagged it, and
+  the dashboard's quota panel was hours stale). Budget to 95% at the reset
+  with russ's reserve is about 7%/day. Claude dispatches stop: the three
+  running Opus steps (25.28b, 22.5, 17.2e) finish their current round;
+  their reviews go to agy's Claude pool (reset to 100%); non-protocol fix
+  rounds go to Gemini (week 55% left, five-hour pool 8%). The quota panel
+  now refreshes with every lanes upload (staleAfterHours 6).
