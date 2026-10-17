@@ -117,7 +117,11 @@ mem_report after-direction-2
 
 # The same names, direct and through dcfs, give the same tree.
 mkdir /src/ref
-$TESTUTIL names-random /src/ref 11 "$PER_DIRECTION" >/dev/null 2>&1
+if out=$($TESTUTIL names-random /src/ref 11 "$PER_DIRECTION" 2>&1); then
+	pass reference-create
+else
+	fail reference-create "$out"
+fi
 same_dump dcfs-created-matches-reference "$MNT/viadcfs" /src/ref
 
 exit "$FAILED"

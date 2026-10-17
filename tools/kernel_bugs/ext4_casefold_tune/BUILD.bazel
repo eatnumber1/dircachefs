@@ -27,3 +27,9 @@ filegroup(
     ],
     visibility = ["//tools/kernel_bugs:__pkg__"],
 )
+
+# The reproducer itself, for //test/qemu:guest_syntax_test.
+exports_files(
+    ["reproduce.sh"],
+    visibility = ["//test/qemu:__pkg__"],
+)

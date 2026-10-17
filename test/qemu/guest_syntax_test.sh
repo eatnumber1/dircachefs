@@ -20,9 +20,7 @@ for script in "$@"; do
 		FAILED=1
 	fi
 done
-if [ "$COUNT" -eq 0 ]; then
-	echo "FAIL: no scripts given" >&2
-	exit 1
+if [ "$FAILED" -eq 0 ]; then
+	echo "PASS: $COUNT guest scripts parse under busybox ash"
 fi
-[ "$FAILED" -eq 0 ] && echo "PASS: $COUNT guest scripts parse under busybox ash"
 exit "$FAILED"

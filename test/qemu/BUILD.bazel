@@ -12,8 +12,12 @@ load(":xfstests.bzl", "xfstests_test")
 load("//third_party/xfstests:helpers.bzl", "XFSTESTS_HELPERS", "XFSTESTS_VFS_HELPERS")
 
 # Every shell script the guests run (the initramfs installs guest/*.sh as
-# /tests/ and guest/init as the init), for guest_syntax_test.
-GUEST_SHELL_SCRIPTS = ["guest/init"] + glob(["guest/*.sh"])
+# /tests/, guest/init as the init and the kernel-bug reproducers under
+# /kernel_bugs/), for :initramfs and guest_syntax_test.
+GUEST_SHELL_SCRIPTS = ["guest/init"] + glob(["guest/*.sh"]) + [
+    "//tools/kernel_bugs/btrfs_failed_inode_read:reproduce.sh",
+    "//tools/kernel_bugs/ext4_casefold_tune:reproduce.sh",
+]
 
 # Guest memory classes (step 6.2), in MiB; the measurements behind each are in
 # README.md "Guest memory" (a test with neither mem= nor asan_mem= gets
@@ -120,8 +124,7 @@ config_setting(
         "//third_party/sibylfs:fs_test_posix",
         "//third_party/sibylfs:test_suite",
         "//tools/kernel_bugs:guest_files",  # step 26.15: /kernel_bugs/
-        "guest/init",
-    ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]) + glob(["guest/sibylfs.*_divergences"]) + [
+    ] + GUEST_SHELL_SCRIPTS + glob(["guest/pjdfstest.*_failures"]) + glob(["guest/sibylfs.*_divergences"]) + [
         "guest/fault_ace_mixed.expected_failures",  # step 26.14e
         "guest/request_budgets.txt",
         "guest/syscall_budgets.txt",
