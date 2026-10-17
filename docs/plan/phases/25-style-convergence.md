@@ -1122,6 +1122,24 @@ surfaces cannot go on the allowlist (25.30): each is fixed, or becomes a
 NOLINT naming its check with its reason. Show the count of new findings
 before fixing. Implementer, mechanical for a large batch of fixes.
 
+
+## 25.32b Style review fixes for 25.32 (from the post-merge review, 2026-10-17; queued, dcfs-mechanical)
+
+The post-merge style review of 8158196 found no correctness bug. To fix:
+`make_index.py` gets `main(argv)` with argparse and `encoding="utf-8"`;
+the plan step goes in each module docstring; `test_index.py` becomes
+`index_test.py` (and 25.29's `test_headings.py` becomes `headings_test.py`);
+`tempfile.TemporaryDirectory` with cleanup replaces `mkdtemp`; both pin
+READMEs say how the sha256 was obtained; tip 122 is described as an uncited
+spot check; comment the title split and the exact `published: true` match;
+`html.unescape` titles and write `_posts/<file>` in the index; one blank
+line in `tools/BUILD.bazel`. The citation regex becomes the reviewer's
+whole-file, `\s+`-tolerant form (no bare `tips/`, no `TotW 25.32` false
+hit), with tests for a wrapped citation, a version number and two
+citations on a line. docs/style.md section 5 gains the reviewer's
+decisions: `TemporaryDirectory` with cleanup, `encoding="utf-8"` in every
+`open()`, `<name>_test.py`, prose scans read whole files, and one
+`TotW #N` per cited tip.
 ## 25.33 A Status is never dropped from a message (russ, 2026-10-17)
 
 russ, on style question 3 (bench diagnostics): "*ALWAYS* include the Status
