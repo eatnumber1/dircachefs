@@ -1,42 +1,35 @@
-# Phase 27: an in-memory cache mode (russ, 2026-10-17)
+# Phase 27: an in-memory cache, by putting the database on tmpfs (russ, 2026-10-17)
 
 russ: "I want users to request an in-memory database (effectively acting
-only as an inmemory cache). If we do that it has some implications too on
-in-kernel inode/attr caching (why cache inmemory twice?). Let's schedule
-adding that feature somewhere between M2 and M3."
+only as an inmemory cache) ... Let's schedule adding that feature
+somewhere between M2 and M3." Then, against a durability-policy
+abstraction: "I'm concerned this will balloon into a lot of abstraction.
+Can we do something like have the database behind a memfd, or something?
+That way we don't have to rewrite any of the existing code, and the
+fsyncs can stay but are no-ops."
 
-## 27.1 Design (protocol agent, with the model)
+A memfd does not fit SQLite's WAL (it creates `-wal` and `-shm` beside
+the database's path). tmpfs does, with no code: `dcfs.cache_db=/run/dcfs/
+<name>.db`. fsync on tmpfs returns at once; the WAL and its shared memory
+work; a daemon restart finds the files and starts warm through ordinary
+recovery; a reboot or power loss empties tmpfs, so the next start is a
+first mount (always safe: nothing stale survives).
 
-- **The option:** `dcfs.cache_db=:memory:` (or a dedicated flag; decide),
-  an SQLite in-memory database: the cache lives only as long as the
-  daemon. A restart, clean or not, starts cold.
-- **What goes away in this mode, by construction, not by branches
-  everywhere:** durability. No WAL, no fsync of the cache, no synchronous
-  phase-1 commit, no dirty set and no recovery (a crash loses the whole
-  cache, which is always safe: nothing stale can survive it). Decide how
-  the code expresses that once (a durability policy chosen at open), so
-  25.28b's `MakeDurable` and 25.28d's poison have a defined meaning
-  (no-ops) rather than a RET_CHECK.
-- **What stays:** the backing syncfs at sync points? Decide: dcfs's dirty
-  set exists to bound the re-read after a crash; with no persistent cache
-  it may have no job, and the sync point may reduce to nothing.
-- **The model:** a configuration where a crash discards the cache; the
-  correctness properties must still hold and be simpler to check.
-- **Kernel caching ("why cache in memory twice?"):** the kernel's dentry,
-  inode and attribute caches already hold what was looked up, but they
-  are evicted under memory pressure, hold no complete directory listings
-  (unless FOPEN_CACHE_DIR), and keep no negative entries for long. Decide,
-  with measurements, what dcfs's in-memory cache still adds (answers
-  without waking the backing after kernel eviction; whole listings; long
-  negative entries) and whether this mode should lean on the kernel more
-  (effectively infinite timeouts, FOPEN_CACHE_DIR, keep_cache) and keep
-  less itself. Builds on 26.40's timeouts and 12.20's kernel-cache model.
-- **Memory:** a bound or a measurement per entry, documented.
+## 27.1 Prove it, document it
 
-## 27.2 Build, tests, docs
+- **Tests:** a representative set of guest suites with the cache database
+  on tmpfs; a daemon crash and restart (starts warm, recovery correct); a
+  reboot-equivalent (tmpfs emptied: a fresh start, then correct).
+- **Docs:** README ("An in-memory cache": tmpfs, `size=`, what a restart
+  and a reboot do) and design.md. No new option, no new code path.
 
-Implementation per 27.1, tests (the mode under the existing guest suites
-where they apply, crash tests showing a cold start), README and
-design.md, the man page.
+## 27.2 The kernel's caches when both are in memory (measure, then tune)
 
-Scheduled between M2 and M3 (docs/plan/README.md, Milestones).
+russ: "why cache inmemory twice?" With the cache on tmpfs, measure what
+dcfs's cache adds over the kernel's dentry, inode and attribute caches
+(answers without the backing after the kernel evicts, whole listings,
+long negative entries) and whether this setup wants the kernel leaned on
+more (26.40's effectively infinite timeouts, FOPEN_CACHE_DIR,
+keep_cache). Tuning, not abstraction; decisions go to russ with numbers.
+
+Scheduled between M2 and M3 (milestone M2.5).
