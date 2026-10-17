@@ -1031,7 +1031,7 @@ reproducible and offline.
 
 Implementer, medium effort.
 
-## 25.30 Every suppression carries its reason (russ, 2026-10-17)
+## 25.30 Every suppression carries its reason (russ, 2026-10-17) (merged 2026-10-17, de8bd57)
 
 russ first asked, of a NOLINTNEXTLINE added in 25.9b, "what's the purpose of
 ratcheting the allowlist if we just suppress?", then ruled: "I like the

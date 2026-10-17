@@ -3674,3 +3674,17 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   had RANDOM_COUNT names against PER_DIRECTION through dcfs; fixed, exact
   comparison kept. names_random passes on ext4, xfs and btrfs. One style
   review, fixed.
+
+- 2026-10-17: 25.30 merged (0a70d64, 1599d4f, de8bd57): the style checks
+  require every NOLINT, NOLINTNEXTLINE and NOLINTBEGIN in a real comment
+  (string and raw-string literals skipped) to name its check and carry a
+  reason of at least three words, on its line or the comment line above; a
+  comment merely mentioning the word counts as a suppression, as clang-tidy
+  treats it. docs/style.md 1.1: fix the code, else a NOLINT with its reason;
+  the allowlist is backlog only. The seven testonly link-time fakes moved
+  from the allowlist to NOLINTBEGIN/END with reasons; ret_check.h's bare
+  `default: // NOLINT` suppressed nothing and went, its three else NOLINTs
+  name readability-inconsistent-ifelse-braces and say why. Found in passing:
+  clang-tidy never analyses header-only libraries after the first in a
+  package (25.31). Style review, two fix rounds; style gate rerun after the
+  rebase.
