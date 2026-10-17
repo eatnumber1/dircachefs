@@ -73,6 +73,7 @@ final hardware check (Phase 21.2).
 |---|---|---|---|
 | M1 | A trustworthy core | 25.28b, 22.5, 17.2e, 25.10, 25.28c, 12.20, 26.40, 12.19, 26.39 | every user-visible promise in the README has a test and, where it is the protocol, a model property |
 | M2 | CI you can trust | 26.41, 26.36's follow-ups, 7.6b, 25.33b, the shell ports (boot.sh first), 25.27 | main stays green through a week of normal merges with no budget re-measure |
+| M2.5 | In-memory cache mode | 27.1, 27.2 | `dcfs.cache_db=:memory:` works with durability absent by construction, and the kernel-cache interplay is measured and decided |
 | M3 | Daily driver on russ's file server | 15.12, 14.10b, 26.38, a runbook | two weeks serving the media pool unattended, with the disks' sleep time shown |
 | M4 | Release candidate | 16, 18, the xfstests target, the coverage target, man page and README, packaging | a fresh machine installs, mounts and survives the README's documented failures from the docs alone |
 | M5 | Ship | 19 (soak), 21.2 (real hardware); red CI then gates merges | the soak and the hardware checks pass |

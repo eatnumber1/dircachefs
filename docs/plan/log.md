@@ -4043,3 +4043,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   without the namespace stat (no CAP_SYS_PTRACE dependency); kernel patch
   row 4 makes the corner exact. Also proposed 17.2f: a differential
   matrix of every operation x caller x file state against native.
+- 2026-10-17, russ asks for an in-memory cache mode, between M2 and M3.
+  Phase 27 (27.1 design with the model and the kernel-cache question,
+  27.2 build) and milestone M2.5.
