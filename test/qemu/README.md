@@ -750,7 +750,7 @@ gate is disabled.
 | the wall allowance covers the work the budgets allow (26.17: `cost_wall_allowance`; the refusal before the guest boots) | `//test/qemu:run_qemu_cost_test` (an allowance one second short of the floor is refused with the numbers and the guest is not booted, the floor itself is accepted, flushes count 20 ms each, a target without budgets has no floor) and `//test/qemu:strace_lib_test` (the arithmetic and its rounding) |
 | the xfstests cost lines (26.17: the daemon's CPU and the disks' I/O per test; the comparison with the native run; the notrun list read from them) | `//test/qemu:xfstests_costs_test` (canned dcfs and native logs: the numbers of a line, the order, extra time and how much of it is CPU, a test native did not run, a log from before the lines refused; the command line) and `//test/qemu:xfstests_notrun_test` (a log of the new form gives the list, the old form gives nothing); the guest script itself is run by the `xfstests` job, and by `xfstests_dev_test_<fstype>` (`manual`) |
 | the disks' I/O is counted (26.17: `cost_disk_counts` and `cost_cgroup_io`, which no budget could notice failing, since a count below its budget passes) | `//test/qemu:boot_test` and `//test/qemu:ram_disks_test` (`cost_selfcheck`: a direct write of 1 MiB must show in the counters of a virtio disk and of a RAM disk and in the cgroup's `io.stat`; with the disks' glob pointing at nothing both fail, saying `disks reads=0 writes=0 ...`), `//test/qemu:cost_report_test` (the sums, the difference of two readings and the cgroup's counts over canned files, other devices left out) and `//test/qemu:run_qemu_cost_test` (a target with a budget for reads whose guest counted none fails) |
-| a run is held to its CPU and I/O budgets (26.17: `guest/cpu_budgets.txt`, `guest/io_budgets.txt`, the tolerance, the runs that are not held, a budgeted target with no COST line) | `//test/qemu:run_qemu_cost_test` (fake qemu and canned serial logs through the real `run-qemu.sh` and the real comparison: at the budget and at budget plus tolerance pass, one microsecond past fails, a zero budget allows nothing, a target with no line is reported, a COST line lacking the count and a missing COST line fail a budgeted target, and noisy, TCG, ASan, UBSan and coverage runs are not held) and `//test/qemu:strace_lib_test` (the tolerance arithmetic and `budget_unheld_reason`) |
+| a run is held to its CPU and I/O budgets (26.17: `guest/cpu_budgets.txt`, `guest/io_budgets.txt`, the tolerance, the runs that are not held, a budgeted target with no COST line) | `//test/qemu:run_qemu_cost_test` (fake qemu and canned serial logs through the real `run-qemu.sh` and the real comparison: at the budget and at budget plus tolerance pass, one microsecond past fails, a zero budget allows nothing, a target with no line is reported, a COST line lacking the count and a missing COST line fail a budgeted target, and noisy, TCG, ASan, UBSan, coverage and load-starved runs are not held to the CPU budget, and a load-starved run is held to its I/O budgets) and `//test/qemu:strace_lib_test` (the tolerance arithmetic and `budget_unheld_reason`) |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
 
 A gate without a self-check is a review finding: the review checklist asks
@@ -1246,7 +1246,9 @@ other targets is a run of the suite with `--test_output=all` and a copy of their
 `cost:` lines). The budgets are for the plain build on KVM with the quiet
 kernel: a sanitizer, coverage, TCG and the noisy kernel spend CPU differently,
 so those runs print the number and say why they are not held
-(`budget_unheld_reason`).
+(`budget_unheld_reason`). So does a run marked `load-starved` (step 26.36,
+"Load starvation" below): the CPU budget is not held there, and the I/O counts
+still are.
 
 **The tolerance is 100% (a doubling), and the data are why.** CPU time of the
 daemon is exact and nearly constant on an idle host, but it is not the same
@@ -1515,6 +1517,14 @@ no timeout is near) and one that is oversubscribed (2.4 times longer and more).
 pressure file: 30% flags a run, 19% does not, 20% does; a failing run and one
 with no `MEM` line carry the flag; no pressure file means no flag;
 `run_qemu_verdict_test` shows the flag on the first boot of a power cut.
+
+A flagged run is not held to its CPU budget (step 26.36; russ, 2026-10-17: "in
+general for all our tests I'm interested in them being load-agnostic"): the
+cost line prints the CPU with `not held to the budgets: host load-starved`, as
+it does for a sanitizer or TCG run. `//dcfs:backing_test`'s CPU ran 0.26 to
+1.0 s against a budget of 0.51 s (1.02 s with the tolerance) in 100 runs on a
+starved host (26.34), which no tolerance holds. The I/O budgets count requests
+and stay held; so do the syscall and request budgets.
 
 ## `qemu_cc_test`: dcfs's replacement for `cc_test`
 

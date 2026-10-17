@@ -7,7 +7,8 @@
 # it). OP is a Bazel label, a whole test: run-qemu.sh holds the guest's COST
 # line to it. The CPU is the daemon's of an e2e test started by start_daemon
 # (guest/lib.sh), or the binary of a unit test. Not held for a sanitizer,
-# coverage, TCG or noisy-kernel run (strace_lib.sh, budget_unheld_reason), and a
+# coverage, TCG or noisy-kernel run (strace_lib.sh, budget_unheld_reason), nor for
+# a run marked load-starved (run-qemu.sh, step 26.36), and a
 # target with no line here is reported, not held. There are no budgets for an
 # operation inside a test (ls -l, stat, cat in request_counts_test: 1 to 20 ms
 # of CPU): a single interrupt or a cache miss storm is as large as the

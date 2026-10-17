@@ -58,6 +58,8 @@
 #       compared. Held to the budgets only in a plain build on KVM with the
 #       quiet kernel (a sanitizer, coverage, TCG or the noisy kernel spend CPU
 #       and cause I/O differently); otherwise the line is printed and says so.
+#       The CPU budget is also not held on a run marked load-starved (step
+#       26.36: CPU time stretches with the host's load); the I/O counts still are.
 #       A target with no line in a file is reported, not held; a budgeted one
 #       whose guest printed no COST line fails, and so does one with a budget
 #       for reads that counted no read (it counted nothing).
@@ -1131,16 +1133,17 @@ printf '%s\n' "$COST_LINE" | awk '{ for (i = 2; i <= NF; i++) { split($i, kv, "=
 cost_count() { awk -v k="$1" '$1 == k { found = 1; print $2 } END { if (!found) print "?" }' "$WORKDIR/cost-counts"; }
 cost_secs() { awk "BEGIN{printf \"%.3f\", $1/1000000}"; }
 
-# cost_hold BUDGETS TOLERANCE: the COST line against the lines of this target in
-# BUDGETS; sets COST_NOTE to what to say beside the numbers, and adds a failure
-# to COST_FAIL.
+# cost_hold BUDGETS TOLERANCE REASON: the COST line against the lines of this
+# target in BUDGETS, unless REASON (non-empty) says why this run is not held to
+# them; sets COST_NOTE to what to say beside the numbers, and adds a failure to
+# COST_FAIL.
 cost_hold() {
 	COST_HELD=0
 	ch_name=$(basename "$1")
 	if ! grep -q "^$COST_TARGET " "$1"; then
 		COST_NOTE="no line for ${COST_TARGET:-this run (no TEST_TARGET)} in $ch_name"
-	elif [ -n "$COST_REASON" ]; then
-		COST_NOTE="not held to the budgets: $COST_REASON"
+	elif [ -n "$3" ]; then
+		COST_NOTE="not held to the budgets: $3"
 	elif [ -z "$COST_LINE" ]; then
 		COST_NOTE="no COST line"
 		COST_VERDICT="no COST line"
@@ -1164,7 +1167,14 @@ if [ -n "$CPU_BUDGETS$IO_BUDGETS" ]; then
 	COST_REASON=$(budget_unheld_reason "$append")
 fi
 if [ -n "$CPU_BUDGETS" ]; then
-	cost_hold "$CPU_BUDGETS" "$COST_CPU_TOLERANCE_PCT"
+	# Step 26.36: CPU time stretches with the host's load (README, "Budgets in
+	# three parts"), so a run the load flag marks is not held to it; the counts
+	# of the I/O budgets do not move with load and stay held.
+	CPU_REASON=$COST_REASON
+	if [ -z "$CPU_REASON" ] && [ -n "$LOAD_TAG" ]; then
+		CPU_REASON="host load-starved"
+	fi
+	cost_hold "$CPU_BUDGETS" "$COST_CPU_TOLERANCE_PCT" "$CPU_REASON"
 	if [ "$COST_HELD" = 1 ]; then
 		COST_NOTE="budget $(cost_secs "$(awk -v t="$COST_TARGET" '$1 == t && $2 == "cpu_us" { print $3 }' "$CPU_BUDGETS")") s, tolerance $COST_CPU_TOLERANCE_PCT%"
 	fi
@@ -1173,7 +1183,7 @@ if [ -n "$CPU_BUDGETS" ]; then
 	fi
 fi
 if [ -n "$IO_BUDGETS" ]; then
-	cost_hold "$IO_BUDGETS" 0
+	cost_hold "$IO_BUDGETS" 0 "$COST_REASON"
 fi
 if [ -n "$IO_BUDGETS" ] && [ "$(cost_count reads)" != "?" ]; then
 	echo "run-qemu.sh: cost: disk I/O $(cost_count reads) reads, $(cost_count writes) writes, $(cost_count sectors_read) sectors read, $(cost_count sectors_written) sectors written, $(cost_count flushes) flushes; dcfs caused $(cost_count dcfs_reads) reads ($(cost_count dcfs_read_bytes) bytes), $(cost_count dcfs_writes) writes ($(cost_count dcfs_write_bytes) bytes) ($COST_NOTE)"

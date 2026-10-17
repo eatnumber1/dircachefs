@@ -272,13 +272,14 @@ chmod +x "$WORK/clock/date"
 pressure_file() { # TOTAL_US: a /proc/pressure/cpu with that total
 	printf 'some avg10=0.00 avg60=0.00 avg300=0.00 total=%s\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n' "$1"
 }
-# run_loaded BEFORE_US AFTER_US: the run lasted 10 s and the counter moved so.
+# run_loaded BEFORE_US AFTER_US [TARGET]: the run lasted 10 s and the counter
+# moved so; TARGET (default //t:unlisted) is the target under test.
 run_loaded() {
 	rm -f "$WORK/clock/n"
 	echo 10 >"$WORK/clock/wall"
 	pressure_file "$1" >"$WORK/psi"
 	pressure_file "$2" >"$WORK/psi.after"
-	run //t:unlisted DCFS_PRESSURE_FILE="$WORK/psi" PATH="$WORK/clock:$PATH"
+	run "${3:-//t:unlisted}" DCFS_PRESSURE_FILE="$WORK/psi" PATH="$WORK/clock:$PATH"
 	rm -f "$WORK/psi.after"
 }
 
@@ -299,6 +300,25 @@ run_loaded 0 2000000
 grep -q "^== RESULT: PASS .*\[load-starved\] ==" "$WORK/stdout" || fail "20% was not flagged: $(cat "$WORK/stdout")"
 echo "PASS: the flag starts at 20% of the wall time"
 
+# Step 26.36 (russ, 2026-10-17: "in general for all our tests I'm interested in
+# them being load-agnostic"): CPU time stretches with the host's load, so a run
+# the flag marks is not held to its CPU budget; the number is printed with the
+# reason, as for a sanitizer or TCG run. The I/O counts do not move with load
+# (26.34) and stay held, and a run that is not starved is held as before.
+canned "COST cpu_us=800001"
+run_loaded 0 3000000 //t:x
+[ "$RC" -eq 0 ] || fail "a load-starved run was held to its CPU budget: $(cat "$WORK/stdout")"
+grep -q "run-qemu.sh: cost: dcfs CPU 0.800 s (not held to the budgets: host load-starved)" "$WORK/stdout" ||
+	fail "the cost line does not say the CPU budget is not held for the load: $(cat "$WORK/stdout")"
+run_loaded 0 1900000 //t:x
+[ "$RC" -ne 0 ] || fail "a run below the starvation threshold was not held to its CPU budget"
+canned "COST cpu_us=400000 $(echo "$IO_OK" | sed 's/reads=50/reads=51/')"
+run_loaded 0 3000000 //t:io
+[ "$RC" -ne 0 ] || fail "a load-starved run was not held to its I/O budget: $(cat "$WORK/stdout")"
+grep -q "^//t:io reads: count rose from 50 to 51" "$WORK/stdout" || fail "the I/O failure is not reported: $(cat "$WORK/stdout")"
+echo "PASS: a load-starved run is not held to its CPU budget, and is held to its I/O budgets"
+
+canned "COST cpu_us=1"
 # A failing run is tagged too, and so is one that has no MEM line (a guest that
 # was killed by the time limit says nothing about itself).
 printf 'TEST first FAIL (x)\nDCFS-TEST-EXIT=1\n' >"$WORK/canned"
