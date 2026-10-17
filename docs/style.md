@@ -466,7 +466,12 @@ each line points at the rule that carries it):
 6. Every error path is tested as a happy path is (`AGENTS.md`, coverage;
    the `-Wl,--wrap` fakes), and a test asserts only what is under test:
    infrastructure failures in a test crash it (`CHECK_OK`), they are not
-   test failures (1.6b).
+   test failures (1.6b). `CHECK_OK` for setup is a rule of thumb, not a
+   firm ruling (russ, 2026-10-17: "I'll agree with the reviewer that it's a
+   matter of taste. My rule about CHECK_OK for infrastructure was meant to
+   be a rule-of-thumb rather than a firm ruling."): `ASSERT_THAT(...,
+   IsOk())` on a setup line is also fine, reviewers flag neither, and
+   nothing is converted for it.
 7. The wrapper's signature says whether a call can fail (1.5): a `Status`
    return that the compiler will not let anyone drop, or no `Status` at all.
 
@@ -679,8 +684,10 @@ until 2026-10-10; this section is it.)
   `CHECK`/`CHECK_OK` and, for a `StatusOr`, `CHECK_OK_AND_ASSIGN(lhs,
   expr)` in the style of `ASSIGN_OR_RETURN` (russ: no custom helper
   beyond that macro; "googletest understands the difference between 'the
-  process crashed' and 'ASSERT/EXPECT failed'"). `ASSERT_*`/`EXPECT_*` are
-  for the property the test is about.
+  process crashed' and 'ASSERT/EXPECT failed'"). `CHECK_OK` for setup is a
+  rule of thumb (section 1.6, item 6): `ASSERT_THAT(..., IsOk())` on a setup
+  line is also fine. `ASSERT_*`/`EXPECT_*` are for the property the test is
+  about.
 - **Poisoned global state is a subsystem that refuses at its door, not a
   crash** (russ, 2026-10-11, on RestoreRoot: a `Status` "means we maybe need
   a style guide exception for the times when global state is poisoned and
@@ -1068,6 +1075,9 @@ the obvious what or how." Apply the core principles:
   Only document a method if it has non-obvious lifetime bindings
   (`ABSL_ATTRIBUTE_LIFETIME_BOUND`), transfer of ownership, side-effects, or
   concurrency preconditions.
+- **A comment in a lower layer says what its function does for any caller.**
+  Why a particular caller calls it is written at that caller (russ,
+  2026-10-17: "You stated exactly the reason why.").
 - **Code added for a reason names its source**: the plan step (`step 23.2`,
   `dir_cache_fs.cc:532`), the audit finding (`audit-tristate F1`,
   `context.h:37`), the conformance case ("found via pjdfstest's chmod/02.t:
@@ -1270,6 +1280,9 @@ necessary, but if you think one is necessary, come to me."
 - **Test first.** Write the test, run it on the unchanged code, quote the
   failure in the commit message, then fix. Never weaken a test to make it
   faster or pass (`AGENTS.md`).
+- **A test comment does not start with its step number.** The test name
+  states the behavior and the commit names the step (russ, 2026-10-17).
+  Existing prefixes go when the test is touched.
 - **Every test of dcfs runs in a QEMU guest as root**: `qemu_cc_test` for
   GoogleTest binaries, `qemu_test`/`qemu_test_matrix` for guest scripts
   (`test/qemu/README.md`). Host-side tests need neither root nor a kernel
@@ -1422,7 +1435,10 @@ script that defines any other function. shfmt enforces the layout:
 `&&` that wraps starts the next line, as the guide's pipeline and `case`
 sections show; check the flags against the guide's examples when 7.6 pins
 shfmt), run by `//tools:format_test`; shellcheck is pinned in the same step
-(7.6). Our additions and narrowings:
+(7.6). The two-space indent applies to guest scripts too, with no "match the
+file" exception (russ, 2026-10-17: "the Google Shell Style Guide says two
+spaces."). A tab-indented file is converted, in one commit, by
+`shfmt -i 2` in 7.6b. Our additions and narrowings:
 - **Host-side scripts are bash**: `#!/bin/bash`, then `set -euo pipefail`
   (our narrowing; the guide only says to use `set` flags sparingly). 8 do
   today (`.github/ci/*`, `formal/trace_validate.sh`,
@@ -1465,6 +1481,10 @@ shfmt), run by `//tools:format_test`; shellcheck is pinned in the same step
   (orchestrator's ruling, 2026-10-16): `def f(environ=os.environ)`, a
   `now` argument; `mock.patch` only for what cannot be injected (the
   injection rule of AGENTS.md).
+- **Pure style in host tooling is neither reviewed nor asked about**
+  (`tools/`, `.github/ci`, the harness scripts; russ, 2026-10-17: "I don't
+  care at all about pure style questions in host tooling"). Correctness
+  rules still apply: a Claude Code hook always exits 0, for instance.
 
 ## 6. TLA+
 
