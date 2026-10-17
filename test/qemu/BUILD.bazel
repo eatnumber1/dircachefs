@@ -951,12 +951,18 @@ test_suite(
 # (sibylfs_scripts in guest/sibylfs_lib.sh). The 51 hand-written scripts are
 # 12 s on a quiet host; the whole suite, 21,069 scripts, is about 0.3 s of host
 # CPU each (2026-10-17), so the generated scripts are in 16 manual shards.
+# Memory (README.md, "Guest memory"; KVM, 2026-10-17): peak_used 98-139 MiB
+# plain and 629-690 ASan (dcfs holds 360-380 MiB of it; the sample the most),
+# reclaim_scans=0 in both; mem and asan_mem are the allowance rule's 320 and
+# 1152. At 512 under ASan the guest ran out of memory (peak_used 477 of 468,
+# fs_test_posix killed, traces missing).
 qemu_test_matrix(
     name = "sibylfs_test",
     cmdline = "dcfs_sibylfs=adhoc",
     disks = [("vdb", "ext4", "512M")],
     guest_script = "guest/sibylfs.sh",
-    mem = 512,
+    mem = 320,
+    asan_mem = 1152,
     size = "medium",
     other_size = "large",
     timeout = "long",
@@ -968,7 +974,8 @@ qemu_test(
     cmdline = "dcfs_sibylfs=0/40",
     disks = [("vdb", "ext4", "512M")],
     guest_script = "guest/sibylfs.sh",
-    mem = 512,
+    mem = 320,
+    asan_mem = 1152,
     size = "large",
     timeout = "eternal",
 )
@@ -981,7 +988,8 @@ qemu_test(
     cmdline = "dcfs_sibylfs=%d/16" % shard,
     disks = [("vdb", "ext4", "512M")],
     guest_script = "guest/sibylfs.sh",
-    mem = 512,
+    mem = 320,
+    asan_mem = 1152,
     size = "enormous",
     tags = ["manual"],
     timeout = "eternal",

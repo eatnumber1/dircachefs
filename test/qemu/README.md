@@ -507,6 +507,7 @@ ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 | enospc_cache (step 11.4c, the same way) | 69-88 | 284-312 | 256 | 576 |
 | fault_* and ACE tests on RAM disks (step 26.17; plain measured at 1024, ASan at 2048; see "RAM disks") | 176-333 (ext4 176-243, btrfs 193-226, xfs 243-333) | 306-519 | 384-576 | 512-832 |
 | write | 136-153 | 224-248 | 320 | 448 |
+| sibylfs (step 12.18b; 51 scripts, or 526 for the sample, 2026-10-17; `reclaim_scans=0`; 512 under ASan ran out of memory) | 98-139 | 629-690 at 1024 | 320 | 1152 |
 | memory (sized by `reclaim_scans=0`, see above) | 104-270 at 576 | 354-478 at 768 | 704 | 832 |
 | mount_dcfs_systemd (a Debian cloud image booted by systemd, 5 daemons, step 15.6) | 61-81 | 368-457 | 256 | 768 |
 | bench_smoke | 79-87 | 1169-1178 | 256 | 1856 |
