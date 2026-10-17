@@ -3588,3 +3588,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   A third load-sensitive budget test: request_counts_test's disk writes
   rose from 62 to 70 once, then passed 3 of 3 (52, 55, 54). The flaky-budget
   triage covers it with fault_backing_test and enospc_cache_test.
+- 2026-10-17: russ on xfstests' raw-device tests, which 26.30's directory
+  sources make "not run" through dcfs: "agreed. leave them out." No
+  dcfs.fsname option; the native comparison run still covers them.
