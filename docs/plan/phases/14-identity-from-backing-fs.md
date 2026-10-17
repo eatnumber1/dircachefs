@@ -303,17 +303,19 @@ the README go to 14.10b below. What was settled:
   gives persistent handles. Two filesystems under one fsid number are a
   documented limitation (`limitations/ident_net_same_identity`), not a
   guarded case.
-- Still open for russ: whether "no replacement while dcfs runs" stays a
-  documented guarantee.
+- russ confirmed the three guarantees (2026-10-17): exclusive access; a
+  unique, fixed fsid per export; and no replacement (replica swap) while
+  dcfs runs, documented as "delete the cache before failing over to a
+  replica". The design is final.
 
 ## 14.10b Network backings: the implementation
 
 Owner: dcfs-protocol. After the error-handling rework of dcfs/ that was in
 flight on 2026-10-16 (it touches device_id.cc and main.cc). Test first
 throughout; the design is docs/design.md "Backings without a filesystem
-UUID". russ's rulings of 2026-10-17 are in the brief: no backing name, no
-hard-mount or sync-export requirement. If russ drops the "no replacement
-while dcfs runs" guarantee (still open), only README's wording changes.
+UUID", final as of 2026-10-17. russ's rulings of that day are in the
+brief: no backing name, no hard-mount or sync-export requirement, and the
+three guarantees below.
 
 Code:
 1. `SourceIdentity` (dcfs/device_id.{h,cc}, renamed or not) replaces
@@ -378,9 +380,14 @@ guest's own knfsd, as nfs_backing_test sets it up):
   validates it.
 
 Docs: README's network-backing paragraph and fstab example restored as
-supported, with the administrator's guarantees (a unique, fixed fsid per
-export among them), and the
-`async`-export note (after a server crash the cache may list changes the
-server lost; delete the cache database), and nothing about hard or soft
-mounts; the Requirements list says what a backing without a UUID needs;
-design.md's section loses its "until then" sentence.
+supported, with exactly these three guarantees (russ, 2026-10-17):
+- exclusive access: nothing but dcfs changes the exported tree, on the
+  server or from another client;
+- a unique, fixed fsid per export (as exports(5) requires);
+- no replacement while dcfs runs: delete the cache before failing over to
+  a replica;
+
+and the `async`-export note (after a server crash the cache may list
+changes the server lost, so delete the cache database), and nothing about
+hard or soft mounts; the Requirements list says what a backing without a
+UUID needs; design.md's section loses its "until then" sentence.

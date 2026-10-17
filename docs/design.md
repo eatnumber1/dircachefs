@@ -459,7 +459,8 @@ check, is in README ("Network backings"):
 - **No replacement while dcfs runs**: the server does not serve the
   export's path before the filesystem is mounted on it (knfsd's
   `mountpoint` export option) and does not swap in a replica under the same
-  fsid without the cache database being deleted.
+  fsid without the cache database being deleted: delete the cache before
+  failing over to a replica (russ confirmed the three, 2026-10-17).
 
 Two things are deliberately not required (russ, 2026-10-17):
 
