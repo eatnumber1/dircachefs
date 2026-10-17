@@ -348,7 +348,10 @@ reading. Not for writing code, nor for subtle protocol judgement.
    its Claude Opus/Sonnet are the same models as our subagents, so it
    takes read-only reviews that would otherwise spend the Claude plan;
    stop at 10% of that pool. Paid top-ups ("AI credits") are still not
-   enabled without russ.
+   enabled without russ. Measured 2026-10-17: one Opus (high) review of
+   a medium diff spent 56% of that pool's week and all of its five-hour
+   window, and was cut off before writing anything; the pool cannot carry
+   an Opus review. Use it only for small Sonnet jobs; reviews go to Argon.
 4. Safety: agy is a weaker model with shell access. Write work is allowed
    (russ, 2026-10-17: "Gemini isn't so bad it must be only read-only.
    Feel free to use it. But check its work and keep an eye on it."), under
