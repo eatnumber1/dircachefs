@@ -185,8 +185,8 @@ TEST(SessionLoopPoisonTest, AnExitedSessionEndsTheLoop) {
 [[noreturn]] void RunPoisonedOverAnExitedSession() {
   Script script;
   script.requests = {InitRequest()};
-  const absl::Status served = RunLoop(script, /*set_callback=*/true,
-                                      {.exited = true, .poisoned = true});
+  absl::Status served = RunLoop(script, /*set_callback=*/true,
+                                {.exited = true, .poisoned = true});
   syscalls::_exit(served == BackingDoor() && script.events.empty() ? 0 : 1);
 }
 

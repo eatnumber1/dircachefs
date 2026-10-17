@@ -74,6 +74,7 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/base/log_severity.h"
+#include "absl/base/nullability.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
@@ -495,14 +496,17 @@ SetgroupsFault &Setgroups() {
 
 }  // namespace
 
+// dcfs::syscalls::setgroups(std::span<const gid_t>), mangled (as BUILD.bazel's
+// SETGROUPS).
+#define DCFS_SETGROUPS \
+  "_ZN4dcfs8syscalls9setgroupsENSt3__14spanIKjLm18446744073709551615EEE"
+
 absl::Status RealSetgroups(std::span<const gid_t> groups) asm(
-    "__real__ZN4dcfs8syscalls9setgroupsENSt3__14spanIKjLm18446744073709551615EE"
-    "E");
+    "__real_" DCFS_SETGROUPS);
 // External linkage is the point: the linker resolves the wrapped calls to it.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 absl::Status WrapSetgroups(std::span<const gid_t> groups) asm(
-    "__wrap__ZN4dcfs8syscalls9setgroupsENSt3__14spanIKjLm18446744073709551615EE"
-    "E");
+    "__wrap_" DCFS_SETGROUPS);
 absl::Status WrapSetgroups(std::span<const gid_t> groups) {
   SetgroupsFault &fault = Setgroups();
   if (++fault.calls != fault.fail_at) return RealSetgroups(groups);
@@ -7320,7 +7324,7 @@ TEST_F(DirCacheFSTest, ForgetRepliesOnceAndLogsNothing) {
 struct LiveReplies {
   absl::Status first;
   absl::Status second;
-  DirCacheFS *fs = nullptr;
+  DirCacheFS *absl_nullable fs = nullptr;
 };
 LiveReplies &Live() {
   static LiveReplies live;

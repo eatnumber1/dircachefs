@@ -52,7 +52,7 @@ absl::Status SessionLoop::Run() {
     // other is served, even if the session has exited meanwhile.
     RETURN_IF_ERROR(BackingDoor());
     if (fuse_session_exited(se_) != 0) return absl::OkStatus();
-    ASSIGN_OR_RETURN(const bool device_open, ServeNext(fbuf));
+    ASSIGN_OR_RETURN(bool device_open, ServeNext(fbuf));
     if (!device_open) return absl::OkStatus();
   }
 }
@@ -65,7 +65,7 @@ absl::StatusOr<bool> SessionLoop::ServeNext(struct fuse_buf &fbuf) {
     std::free(next.mem);
     return true;
   }
-  const int res = fuse_session_receive_buf(se_, &fbuf);
+  int res = fuse_session_receive_buf(se_, &fbuf);
   if (res == -EINTR) return true;
   if (res == 0) return false;
   if (res < 0) return ErrnoToStatus(-res, "fuse_session_receive_buf");

@@ -95,7 +95,8 @@ void Init(void *userdata, fuse_conn_info *conn) {
   LOG(ERROR) << s;
   // libfuse gives init() no way to fail the INIT. A wanted flag not in
   // capable_ext is what it refuses (do_init's want_flags_valid): EPROTO to
-  // the kernel, the session ended, and SessionLoop::Run returns -EPROTO.
+  // the kernel, the session ended, and SessionLoop::Run returns an EPROTO
+  // status.
   // This is the only place dcfs refuses an INIT. capable_ext is libfuse's
   // translation of the kernel's flags into the FUSE_CAP_* bits it defines,
   // the highest of which libfuse 3.18.2 defines is bit 31, so whatever the

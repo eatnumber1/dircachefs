@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/container/fixed_array.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
@@ -386,7 +387,7 @@ TEST_F(SyscallsTest, NameToHandleAtRoundTrip) {
   // test actually ran (it used to be skipped unconditionally on an
   // unprivileged host). Allocate real storage and set handle_bytes first,
   // as dcfs/file_handle.cc itself does.
-  std::vector<uint8_t> handle_buf(sizeof(file_handle) + MAX_HANDLE_SZ);
+  absl::FixedArray<uint8_t> handle_buf(sizeof(file_handle) + MAX_HANDLE_SZ);
   auto *handle = reinterpret_cast<file_handle *>(handle_buf.data());
   handle->handle_bytes = MAX_HANDLE_SZ;
   int mount_id;
@@ -636,9 +637,9 @@ TEST_F(SyscallsTest, OwnFilesByPath) {
 std::vector<std::pair<std::string, absl::Status>> CallEveryBackingWrapper() {
   constexpr std::string_view kNoPath = "/nonexistent/dcfs-poison";
   char buf[16] = {};
-  const uint8_t value[] = {1};
-  const struct timespec times[2] = {};
-  std::vector<uint8_t> handle_buf(sizeof(file_handle) + MAX_HANDLE_SZ);
+  uint8_t value[] = {1};
+  struct timespec times[2] = {};
+  absl::FixedArray<uint8_t> handle_buf(sizeof(file_handle) + MAX_HANDLE_SZ);
   auto *handle = reinterpret_cast<file_handle *>(handle_buf.data());
   handle->handle_bytes = MAX_HANDLE_SZ;
   int mount_id = 0;
