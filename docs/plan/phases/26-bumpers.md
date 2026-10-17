@@ -1281,8 +1281,17 @@ proposal"):
    zero or near-zero tolerance: FUSE requests per operation, backing
    syscalls by kind, fsync/syncfs, SQL statements and transactions
    (`syscall_budgets.txt`, `request_budgets.txt`).
-2. Complexity tests assert slopes (per-entry, per-file costs), extending
-   26.4b's slope tests.
+2. Complexity tests (russ: "How does this measure the complexity? It's
+   two points on some unknown curve."): today's 26.4b slopes check a
+   linear envelope at N = 100 and 1000 only. Instead, because the counts
+   are exact, each operation class runs at several geometrically spaced
+   sizes (10, 100, 1,000, 10,000 or more, above realistic directory
+   sizes) and the points must be exactly collinear with today's per-item
+   cost a and constant b both pinned (a = 0 for operations that should be
+   constant per call). Three or more exactly collinear points rule out a
+   quadratic (more points, higher degrees) and a log factor that shows in
+   the counts across the range; a cost that appears only beyond the
+   largest size is the stated limit.
 3. CPU work is instructions retired (user and kernel, 26.36's PMU
    findings) in a few dedicated benchmark scenarios, unheld without a PMU.
 4. Wall-clock speed is an A/B benchmark: main and the candidate
