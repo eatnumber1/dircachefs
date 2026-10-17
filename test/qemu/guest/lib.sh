@@ -142,6 +142,18 @@ disabled() {
 
 is_mounted() { grep -q " $1 " /proc/mounts; }
 
+# list_names DIR: the names in DIR, sorted, one per line (not . and ..). When
+# readdir fails it prints what testutil said ("ERR ENOSPC") and fails. This,
+# not ls or find: busybox ls ends a listing at a readdir error without saying
+# so, rc 0 and nothing printed.
+list_names() {
+	ln_out=$("${TESTUTIL:-/bin/testutil}" readdir-ino "$1") || {
+		echo "$ln_out"
+		return 1
+	}
+	echo "$ln_out" | awk '$1 != "." && $1 != ".." {print $1}' | sort
+}
+
 # daemon_cleanup LOG: the EXIT trap of a script that mounts dcfs at $MNT with
 # start_daemon (trap 'daemon_cleanup "$LOG"' EXIT): when the script is leaving
 # with a failure, the daemon's log; then the unmount, if $MOUNTED, and the

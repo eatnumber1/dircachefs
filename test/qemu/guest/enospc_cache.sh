@@ -6,12 +6,19 @@
 # (SQLITE_FULL, sqlite.cc's MakeSqliteStatus: kResourceExhausted, ENOSPC)
 # must make dcfs fail the request with ENOSPC, or stop serving, and never
 # serve wrong data. The cache filesystem is filled (fd_fill) while dcfs
-# runs, at three points:
+# runs, at four points:
 #
 # 1. Before a create: its phase 1 (the durable commit, which grows the WAL)
 #    fails. The caller gets ENOSPC, the backing filesystem is untouched, the
 #    name is not served. Once space is freed the next create works, and
 #    after a restart everything served matches the backing filesystem.
+# 1b. A file created and held open while the cache fills: its RELEASE, after
+#    the fill, cannot record the refreshed attributes, so they stay unknown and
+#    a listing of the directory, which must refresh them to reply, fails with
+#    ENOSPC every time. (Section 3's file is closed before the fill and races
+#    its release: that listing is right or fails.) Listings are read with
+#    testutil readdir-ino: busybox ls ends a listing at a readdir error with
+#    rc 0 and no output.
 # 2. During a create held in phase 2 (the backing filesystem frozen: phase 1
 #    is durable): phase 3 cannot record the outcome. The create happened, so
 #    it is replied as EEXIST (which makes the kernel drop the
@@ -70,7 +77,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "enospc_cache.sh: kernel $(uname -r)"
-require_commands umount sync find stat grep dd
+require_commands umount sync find stat grep dd awk sort
 
 alive() {
 	[ -n "$DAEMON_PID" ] && kill -0 "$DAEMON_PID" 2>/dev/null
@@ -126,7 +133,7 @@ right_or_nospace() {
 		fi
 	else
 		case "$ron_out" in
-		*"No space left on device"*) pass "$ron_name" ;;
+		*"No space left on device"* | *"ERR ENOSPC"*) pass "$ron_name" ;;
 		*)
 			if alive; then
 				fail "$ron_name" "failed, not with ENOSPC: $ron_out"
@@ -161,7 +168,7 @@ fd_setup || {
 	fail setup "wrapping or mounting the disks failed"
 	exit "$FAILED"
 }
-for d in d1 d2 d3; do
+for d in d1 d2 d3 d4; do
 	mkdir "$SRC/$d"
 	echo keep >"$SRC/$d/keep"
 done
@@ -195,7 +202,7 @@ if [ ! -e "$SRC/d1/new" ]; then
 else
 	fail phase1-backing-untouched "d1/new reached the backing filesystem although phase 1 failed"
 fi
-right_or_nospace phase1-listing "keep " ls "$MNT/d1"
+right_or_nospace phase1-listing "keep " list_names "$MNT/d1"
 free_cache
 if alive; then
 	if touch "$MNT/d1/after" && [ -e "$SRC/d1/after" ] && [ -e "$MNT/d1/after" ]; then
@@ -207,6 +214,16 @@ if alive; then
 fi
 start phase1-restart --sync_interval_sec=3600
 served_equals_backing phase1-served-equals-backing
+
+# --- 1b. a release cannot refresh the attributes --------------------------------
+
+# See 1b in the header: the close comes after the fill.
+ls "$MNT/d4" >/dev/null
+exec 3>"$MNT/d4/held"
+fill_cache
+exec 3>&-
+right_or_nospace release-listing "held keep " list_names "$MNT/d4"
+free_cache
 
 # --- 2. phase 3 cannot commit -------------------------------------------------
 
@@ -280,7 +297,7 @@ fi
 # And from dcfs itself, the kernel's caches dropped.
 drop_caches
 right_or_nospace phase3-name "$MNT/d2/p3 " ls -d "$MNT/d2/p3"
-right_or_nospace phase3-listing "keep2 p3 " ls "$MNT/d2"
+right_or_nospace phase3-listing "keep2 p3 " list_names "$MNT/d2"
 free_cache
 crash_and_restart phase3
 if [ "$(fd_recovered "$LOG")" -ge 1 ]; then
@@ -300,7 +317,7 @@ touch "$MNT/d3/s1"
 fill_cache
 sleep 3
 # The first request after the interval runs the sync point.
-right_or_nospace sync-listing "keep s1 " ls "$MNT/d3"
+right_or_nospace sync-listing "keep s1 " list_names "$MNT/d3"
 echo "enospc_cache.sh: sync: the daemon's log: $(grep -i 'sync' "$LOG" | tail -2)"
 free_cache
 crash_and_restart sync
