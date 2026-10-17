@@ -50,5 +50,7 @@ if "$BENCH" --src=/src --slow_src=/slow $BENCH_ARGS; then
 else
 	fail benchmarks "dcfs_bench exited nonzero"
 fi
+# A script that sourced this one may define after_bench to report more.
+if command -v after_bench >/dev/null 2>&1; then after_bench; fi
 
 exit "$FAILED"

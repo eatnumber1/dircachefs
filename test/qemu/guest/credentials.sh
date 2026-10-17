@@ -427,6 +427,10 @@ expect_stat sgid-group-member-keeps '%a' pub/sgid_ops/f_grp 2666
 # - 2666 owned by root and written by bob (outside group 2000): the
 #   kernel's FUSE side asks to remove privileges with a SETATTR that sets
 #   nothing, the same request a chown(path, -1, -1) makes ("chown").
+# - 4666 (setuid only): the kernel's SETATTR is the mode minus S_ISUID, so
+#   the passthrough write finds setuid already gone. A kernel that did not
+#   send the mode (a mount that negotiated FUSE_CAP_HANDLE_KILLPRIV_V2: step
+#   17.2c, docs/plan/notes/passthrough-write-cost-17.2c.md) would leave it.
 # - "held": root holds a read-only open while bob writes (one backing file,
 #   and so one passthrough choice, per inode).
 # - A truncate by bob of a 6666 file: one SETATTR of the size and of the
@@ -512,6 +516,12 @@ sgid-other-chown 0:2000 2666 bob chown 1:2666
 sgid-member-write 0:2000 2666 alice write 0:2666
 sgid-root-write 0:2000 2666 root write 0:2666
 sgid-gx-root-capwrite 0:2000 2755 root capwrite 0:2755
+setuid-other-write 0:2000 4666 bob write 0:666
+setuid-other-fallocate 0:2000 4666 bob fallocate 0:666
+setuid-other-copy 0:2000 4666 bob copy 0:666
+setuid-other-truncate 0:2000 4666 bob truncate 0:666
+setuid-owner-write 1001:2000 4666 bob write 0:666
+setuid-root-write 0:2000 4666 root write 0:4666
 "
 
 while read -r name owner mode who op want; do

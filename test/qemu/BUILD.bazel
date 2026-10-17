@@ -1491,6 +1491,22 @@ qemu_test(
     timeout = "long",
 )
 
+# Step 17.2c: just the Write and SetidWrite benchmarks, with the request log on
+# (guest/bench_write.sh). Run it by name.
+qemu_test(
+    name = "bench_write_test",
+    cpus = CONCURRENT_CPUS,
+    disks = [
+        ("vdb", "ext4", "320M"),
+        ("vdc", "ext4", "320M"),
+    ],
+    guest_script = "guest/bench_write.sh",
+    asan_mem = 1856,  # as bench_smoke's tiny trees (not run under ASan)
+    modules = ["dm_delay"],
+    size = "large",
+    timeout = "moderate",
+)
+
 # --- Trace validation (formal/README.md, "Trace validation") ---------------
 #
 # The e2e initramfs with the testonly recording build of dcfs

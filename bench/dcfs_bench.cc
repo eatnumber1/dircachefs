@@ -8,7 +8,8 @@
 //                                          the device node
 //
 // Anything else is a benchmark run; this binary's own flags (below) are
-// removed before google/benchmark sees the command line.
+// removed before google/benchmark sees the command line (--dcfs_flags=A,B
+// gives the daemons of Setup extra flags, e.g. --v=2 for the request log).
 //
 // Write and SetidWrite overwrite a MiB of a file whose mode gets
 // passthrough, and of one whose mode makes dcfs decline it.
@@ -42,6 +43,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_split.h"
 #include "bench/dm_delay.h"
 #include "bench/process.h"
 #include "bench/tree.h"
@@ -63,6 +65,8 @@ struct Config {
   uint64_t big = 10000;
   uint64_t dirty = 10000;
   bool smoke = false;
+  // Extra flags for the daemons Setup starts (--dcfs_flags=--v=2,...).
+  std::vector<std::string> dcfs_flags;
 };
 Config cfg;
 
@@ -202,6 +206,7 @@ bool Setup() {
       if (std::string(kind) == "dcfs0") {
         flags = {"--attr_timeout_sec=0", "--entry_timeout_sec=0"};
       }
+      flags.insert(flags.end(), cfg.dcfs_flags.begin(), cfg.dcfs_flags.end());
       if (!StartDcfs(name, b.src, flags)) return false;
       std::string mnt = cfg.mnt_dir + "/" + name;
       Walk(mnt);  // warm: dcfs's database now has every entry.
@@ -502,6 +507,8 @@ void ParseOwnFlags(int *argc, char **argv) {
       cfg.big = strtoull(v.c_str(), nullptr, 10);
     } else if (TakeFlag(argv[i], "dirty", &v)) {
       cfg.dirty = strtoull(v.c_str(), nullptr, 10);
+    } else if (TakeFlag(argv[i], "dcfs_flags", &v)) {
+      cfg.dcfs_flags = absl::StrSplit(v, ',', absl::SkipEmpty());
     } else if (TakeFlag(argv[i], "smoke", &v)) {
       cfg.smoke = true;
     } else {

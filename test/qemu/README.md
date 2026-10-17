@@ -2327,6 +2327,13 @@ needs network access), optimize just those sources:
     bazel test //test/qemu:bench_readdir_test --test_output=all \
       '--per_file_copt=^(dcfs|bench)/.*,external/(abseil-cpp|sqlite3|libfuse|google_benchmark)\+/.*@-O2,-DNDEBUG'
 
+`bench_write_test` (large tier) runs only `Write` and `SetidWrite`, with the
+daemons' request log on (`--dcfs_flags=--v=2,--stderrthreshold=0`), then
+prints the requests the daemons served by operation and which of them
+reached the backing filesystem (step 17.2c,
+`docs/plan/notes/passthrough-write-cost-17.2c.md`): with passthrough, a
+`Write` should show no `WRITE` request.
+
 The helpers `dcfs_bench mktree ROOT N BIG` (makes the tree; used by the
 idle and memory tests) and `dcfs_bench dm-delay NAME DEV MS` (device-mapper
 ioctls; the guest has no dmsetup) are subcommands of the same binary.
