@@ -2850,3 +2850,25 @@ daemon's descriptor). What the native-type capture adds is only that dcfs
 mounts the block device itself; production uses the bind form with the
 disk mounted by fstab at a raw path, so the capture is scheduled for
 deletion once the spare-disk trial has run on that shape (plan 15.11).
+
+## Syscall fault injection stays link-time (russ, 2026-10-16)
+
+On 2026-10-12 russ approved replacing the link-time `-Wl,--wrap` fakes with
+an injected virtual `Syscalls` class; the temporary orchestrator's
+implementation (one 90-method interface over the backing, process-local
+and process-control calls, a global `RealSyscalls::Default()` beside the
+injected instance, test fakes as virtual-inheritance mixins) was reverted
+before it merged, on the regular orchestrator's recommendation and russ's
+agreement ("I agree. Revert it."). Reasons: it collapsed the three syscall
+libraries whose split lets the build graph prove that only `backing.cc`
+reaches the backing filesystem (russ, 2026-10-09: "Keep it. Mechanical
+invariant enforcement is more valuable."); it left two ways to call a
+syscall; virtual inheritance is what Google style discourages; and
+`--wrap` works (the 49-site fault sweep). The work is kept, unpushed, on
+the `attic/virtual-syscalls` branch of the lane-1 checkout. If a concrete
+limit of `--wrap` bites (a call inside one object file, link-time
+optimisation, target proliferation that hurts), redo it deliberately:
+three interfaces mirroring the three libraries, each its own Bazel
+library so the backing one stays reachable only from `backing.cc`,
+injected through `Context` with no global default other than the one
+`main` constructs, fakes as wrappers holding a delegate.

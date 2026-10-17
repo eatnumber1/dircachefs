@@ -3283,3 +3283,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   move, the watchdog tool, and the process/style commit 5cc30a5 with the dcfs-code-reviewer agent
   and style 1.9's comment standards). Lane-1 holds Gemini's uncommitted virtual-Syscalls refactor;
   recommendation to russ below.
+- russ agreed to revert the virtual-Syscalls refactor (Oct 12's item 5 reversed). Lane-1's
+  uncommitted work saved as the unpushed branch attic/virtual-syscalls (c50fbca) and as a patch in
+  the session scratchpad; lane-1 reset to main. docs/design.md records the decision, the reasons
+  and the conditions for a redesign. docs/plan/handoff_claude.md's "next steps" for that refactor
+  are void.
