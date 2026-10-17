@@ -109,6 +109,29 @@ xfstests lists updated only if a listed test changes outcome. No protocol
 change is expected (`BeginAttrChange` already marks the record unknown);
 if one appears, the model changes in the same step. Protocol agent.
 
+## 17.2c Passthrough writes cost a round trip each (lead, from the 2026-10-17 review of 17.2b)
+
+17.2b's `dcfs_bench` `Write` case measured 9.1 ms per MiB through
+passthrough against 0.14 ms on the backing (ext4 guest, 1 MiB in 64 KiB
+writes, mean of 5). The reviewer's guess, unconfirmed: without
+`HANDLE_KILLPRIV_V2` FUSE clears `SB_NOSEC` (fs/fuse/inode.c:1622), so
+`backing_file_write_iter` calls `file_remove_privs` on every write
+(fs/backing-file.c:266), costing a `GETXATTR security.capability` round
+trip each. First count requests by type during `BM_Write`; if WRITE
+requests appear, passthrough is not engaged at all. Then decide with
+russ whether negotiating `HANDLE_KILLPRIV_V2` (and taking over privilege
+removal) is worth it. dcfs-investigator.
+
+## 17.2d Supplementary groups for credential-overriding callers (lead, from the same review)
+
+`FuseRequest::Caller` (`dcfs/fuse_request.cc`) reads supplementary
+groups from `/proc/<pid>/status`, which shows a task's real (objective)
+credentials, while the request header's uid and gid are subjective. For
+kernel callers that override credentials (nfsd once dcfs is exported,
+ksmbd, overlayfs) the groups can be wrong. Confirm with a test (nfsd in
+the guest exporting a dcfs mount), then decide the fix. Before dcfs is
+NFS-exported in earnest. dcfs-protocol.
+
 ## 17.3 Performance finding (done 2026-10-11, 313bff6)
 
 29 metadata-heavy tests run 20-50x slower through dcfs (4-37 s natively,
