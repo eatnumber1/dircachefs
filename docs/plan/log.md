@@ -3512,5 +3512,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   that NOLINT comments are preferred to the allowlist ("an apology for
   breaking the style guide") provided each carries an explanatory
   comment: the NOLINT stays, and 25.30 gates the reason comment and makes
-  the allowlist backlog-only. Pending russ: approval of the third-party abort/exit
-  allow lines (Abseil internals and flags, libfuse, libnuma).
+  the allowlist backlog-only. russ approved the third-party abort/exit
+  allow lines (Abseil internals and flags, libfuse, libnuma): "Yes"; each
+  carries his approval date.
