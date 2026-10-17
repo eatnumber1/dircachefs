@@ -3836,3 +3836,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   reachability checks (an invariant forbidding the loss, its test expecting
   the counterexample), so a barrier added back fails; `fsync sync` budgeted
   exactly. Extending the pattern to every operation is queued (12.19).
+- 2026-10-17, russ: "I don't care about style in tools *except* for C++.
+  Because C++ style applies to our entire C++ codebase, if there's a style
+  question it might benefit our prod code too!" docs/style.md section 5:
+  open C++ style questions go to russ wherever the code lives.

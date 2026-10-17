@@ -1491,7 +1491,12 @@ spaces."). A tab-indented file is converted, in one commit, by
   Google Python and Shell guides and this section apply to host tools as
   to everything else, and reviewers check them. A question the guides do
   not settle is decided by the reviewer, consistently with the code around
-  it, and recorded here if it will recur; it is not put to russ.
+  it, and recorded here if it will recur; it is not put to russ. The
+  exception is C++ in tools, tests and harnesses: russ, 2026-10-17, "I
+  don't care about style in tools *except* for C++. Because C++ style
+  applies to our entire C++ codebase, if there's a style question it might
+  benefit our prod code too!" A C++ style question the guides leave open
+  goes to russ wherever the code lives.
   Correctness rules apply as always: a Claude Code hook always exits 0,
   for instance.
 
