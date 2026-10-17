@@ -410,31 +410,31 @@ chmod 02666 "$MNT/pub/sgid_ops/f_grp"
 expect_ok sgid-group-member-write alice sh -c "echo 'x' >>'$MNT/pub/sgid_ops/f_grp'"
 expect_stat sgid-group-member-keeps '%a' pub/sgid_ops/f_grp 2666
 
-# --- step 17.2b: setuid and setgid through passthrough, and non-owners -----
+# --- steps 17.2b, 17.2e: setuid and setgid through passthrough ------------
 #
 # Each case runs one write-family operation as one user on a file of a
 # given owner and mode, once in a native directory and once through the
 # mount, and checks that the mount answers what the native filesystem
 # answers (the exit status, and the mode left behind on /mnt and /src) and
 # that this is what the kernel's rule gives (the last field, "status:mode"):
-# a caller outside the file's group without CAP_FSETID drops setgid, and any
-# caller but root drops setuid.
+# any caller but root drops setuid, and setgid if the file is
+# group-executable or the caller is outside its group.
 #
-# - 6666 (setuid and setgid, no group execute): the kernel's FUSE side
-#   clears setuid itself (a SETATTR of the mode minus S_ISUID) but keeps
-#   setgid by its pre-6.2 rule, and a passthrough write reaches the backing
-#   file as the daemon (root, CAP_FSETID), which keeps it too.
-# - 2666 owned by root and written by bob (outside group 2000): the
-#   kernel's FUSE side asks to remove privileges with a SETATTR that sets
-#   nothing, the same request a chown(path, -1, -1) makes ("chown").
-# - 4666 (setuid only): the kernel's SETATTR is the mode minus S_ISUID, so
-#   the passthrough write finds setuid already gone. A kernel that did not
-#   send the mode (a mount that negotiated FUSE_CAP_HANDLE_KILLPRIV_V2: step
-#   17.2c, docs/plan/notes/passthrough-write-cost-17.2c.md) would leave it.
-# - "held": root holds a read-only open while bob writes (one backing file,
-#   and so one passthrough choice, per inode).
-# - A truncate by bob of a 6666 file: one SETATTR of the size and of the
-#   mode minus S_ISUID.
+# dcfs negotiates FUSE_CAP_HANDLE_KILLPRIV_V2, so before a write by a
+# caller without CAP_FSETID the kernel's FUSE side asks to remove
+# privileges with a SETATTR that sets nothing, the same request a
+# chown(path, -1, -1) makes ("chown"), and a passthrough write reaches the
+# backing file as the daemon (root, CAP_FSETID), which keeps both bits.
+#
+# - 6666, 4666, 2666, 2776, 6776: setuid and setgid, with and without
+#   group execute, written by bob (outside group 2000), alice (in it) and
+#   root.
+# - "held": root holds a read-only open while bob writes (one backing file
+#   per inode). "chmodheld": root holds a writable open of a 0666 file,
+#   makes it 6666 and the user writes it (before 17.2e the file kept the
+#   passthrough choice of its first open, and setgid on bob's write).
+# - A truncate, or an O_TRUNC open ("otrunc"): a SETATTR of the size, with
+#   FATTR_KILL_SUIDGID from a caller without CAP_FSETID.
 # - Root (CAP_FSETID) clears nothing; "capwrite" sets security.capability
 #   first, so the kernel removes it and sends a SETATTR that sets nothing.
 #
@@ -470,6 +470,11 @@ sgid_op() {
 	fallocate) $who "$TESTUTIL" fallocate "$dir/$file" 0 0 4096 ;;
 	copy) $who "$TESTUTIL" copyrange-into "$dir/src" "$dir/$file" ;;
 	truncate) $who "$TESTUTIL" truncate "$dir/$file" 4 ;;
+	otrunc) $who sh -c ": >'$dir/$file'" ;;
+	chmodheld)
+		{ chmod 6666 "$dir/$file" && $who sh -c "echo x >>'$dir/$file'"; } \
+			3>>"$dir/$file"
+		;;
 	chown) $who "$TESTUTIL" lchown "$dir/$file" -1 -1 ;;
 	esac </dev/null >/dev/null 2>&1
 	if [ $? -eq 0 ]; then echo 0; else echo 1; fi
@@ -522,6 +527,18 @@ setuid-other-copy 0:2000 4666 bob copy 0:666
 setuid-other-truncate 0:2000 4666 bob truncate 0:666
 setuid-owner-write 1001:2000 4666 bob write 0:666
 setuid-root-write 0:2000 4666 root write 0:4666
+setuid-other-otrunc 0:2000 4666 bob otrunc 0:666
+setuid-root-otrunc 0:2000 4666 root otrunc 0:4666
+suid-other-otrunc 0:2000 6666 bob otrunc 0:666
+sgid-gx-other-write 0:2000 2776 bob write 0:776
+sgid-gx-member-write 0:2000 2776 alice write 0:776
+sgid-gx-member-held 0:2000 2776 alice held 0:776
+sgid-gx-member-otrunc 0:2000 2776 alice otrunc 0:776
+sgid-gx-root-write 0:2000 2776 root write 0:2776
+suid-gx-member-write 0:2000 6776 alice write 0:776
+suid-gx-member-fallocate 0:2000 6776 alice fallocate 0:776
+suid-other-chmodheld 0:2000 0666 bob chmodheld 0:666
+suid-member-chmodheld 0:2000 0666 alice chmodheld 0:2666
 "
 
 while read -r name owner mode who op want; do
@@ -552,6 +569,61 @@ while read -r name owner mode who op want; do
 	fi
 done <<EOF
 $SGID2B_CASES
+EOF
+
+# --- step 17.2e: a write removes security.capability ----------------------
+#
+# The kernel removes it through the mount (a REMOVEXATTR) before a write by
+# anyone, root included. A mount that negotiated
+# FUSE_CAP_HANDLE_KILLPRIV_V2 keeps S_NOSEC on an inode a write found
+# without privileges and skips the check on its later writes, until a
+# security.* xattr is set. So each file is written once first, then given a
+# capability, then written by USER (warm), or after the caches are dropped
+# (cold): the capability must be gone natively, through the mount and on
+# the backing file, and the mode must be the native one.
+
+# name user mode want
+CAP_CASES="
+cap-other-write bob 0666 666
+cap-root-write root 0666 666
+cap-root-setuid-write root 4666 4666
+"
+
+# cap_check TEST FILE USER WANT: as sgid_check, for the capability and mode.
+cap_check() {
+	for d in "$NAT2" "$MNT/$P2"; do
+		$3 sh -c "echo x >>'$d/$2'" </dev/null >/dev/null 2>&1
+	done
+	nat="$("$TESTUTIL" getxattrhex "$NAT2/$2" security.capability):$(stat -c '%a' "$NAT2/$2")"
+	mnt="$("$TESTUTIL" getxattrhex "$MNT/$P2/$2" security.capability):$(stat -c '%a' "$MNT/$P2/$2")"
+	src="$("$TESTUTIL" getxattrhex "$SRC/$P2/$2" security.capability):$(stat -c '%a' "$SRC/$P2/$2")"
+	want="ERR ENODATA:$4"
+	if [ "$nat" = "$want" ] && [ "$mnt" = "$want" ] && [ "$src" = "$want" ]; then
+		pass "$1"
+	else
+		fail "$1" "want $want, native $nat, mount $mnt, src $src"
+	fi
+}
+
+while read -r name who mode want; do
+	[ -n "$name" ] || continue
+	for f in "$name" "$name.cold"; do
+		sgid_make "$f" 0:2000 "$mode"
+		for d in "$NAT2" "$MNT/$P2"; do
+			echo again >>"$d/$f"
+			"$TESTUTIL" setxattrhex "$d/$f" security.capability "$CAPHEX"
+		done
+	done
+	cap_check "$name" "$name" "$who" "$want"
+done <<EOF
+$CAP_CASES
+EOF
+drop_caches_quiesced
+while read -r name who mode want; do
+	[ -n "$name" ] || continue
+	cap_check "$name-cold-cache" "$name.cold" "$who" "$want"
+done <<EOF
+$CAP_CASES
 EOF
 
 # --- the daemon is root again afterwards ----------------------------------

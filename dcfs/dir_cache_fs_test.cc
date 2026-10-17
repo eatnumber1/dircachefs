@@ -549,8 +549,6 @@ using cache::LookupResult;
 using ::testing::AllOf;
 using ::testing::Contains;
 using ::testing::ElementsAre;
-using ::testing::Eq;
-using ::testing::Gt;
 using ::testing::HasSubstr;
 using ::testing::Not;
 using ::testing::UnorderedElementsAre;
@@ -674,9 +672,9 @@ class DirCacheFSTest : public ::testing::Test {
     init_in.major = FUSE_KERNEL_VERSION;
     init_in.minor = FUSE_KERNEL_MINOR_VERSION;
     // What DirCacheFS::Init requires (it refuses the INIT without POSIX
-    // ACLs and DONT_MASK) and what it uses.
-    init_in.flags = FUSE_POSIX_ACL | FUSE_DONT_MASK | FUSE_DO_READDIRPLUS |
-                    FUSE_EXPORT_SUPPORT | FUSE_IOCTL_DIR;
+    // ACLs, DONT_MASK and HANDLE_KILLPRIV_V2) and what it uses.
+    init_in.flags = FUSE_POSIX_ACL | FUSE_DONT_MASK | FUSE_HANDLE_KILLPRIV_V2 |
+                    FUSE_DO_READDIRPLUS | FUSE_EXPORT_SUPPORT | FUSE_IOCTL_DIR;
     std::string body;
     AppendBytes(body, init_in);
     Reply reply = Send(FUSE_INIT, 0, body);
@@ -1146,11 +1144,12 @@ class DirCacheFSTest : public ::testing::Test {
   }
 
   Reply Write(InodeId id, uint64_t fh, std::string_view data, uint64_t off,
-              uid_t uid = 0, gid_t gid = 0) {
+              uid_t uid = 0, gid_t gid = 0, uint32_t write_flags = 0) {
     struct fuse_write_in in = {};
     in.fh = fh;
     in.offset = off;
     in.size = static_cast<uint32_t>(data.size());
+    in.write_flags = write_flags;
     std::string body;
     AppendBytes(body, in);
     body.append(data);
@@ -1235,7 +1234,8 @@ class DirCacheFSTest : public ::testing::Test {
 
   // A SETATTR that sets nothing, from `uid`:`gid`: what chown(path, -1, -1)
   // sends, and what the kernel sends to remove privileges before a write
-  // when its own rule clears no mode bit (fuse_setattr).
+  // (fuse_setattr drops ATTR_KILL_SUID and ATTR_KILL_SGID under
+  // FUSE_CAP_HANDLE_KILLPRIV_V2).
   Reply SetNothing(InodeId id, uid_t uid, gid_t gid) {
     struct fuse_setattr_in in = {};
     std::string body;
@@ -1477,7 +1477,8 @@ class DirCacheFSTest : public ::testing::Test {
 
   // Queues the FUSE_INIT the kernel sends when it mounts, offering `flags`
   // and `flags2` (read only with FUSE_INIT_EXT in `flags`).
-  void QueueInit(uint32_t flags = FUSE_POSIX_ACL | FUSE_DONT_MASK,
+  void QueueInit(uint32_t flags = FUSE_POSIX_ACL | FUSE_DONT_MASK |
+                                  FUSE_HANDLE_KILLPRIV_V2,
                  uint32_t flags2 = 0) {
     struct fuse_init_in in = {};
     in.major = FUSE_KERNEL_VERSION;
@@ -6970,17 +6971,21 @@ TEST_F(DirCacheFSTest, CopyFileRangeByCallerOutsideGroupClearsSetgid) {
   EXPECT_EQ(Release(src, in_fh).error, 0);
 }
 
-// Step 17.2b: before a write by a caller outside a setgid file's group, the
-// kernel asks to remove privileges with a SETATTR that sets nothing (its own
-// pre-6.2 rule clears setgid only with group execute), the request a
-// chown(path, -1, -1) makes. While the file is open for writing it is the
-// write's: setgid goes as the backing filesystem's own write would take it
-// (setattr_should_drop_sgid), from a non-owner too, whose chown would be
-// refused. Root and group members (by their group or a supplementary one)
-// keep it. Root's write sends the same SETATTR for a file carrying
+// Steps 17.2b and 17.2e: before a write by a caller without CAP_FSETID of a
+// setuid or setgid file, the kernel asks to remove privileges with a SETATTR
+// that sets nothing (under FUSE_CAP_HANDLE_KILLPRIV_V2 it drops the
+// ATTR_KILL_* bits and sends no mode), the request a chown(path, -1, -1)
+// makes. While the file is open for writing it is the write's: setuid and
+// setgid go as the backing filesystem's own write would take them
+// (setattr_should_drop_suidgid), from a non-owner too, whose chown would be
+// refused: setuid from anyone but root, setgid with group execute from
+// anyone but root and without it from a caller outside the group. Root and
+// group members (by their group or a supplementary one) keep setgid without
+// group execute. Root's write sends the same SETATTR for a file carrying
 // security.capability (the kernel removes that first), group-executable or
-// not, and keeps setgid.
-TEST_F(DirCacheFSTest, EmptySetattrOfAFileOpenForWritingDropsSetgidAsAWrite) {
+// not, and keeps both bits.
+TEST_F(DirCacheFSTest,
+       EmptySetattrOfAFileOpenForWritingDropsSetuidAndSetgidAsAWrite) {
   struct Case {
     std::string name;
     mode_t mode;
@@ -7020,6 +7025,54 @@ TEST_F(DirCacheFSTest, EmptySetattrOfAFileOpenForWritingDropsSetgidAsAWrite) {
        .gid = 1000,
        .groups = {1000},
        .want = 02676},
+      {.name = "member_gx",
+       .mode = 02676,
+       .uid = 1000,
+       .gid = 0,
+       .groups = {1000},
+       .want = 0676},
+      {.name = "outside_suid",
+       .mode = 04666,
+       .uid = 1000,
+       .gid = 1000,
+       .groups = {1000},
+       .want = 0666},
+      {.name = "member_suid",
+       .mode = 04666,
+       .uid = 1000,
+       .gid = 0,
+       .groups = {1000},
+       .want = 0666},
+      {.name = "root_suid",
+       .mode = 04666,
+       .uid = 0,
+       .gid = 1000,
+       .groups = {1000},
+       .want = 04666},
+      {.name = "outside_suid_sgid",
+       .mode = 06666,
+       .uid = 1000,
+       .gid = 1000,
+       .groups = {1000},
+       .want = 0666},
+      {.name = "member_suid_sgid",
+       .mode = 06666,
+       .uid = 1000,
+       .gid = 0,
+       .groups = {1000},
+       .want = 02666},
+      {.name = "member_suid_sgid_gx",
+       .mode = 06676,
+       .uid = 1000,
+       .gid = 0,
+       .groups = {1000},
+       .want = 0676},
+      {.name = "root_suid_sgid_gx",
+       .mode = 06676,
+       .uid = 0,
+       .gid = 1000,
+       .groups = {1000},
+       .want = 06676},
   };
   for (const Case &c : cases) {
     WriteFile(Path(c.name), "data");
@@ -7077,21 +7130,32 @@ TEST_F(DirCacheFSTest, EmptySetattrOfAFileNotOpenForWritingIsTheCallersChown) {
   EXPECT_EQ(st.st_mode & 07777, 0666u);
 }
 
-// Step 17.2b: a truncate by a caller without CAP_FSETID of a file with
-// setuid set arrives as one SETATTR of the size and of the mode minus
-// setuid (the kernel's pre-6.2 rule keeps setgid without group execute).
-// The truncate, as the caller, removes privileges by the current rule; the
-// mode must not set again a bit it cleared. A caller outside the group
-// loses both bits, a group member setuid alone.
-TEST_F(DirCacheFSTest, TruncateWithAModeKeepsWhatTheTruncateCleared) {
+// Step 17.2e: a truncate arrives as a SETATTR of the size, with
+// FATTR_KILL_SUIDGID from a caller without CAP_FSETID (fuse_do_setattr,
+// FUSE_CAP_HANDLE_KILLPRIV_V2) and never with a mode. The truncate, as the
+// caller, removes privileges by the current rule: a caller outside the
+// group loses both bits, a group member setuid alone, root (whose truncate
+// carries no FATTR_KILL_SUIDGID) neither.
+TEST_F(DirCacheFSTest, TruncateRemovesPrivilegesAsTheCaller) {
   struct Case {
     std::string name;
+    uid_t uid;
     gid_t gid;
+    uint32_t kill;
     mode_t want;
   };
   Case cases[] = {
-      {.name = "outside", .gid = 1000, .want = 0666},
-      {.name = "member", .gid = 0, .want = 02666},
+      {.name = "outside",
+       .uid = 1000,
+       .gid = 1000,
+       .kill = FATTR_KILL_SUIDGID,
+       .want = 0666},
+      {.name = "member",
+       .uid = 1000,
+       .gid = 0,
+       .kill = FATTR_KILL_SUIDGID,
+       .want = 02666},
+      {.name = "root", .uid = 0, .gid = 1000, .kill = 0, .want = 06666},
   };
   for (const Case &c : cases) {
     WriteFile(Path(c.name), "data");
@@ -7103,13 +7167,12 @@ TEST_F(DirCacheFSTest, TruncateWithAModeKeepsWhatTheTruncateCleared) {
     SCOPED_TRACE(c.name);
     ASSERT_OK_AND_ASSIGN(InodeId f, Id(c.name));
     struct fuse_setattr_in in = {};
-    in.valid = FATTR_SIZE | FATTR_MODE;
+    in.valid = FATTR_SIZE | c.kill;
     in.size = 2;
-    in.mode = S_IFREG | 02666;
     std::string body;
     AppendBytes(body, in);
     EXPECT_EQ(
-        Send(FUSE_SETATTR, static_cast<uint64_t>(f), body, 1000, c.gid).error,
+        Send(FUSE_SETATTR, static_cast<uint64_t>(f), body, c.uid, c.gid).error,
         0);
     ASSERT_OK_AND_ASSIGN(struct stat st,
                          syscalls::fstatat(AT_FDCWD, Path(c.name)));
@@ -7128,64 +7191,70 @@ TEST_F(DirCacheFSTest, TruncateWithAModeKeepsWhatTheTruncateCleared) {
   EXPECT_EQ(st.st_mode & 07777, 02666u);
 }
 
-// Step 17.2b: when the mode cannot be read back after the truncate of a
-// size-and-mode SETATTR, the error is replied, the truncate stays done, no
-// mode is applied, and the attributes are read again.
-TEST_F(DirCacheFSTest, TruncateWithAModeWhoseReadBackFailsRepliesTheError) {
-  WriteFile(Path("f"), "data");
-  CHECK_OK(syscalls::fchmodat(AT_FDCWD, Path("f"), 06666, 0));
+// Step 17.2e: a write that does not go through passthrough carries
+// FUSE_WRITE_KILL_SUIDGID from a caller without CAP_FSETID (the pinned
+// libfuse 3.18.2 does not hand it over). The write, as the caller, removes
+// privileges by the current rule, as the flag asks: a caller outside the
+// group loses both bits, a group member setuid alone, root (whose write
+// carries no flag) neither.
+TEST_F(DirCacheFSTest, WriteKillSuidgidIsTheCallersWrite) {
+  struct Case {
+    std::string name;
+    uid_t uid;
+    gid_t gid;
+    uint32_t kill;
+    mode_t want;
+  };
+  Case cases[] = {
+      {.name = "outside",
+       .uid = 1000,
+       .gid = 1000,
+       .kill = FUSE_WRITE_KILL_SUIDGID,
+       .want = 0666},
+      {.name = "member",
+       .uid = 1000,
+       .gid = 0,
+       .kill = FUSE_WRITE_KILL_SUIDGID,
+       .want = 02666},
+      {.name = "root", .uid = 0, .gid = 1000, .kill = 0, .want = 06666},
+  };
+  for (const Case &c : cases) {
+    WriteFile(Path(c.name), "data");
+    CHECK_OK(syscalls::fchmodat(AT_FDCWD, Path(c.name), 06666, 0));
+  }
   auto restore_groups = WithThreadGroups({1000});
   Start();
-  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
-  // The first statx after the truncate is the read-back's.
-  auto fail_after_truncate = std::make_shared<absl::AnyInvocable<void()>>();
-  *fail_after_truncate = [this, fail_after_truncate] {
-    absl::StatusOr<struct stat> now = syscalls::fstatat(AT_FDCWD, Path("f"));
-    if (now.ok() && now->st_size == 2) {
-      StatxFailure() = EIO;
-      return;
-    }
-    StatxHook() = [fail_after_truncate] { (*fail_after_truncate)(); };
-  };
-  StatxHook() = [fail_after_truncate] { (*fail_after_truncate)(); };
-  struct fuse_setattr_in in = {};
-  in.valid = FATTR_SIZE | FATTR_MODE;
-  in.size = 2;
-  in.mode = S_IFREG | 02666;
-  std::string body;
-  AppendBytes(body, in);
-  EXPECT_EQ(
-      Send(FUSE_SETATTR, static_cast<uint64_t>(f), body, 1000, 1000).error,
-      -EIO);
-  StatxHook() = {};
-  ASSERT_OK_AND_ASSIGN(struct stat st, syscalls::fstatat(AT_FDCWD, Path("f")));
-  EXPECT_EQ(st.st_size, 2);
-  EXPECT_EQ(st.st_mode & 07777, 0666u);  // The truncate's, no mode after it.
-  ASSERT_OK_AND_ASSIGN(cache::CachedAttr cached, cache::GetAttr(ctx_, f));
-  EXPECT_TRUE(cached.valid);
-  EXPECT_EQ(cached.st.st_size, 2);
-  EXPECT_EQ(cached.st.st_mode & 07777, 0666u);
+  for (const Case &c : cases) {
+    SCOPED_TRACE(c.name);
+    ASSERT_OK_AND_ASSIGN(InodeId f, Id(c.name));
+    auto [open, fh] = Open(f, O_WRONLY);
+    ASSERT_EQ(open.error, 0);
+    EXPECT_EQ(Write(f, fh, "x", 0, c.uid, c.gid, c.kill).error, 0);
+    EXPECT_EQ(Release(f, fh).error, 0);
+    ASSERT_OK_AND_ASSIGN(struct stat st,
+                         syscalls::fstatat(AT_FDCWD, Path(c.name)));
+    EXPECT_EQ(st.st_mode & 07777, c.want);
+    auto [ga, attr] = Getattr(f);
+    ASSERT_EQ(ga.error, 0);
+    EXPECT_EQ(attr.mode & 07777, c.want);
+  }
 }
 
-// Step 17.2b: a file with setuid and setgid but not group execute gets no
-// passthrough, from any open (one registration serves every open of an
-// inode, and the kernel refuses a non-passthrough open of an inode that has
-// one), nor from a create or O_TMPFILE that makes it: written through
-// passthrough, its setgid would stay for a writer outside its group (the
-// kernel's SETATTR clears setuid alone, and the write runs as the daemon).
-// Its writes come to Write, as the caller. Every other mode keeps it.
-TEST_F(DirCacheFSTest, NoPassthroughForASetuidSetgidFileWithoutGroupExecute) {
+// Step 17.2e: every file gets passthrough, whatever its mode, from an open,
+// a create or an O_TMPFILE: the kernel's SETATTR before a passthrough write
+// removes setuid and setgid (EmptySetattrOfAFileOpenForWriting...), so no
+// mode needs dcfs's own write path.
+TEST_F(DirCacheFSTest, PassthroughForEveryMode) {
   struct Case {
     std::string name;
     mode_t mode;
-    bool passthrough;
   };
   Case cases[] = {
-      {.name = "suid_sgid", .mode = 06666, .passthrough = false},
-      {.name = "suid_sgid_gx", .mode = 06676, .passthrough = true},
-      {.name = "sgid", .mode = 02666, .passthrough = true},
-      {.name = "suid", .mode = 04666, .passthrough = true},
-      {.name = "plain", .mode = 0666, .passthrough = true},
+      {.name = "suid_sgid", .mode = 06666},
+      {.name = "suid_sgid_gx", .mode = 06676},
+      {.name = "sgid", .mode = 02666},
+      {.name = "suid", .mode = 04666},
+      {.name = "plain", .mode = 0666},
   };
   for (const Case &c : cases) {
     WriteFile(Path(c.name), "data");
@@ -7206,8 +7275,7 @@ TEST_F(DirCacheFSTest, NoPassthroughForASetuidSetgidFileWithoutGroupExecute) {
     auto [rw, rw_fh] = Open(f, O_WRONLY);
     ASSERT_EQ(ro.error, 0);
     ASSERT_EQ(rw.error, 0);
-    EXPECT_THAT(backing_id_of(ro),
-                c.passthrough ? testing::Matcher<int32_t>(Gt(0)) : Eq(0));
+    EXPECT_GT(backing_id_of(ro), 0);
     EXPECT_EQ(backing_id_of(rw), backing_id_of(ro));
     EXPECT_EQ(Release(f, ro_fh).error, 0);
     EXPECT_EQ(Release(f, rw_fh).error, 0);
@@ -7215,21 +7283,13 @@ TEST_F(DirCacheFSTest, NoPassthroughForASetuidSetgidFileWithoutGroupExecute) {
 
   Created created = Create(kRootInode, "new", O_RDWR, 06666);
   ASSERT_EQ(created.reply.error, 0);
-  EXPECT_EQ(created.backing_id, 0);
+  EXPECT_GT(created.backing_id, 0);
   EXPECT_EQ(Release(created.id, created.fh).error, 0);
-  Created plain = Create(kRootInode, "new_plain", O_RDWR, 0666);
-  ASSERT_EQ(plain.reply.error, 0);
-  EXPECT_GT(plain.backing_id, 0);
-  EXPECT_EQ(Release(plain.id, plain.fh).error, 0);
 
   Created tmpfile = Tmpfile(kRootInode, O_RDWR, 06666);
   ASSERT_EQ(tmpfile.reply.error, 0);
-  EXPECT_EQ(tmpfile.backing_id, 0);
+  EXPECT_GT(tmpfile.backing_id, 0);
   EXPECT_EQ(Release(tmpfile.id, tmpfile.fh).error, 0);
-  Created plain_tmpfile = Tmpfile(kRootInode, O_RDWR, 0666);
-  ASSERT_EQ(plain_tmpfile.reply.error, 0);
-  EXPECT_GT(plain_tmpfile.backing_id, 0);
-  EXPECT_EQ(Release(plain_tmpfile.id, plain_tmpfile.fh).error, 0);
 }
 
 // A FUSE_MKDIR body for a 0755 directory `name`.
@@ -8123,6 +8183,30 @@ TEST_F(DirCacheFSTest, InitWithoutDontMaskIsRefused) {
   fuse_session_destroy(se);
   EXPECT_THAT(capture.lines, Contains(AllOf(HasSubstr("FAILED_PRECONDITION"),
                                             HasSubstr("FUSE_CAP_DONT_MASK"))))
+      << absl::StrJoin(capture.lines, "\n");
+}
+
+// Step 17.2e: a kernel that does not offer FUSE_CAP_HANDLE_KILLPRIV_V2
+// (protocol 7.33, Linux 5.11, older than every kernel dcfs supports) would
+// remove setuid and setgid by its own pre-6.2 rule, which dcfs no longer
+// works around: Init() fails, naming it, and the INIT is refused.
+TEST_F(DirCacheFSTest, InitWithoutHandleKillprivV2IsRefused) {
+  Start();
+  MountFds mounts;
+  Context ctx{.db = db_, .mounts = mounts, .rng = bitgen_};
+  DirCacheFS other(ctx, options_);
+  struct fuse_session *se = NewSession(&other, {});
+  ASSERT_NE(se, nullptr);
+  WarningCapture capture;
+  QueueInit(FUSE_POSIX_ACL | FUSE_DONT_MASK);
+  {
+    SessionLoop loop(se);
+    EXPECT_EQ(ErrnoOf(loop.Run()), EPROTO);
+  }
+  fuse_session_destroy(se);
+  EXPECT_THAT(capture.lines,
+              Contains(AllOf(HasSubstr("FAILED_PRECONDITION"),
+                             HasSubstr("FUSE_CAP_HANDLE_KILLPRIV_V2"))))
       << absl::StrJoin(capture.lines, "\n");
 }
 

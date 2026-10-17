@@ -2371,14 +2371,14 @@ absl::Status FinishRun(Context &ctx) {
 namespace {
 
 // Bits SetAttr's mode-related branches (an explicit FUSE_SET_ATTR_MODE, or
-// a KILL_SGID-only clear) share: reopening `opath_fd` as a real
+// a KILL_PRIV clear) share: reopening `opath_fd` as a real
 // fd when the node is a regular file or directory (fchmod rejects O_PATH),
 // else FchmodOPath -- except a symlink, which cannot be chmod'd at all on
 // Linux (no lchmod).
 //
-// Runs as root, not AsCaller (see SetAttr's declaration comment): the
-// kernel itself sends a mode change to kill setuid/setgid after a truncate
-// or chown by a non-owner (fuse_setattr), which the caller could not make.
+// Runs as root, not AsCaller (see SetAttr's declaration comment): a
+// KILL_PRIV clear for a caller who does not own the node is a mode change
+// the caller could not make.
 absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
   if (S_ISLNK(type)) {
     return ErrnoToStatus(EOPNOTSUPP, "chmod on a symlink");
@@ -2392,27 +2392,18 @@ absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
   return FchmodOPath(opath_fd, mode);
 }
 
-// Whether the backing filesystem's own write by `caller` would clear the
-// setgid bit, if set, of a file without group execute whose group is `gid`
-// (setattr_should_drop_suidgid under AsCaller, where only fsuid 0 keeps
-// CAP_FSETID): the caller is neither root nor in the group. (With group
-// execute the kernel's own rule clears setgid with a mode instead.)
-bool WriteClearsSetgid(const Credentials &caller, gid_t gid) {
-  if (caller.uid == 0) return false;
-  return caller.gid != gid && !absl::c_linear_search(caller.groups, gid);
-}
-
-// The mode FUSE_SET_ATTR_MODE asks for. With FUSE_SET_ATTR_SIZE too it is
-// the kernel's privilege removal for a truncate (no system call sets both),
-// which the truncate, run as the caller, has done by the current rule:
-// setuid and setgid stay only where the truncate left them, so the mode
-// never sets again a bit the truncate cleared.
-absl::StatusOr<mode_t> RequestedMode(int fd, const struct stat &attr,
-                                     int to_set) {
-  if ((to_set & FUSE_SET_ATTR_SIZE) == 0) return attr.st_mode;
-  ASSIGN_OR_RETURN(struct statx after,
-                   syscalls::statx(fd, "", AT_EMPTY_PATH, STATX_MODE));
-  return attr.st_mode & (after.stx_mode | ~mode_t{S_ISUID | S_ISGID});
+// The setuid and setgid bits that the backing filesystem's own write by
+// `caller` would clear from a regular file of mode `mode` whose group is
+// `gid` (setattr_should_drop_suidgid under AsCaller, where only fsuid 0
+// keeps CAP_FSETID): none for uid 0; for anyone else setuid, and setgid if
+// the file is group-executable or the caller is outside its group.
+mode_t SuidgidClearedByWrite(const Credentials &caller, mode_t mode,
+                             gid_t gid) {
+  if (caller.uid == 0) return 0;
+  const bool in_group =
+      caller.gid == gid || absl::c_linear_search(caller.groups, gid);
+  const bool clears_setgid = (mode & S_IXGRP) != 0 || !in_group;
+  return S_ISUID | (clears_setgid ? S_ISGID : 0);
 }
 
 // FUSE_SET_ATTR_SIZE: only ever valid for a regular file, same as the
@@ -2481,16 +2472,15 @@ absl::Status SetAttrFd(const Credentials &caller, int fd,
   }
 
   if (to_set & FUSE_SET_ATTR_MODE) {
-    ASSIGN_OR_RETURN(mode_t mode, RequestedMode(fd, attr, to_set));
-    RETURN_IF_ERROR(ApplyMode(fd, type, mode));
-  } else if ((to_set & FUSE_SET_ATTR_KILL_SGID) != 0) {
-    // A write's privilege removal on a file open for writing, so never a
-    // symlink (the kernel itself sends no KILL_* bit: dcfs negotiates no
-    // killpriv): setgid cleared from the current mode where a write by the
-    // caller would clear it.
-    mode_t current_mode = stx.stx_mode & 07777;
-    if (WriteClearsSetgid(caller, stx.stx_gid)) current_mode &= ~S_ISGID;
-    RETURN_IF_ERROR(ApplyMode(fd, type, current_mode));
+    RETURN_IF_ERROR(ApplyMode(fd, type, attr.st_mode));
+  } else if ((to_set & FUSE_SET_ATTR_KILL_PRIV) != 0) {
+    // Setuid and setgid cleared from the current mode where a write by the
+    // caller would clear them.
+    const mode_t current_mode = stx.stx_mode & 07777;
+    RETURN_IF_ERROR(ApplyMode(
+        fd, type,
+        current_mode &
+            ~SuidgidClearedByWrite(caller, current_mode, stx.stx_gid)));
   }
 
   if (to_set & (FUSE_SET_ATTR_ATIME | FUSE_SET_ATTR_MTIME |

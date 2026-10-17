@@ -309,6 +309,9 @@ strace_budget budget-write write
 # backing's (step 25.28b: a sync point with no syncfs), between the open's and
 # the release's reads; then the cache's durable point (an fsync of its WAL,
 # a "sync" in the budget), since the write's attributes were committed.
+# Unlike the write above, the write makes no security.capability read: the
+# kernel found nothing to remove at that write and keeps the inode S_NOSEC
+# (FUSE_CAP_HANDLE_KILLPRIV_V2, step 17.2e), so it asks no GETXATTR.
 strace_op fsync dd if=/dev/zero of="$MNT/wr" bs=4096 count=1 conv=notrunc,fsync
 strace_golden fsync fsync <<'EOT'
 open_by_handle_at(backing)
@@ -317,7 +320,6 @@ openat(procfd)
 ioctl(backing)
 close(backing)
 statx(backing)
-getxattr(procfd) !ENODATA
 statx(backing)
 fsync(backing)
 statx(backing)

@@ -632,12 +632,14 @@ absl::Status FinishRun(Context &ctx);
 // FIFOs, sockets and devices go through FchmodOPath (reopening one of
 // those for a real fd could block or have a side effect); a symlink's
 // mode cannot be changed at all on Linux (there is no lchmod) and this
-// fails with EOPNOTSUPP. With FUSE_SET_ATTR_SIZE too, the mode keeps
-// S_ISUID/S_ISGID only where the truncate left them. FUSE_SET_ATTR_KILL_SGID
-// without FUSE_SET_ATTR_MODE, a write's privilege removal on a file open for
-// writing, clears S_ISGID from the node's *current* mode where a write by
-// `caller` would clear it (docs/design.md, "Caller credentials"); the kernel
-// sends no FUSE_SET_ATTR_KILL_* bit itself (dcfs negotiates no killpriv).
+// fails with EOPNOTSUPP. FUSE_SET_ATTR_KILL_PRIV without FUSE_SET_ATTR_MODE
+// clears from the node's *current* mode the setuid and setgid bits that a
+// write by `caller` would clear on the backing filesystem
+// (setattr_should_drop_suidgid, with uid 0 taken to hold CAP_FSETID): for
+// any caller but uid 0, S_ISUID, and S_ISGID if the node is group-executable
+// or `caller` is outside its group. FUSE_SET_ATTR_KILL_SUID (the kernel's
+// FATTR_KILL_SUIDGID) is not acted on: the chown and the ftruncate run as
+// `caller`, so the backing filesystem clears the bits by its own rule.
 // Owner and times use the same regular/dir-vs-other-types split as mode,
 // except that both are unremarkable on a symlink (unlike mode); size is
 // only ever valid for a regular file -- EISDIR/EINVAL otherwise, as the
@@ -649,12 +651,11 @@ absl::Status FinishRun(Context &ctx);
 // still reopened as root (a truncate needs no permission beyond the one the
 // kernel checked on the FUSE side, and ftruncate of an fd the caller opened
 // for writing must work even if the file's mode no longer grants it). The
-// chmod runs as root: the kernel itself sends a mode change to clear
-// setuid/setgid after a truncate or chown by a non-owner (fuse_setattr's
-// killpriv, on the caller's behalf), which the caller's own chmod would be
-// refused; a chmod the caller asked for has already been checked by the
-// kernel (setattr_prepare, including clearing setgid for a caller outside
-// the file's group) before it is sent.
+// chmod runs as root: a KILL_PRIV clear for a caller who does not own the
+// node is a mode change the caller's own chmod would be refused, and a
+// FUSE_SET_ATTR_MODE is applied as asked, its permission being the
+// kernel's to check (setattr_prepare, including clearing setgid for a
+// caller outside the file's group) before the request is sent.
 absl::Status SetAttr(Context &ctx, const Credentials &caller, InodeId id,
                      const struct stat &attr, int to_set);
 

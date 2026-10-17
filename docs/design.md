@@ -2555,66 +2555,78 @@ reads the mode back from the backing filesystem.
 - `linkat` with `AT_EMPTY_PATH` (also needs `CAP_DAC_READ_SEARCH`; a new
   link creates no new owner or group, and the kernel already checked the
   caller's permissions on the FUSE side);
-- chmod: the kernel itself sends a mode change to clear setuid and setgid
-  after a truncate or chown by a non-owner, which the caller's own chmod
-  would be refused; a chmod the caller asked for has already been checked
-  by the kernel; and the setgid removal for a write (below);
+- chmod: a chmod the caller asked for has already been checked by the
+  kernel, and the setuid and setgid removal for a write (below) is a mode
+  change a non-owner's own chmod would be refused;
 - opening an existing file, and every probe, read and refresh.
 
-**Setuid and setgid on writes the kernel handles** (step 17.2b). Before a
-write, fallocate, copy_file_range or truncate by a caller without
-`CAP_FSETID`, the kernel's FUSE side removes privileges itself
-(`file_remove_privs`, `do_truncate`, with the caller's credentials), and
-since dcfs negotiates neither `FUSE_CAP_HANDLE_KILLPRIV` nor its `_V2`,
-`fuse_setattr` re-derives the mode by the pre-6.2 rule: setuid always,
-setgid only with group execute. The current rule
-(`setattr_should_drop_suidgid`) also clears setgid without group execute
-for a caller outside the file's group. A caller with `CAP_FSETID` (root)
-clears neither bit; its write still removes `security.capability`. Three
-cases follow, each with a workaround that the kernel fix
-(`docs/plan/notes/kernel-patches.md`, row 4: `fuse_setattr` calling
-`setattr_should_drop_sgid()` after refreshing `i_mode`) retires:
+**Setuid and setgid on writes** (steps 17.2b, 17.2e). A write, fallocate,
+copy_file_range, truncate or chown by a caller without `CAP_FSETID`
+clears setuid, and setgid where the file is group-executable or the
+caller is outside its group (`setattr_should_drop_suidgid`); a chown
+clears setuid from anyone. dcfs negotiates `FUSE_CAP_HANDLE_KILLPRIV_V2`,
+which leaves that to the filesystem, and `DirCacheFS::Init` refuses a
+kernel that does not offer it (protocol 7.33, Linux 5.11; every kernel
+with FUSE passthrough has it), so there is one path. Without it
+`fuse_setattr` re-derives the mode by the pre-6.2 rule (setuid always,
+setgid only with group execute), which 17.2b had to work around, and the
+kernel keeps `SB_NOSEC` off the superblock, so that every passthrough
+write first asked for `security.capability` with a `GETXATTR` round trip
+(step 17.2c, `docs/plan/notes/passthrough-write-cost-17.2c.md`). What the
+kernel sends with it:
 
-- Setgid without group execute: the kernel's SETATTR sets nothing, the
-  same request a `chown(path, -1, -1)` makes (so does root's write of a file
-  with `security.capability`, after its REMOVEXATTR). Run as that chown, as
-  the caller, it failed the write of a non-owner with `EPERM` (clearing the
-  bit is a mode change only the owner may make; the native filesystem
-  allows the write and clears it). The removal always comes while the file
-  is open for writing, so dcfs takes a SETATTR that sets nothing on a file
-  open for writing for the write's (`DirCacheFS::Setattr`): it clears
-  setgid, as root, where a write by the caller would (`FUSE_SET_ATTR_KILL_SGID`:
-  the caller neither root nor in the file's group; the group-execute term of
-  the kernel's rule never applies, since for such a file the kernel sends a
-  mode), and runs no chown. The price is that a non-owner's
-  `chown(path, -1, -1)` of such a file, while anyone has it open for
-  writing, succeeds and clears the bit where the native filesystem refuses
-  it with `EPERM`. With no writable open it is the caller's chown, as
-  before. Passthrough writes need nothing more for this mode: the bit is
-  gone before the daemon's write.
-- Setuid and setgid without group execute, written: the kernel's SETATTR is
-  the mode minus setuid, which dcfs cannot tell from the owner's chmod, and
-  a passthrough write reaches the backing file as the daemon (`CAP_FSETID`),
-  which keeps setgid too. dcfs declines passthrough for a file with this
-  mode (`PassthroughFor`), so the kernel sends the writes and `WriteFile`
-  runs them as the caller. The choice is made at the inode's first open
-  (one registration serves every open of an inode, and the kernel refuses
-  an open without passthrough of an inode that has one, with `EIO`), so a
-  read-only open declines too, and a file given this mode while open keeps
-  passthrough until dcfs handles its last release: a write in that window
-  keeps setgid. The cost, for files with this mode only (2026-10-17,
-  `dcfs_bench`'s Write and SetidWrite, ext4 in the QEMU guest, 1 MiB
-  overwritten in 64 KiB writes on one open, mean of 5): 9.1 ms through
-  passthrough, 32.8 ms declined (the backing filesystem directly: 0.14 ms).
-- Setuid and setgid without group execute, truncated: the kernel sends one
-  SETATTR of the size and of the mode minus setuid. The truncate runs as
-  the caller and clears both bits on the backing filesystem; the mode,
-  applied as asked, would set setgid again. No system call sets a size and
-  a mode at once, so such a mode is always the kernel's privilege removal,
-  and `backing::SetAttr` keeps setuid and setgid only where the truncate
-  left them. (Applying the mode at all, rather than skipping it, still
-  clears what the kernel's rule asks for where dcfs's truncate cleared
-  less: a caller with uid 0 but without `CAP_FSETID`.)
+- A truncate arrives as a SETATTR of the size, with `FATTR_KILL_SUIDGID`
+  from a caller without `CAP_FSETID` (libfuse hands it over as
+  `FUSE_SET_ATTR_KILL_SUID`), never with a mode; so does an `O_TRUNC`
+  open's (dcfs leaves `FUSE_CAP_ATOMIC_O_TRUNC` off, so the kernel strips
+  `O_TRUNC` from the OPEN, and `FUSE_OPEN_KILL_SUIDGID` with it). A chown
+  arrives with `FATTR_KILL_SUIDGID` always. Both run as the caller, so the
+  backing filesystem clears the bits by its own rule; dcfs acts on the flag
+  in neither. A write that does not go through passthrough carries
+  `FUSE_WRITE_KILL_SUIDGID`, and `WriteFile` runs as the caller too (the
+  pinned libfuse 3.18.2 does not hand that flag over; 3.18.3 does). A
+  CREATE with `O_TRUNC` carries `FUSE_OPEN_KILL_SUIDGID`, but it makes a new
+  file, which no open truncates.
+- A write, fallocate or copy_file_range first goes through the kernel's
+  `file_remove_privs` on the FUSE inode. For a caller without `CAP_FSETID`
+  writing a setuid or setgid file, or for anyone writing a file with
+  `security.capability` (which the kernel removes first, with a
+  REMOVEXATTR), it sends a SETATTR that sets nothing, the request a
+  `chown(path, -1, -1)` makes. For a passthrough write that is all dcfs
+  sees: the write reaches the backing file as the daemon (`CAP_FSETID`),
+  which keeps both bits. The removal always comes while the file is open
+  for writing, so dcfs takes a SETATTR that sets nothing on a file open for
+  writing for the write's (`DirCacheFS::Setattr`, `FUSE_SET_ATTR_KILL_PRIV`):
+  it clears, as root, the bits the backing filesystem's own write by the
+  caller would clear (uid 0 taken to hold `CAP_FSETID`), and runs no chown.
+  Run as the caller's chown, it failed a non-owner's write with `EPERM`
+  (clearing the bits is a mode change only the owner may make; the native
+  filesystem allows the write and clears them). The prices: while anyone
+  has a setuid or setgid file open for writing, a non-owner's
+  `chown(path, -1, -1)` of it succeeds and clears the bits where the native
+  filesystem refuses it with `EPERM`, and root's keeps setuid where the
+  native filesystem clears it. With no writable open it is the caller's
+  chown.
+- Once a write finds an inode with nothing to remove, the kernel marks it
+  `S_NOSEC` and skips the check on its later writes, until its attributes
+  are refreshed from dcfs or a `security.*` xattr is set. A setuid or
+  setgid file is never `S_NOSEC`, so each of its passthrough writes still
+  asks for `security.capability` with a `GETXATTR` (answered from the
+  cache).
+- A caller with uid 0 but without `CAP_FSETID` cannot be told from root
+  (step 17.2d): its write or truncate of a setuid or setgid file keeps both
+  bits through dcfs, where the backing filesystem clears them. (Before
+  17.2e the kernel's re-derived mode cleared setuid for it.)
+
+The cost (2026-10-17, `dcfs_bench`'s Write and SetidWrite, ext4 in the
+QEMU guest, 1 MiB overwritten in 64 KiB writes on one open, mean of 5, on
+a host with a load average of 20 to 29, so the figures are rough): a plain
+file 1.1 ms through dcfs (10.4 ms before 17.2e), a file with setuid and
+setgid 12.1 ms (71.6 ms before, when dcfs declined passthrough for it);
+the backing filesystem directly 0.1 to 1.1 ms. In `bench_write_test`'s
+request counts the plain file's 3200 writes take 2 `GETXATTR` requests
+instead of 3200, and the setuid file's no `WRITE` requests instead of
+3200.
 
 **`default_permissions` is required** (russ, 2026-10-08). The kernel
 checks the caller's permissions against dcfs's cached attributes before a
@@ -2681,8 +2693,8 @@ contents bypass the cache.
     truncate, and any write or fallocate, which remove it.
 
   The kernel also removes `security.capability` itself through the mount
-  (dcfs does not request `FUSE_CAP_HANDLE_KILLPRIV`), so the read-back is a
-  backstop for what the backing filesystem does on its own. LSM relabeling
+  (`setattr_prepare`, with `FUSE_CAP_HANDLE_KILLPRIV_V2` too), so the
+  read-back is a backstop for what the backing filesystem does on its own. LSM relabeling
   and EVM/IMA rewrites are not covered.
 
 <a id="rule-design-names-are-bytes"></a>
@@ -3013,7 +3025,8 @@ fork):
     `subtype=dcfs` and `ro` if `dcfs.ro`;
     install libfuse's signal handlers; run the session loop. `Init` requests
     export support, readdirplus, symlink caching and passthrough; requires
-    POSIX ACLs and `FUSE_CAP_DONT_MASK` (refusing the mount without them);
+    POSIX ACLs, `FUSE_CAP_DONT_MASK` and `FUSE_CAP_HANDLE_KILLPRIV_V2`
+    (refusing the mount without them);
     turns off atomic `O_TRUNC` and FUSE-over-io_uring; and logs whether the
     kernel granted passthrough. The first answered `FUSE_INIT` is the
     "ready" the wrapper waits for (below).

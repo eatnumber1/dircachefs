@@ -251,16 +251,17 @@ check_cold write-truncate-open '[ "$(stat -c %s /mnt/f)" = 0 ]'
 # accounting in a guest whose vCPUs are descheduled at random). What
 # passthrough changes is the number of requests dcfs has to serve: with it
 # active the kernel moves the bytes itself, and dcfs sees only the
-# create/flush/release plus one GETXATTR (security.capability, from the
-# kernel's file_remove_privs) per write(2); with it off it gets one
+# create/flush/release plus a GETXATTR (security.capability, from the
+# kernel's file_remove_privs) for the first write(2) (one per write(2)
+# before step 17.2e's FUSE_CAP_HANDLE_KILLPRIV_V2); with it off it gets one
 # FUSE_WRITE per max_write (1 MiB) chunk, 64 for 64 MiB. Each request wakes
 # dcfs's single thread from its blocking read of /dev/fuse, and the count of
 # those wakeups (voluntary context switches, read from /proc/PID/status) does
 # not depend on host load or on KVM vs TCG. Measured, 64 MiB as 4 writes of
 # 16 MiB: 8-10 wakeups with passthrough (KVM idle, KVM under load, TCG),
 # 73-76 with passthrough disabled in a scratch build; the limit is 32. The
-# writes are 16 MiB because at 1 MiB the per-write GETXATTRs (64) would match
-# the 64 WRITEs a non-passthrough run adds and the check would tell nothing.
+# writes are 16 MiB because at 1 MiB the per-write GETXATTRs of the time
+# (64) would have matched the 64 WRITEs a non-passthrough run adds.
 # The CPU ticks are only printed.
 
 dd if=/dev/urandom of=/tmp/big_src.bin bs=1M count=64 2>/dev/null

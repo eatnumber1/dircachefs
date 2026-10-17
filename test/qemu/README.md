@@ -2572,8 +2572,10 @@ needs network access), optimize just those sources:
 `SetidWrite`, with the daemons' request log on
 (`--dcfs_flags=--v=2,--stderrthreshold=0`), then prints the requests the daemons served by operation and which of them
 reached the backing filesystem (step 17.2c,
-`docs/plan/notes/passthrough-write-cost-17.2c.md`): with passthrough, a
-`Write` should show no `WRITE` request.
+`docs/plan/notes/passthrough-write-cost-17.2c.md`): with passthrough,
+neither case should show a `WRITE` request, and since step 17.2e
+(`FUSE_CAP_HANDLE_KILLPRIV_V2`) `Write` one `GETXATTR` per daemon, where
+`SetidWrite` still has one per write.
 
 The helpers `dcfs_bench mktree ROOT N BIG` (makes the tree; used by the
 idle and memory tests) and `dcfs_bench dm-delay NAME DEV MS` (device-mapper

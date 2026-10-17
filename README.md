@@ -1241,19 +1241,17 @@ recovery protocol, concurrency, and the test strategy.
   (plan phase 15). The paths given on the command line (SOURCE, the
   mount point, `dcfs.cache_db`) are not escaped in startup messages yet.
 - **Setuid and setgid bits on writes follow the backing filesystem, with
-  two gaps until a kernel fix.** A write, fallocate, copy_file_range or
-  truncate through dcfs clears setuid and setgid as the backing filesystem would for
-  the writer. The gaps: a file given setuid and setgid without group
-  execute while it is open keeps setgid through a write by someone outside
-  its group, until dcfs handles its last close; and while a file with setgid
-  but not group execute is open for writing, `chown(path, -1, -1)` by
-  someone who neither owns it nor is in its group succeeds and clears the
-  bit, where the backing filesystem refuses it with `EPERM`. Writes to a
-  file with setuid and setgid but not group execute do not use FUSE
-  passthrough and were about 3.6 times slower (ext4 in the QEMU guest,
-  2026-10-17; `BM_SetidWrite` against `BM_Write` in `bench/dcfs_bench.cc`,
-  step 17.2b in `docs/plan/log.md`; `docs/design.md`, "Caller credentials",
-  says why passthrough is declined).
+  three gaps.** A write, fallocate, copy_file_range or truncate through
+  dcfs clears setuid and setgid as the backing filesystem would for the
+  writer. The gaps: while a setuid or setgid file is open for writing,
+  `chown(path, -1, -1)` by someone who does not own it succeeds and clears
+  the bits, where the backing filesystem refuses it with `EPERM`, and
+  root's keeps setuid, where the backing filesystem clears it; and a
+  process running as root without `CAP_FSETID` keeps both bits through a
+  write or truncate, where the backing filesystem clears them (dcfs cannot
+  tell it from root). dcfs needs a kernel with
+  `FUSE_CAP_HANDLE_KILLPRIV_V2` (Linux 5.11 and later) and refuses to mount
+  without it (`docs/design.md`, "Caller credentials").
 - **A backing filesystem that stops taking writes holds the whole daemon.**
   With the backing filesystem frozen (`fsfreeze -f`, an LVM or storage
   snapshot, a hung network mount), a change through dcfs blocks in its

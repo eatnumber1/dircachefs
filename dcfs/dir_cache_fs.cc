@@ -74,15 +74,15 @@ void NoteBestEffort(std::string_view what, const absl::Status &status) {
 //  - system.posix_acl_access: any chmod of a file with an access ACL
 //    rewrites the ACL to match the new mode (posix_acl_chmod: ext4, xfs,
 //    btrfs). dcfs chmods for FUSE_SET_ATTR_MODE and also for
-//    KILL_SGID (backing::SetAttr). system.posix_acl_default is
+//    KILL_PRIV (backing::SetAttr). system.posix_acl_default is
 //    never touched by a chmod.
 //  - security.capability: removed by chown/chgrp (even chown(-1, -1)) and
 //    truncate (ATTR_KILL_PRIV, fs/open.c, fs/attr.c) and by any write or
 //    fallocate
-//    (file_remove_privs). Note the kernel, since dcfs does not ask for
-//    FUSE_CAP_HANDLE_KILLPRIV(_V2), also removes it itself through the
-//    mount (a FUSE REMOVEXATTR ahead of the SETATTR or write), so this is
-//    the backstop for what the backing filesystem does on its own.
+//    (file_remove_privs). Note the kernel also removes it itself through
+//    the mount (setattr_prepare's REMOVEXATTR ahead of the SETATTR or
+//    write, with FUSE_CAP_HANDLE_KILLPRIV_V2 too), so this is the backstop
+//    for what the backing filesystem does on its own.
 //
 // Not covered (not verified, and not something dcfs changes itself): LSM
 // relabeling, security.evm/security.ima rewrites.
@@ -93,7 +93,7 @@ constexpr std::string_view kXattrsChangedByWrite[] = {kCapabilityXattr};
 // The side-effect xattrs of a Setattr with `to_set`.
 std::vector<std::string_view> XattrsChangedBySetattr(int to_set) {
   std::vector<std::string_view> names;
-  if (to_set & (FUSE_SET_ATTR_MODE | FUSE_SET_ATTR_KILL_SGID)) {
+  if (to_set & (FUSE_SET_ATTR_MODE | FUSE_SET_ATTR_KILL_PRIV)) {
     names.push_back(kAclAccessXattr);
   }
   // An otherwise empty setattr is a chown(path, -1, -1) (see
@@ -109,16 +109,6 @@ std::vector<std::string_view> XattrsChangedBySetattr(int to_set) {
 std::string ErrnoName(int err) {
   const char *name = strerrorname_np(err);
   return name != nullptr ? name : absl::StrCat("errno ", err);
-}
-
-// The passthrough backing id for `fd`, the new shared backing descriptor
-// of a file whose mode is `mode` (see BackingFile), or 0: the kernel did
-// not grant one (logged once at Init), or dcfs declines it for setuid and
-// setgid without group execute, whose setgid a passthrough write would keep
-// (docs/design.md, "Caller credentials").
-absl::StatusOr<int> PassthroughFor(FuseRequest &req, int fd, mode_t mode) {
-  if ((mode & (S_ISUID | S_ISGID | S_IXGRP)) == (S_ISUID | S_ISGID)) return 0;
-  return req.PassthroughOpen(fd);
 }
 
 }  // namespace
@@ -303,16 +293,25 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   // backing.cc's AsCaller), so the backing filesystem applies it exactly
   // where a local create would.
   //
-  // Both are required, not optional: running without them would enforce
-  // permissions differently from the backing filesystem. Every kernel
-  // dcfs supports (Linux 6.9+, for FS_IOC_GETFSUUID and FUSE passthrough)
-  // already has both (protocol 7.26 and 7.12); should one ever be missing,
-  // Init() fails, which refuses the INIT (fuse_ops.cc's Init) and makes
-  // dcfs exit, rather than serve the mount with the wrong permission
-  // checks.
-  for (auto [flag, name] :
-       {std::pair{FUSE_CAP_POSIX_ACL, "FUSE_CAP_POSIX_ACL"},
-        std::pair{FUSE_CAP_DONT_MASK, "FUSE_CAP_DONT_MASK"}}) {
+  // FUSE_CAP_HANDLE_KILLPRIV_V2 (step 17.2e): dcfs removes setuid and
+  // setgid on a write, a truncate and a chown itself, by the backing
+  // filesystem's rule (docs/design.md, "Caller credentials"). Without it
+  // the kernel re-derives the mode by its pre-6.2 rule (fuse_setattr), and
+  // keeps SB_NOSEC off the superblock, so every passthrough write first
+  // asks for security.capability with a GETXATTR round trip
+  // (docs/plan/notes/passthrough-write-cost-17.2c.md).
+  //
+  // All three are required, not optional: running without them would
+  // enforce permissions, or clear setuid and setgid, differently from the
+  // backing filesystem. Every kernel dcfs supports (Linux 6.9+, for
+  // FS_IOC_GETFSUUID and FUSE passthrough) already has them (protocol
+  // 7.26, 7.12 and 7.33); should one ever be missing, Init() fails, which
+  // refuses the INIT (fuse_ops.cc's Init) and makes dcfs exit, rather than
+  // serve the mount with the wrong permission checks.
+  for (auto [flag, name] : {std::pair{FUSE_CAP_POSIX_ACL, "FUSE_CAP_POSIX_ACL"},
+                            std::pair{FUSE_CAP_DONT_MASK, "FUSE_CAP_DONT_MASK"},
+                            std::pair{FUSE_CAP_HANDLE_KILLPRIV_V2,
+                                      "FUSE_CAP_HANDLE_KILLPRIV_V2"}}) {
     if (!fuse_set_feature_flag(&conn, flag)) {
       return FailedPreconditionErrorBuilder()
              << "The kernel does not offer " << name
@@ -325,7 +324,8 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
                         : absl::LogSeverity::kWarning))
       << "FUSE kernel protocol " << conn.proto_major << "." << conn.proto_minor
       << "; FUSE_CAP_PASSTHROUGH " << (passthrough ? "granted" : "NOT granted")
-      << "; FUSE_CAP_POSIX_ACL and FUSE_CAP_DONT_MASK requested"
+      << "; FUSE_CAP_POSIX_ACL, FUSE_CAP_DONT_MASK and "
+         "FUSE_CAP_HANDLE_KILLPRIV_V2 requested"
       << "; FUSE_CAP_ATOMIC_O_TRUNC, FUSE_CAP_OVER_IO_URING and "
          "FUSE_CAP_SPLICE_READ intentionally not requested";
   return absl::OkStatus();
@@ -797,11 +797,13 @@ absl::Status DirCacheFS::Setattr(FuseRequest &req, fuse_ino_t ino,
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "setattr");
   // A SETATTR that sets nothing is a chown(path, -1, -1) or the kernel's
-  // privilege removal before a write; on a file open for writing it is
-  // taken for the second, whose setgid goes as a write by the caller would
-  // take it (docs/design.md, "Caller credentials").
+  // privilege removal before a write (fuse_setattr sends no mode under
+  // FUSE_CAP_HANDLE_KILLPRIV_V2), which always comes while the file is
+  // open for writing; then it is taken for the second, whose setuid and
+  // setgid go as a write by the caller would take them, not by a chown,
+  // which a non-owner may not make (docs/design.md, "Caller credentials").
   if (backing::SetsNothing(to_set) && open_for_write_.contains(id)) {
-    to_set |= FUSE_SET_ATTR_KILL_SGID;
+    to_set |= FUSE_SET_ATTR_KILL_PRIV;
   }
   if (auto it = removed_.find(id); it != removed_.end()) {
     // A removed object (step 23.2): through the descriptor its record
@@ -1670,7 +1672,7 @@ absl::Status DirCacheFS::Link(FuseRequest &req, fuse_ino_t ino,
 }
 
 absl::StatusOr<DirCacheFS::BackingFile> DirCacheFS::MakeBackingFile(
-    InodeId id, mode_t mode, FuseRequest &req) {
+    InodeId id, FuseRequest &req) {
   // A removed object (step 23.2) is reopened through the descriptor its
   // record holds (an open of /proc/<pid>/fd/<n> of an O_PATH descriptor on
   // an unlinked file); anything else by handle.
@@ -1697,13 +1699,13 @@ absl::StatusOr<DirCacheFS::BackingFile> DirCacheFS::MakeBackingFile(
   }
 
   // Ask the kernel to serve reads/writes directly against `fd`. A 0
-  // backing_id means the kernel never granted FUSE_CAP_PASSTHROUGH (logged
-  // once at Init), this registration otherwise failed, or dcfs declined it
-  // (PassthroughFor); none is a dcfs-level error -- Read()/Write() below
-  // fall back to serving the data themselves. This is called at most once
-  // per inode (see BackingFile's comment): every later Open()/Create() of
-  // the same inode reuses the backing_id this call returns.
-  ASSIGN_OR_RETURN(int backing_id, PassthroughFor(req, **fd, mode));
+  // backing_id means either the kernel never granted FUSE_CAP_PASSTHROUGH
+  // (logged once at Init) or this registration otherwise failed; either way
+  // it is not a dcfs-level error -- Read()/Write() below fall back to
+  // serving the data themselves. This is called at most once per inode
+  // (see BackingFile's comment): every later Open()/Create() of the same
+  // inode reuses the backing_id this call returns.
+  ASSIGN_OR_RETURN(int backing_id, req.PassthroughOpen(**fd));
 
   return BackingFile{
       .fd = *std::move(fd), .backing_id = backing_id, .writable = writable};
@@ -1772,8 +1774,7 @@ absl::Status DirCacheFS::OpenInode(FuseRequest &req, InodeId id,
         }));
       }
     }
-    ASSIGN_OR_RETURN(BackingFile backing_file,
-                     MakeBackingFile(id, attr.st.st_mode, req));
+    ASSIGN_OR_RETURN(BackingFile backing_file, MakeBackingFile(id, req));
     backing_id = backing_file.backing_id;
     backing_it = backing_files_.emplace(id, std::move(backing_file)).first;
     open_files_held_.insert(id);
@@ -2809,8 +2810,7 @@ absl::Status DirCacheFS::Create(FuseRequest &req, fuse_ino_t parent_ino,
                              .status();
                        },
                        writable));
-  absl::StatusOr<BackingFile> made =
-      MakeBackingFile(child.id, child.stx.stx_mode, req);
+  absl::StatusOr<BackingFile> made = MakeBackingFile(child.id, req);
   if (!made.ok()) return CreatedButNotCompleted(parent, name, made.status());
   BackingFile backing_file = *std::move(made);
   backing_file.refs = 1;
@@ -3101,8 +3101,7 @@ absl::Status DirCacheFS::Tmpfile(FuseRequest &req, fuse_ino_t parent_ino,
                    backing::RecordTmpfile(ctx_, parent, *fd));
   // The descriptor is the file's shared backing file (it is O_RDWR, and a
   // brand new inode cannot have another): registered once, as Create's.
-  ASSIGN_OR_RETURN(int backing_id,
-                   PassthroughFor(req, *fd, child.stx.stx_mode));
+  ASSIGN_OR_RETURN(int backing_id, req.PassthroughOpen(*fd));
   const bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
   backing_files_.emplace(child.id,
                          BackingFile{.fd = std::move(fd),

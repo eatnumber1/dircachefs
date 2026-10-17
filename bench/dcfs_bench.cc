@@ -11,8 +11,9 @@
 // removed before google/benchmark sees the command line (--dcfs_flags=A,B
 // gives the daemons of Setup extra flags, e.g. --v=2 for the request log).
 //
-// Write and SetidWrite overwrite a MiB of a file whose mode gets
-// passthrough, and of one whose mode makes dcfs decline it.
+// Write and SetidWrite overwrite a MiB of a plain file, and of one with
+// setuid and setgid, which the kernel checks for privileges to remove
+// before every write.
 //
 // Targets: the same operations run on the backing filesystem directly
 // ("backing"), through dcfs with the default one-hour kernel timeouts
@@ -163,7 +164,7 @@ bool StartDcfs(const std::string &name, const std::string &src,
 
 // The files BM_Write and BM_SetidWrite write, at the top of each backing
 // tree, and their modes: an ordinary one, and one with setuid and setgid but
-// not group execute, for which dcfs declines passthrough
+// not group execute, which the kernel never marks S_NOSEC
 // (docs/design.md "Caller credentials").
 constexpr std::pair<std::string_view, mode_t> kWriteFiles[] = {
     {"write_plain", 0666},
