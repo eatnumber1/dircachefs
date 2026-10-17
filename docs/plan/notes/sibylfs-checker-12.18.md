@@ -1,3 +1,12 @@
+> **Correction (2026-10-16, an independent re-verification ordered by russ):**
+> this note's verdict does not hold. The checker builds from source without
+> patches (OCaml 4.02.3 via opam's archive repository), agrees with the
+> 2015-10-05 prebuilt binary (sha256 080c5bce..., not the 2015-08-20 one cited
+> below), accepts a real ext4 trace, rejects every wrong mutant tried, models
+> concurrency, and runs against a mount directly. It is usable as a
+> differential second oracle for the operations it models. See the log entry
+> of 2026-10-16 and step 12.18b.
+
 # SibylFS trace checker as a second oracle: Spike report (2026-10-11, dcfs-investigator)
 
 Spike report for **Step 12.18**: investigating whether the SibylFS trace checker (OCaml) can be built hermetically through Bazel (or pinned as a prebuilt binary) and used as a second oracle to validate dcfs FUSE reply traces.

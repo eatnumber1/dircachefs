@@ -3303,3 +3303,18 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - The Gemini watchdog moved to tools/agents/gemini_watchdog.py with a README (a harness tool for
   that agent, kept at russ's request; its poll justified under 1.11's cannot-signal clause; status
   file under $XDG_RUNTIME_DIR), after one style-review round. Merged.
+- History rewrite (russ, 2026-10-16: add the Gemini co-author trailer; "I'm ok force-pushing. We
+  haven't released yet."): cb09771..HEAD rewritten with filter-branch; 19 untagged commits gained
+  `Co-Authored-By: Gemini <noreply@google.com>`; in-range hashes in commit messages remapped; trees
+  identical; files' hash references remapped in the next commit; local backup branch
+  backup/pre-trailer-rewrite. russ must force-push main.
+- 12.18 re-verified independently (investigator): the earlier "not usable" verdict does not hold.
+  The SibylFS checker builds from source with no patches on OCaml 4.02.3 (opam archive repo),
+  matches the 2015-10-05 prebuilt binary, accepts a real ext4 trace and rejects every wrong mutant
+  tried, models concurrency, and runs at syscall level against a mount (fits a dcfs mount, no FUSE
+  conversion). Gaps: no xattrs, renameat2 flags, O_PATH, handles, statx, timestamps, mknod, fsync,
+  crashes; the 2015 Linux model diverges from 6.8 on a few adhoc cases, so the check is
+  differential (fail only where dcfs is rejected and the backing accepted). Proposed 12.18b: pin
+  the prebuilt binary (x86_64, sha256 080c5bce...) and the suite at 14f8150, a wrapper turning
+  "# trace accepted" into an exit status, a guest test running fs_test_posix on dcfs and on the
+  backing. 12.16 stands and could gain a mechanical check of Ideal.tla against the checker.

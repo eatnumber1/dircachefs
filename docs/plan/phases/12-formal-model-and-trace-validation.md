@@ -559,3 +559,19 @@ Order after 12.12's audit, which may reorder them with the approved
   status is never 0 unless dcfs serves" and known_bugs for the cases the
   three 15.2 review rounds found. Owner: dcfs-protocol (mount namespaces).
 
+
+## 12.18b SibylFS as a differential second oracle (2026-10-16; after the re-verification)
+
+From the independent re-verification (log, 2026-10-16): pin the 2015-10-05
+prebuilt checker (x86_64; sha256
+080c5bced08bbb34dedde43cdbd4f8fd3e1c5d678c60dff7067cc6f189208879) and the
+test suite at sibylfs_test_suite 14f81504 (http_archive, not vendored: no
+licence file in those repos; the source is ISC); a wrapper that turns the
+checker's "# trace accepted" line into an exit status (it always exits 0); a
+QEMU guest test that runs `fs_test_posix -r <fresh dir>` on a dcfs mount and
+on the plain backing, checks both with `fs_test_check -arch linux --root`,
+and fails only where dcfs is rejected and the backing accepted (the 2015
+Linux model diverges from current kernels on a few adhoc cases). The source
+build is the fallback (about 14 archives under a custom repository rule).
+Follow-up: a mechanical check of 12.16's Ideal.tla against the checker
+(bounded TLC behaviours rendered as SibylFS traces). Investigator.
