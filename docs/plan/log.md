@@ -3799,3 +3799,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   session loop, the wall-clock property moved from limitations/ into the
   model); queued for after 25.28b. Read as confirming the 2026-10-12 timer
   exception.
+- 2026-10-17, russ confirms 25.28c's one-shot timer is the 2026-10-12
+  exception to the no-timers rule: "same intent".

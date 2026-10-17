@@ -1014,8 +1014,8 @@ at request ends; `limitations/durability_idle.cfg` shows the wall-clock
 property violated). russ (2026-10-12) approved tying the checkpoint to
 `--sync_interval_sec` as an exception to the no-timers rule; asked on
 2026-10-17 whether a real timer is that exception, he answered "This
-definitely needs to get added to the formal model too", which the
-orchestrator reads as yes (russ may say otherwise).
+definitely needs to get added to the formal model too", and confirmed:
+"same intent".
 
 - **The timer:** a one-shot `timerfd`, armed when something becomes
   losable or dirty with no sync point pending (a commit since the last
