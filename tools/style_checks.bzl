@@ -210,8 +210,9 @@ def style_findings_here(name = "style_findings", tidy = "yes"):
       target that depends on one that is incompatible with the configuration
       (the sanitizer-runtime tests of //dcfs, asan_runtime_test and
       ubsan_runtime_test, are therefore not analysed);
-    - a target with the same `srcs` (the same `hdrs`, if it has no `srcs`) as an earlier one: the fault-injection
-      variants of a test build one source against different deps, and
+    - a target with the same `srcs` (the same `hdrs`, if it has no `srcs`)
+      as an earlier one: the fault-injection variants of a test build one
+      source against different deps, and
       analysing it again would repeat the findings at the cost of minutes
       (dir_cache_fs_test.cc is 7800 lines, built into four targets).
     """
