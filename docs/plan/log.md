@@ -3515,3 +3515,23 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the allowlist backlog-only. russ approved the third-party abort/exit
   allow lines (Abseil internals and flags, libfuse, libnuma): "Yes"; each
   carries his approval date.
+
+- 2026-10-17: 12.18b done (lane-3, two commits, unreviewed): SibylFS's
+  prebuilt checker and test suite pinned, a verdict wrapper with a
+  selftest, and a differential guest test (hand-written scripts medium on
+  ext4, a 1/40 sample large, the full 21,018-script suite manual in 16
+  shards). Through dcfs on ext4 the full suite matched the backing exactly
+  (17,178 allowed on both, none only on one); the hand-written scripts give
+  one ext4-only lead, lseek(SEEK_END) on a directory (FUSE's
+  generic_file_llseek against ext4_dir_llseek), recorded as an expected
+  divergence. The suite has no licence (all rights reserved), and the
+  prebuilt binaries link LGPL-with-exception libraries; both go to russ with
+  4.15's CI-cache question. The 16 manual full-suite guests were likely the
+  load spike of 23:24. fault_backing_test fails its I/O budget under load
+  and enospc_cache_test's sync-listing is flaky, both before this change:
+  a triage step once load allows.
+- Quota 2026-10-17 07:55 UTC: Claude week 11% (about 8 points today against
+  a ceiling of about 10), five-hour session 31%. 12.18b's Opus and style
+  reviews wait for agy's Claude/GPT pool (refills 19:55 UTC) instead of the
+  Claude plan; no new Claude writing dispatches today beyond fix rounds
+  already open.
