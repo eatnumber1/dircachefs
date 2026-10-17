@@ -3958,3 +3958,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 2026-10-17, russ: synchronous invalidation; "If there's any cases you
   think deferred invalidation is needed, bring them to me." In 26.40's
   brief.
+- 2026-10-17, russ steps back on budgets; the orchestrator proposes exact
+  counts, slope tests, instructions in dedicated scenarios and an A/B
+  wall-clock benchmark, dropping per-test block-layer I/O and CPU budgets.
+  russ: "Investigate, then if it pans out, I agree with your proposal."
+  26.41 briefed; the history investigation started on Gemini.

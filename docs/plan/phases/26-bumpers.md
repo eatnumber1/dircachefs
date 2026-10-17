@@ -1267,3 +1267,38 @@ synchronous invalidation before the reply to a deferred one (racy).
   zero timeout for files open for writing stays.
 
 Owner: dcfs-protocol (kernel cache coherence), after 12.20 or with it.
+
+## 26.41 Performance bumpers that do not move with load (russ, 2026-10-17)
+
+russ: "The whole point of both the CPU and disk I/O budgets are to try to
+provide mechanical 'bumpers' around performance regressions, but our host
+can get heavily loaded ... Is what we're doing the best way to achieve
+that goal?" The orchestrator's proposal, agreed if the investigation
+bears it out ("Investigate, then if it pans out, I agree with your
+proposal"):
+
+1. Primary bumpers are exact counts of what dcfs's design controls, with
+   zero or near-zero tolerance: FUSE requests per operation, backing
+   syscalls by kind, fsync/syncfs, SQL statements and transactions
+   (`syscall_budgets.txt`, `request_budgets.txt`).
+2. Complexity tests assert slopes (per-entry, per-file costs), extending
+   26.4b's slope tests.
+3. CPU work is instructions retired (user and kernel, 26.36's PMU
+   findings) in a few dedicated benchmark scenarios, unheld without a PMU.
+4. Wall-clock speed is an A/B benchmark: main and the candidate
+   interleaved on the same host, compared as a ratio; on demand or
+   nightly.
+5. The per-test block-layer I/O budgets (`io_budgets.txt`) and per-test
+   CPU budgets (`cpu_budgets.txt`) go; the wall allowance stays only as a
+   hang guard.
+
+**Investigation first:** from `docs/plan/log.md`, the phase files, git
+history and CI history, every regression or finding the CPU, I/O,
+syscall and request budgets caught, and for each whether an exact count,
+a slope test or an A/B run would have caught it. Any regression only a
+block-layer or CPU-time budget caught changes the design and goes to
+russ. Report in `docs/plan/notes/`. Supersedes the dashboard questions
+on instruction budgets, disk I/O drift and the xfstests write lines.
+
+Owner: the investigation by Gemini (whole-history reading), verified by
+the orchestrator; the change by dcfs-implementer (medium).
