@@ -184,7 +184,10 @@ push; the queue above starts in earnest after the reset.
   would change them substantially. The phase that ports the remainder
   is queued after the trial and the current phases, at the orchestrator's
   choice of when.
-- Coroutines over io_uring (the coroutine phase in history.md). It owes
+- Coroutines over io_uring (the coroutine phase in history.md). io_uring
+  is required, with no fallback loop (russ, 2026-10-17: "I'm ok requiring
+  io_uring be available"); startup refuses clearly where it is disabled.
+  It owes
   the cancellation gap Phase 22 left open: a backing syscall already
   blocked in the kernel (a disk spinning up, a hung network backing,
   `syncfs`) cannot be interrupted today, so a FUSE_INTERRUPT waits for it.

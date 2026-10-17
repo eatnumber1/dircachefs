@@ -3876,3 +3876,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   mounts, trusted/security xattrs. AGENTS.md's "Root is required" stands.
   The io_uring backend still gets an abstraction with a plain-loop
   fallback (io_uring can be disabled by sysctl or seccomp even for root).
+- 2026-10-17, correction: no plain-loop fallback for io_uring. russ: "No,
+  I don't want a fallback for that. I'm ok requiring io_uring be
+  available." The coroutine/io_uring phase requires io_uring (startup
+  refuses with a clear error where it is disabled); the entry above about
+  an abstraction with a fallback is withdrawn.
