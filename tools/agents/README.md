@@ -103,13 +103,15 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
 - `show`: prints the table.
 
 The table has an orchestrator row and one row per `lane-N` under
-`~/Sources/dircachefs-lanes/`. A lane with a recorded agent shows the step
-(the branch name minus a leading `step-`; the agent's description on a
-detached HEAD), agent type, model and effort as `running`; a lane with no
-agent but an `agy` process whose working directory is the lane shows
-`agy, sandboxed`, the branch as the step, and its `--model` with a trailing
-`-low|-medium|-high` moved to the effort column;
-otherwise it is `idle`.
+`~/Sources/dircachefs-lanes/`. A lane with recorded agents shows the step
+(the branch name minus a leading `step-`; the first agent's description on a
+detached HEAD) and `running`. Its agent type, model and effort are each the
+values of every agent on the lane joined by `, ` in launch order (e.g.
+`dcfs-reviewer, dcfs-style-reviewer` / `opus, sonnet` / `high, medium`); when
+an agent stops, the row shows the rest. An `agy` process whose working
+directory is the lane adds `agy, sandboxed` to those lists, with its `--model`
+(a trailing `-low|-medium|-high` moved to the effort column). A lane with an
+`agy` process and no agent shows just that. Otherwise the lane is `idle`.
 
 State is in `$DCFS_DASHBOARD_DIR` (default `~/.cache/dcfs-dashboard/`):
 `running.json`, `finished.json`, `lanes.json`, `uploaded.sha256`, and an

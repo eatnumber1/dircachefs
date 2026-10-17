@@ -32,6 +32,9 @@ class Fixture(unittest.TestCase):
         for d in (self.lanes, self.agents, self.proc):
             os.makedirs(d)
         self.write(os.path.join(self.agents, "dcfs-implementer.md"), AGENT_DEF)
+        self.write(os.path.join(self.agents, "dcfs-reviewer.md"),
+                   "---\nname: dcfs-reviewer\nmodel: opus\neffort: high\n"
+                   "---\nbody\n")
         self.make_lane(1, "step-25.9b")
         self.make_lane(2, "main")
         self.env = dashboard_lanes.Env(
@@ -115,6 +118,25 @@ class PostAgentTest(Fixture):
         self.assertEqual(rows["lane-1"]["state"], "idle")
         self.assertEqual(
             list(rows), ["orchestrator", "lane-1", "lane-2"])
+
+    def test_two_agents_on_one_lane_share_its_row(self):
+        self.launch()
+        self.launch(agent_id="a2", subagent_type="dcfs-reviewer")
+        row = self.rows()["lane-2"]
+        self.assertEqual(row["state"], "running")
+        self.assertEqual(row["step"], "main")
+        self.assertEqual(row["agent"], "dcfs-implementer, dcfs-reviewer")
+        self.assertEqual(row["model"], "sonnet, opus")
+        self.assertEqual(row["effort"], "medium, high")
+
+    def test_stopping_one_of_two_shows_the_rest(self):
+        self.launch()
+        self.launch(agent_id="a2", subagent_type="dcfs-reviewer")
+        self.run_hook("subagent-stop", {"agent_id": "a1"})
+        row = self.rows()["lane-2"]
+        self.assertEqual(row["state"], "running")
+        self.assertEqual(row["agent"], "dcfs-reviewer")
+        self.assertEqual((row["model"], row["effort"]), ("opus", "high"))
 
     def test_orchestrator_config(self):
         os.makedirs(self.dash)
@@ -247,10 +269,24 @@ class AgyTest(Fixture):
         self.launch(prompt="none")
         self.assertEqual(self.rows()["lane-1"]["state"], "idle")
 
-    def test_recorded_agent_wins_over_agy(self):
+    def test_agy_is_appended_to_the_agents_on_its_lane(self):
+        self.make_agy(42, "lane-2", ["--model", "gemini-x-high"])
+        self.launch()
+        self.launch(agent_id="a2", subagent_type="dcfs-reviewer")
+        row = self.rows()["lane-2"]
+        self.assertEqual(row["agent"],
+                         "dcfs-implementer, dcfs-reviewer, agy, sandboxed")
+        self.assertEqual(row["model"], "sonnet, opus, gemini-x")
+        self.assertEqual(row["effort"], "medium, high, high")
+        self.assertEqual(row["step"], "main")
+
+    def test_agy_stays_when_the_agent_on_its_lane_stops(self):
         self.make_agy(42, "lane-2", ["--model", "gemini-x"])
         self.launch()
-        self.assertEqual(self.rows()["lane-2"]["agent"], "dcfs-implementer")
+        self.run_hook("subagent-stop", {"agent_id": "a1"})
+        row = self.rows()["lane-2"]
+        self.assertEqual(row["agent"], "agy, sandboxed")
+        self.assertEqual(row["state"], "running")
 
 
 class BranchTest(Fixture):

@@ -180,8 +180,8 @@ def build_rows(env):
     ]
     running = load_json(env.path("running.json"), {})
     by_lane = {}
-    for record in running.values():  # later launches replace earlier ones
-        by_lane[record["lane"]] = record
+    for record in running.values():  # launch order
+        by_lane.setdefault(record["lane"], []).append(record)
     agy = agy_processes(env)
     lanes = sorted(
         (int(m.group(1)), name)
@@ -197,24 +197,23 @@ def build_rows(env):
         except OSError:  # a lane that is not a worktree: show it empty
             rows.append(row)
             continue
-        if name in by_lane:
-            # A recorded agent wins over an agy process in the same lane.
-            record = by_lane[name]
-            row.update(
-                step=step_of(branch) if branch else record["description"],
-                agent=record["subagent_type"],
-                model=record["model"],
-                effort=record["effort"],
-                state="running",
-            )
-        elif os.path.realpath(lane_dir) in agy:
+        # The recorded agents on the lane, then an agy process there.
+        records = by_lane.get(name, [])
+        shown = [(r["subagent_type"], r["model"], r["effort"])
+                 for r in records]
+        if os.path.realpath(lane_dir) in agy:
             model = agy[os.path.realpath(lane_dir)]
             effort = EFFORT_SUFFIX.match(model)
+            shown.append(("agy, sandboxed",
+                          effort.group(1) if effort else model,
+                          effort.group(2) if effort else ""))
+        if shown:
+            fallback = records[0]["description"] if records else ""
             row.update(
-                step=step_of(branch) if branch else "",
-                agent="agy, sandboxed",
-                model=effort.group(1) if effort else model,
-                effort=effort.group(2) if effort else "",
+                step=step_of(branch) if branch else fallback,
+                agent=", ".join(s[0] for s in shown),
+                model=", ".join(s[1] for s in shown),
+                effort=", ".join(s[2] for s in shown),
                 state="running",
             )
         rows.append(row)
