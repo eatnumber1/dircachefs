@@ -187,7 +187,13 @@ push; the queue above starts in earnest after the reset.
 - Coroutines over io_uring (the coroutine phase in history.md). io_uring
   is required, with no fallback loop (russ, 2026-10-17: "I'm ok requiring
   io_uring be available"); startup refuses clearly where it is disabled.
-  It owes
+  It must keep 26.41's exact work counts possible (russ, 2026-10-17: "if
+  we do this we'll need to find another solution when we switch to
+  io_uring and coroutines"): concurrency and unbounded retries make
+  counts depend on scheduling, so the design keeps an injectable,
+  deterministic executor (a fake ring the test steps one completion at a
+  time) under which the slope and count scenarios run one request at a
+  time, and counts retries separately. It owes
   the cancellation gap Phase 22 left open: a backing syscall already
   blocked in the kernel (a disk spinning up, a hung network backing,
   `syncfs`) cannot be interrupted today, so a FUSE_INTERRUPT waits for it.
