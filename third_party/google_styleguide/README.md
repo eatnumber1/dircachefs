@@ -13,6 +13,8 @@ reviews reproducible and offline; a bump shows the guides' changes as a diff.
   `http_archive`).
   - URL: `https://github.com/google/styleguide/archive/b2a398d17f5ea890c6965b50e6c0c27a8c178f72.tar.gz`
   - sha256: `5ebd83453a1919d9df447e84ea00196c0a72650aab403dbc021b2f9ff5499b40`
+  - How the sha256 was obtained: `curl -L` of the URL above and `sha256sum`
+    of the file, on 2026-10-17; Bazel verifies it on every fetch.
 - Licence: **CC-BY-3.0** (the archive's `LICENSE` is "Creative Commons Legal
   Code, Attribution 3.0 Unported"; its README: "The style guides in this
   project are licensed under the CC-By 3.0 License"). The rendered copies

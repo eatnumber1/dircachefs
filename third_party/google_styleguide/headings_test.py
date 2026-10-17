@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""Checks that the rendered Google style guides hold known section headings.
+"""Checks that the rendered Google style guides hold known section headings
+(plan step 25.29).
 
 A bad render or an upstream restructuring fails here, not in a reviewer's
 hands. argv: the rendered cpp, python, shell and markdown guides, in order.
@@ -24,7 +25,7 @@ EXPECTED = {
 class RenderedGuidesTest(unittest.TestCase):
     def test_headings(self):
         for name, path in zip(EXPECTED, sys.argv[1:5], strict=True):
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 text = f.read()
             headings = {h.strip() for h in
                         re.findall(r"^#{1,6} (.+)$", text, re.M)}

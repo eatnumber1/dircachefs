@@ -6,7 +6,7 @@ py_test(
     name = "headings_test",
     size = "small",
     timeout = "short",
-    srcs = ["test_headings.py"],
+    srcs = ["headings_test.py"],
     args = [
         "$(location :cpp.md)",
         "$(location :python.md)",
@@ -19,7 +19,7 @@ py_test(
         ":python.md",
         ":shell.md",
     ],
-    main = "test_headings.py",
+    main = "headings_test.py",
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
