@@ -1277,3 +1277,12 @@ again, a readable pidfd must make it return 0; failing first against a
 end-to-end smoke test.
 
 Owner: Gemini (agy) for the sweep and the test, a style review after.
+
+**boot.sh ports to C++ next** (russ, 2026-10-17: "I think this is the
+kind of 'large changes' that trigger the rule of rewriting shell scripts
+in C++. Maybe it's time to rewrite boot.sh."): after 25.34 merges, the
+first follow-up of its port list is `test/qemu/guest/boot.sh` as a
+`qemu_cc_test` on 25.34's helpers, same checks and names, shown
+equivalent by one deliberate breakage, the script deleted. Its `waitexit`
+and `waitpath` checks stay end-to-end smoke tests; the "does not return
+early" claim lives in the exact unit test above.
