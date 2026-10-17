@@ -3378,3 +3378,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   examples from this repository (and the concurrency bullet restored, an orchestrator's ruling),
   sg kvm gone from docs/conformance.md and formal/README.md, tools/agents/claude_usage.py with a
   --cwd flag and tests of its parsing (fixture synthetic: no real panel captured by that agent).
+
+- 2026-10-16: `STATUS.md` added at the top level, a progress page russ asked
+  for that GitHub renders for anyone ("a dashboard that I can monitor project
+  progress on ... ideally something that others can see on Github too"). It
+  carries the CI, coverage and TLC badges, what is in flight, what is next,
+  what waits on russ and what landed recently. Kept current at every merge
+  (process.md step 6). Quota and agent details stay out of it.

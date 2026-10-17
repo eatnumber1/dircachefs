@@ -107,7 +107,10 @@ process (its waves and file ownership table) is in `history.md`.
    `N4:` and a `12.5 review:` subject before this line existed). Then, in
    `~/Sources/dircachefs`: `git fetch
    ~/Sources/dircachefs-lanes/lane-K step-N.M` and `git merge --ff-only
-   FETCH_HEAD`. Update the status table and `log.md` and commit them.
+   FETCH_HEAD`. Update the status table, `log.md` and the top-level
+   `STATUS.md` (the public progress page: Now, Next, Waiting on the
+   maintainer, Recently landed; no quota or agent details) and commit
+   them.
    The lane stays for the next step.
 7. **Sync-point suites** run in a lane checked out at `main` (already
    built), not in `~/Sources/dircachefs`, whose Bazel server is russ's.
