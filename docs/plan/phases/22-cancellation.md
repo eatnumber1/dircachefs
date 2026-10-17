@@ -129,3 +129,52 @@ invariant checker; cancel_test bounds 2 s KVM / 8 s TCG (0.8 s measured;
 6,036,816 unchanged (1508 s / 1272 s alone under load 20). AGENTS.md's
 rule now reads "at checkpoints (dcfs/checkpoint.h), each just before a
 backing syscall and never between a mutation's syscall and its phase 3".
+
+## 22.5 Timely interrupts, in the model (russ, 2026-10-17)
+
+russ: "Let's use the formal model to additionally provide some guarantees
+around 'interrupt in a timely manner'. Not necessarily wall clock, but
+maybe 'interrupt between every step' or something like that."
+
+Today `Interrupt(p)` is an action that may happen at a checkpoint pc, so
+the model proves an interrupt is safe but not that it is acted on: a dcfs
+that ignored interrupts forever passes. This step makes acting on one an
+obligation and bounds how much work follows it.
+
+- **Arrival, separate from acting on it.** `InterruptArrives(p)` marks a
+  request (in flight, or queued before dispatch) interrupted at any step.
+  At a checkpoint pc an interrupted request's only enabled step is
+  `Interrupt(p)`: the checkpoint checks, as `Checkpoint` in
+  `dcfs/checkpoint.h` does. Between a syscall and its phase 3 it
+  proceeds, as now.
+- **The bound, a safety property counted in work, not time.** After the
+  interrupt arrives, a request takes at most K more backing syscalls before
+  it replies, where K is the longest run of backing syscalls with no
+  checkpoint between them (the syscall already past its checkpoint, plus
+  the post-syscall reads before phase 3, e.g. a create's probe). Find K
+  from the model, name every pc in that run, and state the property with K
+  written out. If the honest answer is "unbounded somewhere" (a loop of
+  backing calls with no checkpoint), that is a finding: report it rather
+  than bending the property.
+- **Liveness.** An interrupted request eventually replies (`~>`), under
+  the weak fairness of the request's own steps that the code provides.
+- **What the bound does not count.** Work with no backing syscall: cache
+  queries and commits, the kernel-blocked syscall itself (README future
+  work, coroutines over io_uring). Say so in the model's header and in
+  `docs/design.md` "Cancellation".
+- **Known bugs.** A `known_bugs/` variant with one checkpoint removed (say,
+  in readdir's probe loop, or a rename's second name) must violate the
+  bound, and one where the checkpoint ignores the arrival must violate
+  liveness.
+- **The code keeps it.** Trace validation (Phase 12) must refuse a trace
+  in which the code takes a backing syscall at a checkpoint after the
+  interrupt was visible there. Propose, and if cheap build, a mechanical
+  check that every backing call reachable from a FUSE handler is preceded
+  by a checkpoint or sits in the named post-syscall run (the model's K),
+  in the style of 25.9's backing-door matcher.
+- Keep the state space affordable: only the `MC_interrupt*` configs turn
+  arrival on; `MC_large` and `MC_nolock` state counts stay unchanged.
+
+Owner: dcfs-protocol. Docs: `formal/README.md` (actions and properties
+tables), `docs/design.md` "Cancellation", README's EINTR paragraph if
+the guarantee is user-visible.

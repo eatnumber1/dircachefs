@@ -3721,3 +3721,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   later: the README's future-work entry for coroutines over io_uring now
   names it (kernel-blocked backing syscalls cannot be interrupted) and
   what that phase must check.
+- 2026-10-17, 22.5 briefed and dispatched (lane-2, dcfs-protocol): the
+  model gains interrupt arrival and a bound on the backing syscalls a
+  request takes after it (russ: "interrupt in a timely manner").
