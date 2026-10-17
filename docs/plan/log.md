@@ -3907,3 +3907,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   code, 7 out-of-band, 2 real (ctime after FS_IOC_SETFLAGS, stale up to
   attr_timeout; MAP_SHARED stores after close, stale until eviction).
   notes/kernel-cache-invalidation-2026-10-17.md; 12.20's input.
+- 2026-10-17, 26.37 merged (233baa3): the asan guests' initramfs no longer
+  fit the rootfs tmpfs after 12.18b's SibylFS files (+9.6 MB), so
+  E2E_ASAN_MEM 384 -> 512; qemu_cc_test now passes dcfs_sanitizer= like
+  qemu_test (backing_test was held to the plain CPU budget), with
+  sanitizer_cmdline_test; xfstests_1_test_ext4's write-side budget lines
+  dropped (generic/364 and 037 issue at the host's rate: 57,097 writes on
+  CI, 13,644-13,965 locally), read side re-measured. Provisional ruling on
+  the dropped lines on the dashboard. Reviewed by the orchestrator;
+  a Flash style review follows.

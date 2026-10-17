@@ -1099,7 +1099,7 @@ start, or something?"
 Owner: dcfs-implementer, effort medium (the default touches 25.28b's
 bound and its model's Interval; check the model's comment still holds).
 
-## 26.37 CI run 39046531637 (3441f89): the asan shards and xfstests_1 (2026-10-17)
+## 26.37 CI run 39046531637 (3441f89): the asan shards and xfstests_1 (2026-10-17) (merged 2026-10-17, 233baa3)
 
 The first CI run after 12.18b, 26.30 and 26.34 failed in two places.
 
