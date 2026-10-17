@@ -382,9 +382,20 @@ class ChangedTest(unittest.TestCase):
             mutate.changed_hunks(repo, "%s..HEAD" % first, "dcfs/x.cc"),
             [(2, 2), (4, 4)])
         for base in ("0" * 40, "", "d215c098d5c208eda672d0d6535605351bed9f68"):
+            err = io.StringIO()
+            with redirect_stderr(err):
+                hunks = mutate.changed_hunks(repo, "%s..HEAD" % base,
+                                             "dcfs/x.cc")
+            self.assertEqual(hunks, [(2, 2)], base)
+            # a narrowed run is never silent
             self.assertEqual(
-                mutate.changed_hunks(repo, "%s..HEAD" % base, "dcfs/x.cc"),
-                [(2, 2)], base)
+                err.getvalue(),
+                "mutate: base %s is not in this checkout; mutating the tip "
+                "against its parent\n" % base)
+        err = io.StringIO()
+        with redirect_stderr(err):
+            mutate.changed_hunks(repo, "%s..HEAD" % first, "dcfs/x.cc")
+        self.assertEqual(err.getvalue(), "")
 
     def test_a_range_with_no_hunks_selects_nothing(self):
         self.assertEqual(mutate.parse_hunks(""), [])
