@@ -993,7 +993,28 @@ test_suite(
     tests = [":sibylfs_full_%d_test" % shard for shard in range(16)],
 )
 
-# The checks of the wrapper and the gates, with the real tools and no dcfs.
+# The differential test's own logic over canned input, under the guest's
+# busybox: the script selection, the regressions and the gates.
+sh_test(
+    name = "sibylfs_lib_test",
+    size = "small",
+    srcs = ["sibylfs_lib_test.sh"],
+    args = [
+        "$(location guest/lib.sh)",
+        "$(location guest/sibylfs_lib.sh)",
+        "$(location @alpine_busybox//:root/bin/busybox.static)",
+    ],
+    data = [
+        "guest/lib.sh",
+        "guest/sibylfs_lib.sh",
+        "@alpine_busybox//:root/bin/busybox.static",
+    ],
+    timeout = "short",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+# The wrapper, a real run and the account commands, with the real SibylFS
+# tools and no dcfs (what needs root and a guest).
 qemu_test(
     name = "sibylfs_selftest_test",
     guest_script = "guest/sibylfs_selftest.sh",

@@ -77,22 +77,7 @@ LOG=/tmp/dcfs.log
 DAEMON_PID=""
 MOUNTED=0
 
-# See readonly.sh for why every cleanup command here is `|| true`-guarded.
-cleanup() {
-	rc=$?
-	if [ "$rc" -ne 0 ] || [ "$FAILED" -ne 0 ]; then
-		echo "--- dcfs stderr ---"
-		cat "$LOG" 2>/dev/null
-	fi
-	if [ "$MOUNTED" -eq 1 ]; then
-		umount "$MNT" 2>/dev/null || true
-	fi
-	if [ -n "$DAEMON_PID" ] && kill -0 "$DAEMON_PID" 2>/dev/null; then
-		kill "$DAEMON_PID" 2>/dev/null || true
-		wait "$DAEMON_PID" 2>/dev/null || true
-	fi
-}
-trap cleanup EXIT
+trap 'daemon_cleanup "$LOG"' EXIT
 
 echo "pjdfstest.sh: kernel $(uname -r)"
 
@@ -293,15 +278,6 @@ fi
 # duration of this test. Any that show up are a real dcfs bug (a false
 # positive in its own out-of-band detection, most likely), not something
 # pjdfstest itself provoked on purpose.
-oob_count=$(grep -c "out-of-band" "$LOG" 2>/dev/null || true)
-oob_count=${oob_count:-0}
-echo "pjdfstest.sh: dcfs stderr out-of-band warning count: $oob_count"
-if [ "$oob_count" -gt 0 ]; then
-	echo "pjdfstest.sh: unexpected out-of-band warning(s) in dcfs stderr (a dcfs bug -- pjdfstest never touches the backing filesystem outside the mount):"
-	grep "out-of-band" "$LOG"
-	fail pjdfstest-no-out-of-band "$oob_count warning(s), see dcfs stderr above"
-else
-	pass pjdfstest-no-out-of-band
-fi
+no_out_of_band pjdfstest-no-out-of-band "$LOG"
 
 exit "$FAILED"

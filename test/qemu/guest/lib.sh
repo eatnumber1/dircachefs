@@ -142,6 +142,44 @@ disabled() {
 
 is_mounted() { grep -q " $1 " /proc/mounts; }
 
+# daemon_cleanup LOG: the EXIT trap of a script that mounts dcfs at $MNT with
+# start_daemon (trap 'daemon_cleanup "$LOG"' EXIT): when the script is leaving
+# with a failure, the daemon's log; then the unmount, if $MOUNTED, and the
+# daemon's end, if it still runs. Every command is `|| true`-guarded: this must
+# run to completion whatever state the script is in (readonly.sh says why).
+daemon_cleanup() {
+	dc_rc=$?
+	if [ "$dc_rc" -ne 0 ] || [ "$FAILED" -ne 0 ]; then
+		echo "--- dcfs stderr ---"
+		cat "$1" 2>/dev/null
+	fi
+	if [ "$MOUNTED" -eq 1 ]; then
+		umount "$MNT" 2>/dev/null || true
+	fi
+	if [ -n "$DAEMON_PID" ] && kill -0 "$DAEMON_PID" 2>/dev/null; then
+		kill "$DAEMON_PID" 2>/dev/null || true
+		wait "$DAEMON_PID" 2>/dev/null || true
+	fi
+}
+
+# no_out_of_band NAME LOG: the check NAME that dcfs, whose stderr is LOG, logged
+# no "out-of-band" warning. dcfs (backing.cc's ReconcileAttrs and
+# VerifyBackingIdentity, step 4.6) warns of any change on the backing file
+# system that it did not make itself. A test that reaches the backing file
+# system only through the mount, or in directories dcfs has no row for, must
+# see none: one is a false positive of dcfs's own detection. Prints the count.
+no_out_of_band() {
+	noob_count=$(grep -c "out-of-band" "$2" 2>/dev/null || true)
+	noob_count=${noob_count:-0}
+	echo "$(basename "$0"): dcfs stderr out-of-band warning count: $noob_count"
+	if [ "$noob_count" -gt 0 ]; then
+		grep "out-of-band" "$2"
+		fail "$1" "$noob_count out-of-band warning(s) in dcfs stderr, see above: this test changes the backing file system only through the mount, so each is a false positive of dcfs"
+	else
+		pass "$1"
+	fi
+}
+
 # backing_fstype PATH: the filesystem type backing PATH -- "ext4", "xfs",
 # "btrfs", or the raw hex magic (unrecognized) -- for guest scripts that run
 # against all three backing filesystems (step 5.2: qemu_test_matrix) and
