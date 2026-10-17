@@ -195,6 +195,23 @@ TEST(SplitHelperOptionsTest, ValuedFlagWithoutValueIsAnError) {
                        HasSubstr("dcfs.sync_interval_sec")));
 }
 
+TEST(SplitHelperOptionsTest, ABooleanTakesOnlyItsFourValues) {
+  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.ro=false"}),
+              IsOkAndHolds(Field(&HelperOptions::read_only, false)));
+  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.ro=maybe"}),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("dcfs.ro=maybe takes 0, 1, true or false")));
+}
+
+TEST(SplitHelperOptionsTest, CacheDbAndFuseOptNeedAValue) {
+  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.cache_db"}),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("dcfs.cache_db needs a path")));
+  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.fuse_opt="}),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("needs a libfuse mount option")));
+}
+
 TEST(SplitHelperOptionsTest, FuseOptAccumulates) {
   EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.fuse_opt=max_read=65536",
                                          "dcfs.fuse_opt=suid"}),

@@ -518,6 +518,7 @@ TEST_F(SyscallsTest, RlimitFlockClockSleepAndPid) {
   EXPECT_GT(limit.rlim_cur, 0u);
   EXPECT_THAT(syscalls::setrlimit(RLIMIT_NOFILE, limit), IsOk());
   EXPECT_FALSE(syscalls::getrlimit(-1).ok());
+  EXPECT_EQ(StatusToErrno(syscalls::setrlimit(-1, limit)), EINVAL);
 
   EXPECT_THAT(syscalls::flock(file_fd_, LOCK_EX | LOCK_NB), IsOk());
   EXPECT_THAT(syscalls::flock(file_fd_, LOCK_UN), IsOk());
@@ -533,6 +534,8 @@ TEST_F(SyscallsTest, RlimitFlockClockSleepAndPid) {
                 (after.tv_nsec - before.tv_nsec),
             5'000'000L);
   EXPECT_FALSE(syscalls::clock_gettime(static_cast<clockid_t>(-5)).ok());
+  const struct timespec not_a_time = {.tv_sec = 0, .tv_nsec = 2'000'000'000};
+  EXPECT_EQ(StatusToErrno(syscalls::nanosleep(not_a_time)), EINVAL);
   EXPECT_GT(syscalls::getpid(), 0);
 }
 
@@ -609,6 +612,40 @@ TEST(SyscallsWrapperTest, ChdirAndGetuid) {
   EXPECT_EQ(syscalls::getuid(), 0u);  // the guests run as root
   EXPECT_THAT(syscalls::chdir("/"), IsOk());
   EXPECT_EQ(StatusToErrno(syscalls::chdir("/no/such/directory")), ENOENT);
+}
+
+TEST(SyscallsWrapperTest, FailuresCarryTheErrno) {
+  // More groups than the kernel takes.
+  const std::vector<gid_t> too_many(70'000, 0);
+  EXPECT_EQ(StatusToErrno(syscalls::setgroups(too_many)), EINVAL);
+  EXPECT_EQ(StatusToErrno(syscalls::socketpair(-1, SOCK_STREAM, 0).status()),
+            EAFNOSUPPORT);
+  // No process has the largest pid, and signal 0 only asks.
+  EXPECT_EQ(StatusToErrno(syscalls::kill(INT32_MAX, 0)), ESRCH);
+}
+
+// The backing wrappers answer a failed syscall with its errno: a descriptor
+// that is not open, a path that does not exist.
+TEST(SyscallsBackingTest, FailedSyscallsCarryTheErrno) {
+  char buf[16];
+  const std::span<const uint8_t> value;
+  EXPECT_EQ(StatusToErrno(syscalls::read(-1, buf, sizeof buf).status()), EBADF);
+  EXPECT_EQ(
+      StatusToErrno(syscalls::setxattr("/no/such/file", "user.x", value, 0)),
+      ENOENT);
+  EXPECT_EQ(StatusToErrno(syscalls::removexattr("/no/such/file", "user.x")),
+            ENOENT);
+  EXPECT_EQ(StatusToErrno(syscalls::mknodat(-1, "x", S_IFREG | 0600, 0)),
+            EBADF);
+  EXPECT_EQ(StatusToErrno(syscalls::fchownat(-1, "x", 0, 0, 0)), EBADF);
+  EXPECT_EQ(StatusToErrno(syscalls::ftruncate(-1, 0)), EBADF);
+  EXPECT_EQ(StatusToErrno(syscalls::fallocate(-1, 0, 0, 1)), EBADF);
+  EXPECT_EQ(StatusToErrno(syscalls::pread(-1, buf, sizeof buf, 0).status()),
+            EBADF);
+  EXPECT_EQ(StatusToErrno(syscalls::pwrite(-1, buf, sizeof buf, 0).status()),
+            EBADF);
+  EXPECT_EQ(StatusToErrno(syscalls::write(-1, buf, sizeof buf).status()),
+            EBADF);
 }
 
 TEST(SyscallsWrapperTest, SyslogNeverFails) {

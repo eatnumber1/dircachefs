@@ -26,6 +26,7 @@ namespace {
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
+using ::testing::HasSubstr;
 using ::testing::Not;
 
 // Views the bytes of `s` as a blob for Statement::Bind() -- see the
@@ -437,6 +438,19 @@ TEST_F(MigrateTest, OlderThanV1FailsPrecondition) {
               IsOkAndHolds(1));
   EXPECT_THAT(CountRows(db_, "sqlite_master WHERE name = 'cache_state'"),
               IsOkAndHolds(0));
+}
+
+TEST_F(MigrateTest, AV1VersionThatIsNotANumberIsCorrupt) {
+  RootIdentity root = TestRoot();
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+  ASSERT_THAT(DowngradeToV1(db_, root.device_id), IsOk());
+  ASSERT_THAT(db_.Exec("UPDATE meta SET value = 'two' WHERE key = "
+                       "'schema_version'"),
+              IsOk());
+  EXPECT_THAT(
+      Migrate(db_, root),
+      StatusIs(absl::StatusCode::kFailedPrecondition,
+               HasSubstr("meta.schema_version is not an integer: 'two'")));
 }
 
 TEST_F(MigrateTest, DuplicateBackingIdentityViolatesUniqueConstraint) {

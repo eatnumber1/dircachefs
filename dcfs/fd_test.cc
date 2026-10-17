@@ -8,7 +8,9 @@
 #include <cstdlib>
 #include <utility>
 
+#include "absl/base/log_severity.h"
 #include "absl/log/check.h"
+#include "absl/log/scoped_mock_log.h"
 #include "absl/status/status_matchers.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
@@ -20,6 +22,18 @@ namespace dcfs {
 namespace {
 
 using ::absl_testing::IsOk;
+using ::testing::AllOf;
+using ::testing::HasSubstr;
+
+// There is nothing to retry; the descriptor is gone either way.
+TEST(FileDescriptorTest, DestructorLogsACloseThatFails) {
+  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(log, Log(absl::LogSeverity::kError, testing::_,
+                       AllOf(HasSubstr("close(1000000)"),
+                             HasSubstr("Bad file descriptor"))));
+  log.StartCapturingLogs();
+  FileDescriptor not_open(1'000'000);
+}
 
 TEST(FileDescriptorTest, DefaultConstructedInvalid) {
   FileDescriptor fd;
