@@ -116,7 +116,10 @@ process (its waves and file ownership table) is in `history.md`.
    each lane's step, agent type, model and effort; the quota readings
    from "Quota management" below; `gh run list --limit 12`),
    upload each as an asset and point its dataset at the new file with a
-   fresh `updated` time. Its datasets go stale after a day or two and
+   fresh `updated` time, all datasets in one batch write. At most one
+   refresh per turn, at its end, covering every change in it; old
+   uploads are not deleted one by one (each refresh's calls re-read the
+   orchestrator's whole context; russ agreed 2026-10-16). Its datasets go stale after a day or two and
    say so on the page, which is the reminder when a refresh is missed.
    Before any refresh, list what each lane's checkout is on (`git -C
    <lane> branch --show-current`) against the running agents, so the
