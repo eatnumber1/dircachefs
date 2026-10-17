@@ -111,10 +111,10 @@ inline absl::StatusBuilder RetCheckFailStatus(
   case 0:                            \
   default:
 
-#define RET_CHECK(expr)                                                        \
-  DCFS_RET_CHECK_ELSE_BLOCKER_                                                 \
-  if (ABSL_PREDICT_TRUE(expr)) {                                               \
-  } else /* NOLINT(readability-inconsistent-ifelse-braces): see idiom above */ \
+#define RET_CHECK(expr)                                                      \
+  DCFS_RET_CHECK_ELSE_BLOCKER_                                               \
+  if (ABSL_PREDICT_TRUE(expr)) {                                             \
+  } else /* NOLINT(readability-inconsistent-ifelse-braces): caller << msg */ \
     return ::dcfs::internal::RetCheckFail(#expr)
 
 #define DCFS_RET_CHECK_OP_(unique, op, lhs, rhs)                               \
@@ -123,7 +123,7 @@ inline absl::StatusBuilder RetCheckFailStatus(
           ::dcfs::internal::RetCheckOperands{(lhs), (rhs)};                    \
       ABSL_PREDICT_TRUE(                                                       \
           dcfs_rc_ops_##unique.lhs_value op dcfs_rc_ops_##unique.rhs_value)) { \
-  } else /* NOLINT(readability-inconsistent-ifelse-braces): see idiom above */ \
+  } else /* NOLINT(readability-inconsistent-ifelse-braces): caller << msg */   \
     return ::dcfs::internal::RetCheckFailOp(#lhs, #op, #rhs,                   \
                                             dcfs_rc_ops_##unique.lhs_value,    \
                                             dcfs_rc_ops_##unique.rhs_value)
@@ -135,11 +135,11 @@ inline absl::StatusBuilder RetCheckFailStatus(
 #define RET_CHECK_GE(lhs, rhs) DCFS_RET_CHECK_OP_(ge, >=, lhs, rhs)
 #define RET_CHECK_LE(lhs, rhs) DCFS_RET_CHECK_OP_(le, <=, lhs, rhs)
 
-#define RET_CHECK_OK(status_expr)                                              \
-  DCFS_RET_CHECK_ELSE_BLOCKER_                                                 \
-  if (absl::Status dcfs_rc_status_ = (status_expr);                            \
-      ABSL_PREDICT_TRUE(dcfs_rc_status_.ok())) {                               \
-  } else /* NOLINT(readability-inconsistent-ifelse-braces): see idiom above */ \
+#define RET_CHECK_OK(status_expr)                                            \
+  DCFS_RET_CHECK_ELSE_BLOCKER_                                               \
+  if (absl::Status dcfs_rc_status_ = (status_expr);                          \
+      ABSL_PREDICT_TRUE(dcfs_rc_status_.ok())) {                             \
+  } else /* NOLINT(readability-inconsistent-ifelse-braces): caller << msg */ \
     return ::dcfs::internal::RetCheckFailStatus(#status_expr, dcfs_rc_status_)
 
 #endif  // DCFS_RET_CHECK_H_

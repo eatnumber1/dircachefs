@@ -301,46 +301,93 @@ def matcher_file_problems(query_texts):
     return problems
 
 
-SUPPRESSION_RE = re.compile(r"\bNOLINT(?:NEXTLINE|BEGIN)?\b(?P<rest>.*)$")
+SUPPRESSION_RE = re.compile(r"\bNOLINT(?:NEXTLINE|BEGIN)?\b(?P<rest>[^\n]*)")
 CHECKS_RE = re.compile(
     r"^\((?P<checks>[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)*"
     r"(?:,\s*[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)*)*)\)(?P<reason>.*)$")
 COMMENT_NOISE_RE = re.compile(r"/\*|\*/|//|[\\:;,.\-]")
+RAW_STRING_RE = re.compile(r'R"([^ ()\\\t\v\f\n]{0,16})\(')
 MIN_REASON_WORDS = 3
 
 
 def has_reason(text):
-    """True if `text`, less comment punctuation, has a few words."""
+    """True if `text`, less comment punctuation, has MIN_REASON_WORDS words."""
     return len(COMMENT_NOISE_RE.sub(" ", text).split()) >= MIN_REASON_WORDS
 
 
+def comments(text):
+    """[(first line, comment text)] of the C++ `text`, in order.
+
+    Skips string, raw string and character literals, so that a NOLINT inside
+    one is not a comment, as in clang-tidy, which reads comments only."""
+    found = []
+    i, line, size = 0, 1, len(text)
+    while i < size:
+        two = text[i:i + 2]
+        if two == "//":
+            end = text.find("\n", i)
+            end = size if end < 0 else end
+            found.append((line, text[i:end]))
+            i = end
+        elif two == "/*":
+            end = text.find("*/", i + 2)
+            end = size if end < 0 else end + 2
+            found.append((line, text[i:end]))
+            line += text.count("\n", i, end)
+            i = end
+        elif text[i] == '"':
+            raw = RAW_STRING_RE.match(text, i - 1) if i and text[i - 1] == "R" else None
+            if raw:
+                end = text.find(")" + raw.group(1) + '"', i)
+                end = size if end < 0 else end + len(raw.group(1)) + 2
+            else:
+                end = i + 1
+                while end < size and text[end] not in '"\n':
+                    end += 2 if text[end] == "\\" else 1
+                end += 1
+            line += text.count("\n", i, end)
+            i = end
+        elif text[i] == "'" and not (i and text[i - 1].isalnum()):
+            end = i + 1
+            while end < size and text[end] not in "'\n":
+                end += 2 if text[end] == "\\" else 1
+            i = end + 1
+        else:
+            line += text[i] == "\n"
+            i += 1
+    return found
+
+
 def suppression_problems(sources):
-    """Problems of the NOLINT comments of {path: text}: each names its check
-    or checks in parentheses (no wildcard) and has a reason, on the same line
-    after the parenthesis or in the comment on the line directly above."""
+    """Problems with the NOLINT comments in {path: text}.
+
+    Clang-tidy honours a NOLINT in any comment, so every comment that has one
+    (also one that only mentions the word) must name its check or checks in
+    parentheses (no wildcard) and give a reason: on the same line after the
+    parenthesis, or in the comment on the line directly above."""
     problems = []
     for path, text in sorted(sources.items()):
         lines = text.splitlines()
-        for number, line in enumerate(lines, 1):
-            match = SUPPRESSION_RE.search(line)
-            if not match:
-                continue
-            where = "%s:%d" % (path, number)
-            checks = CHECKS_RE.match(match.group("rest").strip())
-            if not checks:
-                problems.append("%s: NOLINT must name its check(s) in "
-                                "parentheses, e.g. NOLINT(misc-no-recursion)"
-                                % where)
-                continue
-            above = lines[number - 2].strip() if number > 1 else ""
-            above_is_comment = (above.startswith(("//", "/*")) or
-                                above.endswith("*/")) and not (
-                                    SUPPRESSION_RE.search(above))
-            if not (has_reason(checks.group("reason")) or
-                    (above_is_comment and has_reason(above))):
-                problems.append("%s: NOLINT needs a reason on the same line "
-                                "after the check names, or in the comment "
-                                "directly above" % where)
+        for first, comment in comments(text):
+            for match in SUPPRESSION_RE.finditer(comment):
+                number = first + comment.count("\n", 0, match.start())
+                where = "%s:%d" % (path, number)
+                checks = CHECKS_RE.match(match.group("rest").strip())
+                if not checks:
+                    problems.append(
+                        "%s: NOLINT must name its check(s) in parentheses, "
+                        "e.g. NOLINT(misc-no-recursion)" % where)
+                    continue
+                above = lines[number - 2].strip() if number > 1 else ""
+                above_is_comment = above.startswith(("//", "/*")) or above.endswith("*/")
+                above_is_suppression = bool(SUPPRESSION_RE.search(above))
+                reason_above = (above_is_comment and not above_is_suppression and
+                                has_reason(above))
+                if not (has_reason(checks.group("reason")) or reason_above):
+                    problems.append(
+                        "%s: NOLINT needs a reason on the same line after the "
+                        "check names, or in the comment directly above"
+                        % where)
     return problems
 
 

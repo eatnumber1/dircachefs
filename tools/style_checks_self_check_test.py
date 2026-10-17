@@ -246,6 +246,26 @@ class FixtureTest(unittest.TestCase):
             ["dcfs/b.cc:%d" % n for n in (1, 2, 3, 4, 6, 8, 9)],
             [p.split(": ")[0] for p in problems])
 
+    def test_a_nolint_outside_a_comment_is_not_a_suppression(self):
+        good = {
+            "dcfs/s.cc": (
+                'const char *a = "// NOLINT";\n'
+                'const char *b = R"(\n'
+                '// NOLINT\n'
+                ')";\n'
+                "char c = '\"'; int n = 1'000;\n"
+                'const char *d = "a \\" NOLINT";\n'),
+        }
+        self.assertEqual([], style_checks.suppression_problems(good))
+
+    def test_a_comment_that_mentions_nolint_is_a_directive(self):
+        # Clang-tidy honours it, so it needs its check and reason too.
+        bad = {"dcfs/m.cc": "int a;  // we avoid NOLINT here\n"
+                            "/* a block\n   NOLINT */\n"}
+        self.assertEqual(
+            ["dcfs/m.cc:1", "dcfs/m.cc:3"],
+            [p.split(": ")[0] for p in style_checks.suppression_problems(bad)])
+
     def test_run_reports_suppression_problems(self):
         problems, _ = style_checks.run(
             [], "", "Checks: 'misc-a'\nWarningsAsErrors: '*'\n",
