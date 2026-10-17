@@ -210,7 +210,7 @@ def style_findings_here(name = "style_findings", tidy = "yes"):
       target that depends on one that is incompatible with the configuration
       (the sanitizer-runtime tests of //dcfs, asan_runtime_test and
       ubsan_runtime_test, are therefore not analysed);
-    - a target with the same `srcs` as an earlier one: the fault-injection
+    - a target with the same `srcs` (the same `hdrs`, if it has no `srcs`) as an earlier one: the fault-injection
       variants of a test build one source against different deps, and
       analysing it again would repeat the findings at the cost of minutes
       (dir_cache_fs_test.cc is 7800 lines, built into four targets).
@@ -229,10 +229,13 @@ def style_findings_here(name = "style_findings", tidy = "yes"):
                 sources[f] = True
         if r.get("target_compatible_with"):
             continue
-        srcs = str(r.get("srcs"))
-        if srcs in seen:
+
+        # Header-only libraries all have `srcs = None`: tell them apart by
+        # their headers, or only the first of a package is analysed.
+        key = str(r.get("srcs")) if r.get("srcs") else "hdrs:" + str(r.get("hdrs"))
+        if key in seen:
             continue
-        seen[srcs] = True
+        seen[key] = True
         targets.append(":" + r["name"])
     style_findings(
         name = name,

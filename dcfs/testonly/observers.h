@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/types/source_location.h"
 #include "dcfs/protocol_events.h"

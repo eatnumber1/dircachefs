@@ -131,6 +131,7 @@ cc_library(
     visibility = ["//dcfs:__pkg__"],
     deps = [
         "//dcfs:protocol_events",
+        "@absl//absl/functional:function_ref",
         "@absl//absl/status",
         "@absl//absl/types:source_location",
     ],

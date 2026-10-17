@@ -4,8 +4,9 @@
 
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
-#include <algorithm>
+#include <cstddef>
 #include <ranges>
 #include <string>
 #include <string_view>
