@@ -700,8 +700,12 @@ until 2026-10-10; this section is it.)
   pointer: the loop that owns the session ends it. The poisoned flag is
   the one global of the daemon (1.8). The door stays free functions, not
   an injected `Backing` object (1.6, "Decision, no `Backing` class").
+  `tools/style_matchers/backing_door_guard.query` reports a function of
+  `dcfs::syscalls` in `syscalls_backing.cc` or `.h` whose body does not
+  call `BackingDoor()`, and
   `SyscallsBackingTest.EveryWrapperRefusesOnceTheDoorIsPoisoned` walks
-  every wrapper; a new wrapper joins its list.
+  every wrapper (a new wrapper joins its list) to show each refuses before
+  its syscall.
 - **Mechanically** (25.9b): `tools/banned_symbols.txt` bans `abort`,
   `exit`, `__assert_fail`, `std::terminate` and Abseil's fatal and
   debug-fatal log messages (`CHECK*`, `LOG(FATAL)`, `DLOG(FATAL)`) in the

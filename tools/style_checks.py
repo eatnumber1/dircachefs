@@ -47,6 +47,7 @@ REPORT_ONLY = frozenset({"status_uninitialized", "pointer_without_nullability"})
 # The matchers (tools/style_matchers/<rule>.query), each with a known-bad and
 # a known-good fixture.
 MATCHER_RULES = (
+    "backing_door_guard",
     "banned_std",
     "capturing_mutating_lambda",
     "check_in_production",

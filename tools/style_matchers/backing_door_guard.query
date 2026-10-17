@@ -1,0 +1,8 @@
+# docs/style.md 1.6b: every backing syscall wrapper passes the backing door
+# (dcfs/backing_door.h) before its syscall, so a poisoned door refuses them
+# all: a function defined in dcfs::syscalls in syscalls_backing.cc or .h (or
+# this rule's fixtures) whose body has no statement calling dcfs::BackingDoor
+# is reported. The check is that the guard is a statement of the body, not
+# that it comes first; the wrapper walk (SyscallsBackingTest) shows each
+# refuses before its syscall.
+match functionDecl(isDefinition(), hasDeclContext(namespaceDecl(hasName("::dcfs::syscalls"))), isExpansionInFileMatching("(^|/)(dcfs/syscalls_backing[.](cc|h)|tools/style_matchers/backing_door_guard_(bad|good)[.]cc)$"), unless(hasBody(compoundStmt(hasAnySubstatement(hasDescendant(callExpr(callee(functionDecl(hasName("::dcfs::BackingDoor")))))))))).bind("backing_door_guard")
