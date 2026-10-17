@@ -33,10 +33,11 @@ the wording quoted.
   tool), and 5 **unverified** because they are resolved but never fetched
   (boringssl, jq.bzl, libpfm, stardoc, tcmalloc). 19 are build-only, 2 are
   test or benchmark only, 5 are not fetched.
-- **14 other pinned downloads and tools:** 7 build tools (LLVM release,
+- **15 other pinned downloads and tools:** 7 build tools (LLVM release,
   the toolchain's runtime `.deb`s, Python, bazel_lib's tool binaries, uv,
-  pandoc, Google's style guides) and 7 test or developer tools and images (JDK for TLC, act,
-  pjdfstest, xfstests, the two TLA+ jars, the Debian cloud image).
+  pandoc, Google's style guides) and 8 test or developer tools and images (JDK for TLC, act,
+  pjdfstest, xfstests, SibylFS's checker, the two TLA+ jars, the Debian cloud
+  image).
 - **Two package sets for the test guests:** 78 Alpine origin packages (40
   carry a GPL term, 13 are LGPL only, 24 permissive only, 1 offers GPL or a
   permissive licence) and 149 Debian `.deb`s (131 on disk, 127 with a
@@ -143,6 +144,7 @@ licence file was read there.
 | Google style guides (`google_styleguide`) | commit b2a398d17f5e (gh-pages tip, 2026-10-17) | CC-BY-3.0 (`LICENSE`: "Creative Commons Legal Code, Attribution 3.0 Unported"; `README.md`: "The style guides in this project are licensed under the CC-By 3.0 License") | `external/+http_archive+google_styleguide/LICENSE` | build input: rendered to Markdown by pandoc for reviewers (`//third_party/google_styleguide:guides`); the rendered copies are derived works credited to Google in `third_party/google_styleguide/README.md`, never shipped |
 | act | 0.2.89 | MIT | `external/+http_archive+act/LICENSE` | developer machine only (runs CI in Docker) |
 | pjdfstest | 85a8aea9e6 | BSD-2-Clause | `COPYING`: "License for all regression tests available with pjdfstest ... Redistribution and use in source and binary forms, with or without modification, are permitted provided that ... 1. ... 2. ..." (two clauses) | test program run in the guests, built from the fetched source |
+| SibylFS checker (`fs_test_check`, `fs_test_posix`: the prebuilt binaries of release 2015-10-05 of `sibylfs_binaries`) | 2015-10-05 | the code is ISC (`LICENSE.txt` of `sibylfs_src`: "Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies."); the binaries statically link OCaml's runtime (LGPL-2 with a static-linking exception), Lem's library (BSD-3-Clause; `pmap`, `pset`: LGPL-2), Sexplib (Apache-2.0), ctypes (MIT), `sha`, `unix-fcntl`, `unix-errno` (ISC) and `fd-send-recv` (LGPL-2.1 with the exception). **The distribution of the binaries states no licence**: no licence file in the repository or the archive | `third_party/sibylfs/README.md` has each source; read from the upstream repositories, the libraries by `nm` of the binaries, their versions unknown | test program run in the guests (differential oracle, step 12.18b); fetched by Bazel, never vendored, never in a release artifact. russ ruled (2026-10-17) that test-only use is fine and that caches are not redistribution |
 | xfstests (`ltp/fsstress.c`, `ltp/fsx.c`, `src/log-writes`, helpers, the `check` scripts) | v2026.05.17 | GPL-2.0 (`LICENSES/GPL-2.0`; `check` is SPDX `GPL-2.0`, `common/rc` is `GPL-2.0+`, `ltp/fsstress.c` is `GPL-2.0`). **`ltp/fsx.c` states no licence** (header: "Copyright (C) 1991, NeXT Computer, Inc. All Rights Reserverd ... Rewritten 8/98 by Conrad Minshall ... Small changes to work under Linux -- davej."), and 42 C and header files of `src/`, `ltp/` and `lib/` carry no SPDX line (not all are built here) | `external/+http_archive+xfstests/` | test programs and scripts in the guests; never distributed |
 | TLA+ tools (`tla2tools.jar`) | 1.7.4 | MIT (`License.txt`: "Copyright (c) 2019 Microsoft Research ... The MIT License (MIT)"); `META-INF/LICENSE.txt` is EPL-2.0 (for bundled parts); the jar also bundles `javax.mail`/`com.sun.mail` and `javax.activation` classes whose licences are **unverified** | inside the jar | model checker only |
 | TLA+ CommunityModules (`CommunityModules-deps.jar`) | 202610040242 | MIT (`LICENSE`, "Copyright (c) 2019 TLA+"); the `-deps` jar bundles Apache Commons, JGraphT, JUNGrapht, Gson and SLF4J classes whose licences are **unverified** (no per-library licence file in the jar) | inside the jar | trace validation only |
@@ -458,11 +460,9 @@ is GPL-2.0 and would be marked so if it ever landed here.
 
 ### SibylFS
 
-SibylFS's licence and use as an oracle are read inside step 12.18b
-(`docs/plan/phases/12-formal-model-and-trace-validation.md`, "12.18b SibylFS
-as a differential second oracle"); nothing from SibylFS is in the tree.
-`formal/dcfs.tla` and `design.md` cite its vocabulary (call, effect, return),
-which is an idea, not text.
+Its checker is in section 3; the pins are `third_party/sibylfs/README.md`.
+Nothing from SibylFS is in the tree. `formal/dcfs.tla` and `design.md` cite its
+vocabulary (call, effect, return), which is an idea, not text.
 
 ## Open questions
 

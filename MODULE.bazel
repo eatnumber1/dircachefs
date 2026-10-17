@@ -136,6 +136,20 @@ http_file(
     urls = ["https://github.com/tlaplus/CommunityModules/releases/download/202610040242/CommunityModules-deps-202610040242.jar"],
 )
 
+# SibylFS (step 12.18b): the 2015 executable POSIX file-system specification
+# (github.com/sibylfs), for the guest tests of test/qemu/guest/sibylfs_lib.sh.
+# The prebuilt x86_64 checker and trace runner (release 2015-10-05 of
+# sibylfs_binaries), pinned by hash and fetched by Bazel, not vendored: the
+# repository has no licence file (the source is ISC).
+# See third_party/sibylfs/README.md.
+http_archive(
+    name = "sibylfs_checker",
+    build_file = "//third_party/sibylfs:BUILD.checker",
+    sha256 = "080c5bced08bbb34dedde43cdbd4f8fd3e1c5d678c60dff7067cc6f189208879",
+    strip_prefix = "sibylfs",
+    url = "https://github.com/sibylfs/sibylfs_binaries/releases/download/2015-10-05/sibylfs_linux_amd64.tar.gz",
+)
+
 java_toolchains = use_extension("@rules_java//java:extensions.bzl", "toolchains")
 use_repo(java_toolchains, "remotejdk21_linux")
 

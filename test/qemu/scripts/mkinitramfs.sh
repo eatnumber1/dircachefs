@@ -20,6 +20,8 @@
 #       their "alpine_strace/root/" path) land at their Alpine paths; so
 #       (step 11.1) do dmsetup's, "alpine_dmsetup/root/". xfstests' fsstress,
 #       fsx and replay-log and //test/qemu:crash_states go to /bin.
+#       Step 12.18b: SibylFS's fs_test_posix and fs_test_check (with their
+#       glibc) go to /sibylfs/bin.
 #
 #   mkinitramfs.sh --unit <out.cpio.gz> <busybox> <init> <cost-lib> \
 #       <test-binary> <disk0-device-or-'-'> <args> [name:path...]
@@ -271,6 +273,15 @@ else
 			cp "$f" "$dest"
 			copy_deps "$dest"
 			chmod +x "$dest"
+			;;
+		*sibylfs_checker/bin/*)
+			# step 12.18b: SibylFS's prebuilt fs_test_posix and fs_test_check
+			# (//third_party/sibylfs), dynamic: copy_deps installs the
+			# toolchain's glibc for them.
+			mkdir -p "$ROOT/sibylfs/bin"
+			cp "$f" "$ROOT/sibylfs/bin/$(basename "$f")"
+			chmod +x "$ROOT/sibylfs/bin/$(basename "$f")"
+			copy_deps "$ROOT/sibylfs/bin/$(basename "$f")"
 			;;
 		*/tests/*)
 			rel=${f#*/tests/}

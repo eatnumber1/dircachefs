@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT
+# The SibylFS pin (README.md), as testonly targets: it is licensed
+# for nothing but our tests' use (README.md, "Licences"), so no target that is
+# not testonly may depend on them.
+
+exports_files(["BUILD.checker"])
+
+filegroup(
+    name = "fs_test_check",
+    testonly = 1,
+    srcs = ["@sibylfs_checker//:bin/fs_test_check"],
+    visibility = ["//test/qemu:__pkg__"],
+)
+
+filegroup(
+    name = "fs_test_posix",
+    testonly = 1,
+    srcs = ["@sibylfs_checker//:bin/fs_test_posix"],
+    visibility = ["//test/qemu:__pkg__"],
+)

@@ -112,6 +112,8 @@ config_setting(
         "@alpine_busybox//:root/bin/busybox.static",
         "@alpine_strace//:root",  # step 26.3: /usr/bin/strace and musl
         "@alpine_dmsetup//:root",  # step 11.1: /sbin/dmsetup and libdevmapper
+        "//third_party/sibylfs:fs_test_check",  # step 12.18b
+        "//third_party/sibylfs:fs_test_posix",
         "//tools/kernel_bugs:guest_files",  # step 26.15: /kernel_bugs/
         "guest/init",
     ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]) + [
@@ -939,6 +941,14 @@ PJDFSTEST_SHARDS = ["rename", "chown", "rest"]
 test_suite(
     name = "pjdfstest_test",
     tests = [":pjdfstest_test_ext4"],
+)
+
+# The checks of the wrapper and the gates, with the real tools and no dcfs.
+qemu_test(
+    name = "sibylfs_selftest_test",
+    guest_script = "guest/sibylfs_selftest.sh",
+    size = "small",
+    timeout = "short",
 )
 
 # Step 11.2b: fsstress and fsx (xfstests' ltp/, built by

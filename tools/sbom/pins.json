@@ -34,6 +34,7 @@
   "repository": {
     "pjdfstest": {"purl": "pkg:github/pjd/pjdfstest", "kind": "tool", "version": "strip_prefix"},
     "xfstests": {"purl": "pkg:github/kdave/xfstests", "kind": "tool", "version": "strip_prefix"},
+    "sibylfs_checker": {"purl": "pkg:github/sibylfs/sibylfs_binaries", "kind": "tool", "version": "url:/download/([^/]+)/"},
     "tla2tools": {"purl": "pkg:github/tlaplus/tlaplus", "kind": "tool", "version": "url:/download/v([^/]+)/"},
     "tla_community_modules": {"purl": "pkg:github/tlaplus/CommunityModules", "kind": "tool", "version": "url:/download/([^/]+)/"},
     "act": {"purl": "pkg:github/nektos/act", "kind": "tool", "version": "url:/download/v([^/]+)/"},

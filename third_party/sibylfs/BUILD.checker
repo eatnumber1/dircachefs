@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+# Overlay for @sibylfs_checker (MODULE.bazel; third_party/sibylfs/README.md):
+# the prebuilt x86_64 binaries of the 2015-10-05 release. The guest runs
+# fs_test_posix (executes a script on a real file system and prints the trace
+# it saw) and fs_test_check (decides whether a trace is allowed by the model).
+# Both are dynamically linked against glibc; test/qemu/scripts/mkinitramfs.sh
+# installs the loader and libraries they need from the pinned toolchain's
+# sysroot, as for any dynamic guest binary. Visible only to
+# //third_party/sibylfs, whose targets are testonly (README.md, "Licences").
+exports_files(
+    [
+        "bin/fs_test_check",
+        "bin/fs_test_posix",
+    ],
+    visibility = ["@dircachefs//third_party/sibylfs:__pkg__"],
+)
