@@ -209,24 +209,27 @@ class DirCacheFS : private events::Bookkeeping {
   // it as one to the protocol events: the model's "linkcreate").
   bool IsUnnamedTmpfile(fuse_ino_t ino) const;
 
-  // Called at the start of every request (see fuse_ops.cc): runs a sync
-  // point (SyncNow) once opts_.sync_interval has passed since the last one.
-  // dcfs is single-threaded inside libfuse's blocking session loop, which
-  // offers no idle hook, so there is no timer: an idle daemon keeps a
-  // non-empty dirty set and its unsynced cache commits until its next
-  // request, its next fsync, or a clean shutdown. That is safe; it only
-  // makes the re-read after a crash larger. The bound (step 25.28b,
+  // Called at the start of every request (see fuse_ops.cc): once
+  // opts_.sync_interval has passed since the last one, runs a sync point:
+  // the backing filesystems' syncfs and the dirty set's clearing (if it may
+  // be non-empty, SyncDue), and leaves the cache's durable point due after
+  // the reply (FinishSyncPoint). Logs a failure at WARNING: no request may
+  // fail over it. dcfs is single-threaded inside libfuse's blocking session
+  // loop, which offers no idle hook, so there is no timer: an idle daemon
+  // keeps a non-empty dirty set and its unsynced cache commits until its
+  // next request or a clean shutdown. That is safe; it only makes the
+  // re-read after a crash larger. The bound (step 25.28b,
   // formal/durability.tla's BoundAtRequestEnd): a request that starts while
   // a cache commit a power cut could lose is one interval old ends with
-  // every commit durable, unless its checkpoint failed (logged at
+  // every commit durable, unless its durable point failed (logged at
   // WARNING).
   void MaybeSyncNow();
   // The sync point's last step, after the request's reply and before the
-  // next request is served (see fuse_ops.cc): the checkpoint SyncNow left
-  // due.
+  // next request is served (see fuse_ops.cc): the durable point
+  // MaybeSyncNow left due.
   void FinishSyncPoint();
   // Whether a sync point's backing half has a reason to run now (see
-  // SyncNow).
+  // MaybeSyncNow).
   bool SyncDue(absl::Time now) const;
 
   // Called by the request handler after a request that reached the backing
@@ -513,16 +516,12 @@ class DirCacheFS : private events::Bookkeeping {
   // outstanding then cannot record or clear anything about it.
   void EndWriting(InodeId id);
 
-  // A sync point now: the backing filesystems' syncfs and the dirty set's
-  // clearing (if it may be non-empty, SyncDue); the checkpoint of the cache's
-  // WAL (CheckpointCache) follows after the reply (FinishSyncPoint). Logs a
-  // failure at WARNING: nothing that calls this may fail over it. `why`
-  // names the caller in the log line.
-  void SyncNow(std::string_view why);
-  // The sync point's checkpoint (step 25.28b): makes every cache commit so
-  // far durable, so that a power cut cannot lose one older than the last
-  // sync point.
-  absl::Status CheckpointCache();
+  // The cache's durable point (step 25.28b): if anything committed since the
+  // last one, fsyncs the cache database's WAL (sqlite3::Connection::
+  // MakeDurable), after which a power cut loses no commit made so far. The
+  // periodic sync point's (FinishSyncPoint), and an FSYNC's or FSYNCDIR's
+  // before its reply.
+  absl::Status MakeCacheDurable();
 
   // Shared phase-1/2/3 wiring for Create/Mkdir/Mknod/Symlink (see
   // dir_cache_fs.cc's "write-through op" rule for what those phases are):
@@ -696,13 +695,13 @@ class DirCacheFS : private events::Bookkeeping {
   // Context::open_files).
   absl::flat_hash_set<int64_t> open_files_held_;
   // When the last sync point ran (or was attempted); see MaybeSyncNow.
-  // Set only by SyncNow, which leaves a checkpoint due: a reset without one
-  // would let commits older than one interval wait
+  // Set only by MaybeSyncNow, which leaves a durable point due: a reset
+  // without one would let commits older than one interval wait
   // (formal/known_bugs/durability_sync_point_skips_checkpoint.tla).
   absl::Time last_sync_;
-  // A sync point ran in this request, and its checkpoint is due after the
-  // reply (FinishSyncPoint).
-  bool checkpoint_due_ = false;
+  // A sync point ran in this request, and its durable point is due after
+  // the reply (FinishSyncPoint).
+  bool durable_point_due_ = false;
   // When a request last reached the backing filesystem; InfinitePast before
   // the first (the start's own reads are not requests).
   absl::Time last_backing_access_ = absl::InfinitePast();

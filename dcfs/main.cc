@@ -82,8 +82,9 @@ ABSL_FLAG(double, sync_interval_sec, 5,
           "point runs a new one: while mutations have left cache entries "
           "dirty (see README \"Crash robustness\"), it syncfs()es the backing "
           "filesystems and marks them clean; then, if anything was cached "
-          "since the last, it checkpoints the cache database's WAL. Bounds "
-          "how much is re-read after a power loss or crash.");
+          "since the cache was last made durable, it fsyncs the cache "
+          "database's WAL. Bounds how much is re-read after a power loss or "
+          "crash.");
 
 namespace dcfs {
 namespace {

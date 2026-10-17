@@ -22,7 +22,6 @@
 #include "dcfs/status.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
-#include "dcfs/testonly/files.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "sqlite3.h"
@@ -34,9 +33,7 @@ using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
 using ::testing::ElementsAre;
-using ::testing::HasSubstr;
 using ::testing::IsEmpty;
-using ::testing::Not;
 
 std::string TestTmpFile(std::string_view name) {
   const char *tmpdir = std::getenv("TEST_TMPDIR");
@@ -139,7 +136,7 @@ TEST(ConnectionTest, CheckpointTruncatesWal) {
   EXPECT_GT(before_stat.st_size, 0)
       << "expected a nonempty -wal file before checkpointing";
 
-  ASSERT_THAT(conn.Checkpoint(Connection::CheckpointMode::kTruncate), IsOk());
+  ASSERT_THAT(conn.Checkpoint(), IsOk());
 
   ASSERT_OK_AND_ASSIGN(struct stat after_stat,
                        syscalls::fstatat(AT_FDCWD, wal_path));
@@ -151,78 +148,49 @@ TEST(ConnectionTest, CheckpointTruncatesWal) {
   EXPECT_EQ(select->Column<int64_t>(0), 1);
 }
 
-// A passive checkpoint (a sync point's) copies the commits into the database
-// file itself and leaves the WAL's size alone.
-TEST(ConnectionTest, CheckpointPassiveCopiesCommitsIntoTheDatabaseFile) {
-  std::string path = TestTmpFile("checkpoint_passive.sqlite");
+// What a sync point asks before it makes the cache durable. Reads do not
+// count; every commit does until a durable point, a kSync one included.
+TEST(ConnectionTest, CommittedSinceDurableCountsCommitsOnly) {
+  std::string path = TestTmpFile("committed_since_durable.sqlite");
   ASSERT_OK_AND_ASSIGN(Connection conn, ConnectionFactory{.path = path}.Open());
-  ASSERT_THAT(conn.Exec("CREATE TABLE t (v TEXT)"), IsOk());
-  ASSERT_THAT(conn.Exec("INSERT INTO t (v) VALUES ('committed-marker')"),
-              IsOk());
-  EXPECT_THAT(testonly::ReadFileToString(path),
-              IsOkAndHolds(Not(HasSubstr("committed-marker"))))
-      << "the commit is in the WAL only";
-  std::string wal_path = absl::StrCat(path, "-wal");
-  ASSERT_OK_AND_ASSIGN(struct stat before_stat,
-                       syscalls::fstatat(AT_FDCWD, wal_path));
-
-  ASSERT_THAT(conn.Checkpoint(Connection::CheckpointMode::kPassive), IsOk());
-
-  EXPECT_THAT(testonly::ReadFileToString(path),
-              IsOkAndHolds(HasSubstr("committed-marker")));
-  ASSERT_OK_AND_ASSIGN(struct stat after_stat,
-                       syscalls::fstatat(AT_FDCWD, wal_path));
-  EXPECT_EQ(after_stat.st_size, before_stat.st_size);
-}
-
-// What a sync point asks before it checkpoints. Reads do not count; every
-// commit does, kSync or not, until a checkpoint of either mode.
-TEST(ConnectionTest, CommittedSinceCheckpointCountsCommitsOnly) {
-  std::string path = TestTmpFile("committed_since_checkpoint.sqlite");
-  ASSERT_OK_AND_ASSIGN(Connection conn, ConnectionFactory{.path = path}.Open());
-  EXPECT_THAT(conn.CommittedSinceCheckpoint(), IsOkAndHolds(false))
+  EXPECT_THAT(conn.CommittedSinceDurable(), IsOkAndHolds(false))
       << "just opened";
   ASSERT_THAT(conn.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
-  EXPECT_THAT(conn.CommittedSinceCheckpoint(), IsOkAndHolds(true));
-  ASSERT_THAT(conn.Checkpoint(Connection::CheckpointMode::kPassive), IsOk());
-  EXPECT_THAT(conn.CommittedSinceCheckpoint(), IsOkAndHolds(false))
-      << "after a passive checkpoint";
+  EXPECT_THAT(conn.CommittedSinceDurable(), IsOkAndHolds(true));
+  ASSERT_THAT(conn.MakeDurable(), IsOk());
+  EXPECT_THAT(conn.CommittedSinceDurable(), IsOkAndHolds(false))
+      << "after a durable point";
   ASSERT_THAT(conn.Exec("SELECT count(*) FROM t"), IsOk());
-  EXPECT_THAT(conn.CommittedSinceCheckpoint(), IsOkAndHolds(false))
+  EXPECT_THAT(conn.CommittedSinceDurable(), IsOkAndHolds(false))
       << "after a read";
   ASSERT_THAT(
       conn.Transaction([&] { return conn.Exec("INSERT INTO t VALUES (1)"); },
                        Durability::kSync),
       IsOk());
-  EXPECT_THAT(conn.CommittedSinceCheckpoint(), IsOkAndHolds(true))
+  EXPECT_THAT(conn.CommittedSinceDurable(), IsOkAndHolds(true))
       << "after a kSync commit";
-  ASSERT_THAT(conn.Checkpoint(Connection::CheckpointMode::kTruncate), IsOk());
-  EXPECT_THAT(conn.CommittedSinceCheckpoint(), IsOkAndHolds(false))
-      << "after a truncating checkpoint";
 }
 
-// The same for an in-memory database (the harness's), whose checkpoint has
-// nothing to copy.
-TEST(ConnectionTest, CommittedSinceCheckpointInMemory) {
+// An in-memory database has no WAL to make durable.
+TEST(ConnectionTest, MakeDurableRefusesAnInMemoryDatabase) {
   ASSERT_OK_AND_ASSIGN(Connection conn, OpenMemory());
-  EXPECT_THAT(conn.CommittedSinceCheckpoint(), IsOkAndHolds(false));
   ASSERT_THAT(conn.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
-  EXPECT_THAT(conn.CommittedSinceCheckpoint(), IsOkAndHolds(true));
-  ASSERT_THAT(conn.Checkpoint(Connection::CheckpointMode::kPassive), IsOk());
-  EXPECT_THAT(conn.CommittedSinceCheckpoint(), IsOkAndHolds(false));
+  EXPECT_THAT(conn.MakeDurable(), StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(conn.CommittedSinceDurable(), IsOkAndHolds(true));
 }
 
-// A moved connection keeps what it last checkpointed.
-TEST(ConnectionTest, CommittedSinceCheckpointFollowsAMove) {
-  ASSERT_OK_AND_ASSIGN(Connection conn, OpenMemory());
+// A moved connection keeps its last durable point.
+TEST(ConnectionTest, CommittedSinceDurableFollowsAMove) {
+  std::string path = TestTmpFile("durable_move.sqlite");
+  ASSERT_OK_AND_ASSIGN(Connection conn, ConnectionFactory{.path = path}.Open());
   ASSERT_THAT(conn.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
-  ASSERT_THAT(conn.Checkpoint(Connection::CheckpointMode::kPassive), IsOk());
+  ASSERT_THAT(conn.MakeDurable(), IsOk());
   Connection moved = std::move(conn);
-  EXPECT_THAT(moved.CommittedSinceCheckpoint(), IsOkAndHolds(false));
+  EXPECT_THAT(moved.CommittedSinceDurable(), IsOkAndHolds(false));
 }
 
-TEST(ConnectionTest, CheckpointPassiveWithReaderReturnsOkStatus) {
-  std::string path = TestTmpFile("checkpoint_passive_reader.sqlite");
+TEST(ConnectionTest, CheckpointWithReaderIsUnavailable) {
+  std::string path = TestTmpFile("checkpoint_reader.sqlite");
   ASSERT_OK_AND_ASSIGN(Connection conn, ConnectionFactory{.path = path}.Open());
   ASSERT_THAT(conn.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
   ASSERT_THAT(conn.Exec("INSERT INTO t (id) VALUES (1)"), IsOk());
@@ -232,10 +200,7 @@ TEST(ConnectionTest, CheckpointPassiveWithReaderReturnsOkStatus) {
   ASSERT_THAT(reader.Exec("BEGIN"), IsOk());
   ASSERT_THAT(reader.Exec("SELECT count(*) FROM t"), IsOk());
 
-  EXPECT_THAT(conn.Checkpoint(Connection::CheckpointMode::kPassive), IsOk());
-
-  EXPECT_THAT(conn.Checkpoint(Connection::CheckpointMode::kTruncate),
-              StatusIs(absl::StatusCode::kUnavailable));
+  EXPECT_THAT(conn.Checkpoint(), StatusIs(absl::StatusCode::kUnavailable));
 
   ASSERT_THAT(reader.Exec("ROLLBACK"), IsOk());
 }
@@ -243,7 +208,7 @@ TEST(ConnectionTest, CheckpointPassiveWithReaderReturnsOkStatus) {
 TEST(ConnectionTest, CheckpointOnInMemoryDatabaseIsANoOp) {
   ASSERT_OK_AND_ASSIGN(Connection conn, OpenMemory());
   ASSERT_THAT(conn.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
-  EXPECT_THAT(conn.Checkpoint(Connection::CheckpointMode::kTruncate), IsOk());
+  EXPECT_THAT(conn.Checkpoint(), IsOk());
 }
 
 // Fixture with a single table with one column per Bind/Column overload this

@@ -2165,7 +2165,7 @@ absl::Status StillWritable(Context &ctx, int fd) {
 
 }  // namespace
 
-absl::Status SyncBacking(Context &ctx, bool announce) {
+absl::Status SyncBacking(Context &ctx) {
   const absl::Time began = ctx.clock->TimeNow();
   events::Scope scope(*ctx.events, ctx, &ProtocolEvents::SyncBegin,
                       &ProtocolEvents::SyncEnd);
@@ -2194,14 +2194,9 @@ absl::Status SyncBacking(Context &ctx, bool announce) {
     RETURN_IF_ERROR(cache::ClearDirty(ctx, synced, keep, &cleared));
     // Model: SyncClearDirty, or StopClear.
     ctx.events->SyncCleared(ctx);
-    LOG_IF(INFO, announce) << "sync point: cleared " << cleared << " of "
-                           << synced.dirty.size() << " dirty rows in "
-                           << absl::FormatDuration(ctx.clock->TimeNow() -
-                                                   began);
-    if (!announce) {
-      VLOG(1) << "sync point: cleared " << cleared << " of "
-              << synced.dirty.size() << " dirty rows";
-    }
+    LOG(INFO) << "sync point: cleared " << cleared << " of "
+              << synced.dirty.size() << " dirty rows in "
+              << absl::FormatDuration(ctx.clock->TimeNow() - began);
     return absl::OkStatus();
   }());
 }
@@ -2355,8 +2350,7 @@ absl::Status FinishRun(Context &ctx) {
   // Model: BeginShutdown; the sync point below is StopSync and StopClear.
   ctx.events->ShutdownBegin(ctx);
   RETURN_IF_ERROR(SyncBacking(ctx));
-  RETURN_IF_ERROR(
-      ctx.db.Checkpoint(sqlite3::Connection::CheckpointMode::kTruncate));
+  RETURN_IF_ERROR(ctx.db.Checkpoint());
   // Model: StopCkpt.
   ctx.events->Checkpointed(ctx);
   if (ctx.dirty.any || ctx.dirty.atime) {

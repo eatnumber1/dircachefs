@@ -640,17 +640,31 @@ bool DirCacheFS::SyncDue(absl::Time now) const {
 }
 
 void DirCacheFS::MaybeSyncNow() {
-  if (ctx_.clock->TimeNow() - last_sync_ < opts_.sync_interval) return;
-  SyncNow("periodic");
+  const absl::Time now = ctx_.clock->TimeNow();
+  if (now - last_sync_ < opts_.sync_interval) return;
+  last_sync_ = now;
+  // With nothing dirty no backing syscall is made: the disks may be spun
+  // down.
+  absl::Status synced =
+      SyncDue(now) ? backing::SyncBacking(ctx_) : absl::OkStatus();
+  // Safe to carry on: the dirty entries stay, and only cost a larger
+  // re-read after a crash.
+  LOG_IF(WARNING, !synced.ok())
+      << "periodic sync of the backing filesystems failed, keeping the dirty "
+         "set: "
+      << synced;
+  // The durable point comes after the backing half, so that it covers the
+  // dirty set's clearing too, and after the request's reply
+  // (FinishSyncPoint), so that no request waits for it (step 25.28b).
+  durable_point_due_ = true;
 }
 
-absl::Status DirCacheFS::CheckpointCache() {
-  ASSIGN_OR_RETURN(bool committed, ctx_.db.CommittedSinceCheckpoint());
+absl::Status DirCacheFS::MakeCacheDurable() {
+  ASSIGN_OR_RETURN(bool committed, ctx_.db.CommittedSinceDurable());
   if (!committed) return absl::OkStatus();
-  RETURN_IF_ERROR(
-      ctx_.db.Checkpoint(sqlite3::Connection::CheckpointMode::kPassive));
-  // Model: WalCheckpoint.
-  ctx_.events->WalCheckpointed(ctx_);
+  RETURN_IF_ERROR(ctx_.db.MakeDurable());
+  // Model: CacheDurable.
+  ctx_.events->CacheMadeDurable(ctx_);
   return absl::OkStatus();
 }
 
@@ -664,34 +678,18 @@ void DirCacheFS::NoteBackingAccess(std::string_view what, absl::Time at) {
   }
 }
 
-void DirCacheFS::SyncNow(std::string_view why) {
-  last_sync_ = ctx_.clock->TimeNow();
-  // Only the periodic sync points are announced at INFO: an fsync runs one
-  // per call, while the dirty set is non-empty. With nothing dirty no
-  // backing syscall is made: the disks may be spun down.
-  absl::Status synced = SyncDue(last_sync_)
-                            ? backing::SyncBacking(ctx_, why == "periodic")
-                            : absl::OkStatus();
-  // Safe to carry on: the dirty entries stay, and only cost a larger
-  // re-read after a crash.
-  LOG_IF(WARNING, !synced.ok())
-      << why << " sync of the backing filesystems failed, "
-      << "keeping the dirty set: " << synced;
-  // The checkpoint comes after the backing half, so that it covers the dirty
-  // set's clearing too, and after the request's reply (FinishSyncPoint), so
-  // that no request waits for it (step 25.28b).
-  checkpoint_due_ = true;
-}
-
 void DirCacheFS::FinishSyncPoint() {
-  if (!checkpoint_due_) return;
-  checkpoint_due_ = false;
-  absl::Status checkpointed = CheckpointCache();
-  // Safe to carry on: the commits stay for SQLite's autocheckpoint or the
-  // next sync point, and only cost a larger re-read after a power loss.
-  LOG_IF(WARNING, !checkpointed.ok())
-      << "sync point: checkpoint of the cache's WAL failed, leaving its "
-      << "commits unsynced until the next sync point: " << checkpointed;
+  if (!durable_point_due_) return;
+  durable_point_due_ = false;
+  absl::Status durable = MakeCacheDurable();
+  // Carries on: the next durable point fsyncs the WAL again (nothing marked
+  // these commits durable). Whether the kernel kept the pages the failed
+  // fsync could not write is the cache disk's filesystem's to say, so they
+  // may not survive a power loss even after that.
+  LOG_IF(WARNING, !durable.ok())
+      << "sync point: fsync of the cache's WAL failed; the cache's commits "
+         "since its last durable point may not survive a power loss: "
+      << durable;
 }
 
 absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
@@ -2214,18 +2212,16 @@ absl::Status DirCacheFS::Fsync(FuseRequest &req, fuse_ino_t ino, int datasync,
   }
   // Backing durability is the backing filesystem's own job; passing the
   // sync through is still correct (and cheap) regardless of `writable`.
-  // Interruption points before the fsync and before the sync point
-  // (dcfs/interruption_point.h): an fsync replied EINTR may have run;
-  // repeating it is harmless.
+  // An interruption point before the fsync (dcfs/interruption_point.h):
+  // an fsync replied EINTR may have run; repeating it is harmless.
   RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("an fsync")));
   BackingCall("FsyncFd");
   RETURN_IF_ERROR(backing::FsyncFd(fd, datasync != 0));
-  // The caller wants what it did durable, and that includes what dcfs
-  // cached about it: a sync point makes the backing filesystems durable,
-  // empties the dirty set (a no-op if it is already empty) and checkpoints
-  // the cache's WAL.
-  RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("a sync point")));
-  SyncNow("fsync");
+  // The fsync makes durable what the backing filesystem's fsync does, no
+  // more (no syncfs: not a sync point, the dirty set stays; step 25.28b).
+  // What dcfs cached about the file (its inode number, the handle an NFS
+  // client holds) is made durable with it.
+  RETURN_IF_ERROR(MakeCacheDurable());
   return req.ReplyErrno(0);
 }
 
@@ -2518,16 +2514,15 @@ absl::Status DirCacheFS::Fsyncdir(FuseRequest &req, fuse_ino_t ino,
     // A removed directory (step 23.2): through its record's descriptor.
     BackingCall("FsyncDirFd");
     RETURN_IF_ERROR(backing::FsyncDirFd(*it->second.fd, datasync != 0));
-    SyncNow("fsyncdir");
+    RETURN_IF_ERROR(MakeCacheDurable());
     return req.ReplyErrno(0);
   }
   // Missing row -> ESTALE; see RequireAttr(). There is no phase 1/3 here:
-  // the syscall, then a sync point, as in Fsync().
+  // the syscall, then the cache's durable point, as in Fsync().
   RETURN_IF_ERROR(RequireAttr(id).status());
   RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("an fsyncdir")));
   RETURN_IF_ERROR(backing::FsyncDir(ctx_, id, datasync != 0));
-  RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("a sync point")));
-  SyncNow("fsyncdir");
+  RETURN_IF_ERROR(MakeCacheDurable());
   return req.ReplyErrno(0);
 }
 

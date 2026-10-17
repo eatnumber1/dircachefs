@@ -8,6 +8,8 @@
 #  - AtimeExpiry, FRead, File* (F's create, lookups, getattrs, releases,
 #    setattrs), WriteSyscall, WriteReply: F's requests are not in this
 #    configuration (MC_atime*, MC_borndirty* take them).
+#  - FsyncReply: the fsync requests (fsync, fsyncdir) are not in this
+#    configuration (the litmus configurations take them).
 #  - Interrupt, InterruptArrives: Interrupts = FALSE here (MC_interrupt*
 #    take them).
 #  - RenameFailed, RenameFailed2, UnlinkFailed: dead in every
@@ -20,6 +22,7 @@ AttrChangePhase3 18690
 AttrChangeStat 35306
 AttrChangeSyscall 10150
 BeginShutdown 15395
+CacheDurable 1523740
 CrashRecovering 2280
 CrashServing 3137725
 CrashStopping 51563
@@ -47,6 +50,7 @@ FileSetEnd 0
 FileSetFill 0
 FileSetStat 0
 FileSetSyscall 0
+FsyncReply 0
 GetattrFill 567878
 GetattrStat 430320
 Init 4
@@ -83,6 +87,5 @@ UnlinkPhase1 41360
 UnlinkPhase3 11332
 UnlinkStat 19148
 UnlinkSyscall 6516
-WalCheckpoint 1523740
 WriteReply 0
 WriteSyscall 0

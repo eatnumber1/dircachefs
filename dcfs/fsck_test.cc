@@ -210,7 +210,7 @@ std::string MakeCache(const std::string &name, const std::string &sql = "") {
     CHECK_OK(db->Exec("PRAGMA foreign_keys=OFF"));
     CHECK_OK(db->ExecScript(sql));
   }
-  CHECK_OK(db->Checkpoint(sqlite3::Connection::CheckpointMode::kTruncate));
+  CHECK_OK(db->Checkpoint());
   CHECK_OK(db->Close());
   return path;
 }

@@ -13,32 +13,33 @@
 (* (dcfs.tla's dbOpts). It has no clock, so it cannot say how long a       *)
 (* normal commit stays losable. Here the same abstraction gets one: the    *)
 (* commits a power loss may lose are those since the last durable point    *)
-(* (a kSync commit, a checkpoint), and `oldest` is the age of the first of *)
-(* them, in ticks of a discrete clock.                                     *)
+(* (a kSync commit, an fsync of the WAL), and `oldest` is the age of the   *)
+(* first of them, in ticks of a discrete clock.                            *)
 (*                                                                         *)
 (* What makes them durable besides a kSync commit (a mutation's phase 1)   *)
-(* is the sync point's checkpoint. The periodic sync point starts at the   *)
-(* first request once Interval ticks have passed since the last one        *)
-(* (DirCacheFS::MaybeSyncNow, SyncNow: the backing half), an FSYNC or      *)
-(* FSYNCDIR starts one too, and the request ends with the checkpoint,      *)
-(* after its reply and before the next request is served                   *)
-(* (DirCacheFS::FinishSyncPoint). There is no timer (docs/style.md, "No    *)
-(* timers"): an idle daemon runs nothing, so the bound is at requests      *)
+(* is the cache's durable point (DirCacheFS::MakeCacheDurable). The        *)
+(* periodic sync point starts at the first request once Interval ticks     *)
+(* have passed since the last one (DirCacheFS::MaybeSyncNow: the backing   *)
+(* half), and the request ends with the durable point, after its reply and *)
+(* before the next request is served (DirCacheFS::FinishSyncPoint). An     *)
+(* FSYNC or FSYNCDIR is no sync point, but makes the durable point before  *)
+(* its reply (Fsync). There is no timer (docs/style.md, "No timers"): an   *)
+(* idle daemon runs nothing, so the bound is at requests                   *)
 (* (LostWithinInterval, the same bound at every moment, does not hold:     *)
 (* limitations/durability_idle.cfg).                                       *)
 (* BoundAtRequestEnd: a request that starts while a commit a power loss    *)
 (* may lose is an interval old ends with every commit durable, unless its  *)
-(* checkpoint failed (CheckpointFails: an I/O error of the cache disk,     *)
-(* logged at WARNING; the commits then wait for the next sync point).      *)
+(* durable point failed (DurablePointFails: an I/O error of the cache      *)
+(* disk, logged at WARNING; the next durable point fsyncs again).          *)
 (* LostOnlySinceSync, the reason: between requests, every commit a power   *)
-(* loss may lose came after the last sync point, unless its checkpoint     *)
+(* loss may lose came after the last sync point, unless its durable point  *)
 (* failed.                                                                 *)
 (*                                                                         *)
 (* Abstractions:                                                           *)
 (*  - Commits may happen at any moment, not only inside requests, and in   *)
 (*    any number (a request may run for many intervals on a slow backing). *)
 (*    That only adds behaviors. Requests do not overlap: dcfs serves one   *)
-(*    at a time, and the checkpoint comes before it serves the next.       *)
+(*    at a time, and the durable point comes before it serves the next.    *)
 (*  - The clock saturates: `since` and `oldest` at Interval stand for      *)
 (*    "Interval ticks or more".                                            *)
 (*  - SQLite's autocheckpoint (every 1000 pages) may make everything       *)
@@ -51,11 +52,12 @@ EXTENDS Integers
 
 CONSTANTS
     Interval,                     \* opts_.sync_interval, in ticks (>= 1)
-    \* Before step 25.28: no sync point checkpoints; only kSync commits and
-    \* the autocheckpoint make a normal commit durable.
+    \* Before step 25.28: no sync point makes the cache durable (then: no
+    \* sync point checkpoints its WAL); only kSync commits and the
+    \* autocheckpoint make a normal commit durable.
     BugNeverCheckpoint,
     \* Step 25.28's: a sync point that clears a dirty set resets the clock
-    \* without a checkpoint (its MaybeCheckpointWal ran only when no sync
+    \* without a durable point (its MaybeCheckpointWal ran only when no sync
     \* point was due, on a clock each sync point reset).
     BugSyncPointSkipsCheckpoint
 
@@ -70,8 +72,8 @@ VARIABLES
     oldest,   \* ticks since the first commit a power loss may lose, or None
     dirty,    \* the dirty set may be non-empty (DirCacheFS::SyncDue)
     busy,     \* a request is being served
-    due,      \* its sync point's checkpoint is due (checkpoint_due_)
-    failed,   \* the last sync point's checkpoint failed
+    due,      \* its sync point's durable point is due (durable_point_due_)
+    failed,   \* the last sync point's durable point failed
     owed,     \* the request started with a losable commit an interval old
     ended     \* the last step ended a request (for BoundAtRequestEnd)
 
@@ -108,21 +110,22 @@ AutoCheckpoint ==
     /\ UNCHANGED <<since, dirty, busy, due, failed, owed>> /\ ended' = FALSE
 
 -----------------------------------------------------------------------------
-(* The sync point. SyncNow, inside the request: the backing half, if the   *)
-(* dirty set may be non-empty (syncfs, then ClearDirty, a normal commit),  *)
-(* and the checkpoint left due. FinishSyncPoint, after the reply: the      *)
-(* checkpoint, if anything committed since the last one, makes every       *)
-(* commit so far durable, or fails.                                        *)
+(* The sync point. SyncNow, inside the request (MaybeSyncNow): the         *)
+(* backing half, if the dirty set may be non-empty (syncfs, then           *)
+(* ClearDirty, a normal commit), and the durable point left due.           *)
+(* FinishSyncPoint, after the reply: the durable point, if anything        *)
+(* committed since the last one, makes every commit so far durable, or     *)
+(* fails.                                                                  *)
 
-Checkpoints(wasDirty) ==
+DurablePointDue(wasDirty) ==
     /\ ~BugNeverCheckpoint
     /\ ~(BugSyncPointSkipsCheckpoint /\ wasDirty)
 
 SyncNow ==
     /\ since' = 0 /\ dirty' = FALSE
     /\ oldest' = IF dirty THEN NormalCommit(oldest) ELSE oldest
-    \* (The bugs' sync point, whose request ends with no checkpoint.)
-    /\ due' = Checkpoints(dirty)
+    \* (The bugs' sync point, whose request ends with no durable point.)
+    /\ due' = DurablePointDue(dirty)
 
 \* A request starts: the periodic sync point first, once Interval ticks
 \* have passed since the last (DirCacheFS::MaybeSyncNow).
@@ -133,12 +136,14 @@ Start ==
        ELSE UNCHANGED <<since, oldest, dirty, due>>
     /\ UNCHANGED failed /\ ended' = FALSE
 
-\* An FSYNC or FSYNCDIR: a sync point inside its request.
+\* An FSYNC or FSYNCDIR (step 25.28b): no sync point (the clock and the
+\* dirty set stay), but the cache's durable point before its reply. One
+\* that fails changes nothing here (the request replies EIO).
 Fsync ==
-    /\ busy /\ SyncNow
-    /\ UNCHANGED <<busy, failed, owed>> /\ ended' = FALSE
+    /\ busy /\ oldest' = None
+    /\ UNCHANGED <<since, dirty, busy, due, failed, owed>> /\ ended' = FALSE
 
-\* The request ends: its reply, then the checkpoint if one is due.
+\* The request ends: its reply, then the durable point if one is due.
 Finish ==
     /\ busy /\ busy' = FALSE
     /\ oldest' = IF due THEN None ELSE oldest
@@ -146,8 +151,8 @@ Finish ==
     /\ due' = FALSE /\ ended' = TRUE
     /\ UNCHANGED <<since, dirty, owed>>
 
-\* The same, with a checkpoint that fails.
-CheckpointFails ==
+\* The same, with a durable point that fails.
+DurablePointFails ==
     /\ busy /\ due /\ busy' = FALSE
     /\ failed' = TRUE
     /\ due' = FALSE /\ ended' = TRUE
@@ -178,7 +183,7 @@ Init ==
 
 Next ==
     \/ Commit \/ Phase1 \/ AutoCheckpoint
-    \/ Start \/ Fsync \/ Finish \/ CheckpointFails
+    \/ Start \/ Fsync \/ Finish \/ DurablePointFails
     \/ Tick \/ PowerLossAndRestart
 
 Spec == Init /\ [][Next]_vars
@@ -187,16 +192,16 @@ Spec == Init /\ [][Next]_vars
 (* Properties. *)
 
 \* The bound: a request that starts while a commit a power loss may lose is
-\* an interval old ends with every commit durable, unless its checkpoint
+\* an interval old ends with every commit durable, unless its durable point
 \* failed.
 BoundAtRequestEnd == ended /\ owed /\ ~failed => oldest = None
 
 \* Why: between requests, every commit a power loss may lose came after the
-\* last sync point, unless that sync point's checkpoint failed.
+\* last sync point, unless that sync point's durable point failed.
 LostOnlySinceSync == ~busy /\ oldest # None /\ ~failed => oldest <= since
 
-\* The bound without its exception: what a failed checkpoint costs
-\* (limitations/durability_checkpoint_fails.cfg expects it violated).
+\* The bound without its exception: what a failed durable point costs
+\* (limitations/durability_durable_point_fails.cfg expects it violated).
 BoundIgnoringFailures == ended /\ owed => oldest = None
 
 \* The bound at every moment, not only at requests: what an idle daemon

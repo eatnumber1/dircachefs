@@ -72,15 +72,25 @@ write sync 1
 write sql_stmts 66
 write sql_txns 6
 
-fsync backing 12
+# Step 25.28b: 12 backing, 76 statements and 8 transactions before (the
+# sync point's syncfs and fstatfs, its snapshot and ClearDirty).
+fsync backing 10
 fsync procfd 3
-# Step 25.28b: 2 before (the backing fsync and syncfs). The sync point now
-# checkpoints the cache's WAL: SQLite fsyncs the WAL before it copies and
-# the database file after, and the release's commit, the first after a whole
-# checkpoint, restarts the WAL and fsyncs its new header.
-fsync sync 5
-fsync sql_stmts 76
-fsync sql_txns 8
+# Step 25.28b: exactly what it makes, so that an added barrier fails here
+# too: the backing fsync and the cache's durable point (an fsync of its
+# WAL), since something committed after the last one. (2 before too: the
+# backing fsync and the sync point's syncfs.)
+fsync sync 2
+fsync sql_stmts 64
+fsync sql_txns 7
+
+# Step 25.28b: an FSYNC with nothing committed since the last durable point:
+# the backing fsync alone.
+fsync-clean backing 8
+fsync-clean procfd 1
+fsync-clean sync 1
+fsync-clean sql_stmts 7
+fsync-clean sql_txns 0
 
 chmod backing 19
 chmod procfd 5
@@ -99,3 +109,12 @@ held-stat procfd 1
 held-stat sync 0
 held-stat sql_stmts 21
 held-stat sql_txns 2
+
+# Step 25.28b: the periodic sync point, after a mutation: syncfs, the
+# read-only guard's fstatfs, the dirty set's clearing, and after the reply
+# the cache's durable point (an fsync of its WAL).
+sync-point backing 3
+sync-point procfd 0
+sync-point sync 2
+sync-point sql_stmts 15
+sync-point sql_txns 1

@@ -268,28 +268,28 @@ class Connection {
   // it.
   void set_observer(ProtocolEvents *absl_nullable observer);
 
-  enum class CheckpointMode {
-    // A sync point's (step 25.28b): copies the committed frames that no
-    // reader of an older snapshot still needs, never waiting for one.
-    kPassive = SQLITE_CHECKPOINT_PASSIVE,
-    // The clean shutdown's: copies every frame and truncates the WAL to zero
-    // bytes, or fails (SQLITE_BUSY) while another connection reads.
-    kTruncate = SQLITE_CHECKPOINT_TRUNCATE,
-  };
-
-  // A WAL checkpoint (sqlite3_wal_checkpoint_v2). Under synchronous=NORMAL
-  // SQLite fsyncs the WAL before it copies a frame (sqlite3.c walCheckpoint),
-  // so with no other connection reading, every commit so far survives a
-  // power loss once this returns OK. A no-op when the database is not in WAL
+  // The clean shutdown's WAL checkpoint (sqlite3_wal_checkpoint_v2,
+  // SQLITE_CHECKPOINT_TRUNCATE): copies every frame into the database file
+  // and truncates the WAL to zero bytes, or fails (SQLITE_BUSY, Unavailable)
+  // while another connection reads. A no-op when the database is not in WAL
   // mode (an in-memory one).
-  absl::Status Checkpoint(CheckpointMode mode);
+  absl::Status Checkpoint();
 
-  // Whether a transaction committed since the last Checkpoint() (or since
+  // A durable point: fsyncs the WAL, after which every transaction committed
+  // so far survives a power loss. Internal for a database with no WAL (an
+  // in-memory one); a failed fsync is the sqlite3 error (EIO to the kernel)
+  // and leaves CommittedSinceDurable() true.
+  absl::Status MakeDurable();
+
+  // Whether a transaction committed since the last MakeDurable() (or since
   // the connection opened). Read from SQLite's data version
-  // (SQLITE_FCNTL_DATA_VERSION). Every commit moves the version, a kSync one
-  // included (a checkpoint after it is redundant but harmless); an empty
-  // transaction moves it too.
-  absl::StatusOr<bool> CommittedSinceCheckpoint() const;
+  // (SQLITE_FCNTL_DATA_VERSION), which every commit moves. A kSync commit
+  // moves it too, though it fsynced the WAL: so does a kSync transaction
+  // that wrote nothing, with no fsync (sqlite3.c, sqlite3PagerCommitPhaseOne
+  // returns before the WAL is written; phase two moves the version), so the
+  // version cannot tell the two apart and a MakeDurable() after a kSync
+  // commit is redundant but harmless.
+  absl::StatusOr<bool> CommittedSinceDurable() const;
 
   ::sqlite3 *absl_nullable Get() const;
 
@@ -337,8 +337,8 @@ class Connection {
   // Whether the outermost open Transaction() was started with
   // Durability::kSync.
   bool sync_transaction_ = false;
-  // DataVersion() after the last Checkpoint(), or at the open.
-  uint32_t checkpointed_version_ = 0;
+  // DataVersion() at the last MakeDurable(), or at the open.
+  uint32_t durable_version_ = 0;
 };
 
 // Opens a Connection. Nothing in Connection may assume the default VFS, so

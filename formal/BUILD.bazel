@@ -324,8 +324,34 @@ tlc_test(
         "create_seq",
         "fsync_file_ext4",
         "fsync_dir_ext4",
-        "fsync_file_direct_metaprefix",
-        "fsync_dir_direct_files_ext4",
+        "fsync_file_metaprefix",
+        "fsync_dir_metaprefix",
+        "fsync_dir_files_ext4",
+    ]
+]
+
+# What the fsyncs above do not guarantee, pinned (step 25.28b; MClitmus.tla,
+# README.md "Changing the model"): an outcome the backing filesystem's regime
+# allows after an fsync stays reachable through dcfs, which passes the fsync
+# through and adds no barrier. Each expects TLC's counterexample; each is
+# paired with the litmus test above of what the same fsync guarantees.
+[
+    tlc_test(
+        name = "no_stronger_than_%s_test" % config,
+        size = "small",
+        timeout = "short",
+        config = "no_stronger/%s.cfg" % config,
+        expect_violation = "Invariant LitmusOK is violated",
+        spec = "MClitmus.tla",
+        srcs = [
+            "MC.tla",
+            "dcfs.tla",
+        ],
+    )
+    for config in [
+        "ext4_fsync_file_loses_entry",  # with fsync_file_ext4
+        "ext4_fsync_dir_loses_data",  # with fsync_dir_ext4
+        "metaprefix_fsync_dir_loses_data",  # with fsync_dir_metaprefix
     ]
 ]
 
@@ -559,16 +585,12 @@ tlc_test(
 
 # What the backing filesystem's crash consistency leaves to the caller
 # (limitations/crash_litmus.tla): the litmus tests whose surprising outcome
-# is reachable, through dcfs (LitmusOK) or with the program's own fsync as
-# on the backing filesystem directly (LitmusBackingOK). Seconds each.
+# is reachable through dcfs (LitmusOK) without an fsync. Seconds each.
 CRASH_LIMITATIONS = {
     "litmus_replace_metaprefix": "Invariant LitmusOK is violated",
     "litmus_replace_ext4": "Invariant LitmusOK is violated",
     "litmus_create_metaprefix": "Invariant LitmusOK is violated",
     "litmus_create_ext4": "Invariant LitmusOK is violated",
-    "litmus_fsync_file_direct_ext4": "Invariant LitmusBackingOK is violated",
-    "litmus_fsync_dir_direct_ext4": "Invariant LitmusBackingOK is violated",
-    "litmus_fsync_dir_direct_metaprefix": "Invariant LitmusBackingOK is violated",
 }
 
 [
@@ -692,8 +714,8 @@ tlc_test(
     spec = "durability.tla",
 )
 
-# Its known bugs: the code before 25.28 (no checkpoint at a sync point) and
-# 25.28's (none at a sync point that clears a dirty set).
+# Its known bugs: the code before 25.28 (no durable point at a sync point)
+# and 25.28's (none at a sync point that clears a dirty set).
 [
     tlc_test(
         name = "known_bug_%s_test" % bug,
@@ -721,8 +743,8 @@ tlc_test(
     srcs = ["durability.tla"],
 )
 
-# What the bound leaves out: its exception, a checkpoint that fails; and,
-# with no timer, the moments between requests.
+# What the bound leaves out: its exception, a durable point that fails;
+# and, with no timer, the moments between requests.
 [
     tlc_test(
         name = "limitation_durability_%s_test" % limitation,
@@ -733,7 +755,7 @@ tlc_test(
         spec = "durability.tla",
     )
     for limitation, violation in {
-        "checkpoint_fails": "BoundIgnoringFailures",
+        "durable_point_fails": "BoundIgnoringFailures",
         "idle": "LostWithinInterval",
     }.items()
 ]
@@ -1021,11 +1043,11 @@ TRACE_TESTS = {
     # name, BugInterruptAfterSyscall, which acts on it there.)
     "interrupt_after_syscall": None,
     # Step 25.28b: a power loss may lose a fill's normal commit (valid) ...
-    "fill_lost_without_wal_checkpoint": None,
-    # ... but not once a sync point's checkpoint has followed it: kept is
+    "fill_lost_without_durable_point": None,
+    # ... but not once the cache's durable point has followed it: kept is
     # valid, lost is rejected at the crash.
-    "wal_checkpoint_keeps_fill": None,
-    "wal_checkpoint_fill_lost": "\"ev\":\"crash\"",
+    "durable_point_keeps_fill": None,
+    "durable_point_fill_lost": "\"ev\":\"crash\"",
 }
 
 [

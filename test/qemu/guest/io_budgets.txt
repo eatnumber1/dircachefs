@@ -136,15 +136,19 @@
 //test/qemu:fault_cache_test_ext4 dcfs_read_bytes 958464   # observed 950272..954368
 //test/qemu:fault_cache_test_ext4 dcfs_write_bytes 966656   # observed 745472..856064
 
-# //test/qemu:fault_ace_a_test (14 runs; reads and writes: 14 runs)
+# //test/qemu:fault_ace_a_test (14 runs; reads and writes: 14 runs; writes,
+# flushes and the daemon's reads, writes and read bytes: 4 runs in step
+# 25.28b, when the dcfs persistence point became a periodic sync point and
+# an FSYNCDIR whose durable point fsyncs the cache's WAL: more of the WAL
+# reaches the disk, and a restart's recovery reads it)
 //test/qemu:fault_ace_a_test reads 36015   # observed 35663..35839
-//test/qemu:fault_ace_a_test writes 24852   # observed 24612..24732
+//test/qemu:fault_ace_a_test writes 25298   # observed 25222..25260
 //test/qemu:fault_ace_a_test sectors_read 386888   # observed 384296..385592
 //test/qemu:fault_ace_a_test sectors_written 324064   # observed 321904..322984
-//test/qemu:fault_ace_a_test flushes 5777   # observed 5689..5733
-//test/qemu:fault_ace_a_test dcfs_reads 1557   # observed 1557..1557
-//test/qemu:fault_ace_a_test dcfs_writes 3503   # observed 3413..3458
-//test/qemu:fault_ace_a_test dcfs_read_bytes 57262080   # observed 57262080..57262080
+//test/qemu:fault_ace_a_test flushes 5869   # observed 5821..5845
+//test/qemu:fault_ace_a_test dcfs_reads 1645   # observed 1639..1642
+//test/qemu:fault_ace_a_test dcfs_writes 3659   # observed 3589..3624
+//test/qemu:fault_ace_a_test dcfs_read_bytes 57909248   # observed 57884672..57896960
 //test/qemu:fault_ace_a_test dcfs_write_bytes 81215488   # observed 81215488..81215488
 
 # //test/qemu:fault_ace_b_test (15 runs; reads and writes: 14 runs)
@@ -158,15 +162,17 @@
 //test/qemu:fault_ace_b_test dcfs_read_bytes 27639808   # observed 27639808..27639808
 //test/qemu:fault_ace_b_test dcfs_write_bytes 39698432   # observed 39698432..39698432
 
-# //test/qemu:fault_ace_mixed_test_ext4 (15 runs; reads and writes: 14 runs)
+# //test/qemu:fault_ace_mixed_test_ext4 (15 runs; reads and writes: 14 runs;
+# writes and the daemon's read bytes: 4 runs in step 25.28b, when the sync
+# event became a periodic sync point and an FSYNCDIR)
 //test/qemu:fault_ace_mixed_test_ext4 reads 5478   # observed 5398..5438
-//test/qemu:fault_ace_mixed_test_ext4 writes 4487   # observed 4417..4452
+//test/qemu:fault_ace_mixed_test_ext4 writes 4505   # observed 4477..4491
 //test/qemu:fault_ace_mixed_test_ext4 sectors_read 72936   # observed 72264..72600
 //test/qemu:fault_ace_mixed_test_ext4 sectors_written 59520   # observed 59024..59272
 //test/qemu:fault_ace_mixed_test_ext4 flushes 1400   # observed 1336..1368
 //test/qemu:fault_ace_mixed_test_ext4 dcfs_reads 752   # observed 746..749
 //test/qemu:fault_ace_mixed_test_ext4 dcfs_writes 636   # observed 614..625
-//test/qemu:fault_ace_mixed_test_ext4 dcfs_read_bytes 17993728   # observed 17969152..17981440
+//test/qemu:fault_ace_mixed_test_ext4 dcfs_read_bytes 18014208   # observed 17989632..18001920
 //test/qemu:fault_ace_mixed_test_ext4 dcfs_write_bytes 15790080   # observed 15732736..15761408
 
 # //test/qemu:xfstests_1_test_ext4 (4 runs; the workload is 123 tests of

@@ -553,9 +553,10 @@ T_Syncfs ==
     /\ Ev("syncfs") /\ ps[P].pc = "S2" /\ Stutter /\ Matches(E, {})
 T_SyncClearDirty ==
     /\ Ev("sync_clear") /\ SyncClearDirty(P) /\ Matches(E, {})
-\* A sync point's checkpoint of the cache's WAL (step 25.28b).
-T_WalCheckpoint ==
-    /\ Ev("wal_checkpoint") /\ WalCheckpoint /\ Matches(E, {})
+\* The cache's durable point (step 25.28b): the periodic sync point's, or
+\* an FSYNC's or FSYNCDIR's (requests the traces do not show).
+T_CacheDurable ==
+    /\ Ev("cache_durable") /\ CacheDurable /\ Matches(E, {})
 
 \* An interruption point found the request interrupted (FUSE_INTERRUPT):
 \* it replies EINTR, ending a mutation past phase 1 without phase 3. The
@@ -658,7 +659,7 @@ TraceNext ==
     \/ T_AttrChangePhase3
     \/ T_CreateFailed \/ T_UnlinkFailed \/ T_RenameFailed
     \/ T_RenameFailed2 \/ T_Reresolve
-    \/ T_ArriveSync \/ T_Syncfs \/ T_SyncClearDirty \/ T_WalCheckpoint
+    \/ T_ArriveSync \/ T_Syncfs \/ T_SyncClearDirty \/ T_CacheDurable
     \/ T_Interrupt \/ T_InterruptArrives \/ T_Reply
     \/ T_BeginShutdown \/ T_StopSync \/ T_StopClear \/ T_StopCkpt
     \/ T_StopFlag

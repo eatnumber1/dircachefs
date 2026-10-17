@@ -142,7 +142,7 @@ timed rename mv "$MNT/t/000/02/new" "$MNT/t/000/02/renamed"
 drop_caches
 timed unlink rm "$MNT/t/000/02/renamed"
 # Writes go through passthrough (the kernel); FSYNC is the backing fsync
-# and the sync point after it (syncfs of everything written since).
+# and the cache's durable point (step 25.28b: no sync point, no syncfs).
 timed write-32m dd if=/dev/zero of="$MNT/w/a" bs=1M count=32
 timed fsync-after-32m dd if=/dev/zero of="$MNT/w/b" bs=4096 count=1 conv=fsync
 timed write-fsync-32m dd if=/dev/zero of="$MNT/w/c" bs=1M count=32 conv=fsync

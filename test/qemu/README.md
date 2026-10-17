@@ -977,12 +977,15 @@ Step 11.2 added three things:
   backing filesystem's (type, size, mode, links, the md5 of every file); and,
   for sequences with a persistence point, `durable`: the backing filesystem is
   exactly what it was at that point. Two persistence points, because they leave
-  different states: an fsync through dcfs (`testutil fsync`; the backing
-  filesystem durable and the dirty set cleared, the cache possibly ahead by
-  what phase 1's fsync made durable) and a syncfs of the backing filesystem
-  itself behind dcfs (the backing filesystem durable, the cache's phase 3 not:
-  recovery has the dirty entries to forget; an fsync of the directory alone
-  persists no file data, which the first run showed on `append`). No sequence cuts inside a
+  different states: a periodic sync point through dcfs (the clock moved past
+  the interval, then a `testutil fsync` of the directory, whose start runs
+  it; the backing filesystem durable and the dirty set cleared, the cache
+  possibly ahead by what phase 1's fsync made durable) and a syncfs of the
+  backing filesystem itself behind dcfs (the backing filesystem durable, the
+  cache's phase 3 not: recovery has the dirty entries to forget). An fsync
+  of the directory alone persists no file data, which the first run showed
+  on `append`, so an `FSYNCDIR` through dcfs, which dcfs passes through with
+  no `syncfs` since step 25.28b, is no persistence point either. No sequence cuts inside a
   mutation (`fault_power_test` does). `dcfs_ace_kinds=` and `dcfs_ace_ops=` on
   the kernel command line pick the kinds (`one pair persist split direct dsplit
   fixtures`) and the operations: target a runs 182 sequences (about 10
@@ -1109,9 +1112,13 @@ dcfs's intent.
   FLUSH after the start mark are not tested.
 - **The record.** After each operation a STATFS through dcfs (which it
   serves after every request queued before it), the WAL's commit count, the
-  cost counter's synced transactions and a log mark; strace of the daemon
-  (`strace -D`) gives each fsync of the WAL and the commit it follows. The
-  synced transactions of each operation must be its WAL fsyncs.
+  cost counter's synced transactions and durable points (step 25.28b: an
+  `FSYNC`'s, and a periodic sync point's after the clock was moved past the
+  interval) and a log mark; strace of the daemon (`strace -D`) gives each
+  fsync of the WAL and the commit it follows. The synced transactions and
+  durable points of the operations, in order, must be the WAL's fsyncs, each
+  within its operation's commits, and each operation's durable points what
+  dcfs's rules say.
 - **The crash states** (CrashMonkey's method on the log): every entry
   before each FLUSH after the start mark; in each epoch between two
   FLUSHes, every prefix of its FUA writes, all of them with a subset of its

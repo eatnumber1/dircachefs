@@ -689,9 +689,11 @@ class ProtocolEvents {
   virtual void ShutdownBegin(Context &ctx) {}
   // FinishRun's checkpoint completed. Model: StopCkpt.
   virtual void Checkpointed(Context &ctx) {}
-  // A sync point's checkpoint of the cache's WAL completed
-  // (DirCacheFS::CheckpointCache; step 25.28b). Model: WalCheckpoint.
-  virtual void WalCheckpointed(Context &ctx) {}
+  // The cache's durable point completed: every commit so far survives a
+  // power loss (DirCacheFS::MakeCacheDurable: the periodic sync point's,
+  // after its reply, or an FSYNC's or FSYNCDIR's, before its reply; step
+  // 25.28b). Model: CacheDurable.
+  virtual void CacheMadeDurable(Context &ctx) {}
   // FinishRun's clean_shutdown = 1 committed. Model: StopFlag.
   virtual void CleanShutdownRecorded(Context &ctx) {}
 

@@ -39,10 +39,10 @@
 #              it saved before gets ESTALE
 #   lag        (step 25.28b) fills on either side of a periodic sync point
 #              with a dirty set: the one older than the interval survives the
-#              cut (the sync point checkpointed the cache's WAL), the one after
-#              it does not
+#              cut (the sync point made the cache durable, an fsync of its
+#              WAL), the one after it does not
 #   lagclean   (step 25.28b) the same with nothing dirty: the periodic sync
-#              point is the checkpoint alone
+#              point is the durable point alone
 #
 # After each, the invariant: every entry dcfs serves matches the backing
 # filesystem exactly (type, size, mode, and the listing of every directory),
@@ -415,8 +415,9 @@ check_ahead() {
 # atime (step 23.8): a read's access time, recorded by dcfs at the release
 # from its held descriptor, which the backing filesystem then loses: it
 # writes atime back lazily and nothing synced it. d7/r's atime is set two
-# days back through dcfs and made durable (an fsync through dcfs, whose sync
-# point empties the dirty set), so the read moves it. dm: the backing
+# days back through dcfs and made durable (a periodic sync point through dcfs,
+# which empties the dirty set: the clock moved past the interval, then an
+# FSYNC of d7/r, whose start runs it), so the read moves it. dm: the backing
 # filesystem drops writes from then on; kill: its journal has not committed
 # the read's update. A create through dcfs in another directory (d8, so
 # that d7's own recovery does not forget d7/r's name) then makes a durable
@@ -426,6 +427,7 @@ check_ahead() {
 setup_atime() {
 	now=$(date +%s)
 	"$TESTUTIL" utimes2 "$MNT/d7/r" $((now - 172800)) $((now - 259200))
+	date -s "@$((now + 3601))" >/dev/null
 	"$TESTUTIL" fsync "$MNT/d7/r" || fail atime-sync "fsync through dcfs failed"
 	ATIME_OLD=$(stat -c %x "$SRC/d7/r")
 	[ "$CUT_MODE" = kill ] || fault_mode "$FD_BACK" drop-writes || fail atime-cut-backing "fault_mode failed"
@@ -587,12 +589,12 @@ check_syncpoint() {
 # d9's listing: a fill, a normal commit. The clock is moved one interval on
 # (no sleep: the daemon reads the real-time clock), and the next request's
 # periodic sync point syncs the backing filesystem, clears the dirty set and
-# checkpoints the cache's WAL after that request's reply; then d10's listing,
+# fsyncs the cache's WAL after that request's reply; then d10's listing,
 # a fill after it. After the cut the cache has d9's listing, older than the
 # interval, and not d10's, younger than the sync point: the witness that the
 # cut loses an unsynced commit, without which d9's would prove nothing.
 # lagclean: the same with nothing dirty (no create): the sync point is the
-# checkpoint alone.
+# durable point alone.
 LAG_INTERVAL=60
 # lag_setup NAME [create]: the scenario NAME, with the create in d8 if asked.
 lag_setup() {

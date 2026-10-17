@@ -131,9 +131,31 @@ qemu_cc_test(
       ":syscalls",
       ":syscalls_backing",
       "//dcfs/testonly:assert_ok_and_assign",
-      "//dcfs/testonly:files",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
+      "@absl//absl/status:status_matchers",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@googletest//:gtest_main",
+      "@sqlite//:sqlite3",
+    ],
+)
+
+# Connection::MakeDurable's fsync of the WAL, through a link-time --wrap of
+# fsync (what SQLite's unix VFS syncs with); a target of its own, so the
+# wrapping touches no other test.
+qemu_cc_test(
+    name = "sqlite_durable_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["sqlite_durable_test.cc"],
+    linkopts = ["-Wl,--wrap=fsync"],
+    deps = [
+      ":sqlite",
+      ":status",
+      ":syscalls_backing",
+      "//dcfs/testonly:assert_ok_and_assign",
+      "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
@@ -1118,6 +1140,8 @@ DIR_CACHE_FS_TEST_WRAPS = [
     "-Wl,--wrap=open_by_handle_at",
     "-Wl,--wrap=statx",
     "-Wl,--wrap=syncfs",
+    # Step 25.28b: a durable point whose WAL fsync fails (FsyncFailsFor).
+    "-Wl,--wrap=fsync",
     # Step 8.2c: the harness's fake kernel passthrough.
     "-Wl,--wrap=fuse_passthrough_open",
     "-Wl,--wrap=fuse_passthrough_close",

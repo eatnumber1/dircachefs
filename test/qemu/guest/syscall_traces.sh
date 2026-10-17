@@ -305,10 +305,10 @@ close(backing)
 EOT
 strace_budget budget-write write
 
-# FSYNC of a written file: the backing fsync, then the sync point that
-# follows it (syncfs on the mount fd, then fstatvfs: the source must still
-# be writable, step 11.5's read-only guard), "Sync points run after the
-# kernel's FSYNC", between the open's and the release's reads.
+# FSYNC of a written file: the backing fsync and nothing more of the
+# backing's (step 25.28b: no sync point, no syncfs), between the open's and
+# the release's reads; then the cache's durable point (an fsync of its WAL,
+# a "sync" in the budget), since the write's attributes were committed.
 strace_op fsync dd if=/dev/zero of="$MNT/wr" bs=4096 count=1 conv=notrunc,fsync
 strace_golden fsync fsync <<'EOT'
 open_by_handle_at(backing)
@@ -320,14 +320,19 @@ statx(backing)
 getxattr(procfd) !ENODATA
 statx(backing)
 fsync(backing)
-syncfs(backing)
-fstatfs(backing)
 statx(backing)
 statx(backing)
 getxattr(procfd) !ENODATA
 close(backing)
 EOT
 strace_budget budget-fsync fsync
+
+# FSYNC of a read-only open with nothing committed since the last durable
+# point: the backing fsync alone (no WAL fsync). The untraced one before it
+# makes durable what the dd's release committed after its FSYNC.
+"$TESTUTIL" fsync "$MNT/wr" || fail fsync-clean-setup "fsync of $MNT/wr failed"
+strace_op fsync-clean "$TESTUTIL" fsync "$MNT/wr"
+strace_budget budget-fsync-clean fsync-clean
 
 # SETATTR chmod: resolve the inode (handle open O_PATH, statx, generation),
 # statx of the mode, phase 2 fchmod through /proc/self/fd (O_PATH rejects
@@ -401,6 +406,21 @@ statx(backing)
 close(backing)
 EOT
 strace_budget budget-held-stat held-stat
+
+# The periodic sync point (step 25.28b), at the first request once the
+# interval has passed (the clock moved past it; no sleep: the daemon reads
+# the real-time clock), with the dirty set non-empty (the chmod's row): the
+# STATFS's own fstatfs; syncfs and the read-only guard's fstatfs; the dirty
+# set's clearing; and after the reply the cache's durable point (an fsync
+# of its WAL), one per interval.
+date -s "@$(($(date +%s) + 1000001))" >/dev/null
+strace_op sync-point stat -f "$MNT"
+strace_golden sync-point sync-point <<'EOT'
+syncfs(backing)
+fstatfs(backing)
+fstatfs(backing)
+EOT
+strace_budget budget-sync-point sync-point
 
 require_no_reclaim no-reclaim
 

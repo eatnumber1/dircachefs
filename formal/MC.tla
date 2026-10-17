@@ -98,8 +98,8 @@ ChildFilledIfDirOk(dirOk, childOk) == dirOk /\ childOk
 FillMarksIfDirNotOk(newRow, dirOk) == newRow /\ ~dirOk
 
 (***************************************************************************)
-(* MC_large.cfg and MC_nolock.cfg leave the sync point's checkpoint out    *)
-(* (WalCheckpoint <- NoWalCheckpoint; step 25.28b). It only shrinks        *)
+(* MC_large.cfg and MC_nolock.cfg leave the periodic durable point out     *)
+(* (CacheDurable <- NoCacheDurable; step 25.28b). It only shrinks          *)
 (* dbOpts, and every property quantifies over dbOpts universally and every *)
 (* step that reads it (PowerLoss) has at least the same choices in a       *)
 (* larger one, so a behavior with it breaks a property only if the same    *)
@@ -108,7 +108,7 @@ FillMarksIfDirNotOk(newRow, dirOk) == newRow /\ ~dirOk
 (* timeouts; trace validation has it, and so does every other             *)
 (* configuration.                                                          *)
 (***************************************************************************)
-NoWalCheckpoint == FALSE
+NoCacheDurable == FALSE
 
 View == <<bCur, bSeq,
           IF mode \in {"down", "recover"} THEN CrashImage(dbCur) ELSE dbCur,

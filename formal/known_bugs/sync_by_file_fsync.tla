@@ -2,7 +2,8 @@
 ------------------------- MODULE sync_by_file_fsync -------------------------
 (***************************************************************************)
 (* Not the code, and not historical (step 12.8): a sync point after the    *)
-(* kernel's FSYNC that takes the file's fsync as its barrier instead of    *)
+(* kernel's FSYNC (FsyncSyncPoint <- Yes; since step 25.28b an FSYNC is no *)
+(* sync point) that takes the file's fsync as its barrier instead of       *)
 (* running syncfs (SyncBarrier <- FsyncOnly), and clears the dirty set     *)
 (* after it, under the ext4 regime. Ferrite's Definition 7 orders before   *)
 (* an fsync of f only the updates of f: the create of f in D (its entry)   *)
@@ -13,9 +14,11 @@
 (* durable, ClearDirty takes D out of the dirty set; a power loss may now  *)
 (* keep that database and lose the create, and recovery has nothing to     *)
 (* forget: f would be served present. Under "seq" and "metaprefix" the     *)
-(* same sync point is safe (MC_litmus_fsync_file_direct_metaprefix.cfg):   *)
-(* there an fsync of a file makes all metadata before it durable. The      *)
-(* code's sync points run syncfs (docs/design.md, "Sync points").          *)
+(* same sync point would be safe: there an fsync of a file makes all       *)
+(* metadata before it durable. The code's sync points run syncfs           *)
+(* (docs/design.md, "Sync points").                                        *)
 (***************************************************************************)
 EXTENDS MClitmus
+
+Yes == TRUE
 =============================================================================

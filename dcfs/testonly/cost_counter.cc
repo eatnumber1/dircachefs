@@ -27,8 +27,9 @@ void CostCounter::BackingCall(Context &ctx, std::string_view what,
   ++counts_.backing_calls;
 }
 
-void CostCounter::WalCheckpointed(Context & /*ctx*/) {
-  ++counts_.wal_checkpoints;
+void CostCounter::CacheMadeDurable(Context & /*ctx*/) {
+  ++counts_.cache_durable_points;
+  Write();
 }
 
 void CostCounter::CheckRequestBegin(Context &ctx, const events::Bookkeeping &fs,
@@ -54,8 +55,8 @@ std::string CostCounter::Text() const {
   std::string text = absl::StrCat(
       "steps ", counts_.steps, "\ntransactions ", counts_.transactions,
       "\ndurable_transactions ", counts_.durable_transactions,
-      "\nbacking_calls ", counts_.backing_calls, "\nwal_checkpoints ",
-      counts_.wal_checkpoints, "\n");
+      "\nbacking_calls ", counts_.backing_calls, "\ncache_durable_points ",
+      counts_.cache_durable_points, "\n");
   for (const auto &[op, n] : counts_.requests) {
     absl::StrAppend(&text, "request.", op, " ", n, "\n");
   }

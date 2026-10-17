@@ -242,7 +242,7 @@ flag is set as the option `dcfs.<flag>`, e.g. `dcfs.sync_interval_sec=2`.
 |---|---|---|
 | `dcfs.attr_timeout_sec` | `3600` | How long the kernel may cache an inode's attributes. Long by design, since dcfs has exclusive access. While a file is open for writing, its attributes are always returned with a timeout of 0. |
 | `dcfs.entry_timeout_sec` | `3600` | How long the kernel may cache a lookup result, including a negative one. |
-| `dcfs.sync_interval_sec` | `5` | The first request this many seconds after the last sync point runs a new one: while mutations have left dirty cache entries, a `syncfs` of the backing filesystem, then the dirty set is cleared; and, after that request's reply, if anything was cached since the last, a checkpoint of the cache database's WAL, which makes it durable. Bounds how much is re-read after a power loss: the entries changed, and what was cached, in about one interval before the last request's start (unless a checkpoint failed and none has completed since: an I/O error of the cache disk, logged at WARNING). Must be positive and finite. |
+| `dcfs.sync_interval_sec` | `5` | The first request this many seconds after the last sync point runs a new one: while mutations have left dirty cache entries, a `syncfs` of the backing filesystem, then the dirty set is cleared; and, after that request's reply, if anything was cached since the cache was last made durable, an fsync of the cache database's WAL, which makes it durable. Bounds how much is re-read after a power loss: the entries changed, and what was cached, in about one interval before the last request's start (unless that fsync failed: an I/O error of the cache disk, logged at WARNING). An `fsync` through dcfs is no sync point and does not restart the interval. Must be positive and finite. |
 
 dcfs uses Abseil logging, so Abseil's logging flags work too, as options with
 Abseil's semantics:
@@ -603,15 +603,15 @@ changed since the last sync point, so that they are re-read from the
 backing filesystem. Inode rows are kept, so NFS handles keep working,
 except after a power loss or kernel crash: the cache database makes a
 durable commit at the first change through dcfs since the last sync point,
-at every sync point (its WAL checkpoint) and at a start, and rows recorded
-after it (by lookups, listings, and the objects a change creates) are
-lost, with their NFS handles. Since a sync point runs at the first request
-`dcfs.sync_interval_sec` seconds after the last, that is about one
-interval's rows before the last request's start, unless a checkpoint
-failed (the cache disk's I/O error, logged at WARNING) and none has
-completed since. Those fail with `ESTALE`; a nodeid handed out again gets a
-fresh random generation, so an old handle resolves to a different file
-only with probability 2^-32 (docs/design.md, "Generations").
+at every sync point and every `fsync` (an fsync of its WAL) and at a
+start, and rows recorded after it (by lookups, listings, and the objects a
+change creates) are lost, with their NFS handles. Since a sync point runs
+at the first request `dcfs.sync_interval_sec` seconds after the last, that
+is about one interval's rows before the last request's start, unless that
+fsync failed (the cache disk's I/O error, logged at WARNING). Those fail
+with `ESTALE`; a nodeid handed out again gets a fresh random generation,
+so an old handle resolves to a different file only with probability 2^-32
+(docs/design.md, "Generations").
 
 After a crash the dead FUSE mount stays in place, and accessing it fails
 with `ENOTCONN`. Unmount it (`umount -l <mountpoint>`) before mounting dcfs
@@ -740,8 +740,8 @@ dcfs itself failed at; warnings are what it noticed or survived.
 | WARNING `the last run did not shut down cleanly (... a crash or power loss / the daemon died; same boot); recovered N dirty cache entries` | At start: the previous run ended without its clean-shutdown record. dcfs forgot what it had cached about the entries changed since the last sync point; they are re-read as needed. Nothing to do unless it recurs; then find out why the daemon dies (the kernel log, the syslog before the line). |
 | ERROR `could not probe recovered inode N ...` | During that recovery the backing filesystem could not be read for an entry (printed for the first ten). The entry stays dirty and is re-checked on access. Check the backing filesystem's health. |
 | WARNING `forgot N rows of objects removed by mutations the last run's end cut short` | Recovery housekeeping after a crash; informational. |
-| WARNING `periodic sync of the backing filesystems failed, keeping the dirty set: ...` (also `fsync sync ...` and `fsyncdir sync ...`) | `syncfs` of the backing filesystem failed: the filesystem has errors, went read-only or is gone. Nothing is lost in dcfs (the entries stay dirty and cost a larger re-read after a crash). Look at the kernel log; it is retried at the next request past the interval. |
-| WARNING `sync point: checkpoint of the cache's WAL failed, leaving its commits unsynced until the next sync point: ...` | The checkpoint that makes the cache's recent work durable failed: the cache database's disk has an I/O error or is full. Until a later checkpoint completes, a power loss can take away more than the last interval of cached rows; nothing else is affected. Fix the cache's disk. |
+| WARNING `periodic sync of the backing filesystems failed, keeping the dirty set: ...` | `syncfs` of the backing filesystem failed: the filesystem has errors, went read-only or is gone. Nothing is lost in dcfs (the entries stay dirty and cost a larger re-read after a crash). Look at the kernel log; it is retried at the next request past the interval. |
+| WARNING `sync point: fsync of the cache's WAL failed; the cache's commits since its last durable point may not survive a power loss: ...` | The fsync that makes the cache's recent work durable failed: the cache database's disk has an I/O error. A power loss can take away more than the last interval of cached rows; nothing else is affected (an `fsync` through dcfs whose fsync of the WAL fails returns `EIO`). Fix the cache's disk. |
 | INFO `The daemon of an earlier mount (device M:N) is still shutting down (/run/dcfs/M_N.lock is locked); waiting for it to exit` | A mount got the device number an earlier mount had, and that mount's daemon is still finishing (syncing, closing its database). The new daemon waits for it, with no timeout, and goes on; the mount point is not served until then. Ctrl-C ends `mount`, not the daemon: `kill` it to cancel. See [Limitations](#limitations). |
 | WARNING `clean shutdown incomplete, the next start will recover the dirty set: ...` | The last sync at shutdown failed (same causes as the line above). The next start recovers by itself. |
 | ERROR `OP: the backing change happened, but recording it in the cache failed; leaving it unknown: ...` | The change is on the backing filesystem but the cache database could not record it (disk full or I/O error on the cache's disk). The entry is re-read later. Free space or fix the cache's disk. |
@@ -1149,12 +1149,14 @@ dirty set, committed with an fsync of the WAL; (2) performs the backing
 syscall, as the calling user where that matters; (3) records the new
 state. A crash at any point leaves at worst unknown entries, which are
 re-read on demand. Sync points (`syncfs`, then clearing the dirty set,
-while a mutation has left dirty state; then a checkpoint of the cache's
-WAL, if anything was cached since the last) run on `fsync`, every few
-seconds while there is something to do, and at shutdown; after an unclean
-shutdown, everything still in the dirty set is forgotten. This bounds what
-a power loss costs to re-reading the entries changed, and what was cached,
-in the last few seconds. A file that was only read is in the dirty set
+while a mutation has left dirty state; then an fsync of the cache's WAL,
+if anything was cached since it was last made durable) run every few
+seconds while there is something to do, and at shutdown; an `fsync`
+through dcfs is the backing filesystem's own fsync, with the cache made
+durable too, and no sync point. After an unclean shutdown, everything
+still in the dirty set is forgotten. This bounds what a power loss costs
+to re-reading the entries changed, and what was cached, in the last few
+seconds. A file that was only read is in the dirty set
 too, for its access time only: that alone makes no `syncfs` run until the
 kernel's own dirtytime expiry (12 hours by default,
 `fs/fs-writeback.c:64`, Linux v7.3-rc4), and after a
@@ -1302,10 +1304,8 @@ recovery protocol, concurrency, and the test strategy.
   does. A backing syscall already blocked in the kernel (a disk spinning
   up, a hung network mount, a long `fsync`) is waited out first. A change
   that already reached the backing filesystem is completed and reported as
-  done, never as `EINTR`. The
-  exception is `fsync`: interrupted after its backing `fsync` and before
-  the sync point that makes it durable in dcfs's cache, it replies `EINTR`
-  although the file's data was synced; repeating it is harmless. See
+  done, never as `EINTR`.
+  See
   docs/design.md, "Cancellation".
 - **Exclusive access to the backing tree is required.** Everything that
   changes the backing tree must go through dcfs. There is no fanotify
@@ -1422,13 +1422,21 @@ recovery protocol, concurrency, and the test strategy.
   the next restart.
 - **Power loss re-reads recent changes.** After a power loss or kernel
   crash, everything cached about entries changed in the last
-  `dcfs.sync_interval_sec` seconds (or since the last `fsync`) is forgotten
-  and re-read from the backing filesystem, which spins it up; so is what
-  the cache recorded in that time (lookups and listings), which the cache
-  database had not yet made durable. An idle dcfs has no timer, so a dirty
-  set and the cache's unsynced work left by the last burst of activity are
-  only made durable by the next request, `fsync` or shutdown; that is safe
-  but makes the re-read larger.
+  `dcfs.sync_interval_sec` seconds is forgotten and re-read from the
+  backing filesystem, which spins it up; so is what the cache recorded in
+  that time (lookups and listings) and had not yet made durable (at a sync
+  point or an `fsync`). An idle dcfs has no timer, so a dirty set and the
+  cache's unsynced work left by the last burst of activity are only made
+  durable by the next request or shutdown; that is safe but makes the
+  re-read larger.
+- **`fsync` is the backing filesystem's, no stronger.** dcfs passes
+  `fsync` and `fdatasync` of a file or a directory through and adds no
+  barrier of its own (no `syncfs`), so a program gets the crash guarantees
+  the backing filesystem gives it and no more: on ext4 as Ferrite's model
+  specifies it, a new file's directory entry may be lost after the file's
+  `fsync`, and a directory's `fsync` alone may leave a new file's data
+  behind; fsync both, as on any filesystem. `formal/no_stronger/` pins
+  these.
 - **xfs writes to the disk by itself for about a minute after the last
   write.** Not dcfs: after the last change to an xfs filesystem, its log
   worker writes two small log records (+4 block writes in all), one per

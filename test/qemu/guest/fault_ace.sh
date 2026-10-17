@@ -16,18 +16,20 @@
 #            long where the filesystem has one).
 #
 # Two persistence points, which leave different states for the cut to find:
-#   dcfs     an fsync of the directory through dcfs (FSYNCDIR, which runs a sync
-#            point): the backing filesystem is durable, and so is the dirty
-#            set's clearing in the cache; what came after is lost on both disks
-#            except the cache's durable phase 1 commits: "backing as of the
-#            fsync, cache possibly ahead";
+#   dcfs     a periodic sync point through dcfs (sync_point_dcfs: the clock
+#            moved past the interval, then an FSYNCDIR, whose start runs it):
+#            the backing filesystem is durable, and so is the dirty set's
+#            clearing in the cache (the FSYNCDIR's durable point); what came
+#            after is lost on both disks except the cache's durable phase 1
+#            commits: "backing as of the sync point, cache possibly ahead".
 #   direct   a syncfs of the backing filesystem itself, behind dcfs (what a sync
 #            point does, without the clearing of the dirty set): "backing
 #            durable, the cache's phase 3 not": the dirty set was not cleared,
-#            so recovery has the entries to forget. (An fsync of the directory
-#            alone is not a persistence point for file data: the first run of
-#            this kind, with that, lost the appended bytes of a file and the
-#            md5 in the snapshot said so.)
+#            so recovery has the entries to forget.
+# An FSYNCDIR alone is no persistence point for file data (step 25.28b: dcfs
+# passes it through, with no syncfs behind it; the first run of this kind used
+# an fsync of the directory alone, lost the appended bytes of a file, and the
+# md5 in the snapshot said so).
 # Neither makes the cache durable ahead of the backing filesystem by more than
 # what phase 1's fsync does, and no sequence here cuts inside a mutation (that
 # is guest/fault_power.sh).
@@ -36,8 +38,8 @@
 # come from dcfs_ace_ops=), per operation O and per ordered pair O1, O2:
 #   one      O, cut                       served
 #   pair     O1, O2, cut                  served
-#   persist  O, fsync, cut                served, durable
-#   split    O1, fsync, O2, cut           served, durable (O2 is lost)
+#   persist  O, sync point, cut           served, durable
+#   split    O1, sync point, O2, cut      served, durable (O2 is lost)
 #   direct   O, direct syncfs, cut        served, durable
 #   dsplit   O1, direct syncfs, O2, cut   served, durable (O2 is lost)
 #   fixtures the checker's negative fixtures: a persistence point that was not
@@ -68,7 +70,8 @@
 #              lookup     the kernel's caches dropped (no sync), then a lookup
 #                         of every name the sequences use
 #              listing    the caches dropped, then both directories listed
-#              sync       an fsync of the directory through dcfs (a sync point)
+#              sync       a periodic sync point through dcfs
+#                         (sync_point_dcfs)
 #              handle     name_to_handle_at of every object (identity_take)
 #            dcfs_ace_seed=N (default 1) and dcfs_ace_count=N (default 20)
 #            pick the sample; dcfs_seed= (run-qemu.sh's $DCFS_SEED) overrides
@@ -177,8 +180,16 @@ begin() {
 drop_backing_writes() {
 	fault_mode "$FD_BACK" drop-writes || fail ace-dropahead "fault_mode failed"
 }
-persist_dcfs() {
+# sync_point_dcfs: a periodic sync point through dcfs: the clock moved past the
+# daemon's interval (3600 s), then a request that surely reaches it (an
+# FSYNCDIR of t, which no cache of the kernel's answers), whose start runs the
+# sync point.
+sync_point_dcfs() {
+	date -s "@$(($(date +%s) + 3601))" >/dev/null
 	"$TESTUTIL" fsync "$MNT/t" || fail ace-fsync "fsync of $MNT/t failed"
+}
+persist_dcfs() {
+	sync_point_dcfs
 	snapshot "$SRC" >/tmp/durable.snap
 	drop_backing_writes
 }
@@ -280,7 +291,7 @@ kind_persist() {
 		begin
 		"ace_$o1"
 		persist_dcfs
-		finish persist "$o1 fsync" /tmp/durable.snap
+		finish persist "$o1 sync-point" /tmp/durable.snap
 	done
 }
 kind_split() {
@@ -290,7 +301,7 @@ kind_split() {
 			"ace_$o1"
 			persist_dcfs
 			"ace_$o2" 2>/dev/null
-			finish split "$o1 fsync $o2" /tmp/durable.snap
+			finish split "$o1 sync-point $o2" /tmp/durable.snap
 		done
 	done
 }
@@ -501,7 +512,7 @@ mixed_event_dropahead() {
 	fault_mode "$FD_BACK" drop-writes || fail ace-dropahead "fault_mode failed"
 	DROPPING=1
 }
-mixed_event_sync() { "$TESTUTIL" fsync "$MNT/t" || fail ace-fsync "fsync of $MNT/t failed"; }
+mixed_event_sync() { sync_point_dcfs; }
 # mixed_lookup_names: a lookup (by name) of every name the sequences use, those
 # that are not there included.
 mixed_lookup_names() {

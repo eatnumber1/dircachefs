@@ -298,7 +298,7 @@ Connection &Connection::operator=(Connection &&o) noexcept {
   swap(statement_cache_, o.statement_cache_);
   swap(savepoint_depth_, o.savepoint_depth_);
   swap(sync_transaction_, o.sync_transaction_);
-  swap(checkpointed_version_, o.checkpointed_version_);
+  swap(durable_version_, o.durable_version_);
   return *this;
 }
 
@@ -328,19 +328,52 @@ absl::Status Connection::Close() {
   return absl::OkStatus();
 }
 
-absl::Status Connection::Checkpoint(CheckpointMode mode) {
-  if (sqlite3_wal_checkpoint_v2(db_, /*zDb=*/nullptr, static_cast<int>(mode),
+absl::Status Connection::Checkpoint() {
+  if (sqlite3_wal_checkpoint_v2(db_, /*zDb=*/nullptr,
+                                SQLITE_CHECKPOINT_TRUNCATE,
                                 /*pnLog=*/nullptr,
                                 /*pnCkpt=*/nullptr) != SQLITE_OK) {
     return LastErrorStatus();
   }
-  ASSIGN_OR_RETURN(checkpointed_version_, DataVersion());
   return absl::OkStatus();
 }
 
-absl::StatusOr<bool> Connection::CommittedSinceCheckpoint() const {
+absl::Status Connection::MakeDurable() {
+  // sqlite3_db_filename is "" for an in-memory or temporary database;
+  // ConnectionFactory::Open puts every other one in WAL mode.
+  const char *filename = sqlite3_db_filename(db_, "main");
+  RET_CHECK(filename != nullptr && filename[0] != '\0')
+      << "only a file-backed database has a WAL to make durable";
+  // SQLITE_FCNTL_JOURNAL_POINTER gives the sqlite3_file of a database's
+  // journal, which in WAL mode is the write-ahead log
+  // (https://sqlite.org/c3ref/c_fcntl_begin_atomic_write.html). Callers ask
+  // CommittedSinceDurable() first, and the commit it saw opened the WAL.
+  sqlite3_file *wal = nullptr;
+  RET_CHECK_EQ(sqlite3_file_control(db_, "main", SQLITE_FCNTL_JOURNAL_POINTER,
+                                    static_cast<void *>(&wal)),
+               SQLITE_OK);
+  RET_CHECK(wal != nullptr && wal->pMethods != nullptr)
+      << "a commit since the last durable point opened the WAL";
+  // Why an fsync of the WAL is enough: a commit writes its frames into the
+  // WAL (pwrite(2), nothing held back in SQLite) before COMMIT returns, and
+  // recovery after a power loss keeps every frame up to the last commit
+  // frame whose salt and checksum chain are intact
+  // (https://sqlite.org/fileformat2.html#walformat). The header a WAL
+  // restart rewrites was fsynced when written (sqlite3.c walFrames,
+  // syncHeader). So once this fsync returns, every commit so far is
+  // recovered after a power loss. SQLITE_SYNC_NORMAL is what SQLite's own
+  // WAL syncs pass at synchronous=NORMAL or FULL.
+  if (int rc = wal->pMethods->xSync(wal, SQLITE_SYNC_NORMAL); rc != SQLITE_OK) {
+    return absl::StatusBuilder(Sqlite3ErrorCodeToStatus(rc))
+           << "fsync of the cache database's WAL";
+  }
+  ASSIGN_OR_RETURN(durable_version_, DataVersion());
+  return absl::OkStatus();
+}
+
+absl::StatusOr<bool> Connection::CommittedSinceDurable() const {
   ASSIGN_OR_RETURN(uint32_t version, DataVersion());
-  return version != checkpointed_version_;
+  return version != durable_version_;
 }
 
 absl::StatusOr<uint32_t> Connection::DataVersion() const {
@@ -557,7 +590,7 @@ absl::StatusOr<Connection> ConnectionFactory::Open() const {
   if (rc != SQLITE_OK) return conn.LastErrorStatus();
 
   RETURN_IF_ERROR(ApplyOpenPragmas(conn));
-  ASSIGN_OR_RETURN(conn.checkpointed_version_, conn.DataVersion());
+  ASSIGN_OR_RETURN(conn.durable_version_, conn.DataVersion());
   return conn;
 }
 

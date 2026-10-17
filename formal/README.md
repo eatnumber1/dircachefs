@@ -214,10 +214,12 @@ on the detail:
   replays of the cache disk (ext4, xfs, btrfs) to every FLUSH after the
   start, write subsets between FLUSHes that keep every FUA write, and torn
   multi-block writes (the WAL's writeback among them). The database's last
-  sync is its last kSync commit or a checkpoint: the clean shutdown's
-  (`StopCkpt`) or a sync point's (`WalCheckpoint`, step 25.28b), which
+  sync is its last kSync commit, the clean shutdown's checkpoint
+  (`StopCkpt`), or the cache's durable point (an fsync of the WAL, step
+  25.28b): the periodic sync point's (`CacheDurable`), which
   `fault_power_test`'s `lag` scenario checks on real disks (a fill before
-  the sync point survives a cut, one after it does not). How old a commit
+  the sync point survives a cut, one after it does not), and an FSYNC's or
+  FSYNCDIR's before its reply (`FsyncDurable`). How old a commit
   stays losable needs a clock, which this model has not:
   [The durability model](#the-durability-model).
 - `clean_shutdown` is modelled but changes nothing: `StartRun` runs
@@ -262,7 +264,7 @@ on the detail:
   `InvalidateInode` after `ESTALE`, refused boundaries, `ParentOf` of a
   non-root directory, `RENAME_EXCHANGE`/`RENAME_NOREPLACE`, and the
   periodic sync's timing (any request may be a sync point at any time, and
-  `WalCheckpoint` may run between any two requests' steps; the durability
+  `CacheDurable` may run between any two requests' steps; the durability
   model has the clock).
 - A handle that fails to open while its object exists is not modelled:
   xfs and btrfs answer ESTALE for an inode the device cannot read, and
@@ -302,7 +304,7 @@ on the detail:
 | `bCur` | The backing filesystem now: D's `names` (name -> object or `"-"`), `ver` (D's attributes), `f` (F's attributes, step 23.8), `fs` (F's last change that was not a read, a ghost) and `fn` (F exists, under its name in D; step 23.11), and `data` (object -> its contents: 0 empty, else a stamp; only the `write` requests of step 12.8 change it) | the real directory and its files |
 | `bSeq` | The backing filesystem's states since its last durable point, in the order the syscalls made them: `bSeq[1]` is durable, the last is `bCur` (step 12.8). Which states a power loss may leave of them is the regime's (`BCrash`, `MetaCrash`) | the backing filesystem's page cache and journal |
 | `dbCur` | The cache database now (for D): `dent`, `complete`, `epoch`, `attrValid`, `attr`, `dirty`, `clean`; for F (steps 23.8, 23.11): `fRow` (its row exists), `fDent` (its dentry in D), `fValid`, `fAttr`, `fDirty` | `dentries`, `directories.children_complete`/`epoch`, `inodes.attrs_valid` and attributes, `dirty`, `cache_state.clean_shutdown` |
-| `dbOpts` | Database states a crash may leave: the last fsynced commit and every later one | the WAL at `synchronous=NORMAL`, since its last fsync (a kSync commit or a checkpoint) |
+| `dbOpts` | Database states a crash may leave: the last fsynced commit and every later one | the WAL at `synchronous=NORMAL`, since its last fsync (a kSync commit, a checkpoint or a durable point) |
 | `mode` | `"up"` (serving), `"down"`, `"recover"`/`"start"` (startup), `"stop_*"` (shutdown) | `main.cc`'s lifecycle |
 | `seq` | The fill guards' logical clock | `FillGuards::seq` |
 | `inflight` | Mutations of D between phase 1 and their end | `FillGuards::inflight[D]` |
@@ -352,9 +354,10 @@ prints. A request's first step runs inside `Arrive`.
 | `RenameSyscall` | renameat2: moves whatever the source name holds now | Phase 2 | `backing::RenameAt` |
 | `RenamePhase3` | If `Owns(D)`: destination -> the resolved (and verified) source, source name absent; `End` | Phase 3 | `Rename`'s phase-3 transaction |
 | `RenameStat`, `RenameFill`, `RenameFailed`, `RenameFailed2` | As for create (a failure re-resolves both names) | | `RefreshAfterRename`, `ReresolveAfterFailure` |
-| (sync, first step) | Snapshot of the fill guards' clock, then syncfs: every backing write so far is durable (`SyncBarrier`; an FSYNCDIR's or FSYNC's own fsync comes first and adds nothing). A `fsync` request (step 12.8: the kernel's FSYNC of the file a name holds) is the same sync point | Sync points | `backing::SyncBacking`, `cache::BeginSync` |
+| (sync, first step) | The periodic sync point: snapshot of the fill guards' clock, then syncfs: every backing write so far is durable (`SyncBarrier`) | Sync points | `backing::SyncBacking`, `cache::BeginSync` |
 | `SyncClearDirty` | Clear D's dirty row (normal durability) unless a mutation of D began or ended since the snapshot or is in flight; forget `dirty.durable` | Sync points | `cache::ClearDirty` |
-| `WalCheckpoint` | Step 25.28b: a sync point's checkpoint of the cache's WAL: every commit so far is durable (`dbOpts` becomes `{dbCur}`). At any moment no request is between two syscalls, which covers where the code runs it: after the reply of a request whose sync point ran (the periodic one, an FSYNC's or FSYNCDIR's), before the next request is read | Sync points (the sync point's checkpoint) | `DirCacheFS::CheckpointCache`, `sqlite3::Connection::Checkpoint` |
+| `CacheDurable` | Step 25.28b: the periodic sync point's durable point of the cache (an fsync of its WAL): every commit so far is durable (`dbOpts` becomes `{dbCur}`). At any moment no request is between two syscalls, which covers where the code runs it: after the reply of the request whose start ran the sync point, before the next request is read | Sync points (the cache's durable point) | `DirCacheFS::MakeCacheDurable`, `FinishSyncPoint`, `sqlite3::Connection::MakeDurable` |
+| (fsync, fsyncdir, first step), `FsyncReply` | Step 25.28b: the kernel's FSYNC of the file a name holds (`fsync`, step 12.8) or its FSYNCDIR of D (`fsyncdir`): the fsync passed through (`FsyncOnly`: what the regime's fsync makes durable, nothing more), then the cache's durable point (`CacheDurable`'s effect) and the reply. No sync point: no syncfs, the dirty set stays (`FsyncSyncPoint` is FALSE; `known_bugs/sync_by_file_fsync` sets it) | Sync points (fsync) | `DirCacheFS::Fsync`, `Fsyncdir`, `backing::FsyncFd`, `FsyncDir` |
 | (write, first step), `WriteSyscall`, `WriteReply` | Step 12.8: a write of new contents to the file a name holds, through its writable open (passthrough; `ENOENT` if the name holds none), then the reply. It changes the file's data only, which no record of D's covers (the open's phase 1 and release are the file's, not modelled); it gives the crash regimes data to reorder | | `fuse_ops.cc` WRITE through passthrough |
 | `InterruptArrives` | With `Interrupts` (step 22.5): the kernel's FUSE_INTERRUPT for a request in flight arrives, at any step, once (in the safety configurations, only where its next step reads it: `CanArriveWhereItMatters`). Nothing changes but the request's `intr`; it goes on to its next interruption point | Cancellation | libfuse's `do_interrupt` (`SessionLoop::Drain`) |
 | `Interrupt` | An interruption point, just before a backing syscall (`RN_probe`, `PD_read`, `PD_commit`: the population's reads abandoned, `PD_commit` standing for the checks between probe batches only; `GA_stat`: the refresh not taken; `C_sys`, `U_sys`, `R_sys`, `A_sys`; F's `FC_sys`, `FS_sys`, `FG_stat`, `FG_rstat`, a write's `W_sys`), finds the request's interrupt arrived: the request replies `EINTR`; a mutation past phase 1 `End`s (D's, or F's for F's setattr) without phase 3, its names and attributes left unknown and dirty, the backing unchanged. An obligation (step 22.5): at an interruption point an interrupted request has no other step (`Proceeds`, in `At`). Never between a syscall and its phase 3 | Cancellation | `CheckInterrupted` (`dcfs/interruption_point.h`), `SessionLoop` |
@@ -586,17 +589,18 @@ journals all metadata in one stream of transactions, so that its
 directory changes persist in order as under `"metaprefix"`.
 
 **Barriers.** A completed barrier makes durable what it orders. Every
-sync point of dcfs runs `syncfs` (`SyncBarrier` = `Syncfs`: the sequence
-becomes `<<bCur>>`, in every regime), after the fsync that the kernel's
-`FSYNC` or `FSYNCDIR` asked for, which adds nothing to it. `FsyncOnly`,
-which is not the code, takes that fsync alone as the barrier (a
-configuration puts it in with `SyncBarrier <- FsyncOnly`): what a program
-running on the backing filesystem directly gets from its own fsync, and
-what a sync point relying on it would clear the dirty set on. Under
-`"seq"` any completed barrier makes everything before it durable (a crash
-that keeps it keeps every earlier write). Otherwise:
+sync point of dcfs (the periodic one) runs `syncfs` (`SyncBarrier` =
+`Syncfs`: the sequence becomes `<<bCur>>`, in every regime). The kernel's
+`FSYNC` and `FSYNCDIR` are no sync point (step 25.28b): dcfs passes the
+fsync through, and `FsyncOnly` is what it makes durable, what a program
+running on the backing filesystem directly gets from its own fsync. (A
+configuration that puts it in as a sync point's barrier,
+`SyncBarrier <- FsyncOnly`, is a sync point relying on it to clear the
+dirty set: `known_bugs/sync_by_file_fsync`.) Under `"seq"` any completed
+barrier makes everything before it durable (a crash that keeps it keeps
+every earlier write). Otherwise:
 
-- an fsync of D (`sync`) makes durable D's entries and attributes (DFSCQ:
+- an fsync of D (`fsyncdir`) makes durable D's entries and attributes (DFSCQ:
   an fsync of a directory flushes all pending metadata; Ferrite: every
   update of D is ordered before it), and the files' data only with the
   switch **`DirFsyncPersistsFiles`** (does an fsync of the directory
@@ -624,8 +628,8 @@ promise. It does depend on the barrier being `syncfs`:
 `known_bugs/sync_by_file_fsync` clears the dirty set after a file's fsync
 alone, under `"ext4"`, and violates `CrashSafe` (the create of the file
 may still be lost while the database, no longer dirty, records it). Under
-`"seq"` and `"metaprefix"` the same sync point is safe
-(`MC_litmus_fsync_file_direct_metaprefix.cfg`), which is why the
+`"seq"` and `"metaprefix"` the same sync point would be safe (there an
+fsync of a file makes all metadata before it durable), which is why the
 regimes are needed to see it.
 
 **Litmus tests** (`MClitmus.tla`): Ferrite's tests (section 3.4) and the
@@ -640,9 +644,12 @@ filesystem itself could be left with it. By `CrashSafe` the first fails
 only where the second does: once recovery has run, what dcfs serves of D
 is the backing filesystem's own state (`CrashRefines` alone would not
 give it under `"seq"`, where names and data come from one state). A test that holds checks every invariant of
-dcfs besides; one that does not is a [limitation](#known-bugs-the-models-own-tests)
-(`limitations/crash_litmus.tla`) and its test expects the
-counterexample.
+dcfs besides. One that does not is a [limitation](#known-bugs-the-models-own-tests)
+(`limitations/crash_litmus.tla`) when no fsync is involved, and a pinned
+non-guarantee (`no_stronger/`, step 25.28b; [Changing the
+model](#changing-the-model)) when the outcome is one the regime allows
+after an fsync: dcfs is no stronger than the backing filesystem there.
+Either test expects the counterexample.
 
 | Test | Program | Surprising outcome | Regime | Barrier | Expected |
 |---|---|---|---|---|---|
@@ -650,19 +657,20 @@ counterexample.
 | `limitations/litmus_replace_metaprefix`, `_ext4` | same (Ferrite's atomic replace via rename) | same | metaprefix, ext4 | | `LitmusOK` violated: the rename persists, t's data not; dcfs serves f empty, as the backing has it |
 | `MC_litmus_create_seq` | create t, write t, rename t to f (new) | f exists without the data | seq | | holds |
 | `limitations/litmus_create_metaprefix`, `_ext4` | same (atomic create via rename) | same | metaprefix, ext4 | | `LitmusOK` violated |
-| `MC_litmus_fsync_file_ext4` | create f, write f, FSYNC f | the fsync returned and f is absent or empty | ext4 | syncfs (the code) | holds |
-| `limitations/litmus_fsync_file_direct_ext4` | same (implied directory fsync) | same | ext4 | f's fsync alone | `LitmusBackingOK` violated: the create of f is not ordered before f's fsync |
-| `MC_litmus_fsync_file_direct_metaprefix` | same | same | metaprefix | f's fsync alone | holds (an fsync ends the tree sequence) |
-| `MC_litmus_fsync_dir_ext4` | create f, write f, FSYNCDIR | the fsync returned and f is absent or empty | ext4, switch FALSE | syncfs (the code) | holds |
-| `limitations/litmus_fsync_dir_direct_ext4`, `_metaprefix` | same (step 11.2's directory fsync) | same | ext4, metaprefix, switch FALSE | D's fsync alone | `LitmusBackingOK` violated: f is there, empty |
-| `MC_litmus_fsync_dir_direct_files_ext4` | same | same | ext4, switch TRUE | D's fsync alone | holds |
+| `MC_litmus_fsync_file_ext4` | create f, write f, FSYNC f (implied directory fsync) | the fsync returned and f is there, empty | ext4 | f's fsync | holds: f's write is ordered before f's fsync |
+| `no_stronger/ext4_fsync_file_loses_entry` | same | the fsync returned and f is absent | ext4 | f's fsync | `LitmusOK` violated: the create of f is not ordered before f's fsync |
+| `MC_litmus_fsync_file_metaprefix` | same | the fsync returned and f is absent or empty | metaprefix | f's fsync | holds (an fsync ends the tree sequence) |
+| `MC_litmus_fsync_dir_ext4`, `_metaprefix` | create f, write f, FSYNCDIR (step 11.2's directory fsync) | the fsync returned and f is absent | ext4, metaprefix, switch FALSE | D's fsync | holds: D's updates are ordered before D's fsync |
+| `no_stronger/ext4_fsync_dir_loses_data`, `metaprefix_fsync_dir_loses_data` | same | the fsync returned and f is there, empty | ext4, metaprefix, switch FALSE | D's fsync | `LitmusOK` violated |
+| `MC_litmus_fsync_dir_files_ext4` | same | the fsync returned and f is absent or empty | ext4, switch TRUE | D's fsync | holds |
 
 So through dcfs: an fsync (of a file or of a directory) gives the caller
-at least what the backing filesystem's own fsync gives, and more where the
-backing's fsync is weak, since dcfs follows it with `syncfs`; an atomic
-replace or create by rename without an fsync before the rename is as
-atomic as the backing filesystem makes it, no more (dcfs adds no
-atomicity, and no crash outcome either).
+exactly what the backing filesystem's own fsync gives (step 25.28b: dcfs
+passes it through, with no `syncfs` behind it; before, it followed every
+fsync with a sync point, which gave more where the backing's fsync is
+weak); an atomic replace or create by rename without an fsync before the
+rename is as atomic as the backing filesystem makes it, no more (dcfs
+adds no atomicity, and no crash outcome either).
 
 **What the tests exercise of this** (Phase 11, "Status as built"): step
 11.2's power cuts and ACE-style sequences (one and two operations, with
@@ -680,9 +688,10 @@ no backing state beyond what each request read, and a power cut
 (`trace_power_test`, `trace_crash_test`) is a `crash` line, which
 `T_Crash` explains with `Crash` and `Trace.cfg`'s `Reorder = "seq"`; a
 weaker regime only allows more crash outcomes, so a trace valid under
-`"seq"` stays valid under it. The recorder writes no `write` or `fsync`
-request (`Requests <- AllKinds` leaves them out): the data writes reach
-no record of D's.
+`"seq"` stays valid under it. The recorder writes no `write`, `fsync` or
+`fsyncdir` request (`Requests <- AllKinds` leaves them out): they reach
+no record of D's (an fsync's durable point is a `cache_durable` line,
+`CacheDurable`).
 
 **State counts.** With `Reorder = "seq"` the sequence holds the same
 states as the set did, one-to-one (every change takes a fresh stamp, so
@@ -723,8 +732,8 @@ with the kernel's lock only a getattr can. Step 12.11's attribute change
 from 935,825 to 1,479,307, recovery from 25,861 to 39,635, liveness from
 101,898 to 146,504 and interrupt from 230,662 to 280,869 (run of
 2026-10-08); the large configurations leave it out and are unchanged.
-Step 25.28b's `WalCheckpoint` (every configuration but `MC_large.cfg` and
-`MC_nolock.cfg`, which leave it out: `MC.tla`'s `NoWalCheckpoint` says
+Step 25.28b's `CacheDurable` (every configuration but `MC_large.cfg` and
+`MC_nolock.cfg`, which leave it out: `MC.tla`'s `NoCacheDurable` says
 why it cannot hide a violation) took small from 1,479,307 to 1,869,733,
 recovery from 39,635 to 42,479, liveness from 146,504 to 244,552,
 interrupt from 280,869 to 388,382, interrupt_muts2 from 892,708 to
@@ -756,7 +765,8 @@ populated. Every configuration but `MC_long_names.cfg` sets it to `{}`.
 | `MC_atime.cfg`, `MC_atime_concurrent.cfg`, `MC_atime_crash.cfg` | `atime_test`, `atime_concurrent_test`, `atime_crash_test` (medium) | the file F (step 23.8; [Access times of a file](#access-times-of-a-file-step-238)) | 334,826; 373,534; 29,322 (step 23.11: F's setattrs also move the ghost `fs`; 260,871, 292,824, 29,322 at step 23.8b's corrected `View`; before it 263,848, 297,308, 29,950, the first two depending on TLC's workers) | ~2.5 min; ~3.5 min; ~15 s (load 10-17, 2026-10-09) |
 | `MC_borndirty.cfg`, `_ext4`; `MC_borndirty_nolock.cfg`, `_nolock_ext4`; `MC_borndirty_recovery.cfg` | `borndirty_*_test` (medium) | step 23.11 ([Born-dirty create](#born-dirty-create-step-2311)) | 275,962; 382,710; 89,998; 108,724; 3,054 | 39 s; 2.2 min; 33 s; 46 s; 7 s (by hand, load 14, 2026-10-09) |
 | `MC_crash_ext4.cfg`, `MC_crash_metaprefix.cfg` | `crash_ext4_test`, `crash_metaprefix_test` (medium) | step 12.8: the two weaker backing regimes; 2 names, 1 slot, 3 mutations, 1 crash, lookups, getattrs, creates, unlinks, renames, attribute changes of D and syncs (the litmus configurations have the writes and FSYNCs); all invariants, `CrashRefines`, the effect-point properties and `ReplyObservable` | 356,954 (ext4), 292,044 (metaprefix) | ~3 min, ~1.5 min |
-| `MC_litmus_*.cfg` | `litmus_*_test` (small) | step 12.8: the litmus tests that must hold (`MClitmus.tla`; [the table](#the-backing-filesystems-crash-consistency)); 1 slot, 1-2 names, a fixed program of 2-3 mutations and a sync point, 1 crash; every invariant and property besides | 679-1,475 each | seconds |
+| `MC_litmus_*.cfg` | `litmus_*_test` (small) | step 12.8: the litmus tests that must hold (`MClitmus.tla`; [the table](#the-backing-filesystems-crash-consistency)); 1 slot, 1-2 names, a fixed program of 2-3 mutations and an fsync or FSYNCDIR, 1 crash; every invariant and property besides | 761-1,874 each | seconds |
+| `no_stronger/*.cfg` | `no_stronger_than_*_test` (small) | step 25.28b: what those fsyncs do not guarantee, pinned ([Changing the model](#changing-the-model)); the same bounds, `LitmusOK` alone, the counterexample expected | 761-1,037 each | seconds |
 | `MC_durability.cfg` | `durability_test` (small) | step 25.28b: [The durability model](#the-durability-model) | 456 | seconds |
 
 `small_coverage_test` and `nolock_small_coverage_test` (large, step
@@ -831,7 +841,7 @@ FALSE in the real configurations.
 | `interrupt_not_replied` | not historical (step 22.5): an interruption point that stops the request, which never replies (`InterruptReplies <- InterruptNeverReplies`; the kernel waits for a reply even for a SIGKILLed caller); deadlock checking off (`CHECK_DEADLOCK FALSE`): every request can end up stuck, getattrs included since 22.5 made their refreshes interruption points; no `VIEW` | `InterruptedReplies` (temporal) | a create's phase 1; its interrupt arrives; at its interruption point it has no step left, while getattrs go on in the other slot |
 | `attr_change_end_skipped` | 8.2's mutation survivors (step 12.11): a deleted `Mutation::End` after an attribute change (`AttrChangeEnd <- AttrChangeEndSkipped`) | `GuardsBalanced` | an attribute change of D: phase 1, its syscall; its end leaves `FillGuards::inflight` raised with no request in flight (its refresh, and every later fill of D, is then refused) |
 | `borndirty_*` | step 23.11 | `CrashSafe` | see [Born-dirty create](#born-dirty-create-step-2311) |
-| `sync_by_file_fsync` | not historical (step 12.8): a sync point after FSYNC whose only barrier is the file's fsync (`SyncBarrier <- FsyncOnly`), under the `"ext4"` regime (`MClitmus.tla`'s implied-directory-fsync program) | `CrashSafe` | create f: phase 1, its syscall, phase 3 (f recorded present); write f; FSYNC of f: its fsync makes f's data durable, not its entry in D (Ferrite's Definition 7), and `ClearDirty` takes D out of the dirty set: a power loss may now lose the create while the database says f is present and recovery has nothing to forget. Under `"seq"` the same configuration finds nothing |
+| `sync_by_file_fsync` | not historical (step 12.8): a sync point after FSYNC (`FsyncSyncPoint <- Yes`; since step 25.28b an FSYNC is none) whose only barrier is the file's fsync (`SyncBarrier <- FsyncOnly`), under the `"ext4"` regime (`MClitmus.tla`'s implied-directory-fsync program) | `CrashSafe` | create f: phase 1, its syscall, phase 3 (f recorded present); write f; FSYNC of f: its fsync makes f's data durable, not its entry in D (Ferrite's Definition 7), and `ClearDirty` takes D out of the dirty set: a power loss may now lose the create while the database says f is present and recovery has nothing to forget. Under `"seq"` the same configuration finds nothing |
 
 ### Premises: every property bites (step 12.12a)
 
@@ -1028,7 +1038,7 @@ right after the code the model's step stands for, with no backing syscall
 | `SyncfsStarting` | `SyncBacking`, before the syncfs calls | (`unexplained` unless the snapshot came right before) | none: the recorder requires `SyncSnapshotTaken` to be the callback right before it | Sync points |
 | `SyncfsDone` | `SyncBacking`, after the syncfs calls | `syncfs` | nothing (the model's syncfs takes effect at S1) | Sync points |
 | `SyncCleared` | `SyncBacking`, after `cache::ClearDirty` | `sync_clear`, `stop_clear` | `SyncClearDirty`; `StopClear` | Sync points |
-| `WalCheckpointed` | `DirCacheFS::CheckpointCache`, after a sync point's checkpoint (step 25.28b) | `wal_checkpoint`, in every directory's trace | `WalCheckpoint` | Sync points (the sync point's checkpoint) |
+| `CacheMadeDurable` | `DirCacheFS::MakeCacheDurable`, after the cache's durable point: the periodic sync point's, or an FSYNC's or FSYNCDIR's (step 25.28b) | `cache_durable`, in every directory's trace | `CacheDurable` | Sync points (the cache's durable point) |
 | `RunStarting` | `backing::StartRun`, first | `crash` (if the clean-shutdown flag is 0), `restart` | `Crash`, `Restart` | Crashes, power loss and recovery |
 | `Recovered` | `StartRun`, after `cache::RecoverDirty` | `recover`, with the keys of the inodes that were dirty (read at `RunStarting`) | `Recover`, a dentry made unknown in a clean D only if its object's key is among them | Recovery |
 | `RunStarted` | `StartRun`, after its kSync commit | `start_run` | `StartRun` | Startup |
@@ -1327,9 +1337,9 @@ renames with flags and syscall failures.
   object its resolve probed, and a negative entry after that probe is
   rejected), and the end of an attribute change (step 12.11: an
   attrchange with its `end` line is valid, one without it is rejected at
-  the refresh's `stat` that follows), and the sync point's checkpoint
-  (step 25.28b: a power loss may lose a fill's normal commit, but not once
-  a `wal_checkpoint` line has followed it: kept is valid, lost is rejected
+  the refresh's `stat` that follows), and the cache's durable point (step
+  25.28b: a power loss may lose a fill's normal commit, but not once a
+  `cache_durable` line has followed it: kept is valid, lost is rejected
   at the `crash` line).
 
 A crash during recovery (steps 12.6, 12.6b):
@@ -1384,7 +1394,7 @@ the run of 2026-10-06). `Arrive` is split by request kind.
 | `UnlinkPhase1` (begin, retry, EAGAIN, ENOENT), `UnlinkSyscall`, `UnlinkPhase3`, `UnlinkStat`, `UnlinkFill` | harness, power, rename |
 | `RenameResolveDst`, `RenamePhase1` (begin, retry, EAGAIN), `RenameSyscall`, `RenamePhase3`, `RenameStat`, `RenameFill` | harness, power |
 | `SyncClearDirty` | harness, power, rename |
-| `WalCheckpoint` (step 25.28b; run of 2026-10-17) | harness, power, rename |
+| `CacheDurable` (step 25.28b; run of 2026-10-17) | harness, power, rename |
 | `Crash`, `Restart`, `Recover`, `StartRun` | crash, power (`Restart`, `Recover`, `StartRun` also rename, create) |
 | `BeginShutdown`, `StopSync` | crash, power, rename, create |
 | `StopClear`, `StopCkpt`, `StopFlag` | power, rename, create |
@@ -1987,6 +1997,21 @@ model in the same change (AGENTS.md). In practice:
 - A bug fixed in the code that the model can express: add a `Bug*`
   constant that puts it back, and a `known_bugs/` variant whose test
   expects the counterexample.
+- A non-guarantee, pinned: an outcome dcfs deliberately does not rule out
+  because the backing filesystem does not (dcfs is no stronger than the
+  backing there; step 25.28b, for what an fsync leaves possible under a
+  regime). Put it in as a configuration whose invariant says that outcome
+  never happens, in `no_stronger/`, named to read so
+  (`no_stronger_than_ext4_fsync_file_loses_entry_test`), with a test that
+  expects TLC's counterexample. It is the converse of `CrashRefines`:
+  that one says dcfs allows no outcome the backing does not; this one
+  says dcfs allows this outcome the backing allows, so that a barrier,
+  sync or ordering added later, which would hide the loss and cost a
+  syscall per request, fails the test, and the decision not to have it
+  is revisited rather than undone by accident. Pair it with the
+  configuration of what the same operation does guarantee (its comment
+  and the BUILD rule name the pair), so that the two together state
+  exactly what the operation gives.
 - Trace validation checks the code against the model: a changed step
   needs its protocol event (`dcfs/protocol_events.h`) at the place the
   model's step now stands for, `Trace.tla`'s action for it, and the event
@@ -2006,8 +2031,8 @@ model in the same change (AGENTS.md). In practice:
   unnamed rows) updates `lifetime.tla`, with its `LifetimeChanged` events
   and `LifetimeTrace.tla` (see [The lifetime model](#the-lifetime-model)).
 - A change to when a sync point runs, or to what makes the cache's commits
-  durable (the checkpoint, the kSync commits), updates `durability.tla`
-  too (see [The durability model](#the-durability-model)).
+  durable (the durable points, the kSync commits), updates
+  `durability.tla` too (see [The durability model](#the-durability-model)).
 - Every table or column that mirrors the backing filesystem (a row, a
   dentry, a mark, a completeness flag) has its row lifecycle in the
   model, not only its contents: where the code creates and deletes it,
@@ -2773,17 +2798,17 @@ fakes one by changing the row's recorded generation).
 having no clock: how old a cache commit can a power loss take away? Its
 abstraction of the cache database is `dcfs.tla`'s (step 12.14's, checked
 against SQLite by `sqlite_durability_test`): a normal commit may be lost,
-a kSync one may not, nor any commit before one, and a checkpoint makes
-every commit so far durable. To it the model adds a discrete clock and
-keeps only what the question needs:
+a kSync one may not, nor any commit before one, and a durable point (an
+fsync of the WAL) makes every commit so far durable. To it the model adds
+a discrete clock and keeps only what the question needs:
 
 | Variable | Meaning | In dcfs |
 |---|---|---|
 | `since` | ticks since the last sync point | `DirCacheFS::last_sync_` |
 | `oldest` | ticks since the first commit a power loss may lose (`None`: nothing to lose) | the WAL frames since its last fsync |
 | `dirty` | the dirty set may be non-empty | `DirCacheFS::SyncDue` |
-| `busy`, `due` | a request is being served; its sync point's checkpoint is due | `DirCacheFS::checkpoint_due_` |
-| `failed` | the last sync point's checkpoint failed | its WARNING |
+| `busy`, `due` | a request is being served; its sync point's durable point is due | `DirCacheFS::durable_point_due_` |
+| `failed` | the last sync point's durable point failed | its WARNING |
 | `owed`, `ended` | the request started with a losable commit an interval old; the last step ended a request | (checking only) |
 
 | Action | What it does | dcfs |
@@ -2792,34 +2817,34 @@ keeps only what the question needs:
 | `Phase1` | A kSync commit that marks a row dirty: everything so far durable | `cache::BeginMutation` |
 | `AutoCheckpoint` | SQLite's own checkpoint, every 1000 pages | SQLite |
 | `Start` | A request starts: the periodic sync point's backing half first, once `Interval` ticks have passed since the last (`SyncNow`) | `DirCacheFS::MaybeSyncNow` |
-| `Fsync` | An FSYNC's or FSYNCDIR's sync point, inside its request | `DirCacheFS::Fsync`, `Fsyncdir` |
-| `Finish` | The request ends: its reply, then the checkpoint if one is due | `DirCacheFS::FinishSyncPoint` |
-| `CheckpointFails` | The same with a checkpoint that fails (an I/O error of the cache disk) | its WARNING |
+| `Fsync` | An FSYNC or FSYNCDIR (step 25.28b): no sync point (the clock and the dirty set stay), but the cache's durable point before its reply; one that fails replies EIO and changes nothing | `DirCacheFS::Fsync`, `Fsyncdir`, `MakeCacheDurable` |
+| `Finish` | The request ends: its reply, then the durable point if one is due | `DirCacheFS::FinishSyncPoint` |
+| `DurablePointFails` | The same with a durable point that fails (an I/O error of the cache disk) | its WARNING |
 | `Tick` | One tick of time passes (saturating at `Interval`) | the clock |
 | `PowerLossAndRestart` | The commits a power loss may lose are lost; the next process's clock starts | `backing::StartRun` |
 
 `SyncNow` resets the clock, clears the dirty set (`ClearDirty`, a normal
-commit) if it may be non-empty, and leaves the checkpoint due, which the
-request's end runs. Commits may come at any moment, not only inside
+commit) if it may be non-empty, and leaves the durable point due, which
+the request's end runs. Commits may come at any moment, not only inside
 requests, in any number: a request may run for many intervals on a slow
 backing. That only adds behaviors. Requests do not overlap: dcfs serves
-one at a time, and the checkpoint comes before it serves the next.
+one at a time, and the durable point comes before it serves the next.
 
 Properties: `BoundAtRequestEnd`, the bound, says that a request that
 starts while a commit a power loss may lose is an interval old (`owed`)
-ends with every commit durable (`oldest = None`), unless its checkpoint
+ends with every commit durable (`oldest = None`), unless its durable point
 failed; `LostOnlySinceSync`, the reason, says that between requests every
 commit a power loss may lose came after the last sync point (`oldest <=
 since`), with the same exception. The bound is at requests, not at every
 moment: with no timer (docs/style.md, "No timers") an idle daemon runs
 nothing, so its last interval's commits wait for its next request.
-`MC_durability.cfg` checks both at an interval of three ticks (456
+`MC_durability.cfg` checks both at an interval of three ticks (440
 distinct states). The limitations, each a small test that expects its
 property violated:
 
 | Configuration | Property | What it shows |
 |---|---|---|
-| `limitations/durability_checkpoint_fails.cfg` | `BoundIgnoringFailures`, the bound without its exception | a failed checkpoint leaves its commits losable until a later one completes |
+| `limitations/durability_durable_point_fails.cfg` | `BoundIgnoringFailures`, the bound without its exception | a failed durable point leaves its commits losable until a later one completes |
 | `limitations/durability_idle.cfg` | `LostWithinInterval` (`oldest = None \/ oldest < Interval`), the bound at every moment | with no timer an idle daemon runs nothing: a commit, then time passing with no request |
 
 Known bugs, each the code before this step (`Bug*` constants, FALSE in
@@ -2827,22 +2852,23 @@ the real configuration; small tests):
 
 | Variant | Bug | Expected | The counterexample |
 |---|---|---|---|
-| `durability_never_checkpoint` | before step 25.28: no sync point checkpointed | `BoundAtRequestEnd` | a fill, three ticks, a request starts and ends with the fill still losable |
-| `durability_sync_point_skips_checkpoint` | step 25.28: a sync point that clears a dirty set resets the clock without a checkpoint (its `MaybeCheckpointWal` ran only when no sync point was due) | `BoundAtRequestEnd` | a phase 1, a phase 3, three ticks; the request whose sync point clears the dirty set ends with phase 3's commit losable |
+| `durability_never_checkpoint` | before step 25.28: no sync point checkpointed the WAL (made the cache durable) | `BoundAtRequestEnd` | a fill, three ticks, a request starts and ends with the fill still losable |
+| `durability_sync_point_skips_checkpoint` | step 25.28: a sync point that clears a dirty set resets the clock without a durable point (its `MaybeCheckpointWal` ran only when no sync point was due) | `BoundAtRequestEnd` | a phase 1, a phase 3, three ticks; the request whose sync point clears the dirty set ends with phase 3's commit losable |
 
 `premise_lost_only_since_sync_test` checks `LostOnlySinceSync` alone on
-the second. Its links to the code: `WalCheckpoint` is the sync point's
-checkpoint in `dcfs.tla` and its traces (the `WalCheckpointed` event);
+the second. Its links to the code: `CacheDurable` is the periodic sync
+point's durable point in `dcfs.tla` and its traces (the
+`CacheMadeDurable` event), `FsyncDurable` an FSYNC's or FSYNCDIR's;
 `fault_power_test`'s `lag` and `lagclean` scenarios cut the power on real
 disks with a fill on each side of a periodic sync point, with a dirty set
 and without: the one before survives, the one after does not; and
-`sqlite_durability_test` judges the crash states of a sync point's
-checkpoint, across the two WAL generations it makes.
+`sqlite_durability_test` judges the crash states of the durable points
+(an FSYNCDIR's, the periodic sync point's).
 
 ```sh
 bazel test //formal:durability_test //formal:known_bug_durability_never_checkpoint_test \
            //formal:known_bug_durability_sync_point_skips_checkpoint_test \
            //formal:premise_lost_only_since_sync_test \
-           //formal:limitation_durability_checkpoint_fails_test \
+           //formal:limitation_durability_durable_point_fails_test \
            //formal:limitation_durability_idle_test
 ```

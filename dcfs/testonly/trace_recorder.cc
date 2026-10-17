@@ -1528,12 +1528,12 @@ void TraceRecorder::SyncCleared(Context &ctx) {
   After(ctx);
 }
 
-void TraceRecorder::WalCheckpointed(Context &ctx) {
-  Enter("WalCheckpointed");
-  // Every directory: the checkpoint makes the whole cache durable
-  // (dcfs.tla's WalCheckpoint).
+void TraceRecorder::CacheMadeDurable(Context &ctx) {
+  Enter("CacheMadeDurable");
+  // Every directory: the durable point makes the whole cache durable
+  // (dcfs.tla's CacheDurable).
   for (auto &[dir, state] : dirs_) {
-    if (!state.dead) Emit(ctx, dir, nullptr, "wal_checkpoint");
+    if (!state.dead) Emit(ctx, dir, nullptr, "cache_durable");
   }
   After(ctx);
 }

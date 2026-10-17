@@ -20,9 +20,18 @@
 (* the backing's own state) the first can fail only where the second does. *)
 (* (CrashRefines alone would not give that under "seq", where names and    *)
 (* data come from one state.) The configurations (MC_litmus_*.cfg,         *)
-(* limitations/litmus_*.cfg) say, for each regime, which outcome is        *)
-(* expected; README.md, "The backing filesystem's crash consistency", has  *)
-(* the table.                                                              *)
+(* limitations/litmus_*.cfg, no_stronger/*.cfg) say, for each regime,      *)
+(* which outcome is expected; README.md, "The backing filesystem's crash   *)
+(* consistency", has the table.                                            *)
+(*                                                                         *)
+(* An outcome the regime allows after an fsync is a non-guarantee, pinned  *)
+(* as such (no_stronger/*.cfg, step 25.28b): LitmusOK, with the outcome as *)
+(* LitmusBad, and a test that expects TLC's counterexample. dcfs passes    *)
+(* the kernel's fsync through and adds no barrier of its own (no syncfs),  *)
+(* so it allows exactly the losses the backing filesystem allows: one      *)
+(* more barrier would make the counterexample vanish and the test fail.    *)
+(* Each is paired with the MC_litmus_*.cfg of what the same fsync does     *)
+(* guarantee.                                                              *)
 (*                                                                         *)
 (* The predicates are about the run in which the program ran: they hold    *)
 (* vacuously once a crash has happened (MaxCrashes = 1 lets the model's    *)
@@ -44,15 +53,15 @@ FsyncFile == <<Step("create", "f", None), Step("write", "f", None),
 \* Directory fsync (step 11.2's ACE "direct" kind as first written): create
 \* f, write it, fsync D (FSYNCDIR).
 FsyncDir == <<Step("create", "f", None), Step("write", "f", None),
-              Step("sync", None, None)>>
+              Step("fsyncdir", None, None)>>
 
 \* The program a configuration runs (Script <- ...).
 Script == ViaRename
 
 \* The script's steps run in order, one at a time (one request slot). The
 \* mutations (create, write, rename) are counted by `muts`, so the next one
-\* is Script[muts + 1]; a sync point (sync, fsync) comes only last, once
-\* every mutation has run (and may come again: it changes nothing more).
+\* is Script[muts + 1]; a sync (fsync, fsyncdir) comes only last, once every
+\* mutation has run (and may come again: it changes nothing more).
 ScriptAllows(k, n, m) ==
     IF k \in SyncKinds
     THEN /\ muts = Len(Script) - 1
@@ -64,7 +73,7 @@ ScriptAllows(k, n, m) ==
 WithF == {{"f"}}
 Empty == {{}}
 
-\* The program's sync point has replied (Ferrite's mark: the caller saw the
+\* The program's fsync has replied (Ferrite's mark: the caller saw the
 \* fsync return).
 Marked == \E p \in Procs : ps[p].rep.k \in SyncKinds
 
@@ -80,8 +89,11 @@ BadReplace(v) == NoFile(v, "f") \/ NoData(v, "f")
 \* ACVR: f exists but without the data.
 BadCreate(v) == NoData(v, "f")
 \* Implied directory fsync, directory fsync: the fsync returned, and f is
-\* absent or without the data it was written.
+\* absent or without the data it was written; or, each half alone, f is
+\* absent (its entry lost) or there without the data (its data lost).
 BadAfterFsync(v) == Marked /\ (NoFile(v, "f") \/ NoData(v, "f"))
+EntryLostAfterFsync(v) == Marked /\ NoFile(v, "f")
+DataLostAfterFsync(v) == Marked /\ NoData(v, "f")
 
 LitmusBad(v) == BadReplace(v)
 

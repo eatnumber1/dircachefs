@@ -69,16 +69,18 @@ AllKinds == {"lookup", "readdir", "readdirplus", "getattr",
 FileKinds == {"fopen", "frelease", "fgetattr", "fset", "fcreate", "flookup"}
 \* (Step 23.11: "fcreate", the create of F under its name in D, and
 \* "flookup", a lookup of that name: "Born-dirty create" below.)
-\* The requests that touch a file's data (step 12.8): a write to the file a
-\* name holds, through a writable open (passthrough), and the kernel's
-\* FSYNC of it. No record of D's changes at either; they exist so that the
-\* backing filesystem's crash regimes have data to reorder (the litmus
-\* configurations, MClitmus.tla). Not in AllKinds: the configurations
-\* without them keep their state spaces.
-DataKinds == {"write", "fsync"}
-\* The requests that are a sync point (an FSYNCDIR of D or the periodic
-\* sync; an FSYNC of a file).
-SyncKinds == {"sync", "fsync"}
+\* The requests that touch a file's data or make it durable (step 12.8): a
+\* write to the file a name holds, through a writable open (passthrough),
+\* the kernel's FSYNC of it, and its FSYNCDIR of D (step 25.28b). No record
+\* of D's changes at any; they exist so that the backing filesystem's crash
+\* regimes have data to reorder and barriers to reorder it against (the
+\* litmus configurations, MClitmus.tla). Not in AllKinds: the
+\* configurations without them keep their state spaces.
+DataKinds == {"write", "fsync", "fsyncdir"}
+\* The requests that sync: the periodic sync point ("sync"), and the
+\* kernel's FSYNC of a file and FSYNCDIR of D, each the backing filesystem's
+\* fsync and the cache's durable point (step 25.28b: not sync points).
+SyncKinds == {"sync", "fsync", "fsyncdir"}
 Regimes == {"seq", "metaprefix", "ext4"}
 
 ASSUME /\ LongNames \subseteq Names
@@ -198,7 +200,7 @@ VARIABLES
                  \* commit and every later commit (a prefix of the WAL).
                  \* Read it only universally (\A s \in dbOpts, or a choice
                  \* among all of them): MC_large/MC_nolock leave
-                 \* WalCheckpoint out on that ground (MC.tla).
+                 \* CacheDurable out on that ground (MC.tla).
     mode,        \* the daemon: "up" serving, "down", or a start/stop step
     seq,         \* FillGuards::seq (D is the only inode tracked: README)
     inflight,    \* FillGuards::inflight[D]
@@ -369,7 +371,7 @@ Commit(new, sync) ==
 (*                                                                         *)
 (* A completed barrier makes what it orders durable: syncfs everything     *)
 (* (Syncfs, what every sync point of dcfs runs); an fsync less (FsyncOnly, *)
-(* which is not the code).                                                 *)
+(* what the kernel's FSYNC and FSYNCDIR pass through, step 25.28b).        *)
 (***************************************************************************)
 
 \* A backing syscall that changes D or a file's data: durable only after a
@@ -470,10 +472,11 @@ Force(meta, fmeta, objs) ==
 \* The files D names now.
 NamedObjs == {bCur.names[x] : x \in Names} \ {NoObj}
 
-\* Not the code (FsyncOnly: limitations/crash_litmus.tla,
-\* known_bugs/sync_by_file_fsync): a sync point whose only barrier is the
-\* fsync that the kernel's FSYNCDIR or FSYNC asked for. An fsync of D
-\* ("sync") makes durable D's metadata (DFSCQ: an fsync of a directory
+\* The fsync that the kernel's FSYNC or FSYNCDIR asked for, which dcfs
+\* passes through (step 25.28b; FsyncFrom): what it makes durable, nothing
+\* more. An fsync of D (an FSYNCDIR's; every kind but "fsync" takes this
+\* branch, the periodic sync point too where a configuration makes this its
+\* barrier) makes durable D's metadata (DFSCQ: an fsync of a directory
 \* flushes all pending metadata; Ferrite: every update of D is ordered
 \* before it) and, with DirFsyncPersistsFiles, the data of the files D
 \* names (and under "metaprefix" all metadata, F's attributes too). An
@@ -489,8 +492,7 @@ FsyncOnly(r) ==
     ELSE Force(TRUE, all, IF DirFsyncPersistsFiles THEN NamedObjs ELSE {})
 
 \* The barrier of sync point r's request, before it clears the dirty set:
-\* syncfs, after the fsync the kernel asked for (backing::SyncBacking; the
-\* fsync makes nothing durable that syncfs does not).
+\* syncfs (backing::SyncBacking).
 SyncBarrier(r) == Syncfs
 
 \* The backing filesystem changes from bCur to b2: request r remembers the
@@ -1110,16 +1112,16 @@ RFail2(p) ==
     /\ UNCHANGED <<servedWrong, stamp>>
 
 (***************************************************************************)
-(* A sync point (backing::SyncBacking): from the periodic                 *)
-(* DirCacheFS::MaybeSyncNow, or after FSYNC/FSYNCDIR. Other requests      *)
-(* run while it waits on syncfs, as they will under coroutines.           *)
+(* A sync point (backing::SyncBacking), from the periodic                  *)
+(* DirCacheFS::MaybeSyncNow. Other requests run while it waits on syncfs,  *)
+(* as they will under coroutines. The kernel's FSYNC and FSYNCDIR are no   *)
+(* sync point (step 25.28b): FsyncFrom below.                              *)
 (***************************************************************************)
 
 \* cache::BeginSync (the guards' clock, in `snap`; D's row in the snapshot
 \* of the dirty set is implied: D only becomes dirty through a phase 1,
 \* which moves the clock), then syncfs(2): every backing write so far is
-\* durable (SyncBarrier; an FSYNCDIR's or FSYNC's own fsync comes first and
-\* adds nothing to it). An FSYNC ("fsync") is the same sync point.
+\* durable (SyncBarrier).
 S1From(p, r) ==
     /\ bSeq' = SyncBarrier(r)
     /\ Syscall(p, [r EXCEPT !.pc = "S2", !.snap = seq, !.fsnap = fm.seq,
@@ -1163,19 +1165,51 @@ S2(p) ==
     /\ Reply(p, ps[p], Rep("ok", {}))
     /\ UnchangedBacking /\ UNCHANGED <<seq, inflight, servedWrong, stamp>>
 
-\* The sync point's checkpoint of the cache's WAL (step 25.28b,
-\* DirCacheFS::CheckpointCache): every commit so far is durable. In the
-\* code it runs after the reply of a request whose sync point ran (the
-\* periodic one, an FSYNC's, an FSYNCDIR's), before the next request is
-\* read (DirCacheFS::FinishSyncPoint); here it may run at any moment no
-\* request is between two syscalls, which covers that. When it runs, and
-\* the bound on what a power loss loses that this gives, is
-\* durability.tla's subject.
-WalCheckpoint ==
+\* The periodic sync point's durable point of the cache (step 25.28b,
+\* DirCacheFS::MakeCacheDurable: an fsync of its WAL): every commit so far
+\* is durable. In the code it runs after the reply of the request whose
+\* start ran the sync point, before the next request is read
+\* (DirCacheFS::FinishSyncPoint); here it may run at any moment no request
+\* is between two syscalls, which covers that. When it runs, and the bound
+\* on what a power loss loses that this gives, is durability.tla's subject.
+CacheDurable ==
     /\ mode = "up" /\ running = None
     /\ dbOpts' = {dbCur}
     /\ UNCHANGED <<bCur, bSeq, dbCur, mode, seq, inflight, durableD, running,
                    ps, servedWrong, fm, stamp, muts, crashes>>
+
+(***************************************************************************)
+(* The kernel's FSYNC of the file a name of D holds ("fsync") and its      *)
+(* FSYNCDIR of D ("fsyncdir") (step 25.28b; DirCacheFS::Fsync, Fsyncdir):  *)
+(* the fsync it asked for, passed through (FsyncOnly), then the cache's    *)
+(* durable point and the reply. Not a sync point: no syncfs, and the dirty *)
+(* set stays. A power loss after the reply may still lose what the backing *)
+(* filesystem's fsync does not make durable (the no_stronger litmus        *)
+(* configurations, MClitmus.tla).                                          *)
+(***************************************************************************)
+
+\* Whether an FSYNC is a sync point instead (before step 25.28b it was:
+\* its fsync, then syncfs and the dirty set's clearing). Not the code;
+\* known_bugs/sync_by_file_fsync overrides it, with the fsync as the sync
+\* point's only barrier (SyncBarrier <- FsyncOnly).
+FsyncSyncPoint == FALSE
+
+\* The fsync.
+FsyncFrom(p, r) ==
+    /\ bSeq' = FsyncOnly(r)
+    /\ Syscall(p, [r EXCEPT !.pc = "Y_reply"])
+    /\ UNCHANGED bCur /\ UnchangedDB /\ UnchangedGuards
+    /\ UNCHANGED <<servedWrong, stamp>>
+
+\* The cache's durable point (CacheDurable's effect), and the reply. The
+\* code skips the WAL's fsync when nothing committed since its last durable
+\* point, and dbOpts is {dbCur} already then.
+FsyncDurable(p) ==
+    /\ At(p, "Y_reply")
+    /\ dbOpts' = {dbCur}
+    /\ Reply(p, ps[p], Rep("ok", {}))
+    /\ UNCHANGED <<bCur, bSeq, dbCur>> /\ UnchangedGuards
+    /\ UNCHANGED <<servedWrong, stamp>>
 
 (***************************************************************************)
 (* A write to the file a name of D holds (step 12.8): the kernel's WRITE   *)
@@ -1724,7 +1758,8 @@ Arrive(p) ==
           /\ S1From(p, NewReq("sync", None, None, "S1", None, None, FALSE))
           /\ UNCHANGED muts
        \* Step 12.8: a write to the file n holds (not under D's lock), and
-       \* the kernel's FSYNC of it (its fsync, then a sync point).
+       \* the kernel's FSYNC of it; step 25.28b: its FSYNCDIR of D (neither
+       \* under D's lock).
        \/ /\ "write" \in Requests
           /\ muts < MaxMutations /\ muts' = muts + 1
           /\ \E n \in Names :
@@ -1736,7 +1771,16 @@ Arrive(p) ==
        \/ /\ "fsync" \in Requests
           /\ \E n \in Names :
                /\ ArriveAllowed("fsync", n, None)
-               /\ S1From(p, NewReq("fsync", n, None, "S1", None, None, FALSE))
+               /\ IF FsyncSyncPoint
+                  THEN S1From(p, NewReq("fsync", n, None, "S1", None, None,
+                                        FALSE))
+                  ELSE FsyncFrom(p, NewReq("fsync", n, None, "F", None, None,
+                                           FALSE))
+          /\ UNCHANGED muts
+       \/ /\ "fsyncdir" \in Requests
+          /\ ArriveAllowed("fsyncdir", None, None)
+          /\ FsyncFrom(p, NewReq("fsyncdir", None, None, "F", None, None,
+                                 FALSE))
           /\ UNCHANGED muts
        \* F's requests by nodeid need F's row and F (step 23.11: the kernel
        \* holds a nodeid of F only once dcfs replied an entry for it).
@@ -1810,6 +1854,7 @@ AttrChangeFill(p)  == FillAttrsAndReply(p, "A_fill") /\ F
 SyncClearDirty(p)  == S2(p) /\ F
 WriteSyscall(p)    == WSys(p) /\ F
 WriteReply(p)      == WReply(p) /\ F
+FsyncReply(p)      == FsyncDurable(p) /\ F
 FileReleaseStat(p) == FStat(p, "FR_stat", "FR_fill") /\ F
 FileReleaseFill(p) == FRFill(p) /\ F
 FileGetattrStat(p) == FStat(p, "FG_stat", "FG_fill") /\ F
@@ -2081,7 +2126,7 @@ RequestStep(p) ==
     \/ AttrChangeSyscall(p) \/ AttrChangePhase3(p)
     \/ AttrChangeStat(p) \/ AttrChangeFill(p)
     \/ SyncClearDirty(p)
-    \/ WriteSyscall(p) \/ WriteReply(p)
+    \/ WriteSyscall(p) \/ WriteReply(p) \/ FsyncReply(p)
     \/ Interrupt(p)
     \/ FileReleaseStat(p) \/ FileReleaseFill(p)
     \/ FileGetattrStat(p) \/ FileGetattrFill(p)
@@ -2094,7 +2139,7 @@ RequestStep(p) ==
 
 Next ==
     \/ \E p \in Procs : Arrive(p) \/ RequestStep(p) \/ InterruptArrives(p)
-    \/ FRead \/ AtimeExpiry \/ WalCheckpoint
+    \/ FRead \/ AtimeExpiry \/ CacheDurable
     \/ CrashServing \/ CrashRecovering \/ CrashStopping
     \/ Restart \/ Recover \/ StartRun \/ ProbesDone
     \/ BeginShutdown \/ StopSync \/ StopClear \/ StopCkpt \/ StopFlag

@@ -110,8 +110,8 @@ start() {
 }
 
 # sql QUERY: the cache database's answer, rows joined by ";" (read only, and
-# only while the daemon is idle: a reader can make a sync point's checkpoint
-# see SQLITE_BUSY).
+# only while the daemon is idle: a reader can make the clean shutdown's
+# checkpoint see SQLITE_BUSY).
 sql() { "$TESTUTIL" sql "$DB" "$1" | tr '\n' ';'; }
 
 # now: the guest's uptime in seconds, two decimals.

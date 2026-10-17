@@ -155,6 +155,14 @@ absl::AnyInvocable<void()> &SyncfsHook() {
   return *hook;
 }
 
+// The inode whose every fsync fails with EIO (0: none): the cache
+// database's WAL (WalInode), for a durable point that fails (SQLite's unix
+// VFS syncs with fsync).
+ino_t &FsyncFailsFor() {
+  static ino_t ino = 0;
+  return ino;
+}
+
 // The errno the next name_to_handle_at fails with, once (0: none).
 int &NameToHandleFailure() {
   static int err = 0;
@@ -397,6 +405,19 @@ int __wrap_syncfs(int fd) {
   if (hook) hook();
   return __real_syncfs(fd);
 }
+// Not a backstop: SQLite fsyncs its WAL inside a transaction.
+int __real_fsync(int fd);
+int __wrap_fsync(int fd) {
+  if (dcfs::FsyncFailsFor() != 0) {
+    absl::StatusOr<struct stat> st = dcfs::syscalls::fstat(fd);
+    CHECK_OK(st.status());
+    if (st->st_ino == dcfs::FsyncFailsFor()) {
+      errno = EIO;
+      return -1;
+    }
+  }
+  return __real_fsync(fd);
+}
 
 // The rest of the backstop's wraps (see dcfs::NoTransactionAt): each checks,
 // then makes the real call.
@@ -593,10 +614,11 @@ class DirCacheFSTest : public ::testing::Test {
   }
 
   // Starts the filesystem over the source tree built so far: a fresh
-  // cache, a DirCacheFS, and a libfuse session that has seen FUSE_INIT.
-  void Start(std::string_view db_path = ":memory:") {
-    ASSERT_OK_AND_ASSIGN(
-        db_, sqlite3::ConnectionFactory{.path = std::string(db_path)}.Open());
+  // cache (a database file beside the source tree, in WAL mode as main.cc
+  // has it), a DirCacheFS, and a libfuse session that has seen FUSE_INIT.
+  void Start() {
+    ASSERT_OK_AND_ASSIGN(db_,
+                         sqlite3::ConnectionFactory{.path = DbPath()}.Open());
     // Every request (and backing syscall) checks the invariants
     // (dcfs/testonly/invariant_checker.h); a violation aborts the test.
     checker_ = std::make_unique<testonly::InvariantChecker>();
@@ -671,6 +693,7 @@ class DirCacheFSTest : public ::testing::Test {
     OpenByHandleFailures().clear();
     NameToHandleHook() = {};
     SyncfsHook() = {};
+    FsyncFailsFor() = 0;
     StatvfsReadOnly() = false;
     NameToHandleFailure() = 0;
     FakeInodeNumbers().clear();
@@ -688,6 +711,14 @@ class DirCacheFSTest : public ::testing::Test {
     observers_.reset();
     checker_.reset();
     HarnessDb() = nullptr;
+    // The cache database Start() made (its last close removed its WAL and
+    // shared-memory files), so that the tests' databases do not fill the
+    // guest's TEST_TMPDIR; best effort, as the source tree's (a test that
+    // poisons the backing door leaves both).
+    if (db_.Get() != nullptr) {
+      EXPECT_THAT(db_.Close(), IsOk());
+      testonly::RemoveAll(DbPath());
+    }
     if (!source_.empty()) testonly::RemoveAll(source_);
   }
 
@@ -1227,12 +1258,33 @@ class DirCacheFSTest : public ::testing::Test {
     return Send(FUSE_UNLINK, static_cast<uint64_t>(parent), body);
   }
 
-  // An fsync of directory `id`: the fsync itself, then a sync point.
+  // An fsync of directory `id`: the fsync itself, then the cache's durable
+  // point.
   Reply Fsyncdir(InodeId id) {
     struct fuse_fsync_in in = {};
     std::string body;
     AppendBytes(body, in);
     return Send(FUSE_FSYNCDIR, static_cast<uint64_t>(id), body);
+  }
+
+  // An fsync of open file `fh` of `id`.
+  Reply Fsync(InodeId id, uint64_t fh) {
+    struct fuse_fsync_in in = {};
+    in.fh = fh;
+    std::string body;
+    AppendBytes(body, in);
+    return Send(FUSE_FSYNC, static_cast<uint64_t>(id), body);
+  }
+
+  // The cache database Start() opens.
+  std::string DbPath() const { return absl::StrCat(source_, ".sqlite"); }
+
+  // The inode of the cache database's WAL.
+  ino_t WalInode() const {
+    absl::StatusOr<struct stat> st =
+        syscalls::fstatat(AT_FDCWD, absl::StrCat(DbPath(), "-wal"));
+    EXPECT_THAT(st, IsOk());
+    return st.ok() ? st->st_ino : 0;
   }
 
   std::vector<InodeId> Dirty() {
@@ -1691,13 +1743,13 @@ TEST_F(DirCacheFSTest, ReleaseDuringASyncPointKeepsTheDirtyRow) {
     AppendToFile(Path("f"), "late");
     release = Release(f, fh);
   };
-  EXPECT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_THAT(backing::SyncBacking(ctx_), IsOk());
   ASSERT_TRUE(release.has_value()) << "the hook did not run";
   EXPECT_EQ(release->error, 0);
   EXPECT_THAT(Dirty(), Contains(f));
 
   // The next sync point began after the last write: now it may go.
-  EXPECT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_THAT(backing::SyncBacking(ctx_), IsOk());
   EXPECT_THAT(Dirty(), Not(Contains(f)));
 }
 
@@ -1736,11 +1788,11 @@ TEST_F(DirCacheFSTest, ReleaseEndsTheWritesForAFillThatBeganBefore) {
 TEST_F(DirCacheFSTest, WritableCreateIsDirtyWhenReplied) {
   Start();
   StartTrace();
-  std::optional<Reply> fsync;
-  OpenByHandleHook() = [&] { fsync = Fsyncdir(kRootInode); };
+  std::optional<absl::Status> sync;
+  OpenByHandleHook() = [&] { sync = backing::SyncBacking(ctx_); };
   Created created = Create(kRootInode, "new", O_RDWR | O_CREAT | O_EXCL);
-  ASSERT_TRUE(fsync.has_value()) << "the hook did not run";
-  EXPECT_EQ(fsync->error, 0);
+  ASSERT_TRUE(sync.has_value()) << "the hook did not run";
+  EXPECT_THAT(*sync, IsOk());
   ASSERT_EQ(created.reply.error, 0);
   EXPECT_THAT(Dirty(), Contains(created.id));
 
@@ -1748,7 +1800,7 @@ TEST_F(DirCacheFSTest, WritableCreateIsDirtyWhenReplied) {
   AppendToFile(Path("new"), "data");
   ASSERT_EQ(Release(created.id, created.fh).error, 0);
   EXPECT_THAT(Dirty(), Contains(created.id));
-  EXPECT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_THAT(backing::SyncBacking(ctx_), IsOk());
   EXPECT_THAT(Dirty(), Not(Contains(created.id)));
 }
 
@@ -1865,7 +1917,7 @@ TEST_F(DirCacheFSTest, UnlinkIsRefusedWhileItsParentKeepsChanging) {
 // --- formal/ finding sync_during_mutation --------------------------------
 //
 // The model's counterexample, through the real request path: the root is
-// dirty; an FSYNCDIR's sync point takes its snapshot and waits on syncfs;
+// dirty; a sync point takes its snapshot and waits on syncfs;
 // meanwhile a whole MKDIR in the root runs (phase 1, mkdirat, phase 3, its
 // end). The syncfs may have begun before the mkdirat, so the clear must
 // keep the root's row (in the snapshot, but mutated since) and the new
@@ -1880,13 +1932,13 @@ TEST_F(DirCacheFSTest, MkdirDuringASyncPointKeepsItsDirtyRows) {
 
   std::optional<std::pair<Reply, InodeId>> mkdir;
   SyncfsHook() = [&] { mkdir = Mkdir(kRootInode, "new"); };
-  EXPECT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_THAT(backing::SyncBacking(ctx_), IsOk());
   ASSERT_TRUE(mkdir.has_value()) << "the hook did not run";
   ASSERT_EQ(mkdir->first.error, 0);
   EXPECT_THAT(Dirty(), UnorderedElementsAre(kRootInode, mkdir->second));
 
   // The next sync point began after the mkdirat: now both may go.
-  EXPECT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_THAT(backing::SyncBacking(ctx_), IsOk());
   EXPECT_THAT(Dirty(), ::testing::IsEmpty());
 }
 
@@ -1996,7 +2048,7 @@ TEST_F(DirCacheFSTest, CommonRequestsMatchTheModel) {
   EXPECT_EQ(Setxattr(d, "user.k", "v").error, 0);
   EXPECT_THAT(List(d, true),
               IsOkAndHolds(UnorderedElementsAre(".", "..", "c", "e")));
-  EXPECT_EQ(Fsyncdir(d).error, 0);
+  EXPECT_THAT(backing::SyncBacking(ctx_), IsOk());
   EXPECT_THAT(Dirty(), Not(Contains(d)));
 }
 
@@ -2051,7 +2103,7 @@ TEST_F(DirCacheFSTest, TraceScenarioMkdirDuringSync) {
   StartTrace();
   Mkdir(kRootInode, "first");
   SyncfsHook() = [&] { Mkdir(kRootInode, "new"); };
-  Fsyncdir(kRootInode);
+  EXPECT_THAT(backing::SyncBacking(ctx_), IsOk());
 }
 
 // A mkdir in d during a readdir's population of d (at its first probe,
@@ -2721,7 +2773,7 @@ TEST_F(DirCacheFSTest, CopyFileRangeCopiesOnTheBackingFiles) {
   auto [out, out_fh] = Open(dst, O_WRONLY);
   ASSERT_EQ(in.error, 0);
   ASSERT_EQ(out.error, 0);
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());
   EXPECT_EQ(CopyFileRange(src, in_fh, dst, out_fh, 100), 10);
   EXPECT_EQ(testonly::FileSize(Path("dst")).value_or(-1), 10);
   EXPECT_THAT(Dirty(), Contains(dst));  // The copy's phase 1.
@@ -2775,7 +2827,7 @@ TEST_F(DirCacheFSTest, IoctlForwardsItsAllowlist) {
   // A set: the flags, and the attributes (ctime) refreshed after.
   const int nodump = flags | FS_NODUMP_FL;
   std::string in(reinterpret_cast<const char *>(&nodump), sizeof(nodump));
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());
   EXPECT_EQ(Ioctl(f, FS_IOC_SETFLAGS, in, 0).error, 0);
   EXPECT_THAT(Dirty(), Contains(f));
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
@@ -3343,11 +3395,11 @@ TEST_F(ClockTest, PeriodicSyncPointFollowsTheInjectedClock) {
   EXPECT_EQ(attr.st.st_size, 5);
 }
 
-// The periodic sync point that a mutation's dirty row drives also checkpoints
-// the cache's WAL, so the fills committed since the last one stop depending on
-// SQLite's autocheckpoint to become durable.
-TEST_F(ClockTest, PeriodicSyncPointCheckpointsTheWal) {
-  Start(absl::StrCat(source_, "_wal.sqlite"));
+// The periodic sync point that a mutation's dirty row drives also makes the
+// cache durable (its WAL fsynced), so the commits since the last durable
+// point stop depending on SQLite's autocheckpoint to become durable.
+TEST_F(ClockTest, PeriodicSyncPointMakesTheCacheDurable) {
+  Start();
   auto [mkdir, d] = Mkdir(kRootInode, "d");
   ASSERT_EQ(mkdir.error, 0);
   ASSERT_THAT(Dirty(), Contains(d));
@@ -3356,46 +3408,48 @@ TEST_F(ClockTest, PeriodicSyncPointCheckpointsTheWal) {
   clock_.AdvanceTime(absl::Seconds(5));
   Tick();
   EXPECT_THAT(Dirty(), ::testing::IsEmpty()) << "the sync point ran";
-  EXPECT_EQ(counter_.counts().wal_checkpoints, 1) << "and checkpointed the WAL";
+  EXPECT_EQ(counter_.counts().cache_durable_points, 1)
+      << "and made the cache durable";
 }
 
-// With no dirty row, commits alone (a fill) drive the checkpoint, once an
-// interval has passed since the last sync point, and with no backing syscall;
-// with no commit since the last checkpoint, there is none. A periodic sync
-// point with nothing to do still restarts the interval.
-TEST_F(ClockTest, CommitsAloneDriveThePeriodicCheckpoint) {
+// With no dirty row, commits alone (a fill) drive the durable point, once an
+// interval has passed since the last sync point, and with no backing
+// syscall; with no commit since the last durable point, there is none. A
+// periodic sync point with nothing to do still restarts the interval.
+TEST_F(ClockTest, CommitsAloneDriveThePeriodicDurablePoint) {
   ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/x"));
   WriteFile(Path("f"));
-  Start(absl::StrCat(source_, "_wal.sqlite"));
-  // A sync point now: the start's commits checkpointed, nothing dirty.
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  Start();
+  // A sync point now: the start's commits durable, nothing dirty.
+  clock_.AdvanceTime(absl::Seconds(5));
+  Tick();
   ASSERT_THAT(Dirty(), ::testing::IsEmpty());
   counter_.Reset();
 
   clock_.AdvanceTime(absl::Seconds(5));
   Tick();
-  EXPECT_EQ(counter_.counts().wal_checkpoints, 0)
-      << "no commit since the last checkpoint";
+  EXPECT_EQ(counter_.counts().cache_durable_points, 0)
+      << "no commit since the last durable point";
 
   auto [lookup, entry] = Lookup(kRootInode, "f");  // A fill: root's listing.
   ASSERT_EQ(lookup.error, 0);
   ASSERT_THAT(Dirty(), ::testing::IsEmpty());
   clock_.AdvanceTime(absl::Seconds(4));
   Tick();
-  EXPECT_EQ(counter_.counts().wal_checkpoints, 0)
+  EXPECT_EQ(counter_.counts().cache_durable_points, 0)
       << "before the interval has elapsed";
   clock_.AdvanceTime(absl::Seconds(1));
   counter_.Reset();
   Tick();
-  EXPECT_EQ(counter_.counts().wal_checkpoints, 1)
+  EXPECT_EQ(counter_.counts().cache_durable_points, 1)
       << "the fill's commit, once the interval has elapsed";
   EXPECT_EQ(counter_.counts().backing_calls, 0)
-      << "a checkpoint alone reaches no backing filesystem";
+      << "a durable point alone reaches no backing filesystem";
 
   clock_.AdvanceTime(absl::Seconds(5));
   Tick();
-  EXPECT_EQ(counter_.counts().wal_checkpoints, 1)
+  EXPECT_EQ(counter_.counts().cache_durable_points, 1)
       << "not again without another commit";
   auto [dir_lookup, dir_entry] = Lookup(kRootInode, "d");
   ASSERT_EQ(dir_lookup.error, 0);
@@ -3403,47 +3457,131 @@ TEST_F(ClockTest, CommitsAloneDriveThePeriodicCheckpoint) {
       Lookup(static_cast<InodeId>(dir_entry.nodeid), "x");
   ASSERT_EQ(fill.error, 0);
   Tick();
-  EXPECT_EQ(counter_.counts().wal_checkpoints, 1)
+  EXPECT_EQ(counter_.counts().cache_durable_points, 1)
       << "nor within an interval of the last sync point, which had nothing "
          "to do";
 }
 
-// An FSYNCDIR's sync point checkpoints the WAL too (the same sync point as the
-// periodic one).
-TEST_F(ClockTest, FsyncdirCheckpointsTheWal) {
-  Start(absl::StrCat(source_, "_wal.sqlite"));
-  auto [mkdir, d] = Mkdir(kRootInode, "d");
-  ASSERT_EQ(mkdir.error, 0);
-  counter_.Reset();
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
-  EXPECT_THAT(Dirty(), ::testing::IsEmpty());
-  EXPECT_EQ(counter_.counts().wal_checkpoints, 1);
-}
-
-// Records the replies and the sync points' checkpoints, in order.
-class ReplyAndCheckpointOrder : public ProtocolEvents {
+// Records the replies, the sync points' syncfs and the cache's durable
+// points, in order.
+class ReplyAndDurableOrder : public ProtocolEvents {
  public:
   void Replied(Context &, int) override { order.emplace_back("reply"); }
-  void WalCheckpointed(Context &) override { order.emplace_back("checkpoint"); }
+  void SyncfsStarting(Context &) override { order.emplace_back("syncfs"); }
+  void CacheMadeDurable(Context &) override { order.emplace_back("durable"); }
   std::vector<std::string> order;
 };
 
-// The request whose sync point it is does not wait for the checkpoint: it
-// runs after the reply of the request whose start ran the periodic sync
-// point, and of an FSYNCDIR, before the next request is served.
-TEST_F(ClockTest, TheCheckpointComesAfterTheReply) {
-  Start(absl::StrCat(source_, "_wal.sqlite"));
+// An FSYNC or FSYNCDIR is not a sync point (step 25.28b): it makes durable
+// what the backing filesystem's fsync does and the cache, before its reply,
+// with no syncfs; the dirty set stays, and the periodic sync point keeps its
+// cadence (an fsync does not restart the interval).
+TEST_F(ClockTest, FsyncAndFsyncdirMakeTheCacheDurableBeforeTheReply) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [open, fh] = Open(f, O_RDWR);  // f's row: dirty
+  ASSERT_EQ(open.error, 0);
+  auto [mkdir, d] = Mkdir(kRootInode, "d");  // the root's and d's rows
+  ASSERT_EQ(mkdir.error, 0);
+  ReplyAndDurableOrder order;
+  observers_->Add(&order);
+  clock_.AdvanceTime(absl::Seconds(4));
+
+  ASSERT_EQ(Fsync(f, fh).error, 0);
+  EXPECT_THAT(order.order, ElementsAre("durable", "reply")) << "FSYNC";
+  ASSERT_EQ(Mkdir(d, "e").first.error, 0);
+  order.order.clear();
+  ASSERT_EQ(Fsyncdir(d).error, 0);
+  EXPECT_THAT(order.order, ElementsAre("durable", "reply")) << "FSYNCDIR";
+  EXPECT_THAT(Dirty(), ::testing::IsSupersetOf({kRootInode, f, d}))
+      << "no sync point: the dirty set stays";
+
+  clock_.AdvanceTime(absl::Seconds(1));
+  order.order.clear();
+  Tick();
+  EXPECT_THAT(order.order, ElementsAre("syncfs", "reply", "durable"))
+      << "the periodic sync point, an interval after the last one";
+  observers_->Remove(&order);
+  ASSERT_EQ(Release(f, fh).error, 0);
+}
+
+// An FSYNC with nothing committed since the last durable point fsyncs no WAL:
+// the durable point is skipped, not repeated.
+TEST_F(ClockTest, FsyncWithNothingCommittedLeavesTheCacheAlone) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Fsync(f, fh).error, 0);
+  counter_.Reset();
+  ASSERT_EQ(Fsync(f, fh).error, 0);
+  EXPECT_EQ(counter_.counts().cache_durable_points, 0);
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_EQ(counter_.counts().cache_durable_points, 0);
+  ASSERT_EQ(Release(f, fh).error, 0);
+}
+
+// An FSYNC or FSYNCDIR whose durable point fails (the WAL's fsync: an I/O
+// error of the cache disk) replies EIO: what dcfs cached about the file may
+// not survive a power loss. Nothing marked the commits durable: the next
+// durable point fsyncs the WAL again.
+TEST_F(ClockTest, FailedDurablePointFailsTheFsync) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("gone"), 0755), IsOk());
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  auto [gone_lookup, gone_entry] = Lookup(kRootInode, "gone");
+  ASSERT_EQ(gone_lookup.error, 0);
+  const InodeId gone = static_cast<InodeId>(gone_entry.nodeid);
+  std::string rmdir = "gone";
+  rmdir.push_back('\0');
+  ASSERT_EQ(Send(FUSE_RMDIR, kRootInode, rmdir).error, 0);  // removed
+  ASSERT_EQ(Opendir(gone).error, 0);
+  struct Case {
+    std::string_view what;
+    absl::AnyInvocable<Reply()> send;
+  };
+  Case cases[] = {
+      {.what = "FSYNC", .send = [&] { return Fsync(f, fh); }},
+      {.what = "FSYNCDIR", .send = [&] { return Fsyncdir(kRootInode); }},
+      {.what = "FSYNCDIR of a removed directory",
+       .send = [&] { return Fsyncdir(gone); }},
+  };
+  for (Case &c : cases) {
+    ASSERT_EQ(Mkdir(kRootInode, c.what).first.error, 0) << "a commit";
+    counter_.Reset();
+    FsyncFailsFor() = WalInode();
+    EXPECT_EQ(c.send().error, -EIO) << c.what;
+    FsyncFailsFor() = 0;
+    EXPECT_EQ(counter_.counts().cache_durable_points, 0) << c.what;
+    ASSERT_EQ(c.send().error, 0) << c.what;
+    EXPECT_EQ(counter_.counts().cache_durable_points, 1)
+        << c.what << ": again, for the commits it left";
+  }
+  ASSERT_EQ(Release(f, fh).error, 0);
+}
+
+// The request whose sync point it is does not wait for the durable point:
+// it runs after the reply of the request whose start ran the periodic sync
+// point, before the next request is served.
+TEST_F(ClockTest, ThePeriodicDurablePointComesAfterTheReply) {
+  Start();
   ASSERT_EQ(Mkdir(kRootInode, "d").first.error, 0);
-  ReplyAndCheckpointOrder order;
+  ReplyAndDurableOrder order;
   observers_->Add(&order);
   clock_.AdvanceTime(absl::Seconds(5));
   Tick();
-  EXPECT_THAT(order.order, ElementsAre("reply", "checkpoint"))
-      << "the periodic sync point";
-  ASSERT_EQ(Mkdir(kRootInode, "e").first.error, 0);
-  order.order.clear();
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
-  EXPECT_THAT(order.order, ElementsAre("reply", "checkpoint")) << "FSYNCDIR";
+  EXPECT_THAT(order.order, ElementsAre("syncfs", "reply", "durable"));
   observers_->Remove(&order);
 }
 
@@ -3485,67 +3623,41 @@ class ScopedVerbosity {
   int saved_;
 };
 
-// Simulates a checkpoint that cannot complete. Once a sync point has cleared
-// the dirty set, at the end of its request (after the invariant checks, before
-// the checkpoint that follows the reply), steps a read statement and leaves it
-// part way through its rows until Release(): the connection holds a read
-// transaction meanwhile, in which SQLite refuses a checkpoint (SQLITE_LOCKED),
-// as a cache disk's I/O error would make it fail.
-class HoldReadAfterSyncClear : public ProtocolEvents {
- public:
-  void SyncCleared(Context &) override { armed_ = true; }
-  void CheckRequestEnd(Context &ctx, const events::Bookkeeping &,
-                       const events::Request &) override {
-    if (!std::exchange(armed_, false)) return;
-    absl::StatusOr<sqlite3::Statement> stmt =
-        sqlite3::Statement::Prepare(ctx.db, "SELECT id FROM inodes");
-    CHECK_OK(stmt.status());
-    absl::StatusOr<bool> row = stmt->Step();
-    CHECK_OK(row.status());
-    CHECK(*row);
-    held_ = *std::move(stmt);
-  }
-  void Release() { held_ = sqlite3::Statement(); }
-
- private:
-  bool armed_ = false;
-  sqlite3::Statement held_;
-};
-
-// A checkpoint that fails is logged, and the sync point's backing half has
-// still cleared the dirty set; the commits stay for the next sync point's
-// checkpoint.
-TEST_F(ClockTest, FailedCheckpointIsLoggedAndLeftToTheNextSyncPoint) {
-  Start(absl::StrCat(source_, "_wal.sqlite"));
+// A periodic durable point that fails (the WAL's fsync: an I/O error of the
+// cache disk) is logged, and the sync point's backing half has still
+// cleared the dirty set; the next durable point fsyncs the WAL again.
+TEST_F(ClockTest, FailedPeriodicDurablePointIsLoggedAndLeftToTheNext) {
+  Start();
   auto [mkdir, d] = Mkdir(kRootInode, "d");
   ASSERT_EQ(mkdir.error, 0);
   counter_.Reset();
-  HoldReadAfterSyncClear hold;
-  observers_->Add(&hold);
   {
     AllLogCapture capture;
+    FsyncFailsFor() = WalInode();
     clock_.AdvanceTime(absl::Seconds(5));
     Tick();
-    EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning, "checkpoint"), 1)
+    FsyncFailsFor() = 0;
+    EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning,
+                            "fsync of the cache's WAL failed"),
+              1)
         << capture.Dump();
   }
-  observers_->Remove(&hold);
-  hold.Release();
   EXPECT_THAT(Dirty(), ::testing::IsEmpty());
-  EXPECT_EQ(counter_.counts().wal_checkpoints, 0);
+  EXPECT_EQ(counter_.counts().cache_durable_points, 0);
 
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
-  EXPECT_EQ(counter_.counts().wal_checkpoints, 1)
-      << "the next sync point checkpoints what the failed one left";
+  clock_.AdvanceTime(absl::Seconds(5));
+  Tick();
+  EXPECT_EQ(counter_.counts().cache_durable_points, 1)
+      << "the next sync point's durable point, for what the failed one left";
 }
 
 // A FORGET or BATCH_FORGET that starts the periodic sync point (they have no
-// reply) finishes it too: the checkpoint runs after the handler, not at the
-// next request.
+// reply) finishes it too: the durable point runs after the handler, not at
+// the next request.
 TEST_F(ClockTest, ForgetsFinishTheSyncPointTheyStart) {
   WriteFile(Path("f"));
   WriteFile(Path("g"));
-  Start(absl::StrCat(source_, "_wal.sqlite"));
+  Start();
   auto [lf, ef] = Lookup(kRootInode, "f");
   ASSERT_EQ(lf.error, 0);
   auto [lg, eg] = Lookup(kRootInode, "g");
@@ -3554,11 +3666,11 @@ TEST_F(ClockTest, ForgetsFinishTheSyncPointTheyStart) {
   counter_.Reset();
   clock_.AdvanceTime(absl::Seconds(5));
   Forget(static_cast<InodeId>(ef.nodeid), 1);
-  EXPECT_EQ(counter_.counts().wal_checkpoints, 1) << "FORGET";
+  EXPECT_EQ(counter_.counts().cache_durable_points, 1) << "FORGET";
   ASSERT_EQ(Mkdir(kRootInode, "e").first.error, 0);
   clock_.AdvanceTime(absl::Seconds(5));
   BatchForget({{static_cast<InodeId>(eg.nodeid), 1}});
-  EXPECT_EQ(counter_.counts().wal_checkpoints, 2) << "BATCH_FORGET";
+  EXPECT_EQ(counter_.counts().cache_durable_points, 2) << "BATCH_FORGET";
 }
 
 // A writable open refused for the backing file's flag says which flag, in
@@ -3622,33 +3734,6 @@ TEST_F(ClockTest, ASyncPointIsLoggedAtInfoWithItsRows) {
   Tick();
   EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "sync point"), 1)
       << "nothing dirty, no sync point\n"
-      << capture.Dump();
-}
-
-// An fsync's sync point is not announced at INFO (one per call), only at
-// --v=1.
-TEST_F(ClockTest, AnFsyncdirSyncPointIsLoggedOnlyAtVerbosityOne) {
-  WriteFile(Path("f"));
-  Start();
-  auto [lookup, entry] = Lookup(kRootInode, "f");
-  ASSERT_EQ(lookup.error, 0);
-  const InodeId f = static_cast<InodeId>(entry.nodeid);
-  auto [open, fh] = Open(f, O_RDWR);
-  ASSERT_EQ(open.error, 0);
-  ASSERT_EQ(Release(f, fh).error, 0);  // written: dirty
-  {
-    AllLogCapture capture;
-    ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
-    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "sync point"), 0)
-        << capture.Dump();
-  }
-  auto [open2, fh2] = Open(f, O_RDWR);
-  ASSERT_EQ(open2.error, 0);
-  ASSERT_EQ(Release(f, fh2).error, 0);
-  ScopedVerbosity v(1);
-  AllLogCapture capture;
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
-  EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "sync point: cleared"), 1)
       << capture.Dump();
 }
 
@@ -4380,7 +4465,7 @@ TEST_F(DirCacheFSTest, LastForgetOfAWrittenFileReconcilesItsAttributes) {
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
   ASSERT_EQ(Release(f, fh).error, 0);
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);  // A sync point: f is clean.
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());  // A sync point: f is clean.
   ASSERT_THAT(Dirty(), Not(Contains(f)));
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr before, cache::GetAttr(ctx_, f));
   ASSERT_TRUE(before.valid);
@@ -4397,7 +4482,7 @@ TEST_F(DirCacheFSTest, LastForgetOfAWrittenFileReconcilesItsAttributes) {
   EXPECT_EQ(after.st.st_size, 6);
   // Recorded as a mutation records: dirty until a sync point covers it.
   EXPECT_THAT(Dirty(), Contains(f));
-  EXPECT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_THAT(backing::SyncBacking(ctx_), IsOk());
   EXPECT_THAT(Dirty(), Not(Contains(f)));
 
   // Once is enough: forgotten again (after a new lookup) with no writable
@@ -4427,7 +4512,7 @@ TEST_F(DirCacheFSTest, LastForgetOfAnUnchangedFileChangesNothing) {
     ASSERT_EQ(open.error, 0);
     ASSERT_EQ(Release(id, fh).error, 0);
   }
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());
   AppendToFile(Path("g"), "stored");
 
   BatchForget({{f, 1}, {g, 1}});
@@ -4481,7 +4566,7 @@ TEST_F(DirCacheFSTest, LastForgetWithoutAHeldDescriptorMarksUnknown) {
   Reply release = Release(f, fh);  // Cannot hold a descriptor now.
   ASSERT_THAT(syscalls::setrlimit(RLIMIT_NOFILE, saved), IsOk());
   ASSERT_EQ(release.error, 0);
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);  // A sync point: f is clean.
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());  // A sync point: f is clean.
   ASSERT_THAT(Dirty(), Not(Contains(f)));
   Forget(f, 1);
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
@@ -4544,7 +4629,7 @@ TEST_F(DirCacheFSTest, HeldDescriptorsStopAtTheCap) {
   ASSERT_THAT(syscalls::setrlimit(RLIMIT_NOFILE, saved), IsOk());
 
   // Within the cap: held, so its FORGET re-reads through it.
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());
   Forget(written[0], 1);
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr held,
                        cache::GetAttr(ctx_, written[0]));
@@ -4687,7 +4772,7 @@ TEST_F(DirCacheFSTest, ForgetBatchReconcilesInOnePhase1) {
     ASSERT_EQ(open.error, 0);
     ASSERT_EQ(Release(id, fh).error, 0);
   }
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);  // A sync point: all clean.
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());  // A sync point: all clean.
   CountMutations count;
   observers_->Add(&count);
   BatchForget({{ids[0], 1}, {ids[1], 1}, {ids[2], 1}});
@@ -4732,7 +4817,7 @@ TEST_F(DirCacheFSTest, WrittenAgainKeepsItsHeldDescriptor) {
   Reply release = Release(f, again_fh);  // No new descriptor possible.
   ASSERT_THAT(syscalls::setrlimit(RLIMIT_NOFILE, saved), IsOk());
   ASSERT_EQ(release.error, 0);
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());
   AppendToFile(Path("f"), "stored");
   Forget(f, 1);
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
@@ -4827,11 +4912,7 @@ TEST_F(DirCacheFSTest, RemovedFileCanBeChanged) {
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
   EXPECT_TRUE(fs_->HasOpenFiles(f));
-  struct fuse_fsync_in fsync_in = {};
-  fsync_in.fh = fh;
-  std::string fsync_body;
-  AppendBytes(fsync_body, fsync_in);
-  EXPECT_EQ(Send(FUSE_FSYNC, static_cast<uint64_t>(f), fsync_body).error, 0);
+  EXPECT_EQ(Fsync(f, fh).error, 0);
   // A fallocate has no row to begin a mutation on: it goes through the open's
   // descriptor, and the object grows.
   struct fuse_fallocate_in falloc = {};
@@ -5254,7 +5335,7 @@ TEST_F(DirCacheFSTest, NonFinalForgetKeepsTheHeldDescriptor) {
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
   ASSERT_EQ(Release(f, fh).error, 0);
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);  // A sync point: f is clean.
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());  // A sync point: f is clean.
   Forget(f, 1);
   EXPECT_THAT(Dirty(), Not(Contains(f)));  // Not reconciled yet.
   AppendToFile(Path("f"), "stored");       // The mapping's stores.
@@ -5753,9 +5834,15 @@ TEST_F(DirCacheFSTest, TmpfileRowGoesAtTheStartAfterACrash) {
 // shows the checker through InvariantChecker::TamperBookkeeping, a copy of
 // the bookkeeping DirCacheFS reports with one entry changed), inside the
 // death test's child, so that the fixture's own checks at DESTROY still
-// pass: no production code is faulted.
+// pass: no production code is faulted. The child is a fresh process
+// ("threadsafe" style), which runs the test again with a cache of its own:
+// a forked one would share the parent's database file and its WAL index,
+// and what it broke would reach the parent's DESTROY.
 
-using DirCacheFSDeathTest = DirCacheFSTest;
+class DirCacheFSDeathTest : public DirCacheFSTest {
+ protected:
+  DirCacheFSDeathTest() { GTEST_FLAG_SET(death_test_style, "threadsafe"); }
+};
 using testonly::FakeBookkeeping;
 
 // A regex for "in request <op> nodeid <id>" in a violation's message.
@@ -6569,7 +6656,7 @@ TEST_F(DirCacheFSTest, CopyFileRangeEndsItsMutationBeforeItsRefreshes) {
   auto [out, out_fh] = Open(dst, O_WRONLY);
   ASSERT_EQ(in.error, 0);
   ASSERT_EQ(out.error, 0);
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());
 
   // Phase 1 and the backing copy make no statx: the first is the refresh.
   std::optional<size_t> in_flight;
@@ -6589,7 +6676,7 @@ TEST_F(DirCacheFSTest, RemovexattrEndsItsMutationBeforeItsRefreshes) {
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   ASSERT_EQ(Setxattr(f, "user.k", "v").error, 0);
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());
 
   std::string name = "user.k";
   name.push_back('\0');
@@ -6641,7 +6728,7 @@ TEST_F(DirCacheFSTest, FallocateEndsItsMutationBeforeItsRefreshes) {
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   auto [open, fh] = Open(f, O_WRONLY);
   ASSERT_EQ(open.error, 0);
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());
 
   struct fuse_fallocate_in falloc = {};
   falloc.fh = fh;
@@ -7290,7 +7377,7 @@ TEST_F(DirCacheFSTest, ForgetReconciliationsAreQuiet) {
     ASSERT_EQ(open.error, 0);
     ASSERT_EQ(Release(ids[i], fh).error, 0);
   }
-  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());
 
   // f's attributes changed behind the mapping: reconciled and recorded.
   AppendToFile(Path("f"), "stored");
@@ -8419,7 +8506,7 @@ TEST_P(CheckpointTest, InterruptedAtItsFirstCheckpoint) {
     ASSERT_EQ(open2.error, 0);
     fh2 = h2;
   }
-  ASSERT_THAT(Fsyncdir(kRootInode).error, 0);  // A sync point: all clean.
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());  // A sync point: all clean.
   ASSERT_OK_AND_ASSIGN(struct stat before,
                        syscalls::fstatat(AT_FDCWD, Path("f")));
   FakeInterrupts interrupts;
@@ -8815,14 +8902,6 @@ class FaultIteration : public DirCacheFSTest {
     std::string body(name);
     body.push_back('\0');
     return Send(opcode, static_cast<uint64_t>(id), body);
-  }
-
-  Reply Fsync(InodeId id, uint64_t fh) {
-    struct fuse_fsync_in in = {};
-    in.fh = fh;
-    std::string body;
-    AppendBytes(body, in);
-    return Send(FUSE_FSYNC, static_cast<uint64_t>(id), body);
   }
 
   Reply Setattr(InodeId id, uint32_t valid, uint64_t size) {

@@ -79,7 +79,7 @@
 (*    descriptor are lifetime.tla's: here a removed record answers for an *)
 (*    object unlinked through dcfs until the kernel evicts the nodeid.    *)
 (*  - A power loss rolls the database back to its last durable commit (a  *)
-(*    phase 1, a WAL checkpoint, the start: Persist); the backing         *)
+(*    phase 1, a durable point or checkpoint, the start: Persist); the    *)
 (*    filesystem keeps what it did (dcfs.tla's crash states cover the     *)
 (*    rest). A cache wipe happens while dcfs is stopped.                  *)
 (*  - The root (nodeid 1, generation 0) is not modelled.                  *)
@@ -535,7 +535,8 @@ Sync ==
     /\ UNCHANGED <<bName, bState, rows, nextId, stubHigh, dur, rec, kin, nfs,
                    mints, probe, run, clean, countVars, badMade>>
 
-\* A durable commit (a phase 1 elsewhere, a WAL checkpoint).
+\* A durable commit (a phase 1 elsewhere, the cache's durable point: an
+\* fsync of its WAL, at a sync point or an FSYNC).
 Persist ==
     /\ Up /\ Track /\ dur # Durable
     /\ dur' = Durable
