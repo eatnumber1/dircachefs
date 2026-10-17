@@ -3345,3 +3345,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   each agy dispatch.
 - russ agreed: network backings get a real identity design (14.10, protocol agent, after the
   current queue); README marks them unsupported until then (added to the running 15.11c).
+- russ on fsck for bind lines: "Unfortunate. Document this." Added to the running 15.11c: README
+  says passno 0 on dcfs lines under systemd (no systemd-fsck@ unit for a directory source) and
+  fsck.dcfs by hand; what util-linux `fsck -A` and other inits do with a non-zero passno is
+  documented only as far as verified in a guest.
