@@ -19,6 +19,7 @@ AGENT_DEF = (
 
 
 class Fixture(unittest.TestCase):
+    """Not a test case by itself: the temp directories the tests share."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -38,7 +39,6 @@ class Fixture(unittest.TestCase):
             lanes_root=self.lanes,
             agents_dir=self.agents,
             proc_root=self.proc,
-            now=lambda: "T0",
         )
 
     def write(self, path, text):
@@ -146,9 +146,9 @@ class PostAgentTest(Fixture):
 
     def test_agent_without_lane_is_recorded_but_not_shown(self):
         self.launch(prompt="no lane here")
-        self.assertEqual(
-            {r["state"] for l, r in self.rows().items() if l != "orchestrator"},
-            {"idle"})
+        rows = self.rows()
+        del rows["orchestrator"]
+        self.assertEqual({r["state"] for r in rows.values()}, {"idle"})
         with open(os.path.join(self.dash, "running.json")) as f:
             self.assertIn("a1", json.load(f))
 
@@ -207,10 +207,49 @@ class AgyTest(Fixture):
         self.assertEqual(self.rows()["lane-1"]["model"], "")
         self.assertEqual(self.rows()["lane-2"]["state"], "idle")
 
+    def test_model_as_the_last_argument(self):
+        self.make_agy(42, "lane-1", ["--model"])
+        self.launch(prompt="none")
+        self.assertEqual(self.rows()["lane-1"]["model"], "")
+
+    def test_process_that_exited_mid_scan(self):
+        os.makedirs(os.path.join(self.proc, "9", "cmdline"))  # unreadable
+        self.launch(prompt="none")
+        self.assertEqual(self.rows()["lane-1"]["state"], "idle")
+
     def test_recorded_agent_wins_over_agy(self):
         self.make_agy(42, "lane-2", ["--model", "gemini-x"])
         self.launch()
         self.assertEqual(self.rows()["lane-2"]["agent"], "dcfs-implementer")
+
+
+class BranchTest(Fixture):
+
+    def test_relative_gitdir_resolves_against_the_lane(self):
+        self.write(os.path.join(self.lanes, "lane-1", ".git"),
+                   "gitdir: ../gitdir-1\n")
+        self.launch(prompt="dircachefs-lanes/lane-1")
+        self.assertEqual(self.rows()["lane-1"]["step"], "25.9b")
+
+    def test_detached_head_falls_back_to_the_description(self):
+        self.write(os.path.join(self.lanes, "gitdir-1", "HEAD"), "abc123\n")
+        self.launch(prompt="dircachefs-lanes/lane-1")
+        self.assertEqual(self.rows()["lane-1"]["step"], "do thing")
+
+    def test_unreadable_lane_gets_an_empty_row_not_a_failed_table(self):
+        os.makedirs(os.path.join(self.lanes, "lane-3"))  # no .git
+        self.launch(prompt="dircachefs-lanes/lane-3")
+        self.assertEqual(self.rows()["lane-3"]["state"], "idle")
+        self.assertEqual(self.rows()["lane-1"]["state"], "idle")
+
+
+class WriteAtomicTest(unittest.TestCase):
+
+    def test_failed_write_leaves_no_temp_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(TypeError):
+                dashboard_lanes.write_atomic(os.path.join(d, "f"), 123)
+            self.assertEqual(os.listdir(d), [])
 
 
 class StopTest(Fixture):
@@ -264,6 +303,50 @@ class MalformedTest(Fixture):
     def test_missing_fields(self):
         self.check("post-agent", {"tool_input": {}})
         self.check("subagent-stop", {})
+
+    def test_unknown_agent_stop_is_not_an_error_and_regenerates(self):
+        out, err = self.run_hook("subagent-stop", {"agent_id": "never"})
+        self.assertEqual((out, err), ("", ""))
+        self.assertIn("lane-1", self.rows())
+
+    def test_state_file_of_the_wrong_type(self):
+        os.makedirs(self.dash)
+        self.write(os.path.join(self.dash, "running.json"), "[]")
+        self.check("subagent-stop", {"agent_id": "a1"})
+
+    def test_state_file_that_is_not_json(self):
+        os.makedirs(self.dash)
+        self.write(os.path.join(self.dash, "running.json"), "{nope")
+        self.check("subagent-stop", {"agent_id": "a1"})
+
+    def test_empty_stdin_is_an_empty_event(self):
+        self.check("subagent-stop", "")
+
+    def test_mark_uploaded_and_show_before_any_file(self):
+        self.check("mark-uploaded", "")
+        self.check("show", "")
+
+    def test_show_does_not_read_stdin(self):
+        class Tty:
+            def read(self):
+                raise AssertionError("show read stdin")
+
+        self.run_hook("stop", {"stop_hook_active": False})
+        out = io.StringIO()
+        dashboard_lanes.main(["show"], stdin=Tty(), stdout=out,
+                             stderr=io.StringIO(), env=self.env)
+        self.assertIn("orchestrator", out.getvalue())
+
+    def test_no_arguments(self):
+        out, err = io.StringIO(), io.StringIO()
+        code = dashboard_lanes.main(
+            [], stdin=io.StringIO(""), stdout=out, stderr=err, env=self.env)
+        self.assertEqual((code, out.getvalue()), (0, ""))
+        self.assertEqual(len(err.getvalue().splitlines()), 1)
+
+    def test_lock_file_is_taken_in_the_dashboard_dir(self):
+        self.run_hook("stop", {})
+        self.assertTrue(os.path.exists(os.path.join(self.dash, "lock")))
 
     def test_unknown_subcommand(self):
         out, err = io.StringIO(), io.StringIO()

@@ -20,14 +20,13 @@ running.json, lanes.json, uploaded.sha256, and an optional config.json with
 """
 
 import dataclasses
+import fcntl
 import hashlib
 import json
 import os
 import re
 import sys
 import tempfile
-import time
-from typing import Callable, Optional
 
 LANE_IN_PROMPT = re.compile(r"dircachefs-lanes/lane-(\d+)")
 LANE_DIR = re.compile(r"lane-(\d+)$")
@@ -36,13 +35,10 @@ STEP_BRANCH = re.compile(r"step-(.+)$")
 
 @dataclasses.dataclass
 class Env:
-    """The directories and the clock the tool works against."""
-
     dashboard_dir: str
     lanes_root: str
     agents_dir: str
     proc_root: str
-    now: Callable[[], str]
 
     @classmethod
     def from_environ(cls, environ):
@@ -57,7 +53,6 @@ class Env:
                 environ.get("CLAUDE_PROJECT_DIR", "."), ".claude", "agents"
             ),
             proc_root="/proc",
-            now=lambda: time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         )
 
     def path(self, name):
@@ -73,9 +68,14 @@ def write_atomic(path, text):
     directory = os.path.dirname(path)
     os.makedirs(directory, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=directory)
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
 
 def load_json(path, default):
@@ -85,7 +85,11 @@ def load_json(path, default):
 
 
 def frontmatter(env, subagent_type):
-    """The key: value pairs of .claude/agents/<type>.md, or {}."""
+    """The key: value pairs of .claude/agents/<type>.md, or {}.
+
+    Parsed by hand: the tool is standard library only, and the frontmatter
+    is flat `key: value` lines.
+    """
     path = os.path.join(env.agents_dir, subagent_type + ".md")
     if not os.path.exists(path):
         return {}
@@ -106,7 +110,6 @@ def record_agent(env, event):
     match = LANE_IN_PROMPT.search(tool_input["prompt"])
     running = load_json(env.path("running.json"), {})
     running[response["agentId"]] = {
-        "agent_id": response["agentId"],
         "subagent_type": tool_input["subagent_type"],
         "description": tool_input["description"],
         "lane": "lane-" + match.group(1) if match else None,
@@ -114,17 +117,20 @@ def record_agent(env, event):
         or response.get("resolvedModel")
         or front.get("model", ""),
         "effort": front.get("effort", ""),
-        "started": env.now(),
     }
     write_atomic(env.path("running.json"), json.dumps(running, indent=2))
 
 
 def lane_branch(lane_dir):
-    """The branch checked out in a lane (a linked worktree), or ''."""
+    """The branch checked out in a lane (a linked worktree).
+
+    A detached HEAD returns the commit hash, which matches no step branch.
+    """
     dot_git = os.path.join(lane_dir, ".git")
     git_dir = dot_git
     if os.path.isfile(dot_git):
-        git_dir = read_text(dot_git).split(":", 1)[1].strip()
+        gitdir = read_text(dot_git).partition(":")[2].strip()
+        git_dir = os.path.join(lane_dir, gitdir)  # may be relative
     head = read_text(os.path.join(git_dir, "HEAD")).strip()
     return head.removeprefix("ref: refs/heads/")
 
@@ -133,11 +139,12 @@ def agy_processes(env):
     """Maps a working directory to the --model of an agy running there."""
     found = {}
     for pid in os.listdir(env.proc_root):
-        cmdline = os.path.join(env.proc_root, pid, "cmdline")
-        if not os.path.exists(cmdline):
+        try:
+            with open(os.path.join(env.proc_root, pid, "cmdline"), "rb") as f:
+                text = f.read().decode(errors="replace")
+        except OSError:  # the process exited, or is not one (/proc/self)
             continue
-        with open(cmdline, "rb") as f:
-            argv = f.read().decode(errors="replace").split("\0")
+        argv = text.rstrip("\0").split("\0")
         if os.path.basename(argv[0]) != "agy":
             continue
         model = ""
@@ -177,9 +184,15 @@ def build_rows(env):
         lane_dir = os.path.join(env.lanes_root, name)
         row = {"lane": name, "step": "", "agent": "", "model": "",
                "effort": "", "state": "idle"}
+        try:
+            branch = lane_branch(lane_dir)
+        except OSError:  # a lane that is not a worktree: show it empty
+            rows.append(row)
+            continue
         if name in by_lane:
+            # A recorded agent wins over an agy process in the same lane.
             record = by_lane[name]
-            step = STEP_BRANCH.match(lane_branch(lane_dir))
+            step = STEP_BRANCH.match(branch)
             row.update(
                 step=step.group(1) if step else record["description"],
                 agent=record["subagent_type"],
@@ -208,6 +221,8 @@ def regenerate(env):
 
 
 def post_agent(env, event):
+    # An agent_id means a subagent made this call: its launches are not
+    # lanes of the orchestrator.
     if "agent_id" in event:
         return ""
     record_agent(env, event)
@@ -224,14 +239,19 @@ def post_agent(env, event):
 
 def subagent_stop(env, event):
     running = load_json(env.path("running.json"), {})
-    del running[event["agent_id"]]
+    # Agents we never recorded stop too: foreground agents, subagents'
+    # own launches, and agents launched before the hooks were installed.
+    running.pop(event["agent_id"], None)
     write_atomic(env.path("running.json"), json.dumps(running, indent=2))
     regenerate(env)
     return ""
 
 
 def stop(env, event):
-    if "agent_id" in event or event.get("stop_hook_active", False):
+    # A subagent's stop is not the session's. stop_hook_active means the
+    # session is already continuing after our block: blocking again would
+    # loop.
+    if "agent_id" in event or event.get("stop_hook_active"):
         return ""
     if not regenerate(env):
         return ""
@@ -241,43 +261,60 @@ def stop(env, event):
         % env.path("lanes.json"))})
 
 
-def mark_uploaded(env, event):
+def mark_uploaded(env):
     digest = hashlib.sha256(read_text(env.path("lanes.json")).encode())
     write_atomic(env.path("uploaded.sha256"), digest.hexdigest() + "\n")
     return ""
 
 
-def show(env, event):
+def show(env):
     return read_text(env.path("lanes.json"))
 
 
-COMMANDS = {
-    "post-agent": post_agent,
-    "subagent-stop": subagent_stop,
-    "stop": stop,
-    "mark-uploaded": mark_uploaded,
-    "show": show,
-}
+def lock(env):
+    """Holds the dashboard lock until the returned file is closed.
+
+    Hooks run concurrently (a subagent stopping while another launches); a
+    blocking flock makes each command's read-modify-write whole, and it
+    waits for the other hook's exit, not for a time.
+    """
+    os.makedirs(env.dashboard_dir, exist_ok=True)
+    f = open(env.path("lock"), "w")
+    fcntl.flock(f, fcntl.LOCK_EX)
+    return f
 
 
+# Hook commands take the hook's JSON event.
+HOOKS = {"post-agent": post_agent, "subagent-stop": subagent_stop,
+         "stop": stop}
+# The others are run by hand and read no stdin.
+MANUAL = {"mark-uploaded": mark_uploaded, "show": show}
+
+
+# A table dispatch, not argparse: a hook must exit 0 with one line on
+# stderr whatever it is given, and argparse exits 2 on a bad command line.
 def main(argv, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
-         env: Optional[Env] = None):
+         env=None):
     """Runs one subcommand; always returns 0.
 
     A hook that exits nonzero or crashes can wedge the Claude Code session
     (a Stop hook that errors keeps the session from finishing), and the
-    dashboard is a convenience, so a malformed input or an unreadable state
-    file is reported in one line on stderr and the hook succeeds silently.
+    dashboard is a convenience, so any failure (malformed input, a state
+    file of the wrong type or unreadable) is reported in one line on stderr
+    and the hook succeeds silently.
     """
     env = env or Env.from_environ(os.environ)
     try:
-        command = COMMANDS[argv[0]]
-        event = json.loads(stdin.read() or "{}")
-        if not isinstance(event, dict):
-            raise ValueError("hook input is not a JSON object")
-        stdout.write(command(env, event))
-    except (KeyError, ValueError, TypeError, OSError, IndexError) as e:
-        stderr.write("dashboard_lanes: %s: %r\n" % (argv[:1], e))
+        with lock(env):
+            if argv[0] in MANUAL:
+                stdout.write(MANUAL[argv[0]](env))
+            else:
+                event = json.loads(stdin.read() or "{}")
+                if not isinstance(event, dict):
+                    raise ValueError("hook input is not a JSON object")
+                stdout.write(HOOKS[argv[0]](env, event))
+    except Exception as e:
+        stderr.write("dashboard_lanes: %s: %r\n" % (argv[0] if argv else "", e))
     return 0
 
 

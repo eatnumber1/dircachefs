@@ -114,9 +114,9 @@ orchestrator):
 
 ```json
 {"hooks": {
-  "PostToolUse": [{"matcher": "Agent", "hooks": [{"type": "command", "command": "python3 -I $CLAUDE_PROJECT_DIR/tools/agents/dashboard_lanes.py post-agent", "timeout": 10}]}],
-  "SubagentStop": [{"hooks": [{"type": "command", "command": "python3 -I $CLAUDE_PROJECT_DIR/tools/agents/dashboard_lanes.py subagent-stop", "timeout": 10}]}],
-  "Stop": [{"hooks": [{"type": "command", "command": "python3 -I $CLAUDE_PROJECT_DIR/tools/agents/dashboard_lanes.py stop", "timeout": 10}]}]
+  "PostToolUse": [{"matcher": "Agent", "hooks": [{"type": "command", "command": "python3 -I \"$CLAUDE_PROJECT_DIR\"/tools/agents/dashboard_lanes.py post-agent", "timeout": 10}]}],
+  "SubagentStop": [{"hooks": [{"type": "command", "command": "python3 -I \"$CLAUDE_PROJECT_DIR\"/tools/agents/dashboard_lanes.py subagent-stop", "timeout": 10}]}],
+  "Stop": [{"hooks": [{"type": "command", "command": "python3 -I \"$CLAUDE_PROJECT_DIR\"/tools/agents/dashboard_lanes.py stop", "timeout": 10}]}]
 }}
 ```
 
