@@ -4006,3 +4006,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   outcome fields at merge. Two unpushed plan subjects ("26.41, 12.23:",
   "12.21, 12.22:") failed the subject gate and were reworded before any
   push (filter-branch over origin/main..main).
+- 2026-10-17, russ agrees to rename the cancellation checkpoint:
+  CheckInterrupted, "interruption points". 22.6 queued after 22.5 and
+  25.28b.

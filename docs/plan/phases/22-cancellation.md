@@ -178,3 +178,17 @@ obligation and bounds how much work follows it.
 Owner: dcfs-protocol. Docs: `formal/README.md` (actions and properties
 tables), `docs/design.md` "Cancellation", README's EINTR paragraph if
 the guarantee is user-visible.
+
+## 22.6 Interruption points: the cancellation checkpoint renamed (russ, 2026-10-17; queued after 22.5 and 25.28b)
+
+"Checkpoint" meant both a SQLite WAL checkpoint and Phase 22's place where
+a request checks for FUSE_INTERRUPT. russ: "Agreed. Interruption points
+also is more semantically meaningful." `dcfs::Checkpoint(ctx, where)`
+becomes `dcfs::CheckInterrupted(ctx, where)`; `dcfs/checkpoint.{h,cc}`
+become `dcfs/interruption_point.{h,cc}` (target renamed, users updated);
+the prose term is "interruption point" everywhere (AGENTS.md's rule,
+docs/design.md "Cancellation", formal/ comments and README, test names,
+the plan's current text; history in log.md stays as written). "Checkpoint"
+then means only the SQLite WAL checkpoint. Mechanical, after 22.5 round 2
+and 25.28b merge (both edit those call sites). Owner: Gemini (agy), a
+style review after.
