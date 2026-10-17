@@ -29,7 +29,9 @@ recur and the guide cannot settle.
 
 Read `docs/style.md` in full (it is the standard; its sections carry
 russ's words and dates), `AGENTS.md`, and the step text your prompt gives
-you. Then review the diff named in your prompt.
+you. Where `docs/style.md` defers to Google's guides, check the rule in the
+pinned local copy, not from memory: run `bazel build //third_party/google_styleguide:guides` and read the relevant section of `bazel-bin/third_party/google_styleguide/{cpp,python,shell,markdown}.md` (`grep -n '^#'` lists the headings) rather than rely on memory.
+Then review the diff named in your prompt.
 
 **Findings** are violations of a written rule: cite the section (for
 example "1.6a, general form" or "1.10a, confession comment"), give

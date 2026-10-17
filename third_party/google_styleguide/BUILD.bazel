@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: MIT
+load("@rules_python//python:py_test.bzl", "py_test")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
+
+py_test(
+    name = "headings_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["test_headings.py"],
+    args = [
+        "$(location :cpp.md)",
+        "$(location :python.md)",
+        "$(location :shell.md)",
+        "$(location :markdown.md)",
+    ],
+    data = [
+        ":cpp.md",
+        ":markdown.md",
+        ":python.md",
+        ":shell.md",
+    ],
+    main = "test_headings.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+# Each guide rendered to GitHub-flavored Markdown with the pinned pandoc.
+# Raw HTML is dropped so the C++ guide reads as plain Markdown.
+[
+    genrule(
+        name = name + "_md",
+        srcs = [src],
+        outs = [name + ".md"],
+        cmd = "$(location @pandoc//:bin/pandoc) -f " + fmt +
+              " -t gfm-raw_html --wrap=none $< -o $@",
+        tools = ["@pandoc//:bin/pandoc"],
+    )
+    for name, src, fmt in [
+        ("cpp", "@google_styleguide//:cppguide.html", "html"),
+        ("python", "@google_styleguide//:pyguide.md", "gfm"),
+        ("shell", "@google_styleguide//:shellguide.md", "gfm"),
+        ("markdown", "@google_styleguide//:docguide/style.md", "gfm"),
+    ]
+]
+
+# bazel build //third_party/google_styleguide:guides leaves the four guides and
+# the licence in bazel-bin/third_party/google_styleguide/ (README.md).
+filegroup(
+    name = "guides",
+    srcs = [
+        ":cpp.md",
+        ":markdown.md",
+        ":python.md",
+        ":shell.md",
+        "@google_styleguide//:LICENSE",
+    ],
+)

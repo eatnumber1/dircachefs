@@ -6,6 +6,11 @@ conform to them: [C++](https://google.github.io/styleguide/cppguide.html),
 [Shell](https://google.github.io/styleguide/shellguide.html) and, for
 documents,
 [Markdown](https://google.github.io/styleguide/docguide/style.html).
+A pinned local copy of all four, rendered to Markdown, is built by
+`bazel build //third_party/google_styleguide:guides` into
+`bazel-bin/third_party/google_styleguide/{cpp,python,shell,markdown}.md`
+(`third_party/google_styleguide/README.md`); reviewers and agents read the
+relevant section there rather than rely on memory, and need no network.
 Bazel files follow Bazel's BUILD style guide as buildifier enforces it. A
 section here says only what adds to or narrows Google's rules, or covers
 what Google does not (tests, Bazel, docs, commits). Where the tree breaks

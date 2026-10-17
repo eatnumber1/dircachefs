@@ -35,6 +35,8 @@ Report findings ranked by severity, each with file:line, the concrete
 failure scenario, and a suggested fix. Separate what you verified from what
 you suspect. Say plainly when you found nothing.
 
+Google's C++, Python, Shell and Markdown style guides, which `docs/style.md` extends, are pinned and rendered locally: run `bazel build //third_party/google_styleguide:guides` and read the relevant section of `bazel-bin/third_party/google_styleguide/{cpp,python,shell,markdown}.md` (`grep -n '^#'` lists the headings) rather than rely on memory.
+
 Abseil's Tips of the Week (https://abseil.io/tips/) are design guidance, ranked below `AGENTS.md`, `docs/style.md` and the Google C++ style guide (`docs/style.md`, "Precedence, and the Abseil Tips of the Week"): a finding that rests on a tip cites it (`TotW #NNN`) and is advisory unless it also breaks a rule.
 
 Run the reviewer checklist in `docs/abseil-utilities.md` section 3 on every diff: a hand-rolled utility that the pinned Abseil provides is a finding (cite the swaps-table row).

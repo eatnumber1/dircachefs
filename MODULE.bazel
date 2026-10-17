@@ -162,6 +162,18 @@ http_archive(
     urls = ["https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-linux-amd64.tar.gz"],
 )
 
+# Step 25.29: Google's style guides (C++, Python, Shell, Markdown), rendered to
+# Markdown by the pinned pandoc for reviewers (//third_party/google_styleguide:guides).
+# google/styleguide at the gh-pages tip of 2026-10-17; see
+# third_party/google_styleguide/README.md for the update procedure.
+http_archive(
+    name = "google_styleguide",
+    build_file = "//third_party/google_styleguide:BUILD.google_styleguide",
+    sha256 = "5ebd83453a1919d9df447e84ea00196c0a72650aab403dbc021b2f9ff5499b40",
+    strip_prefix = "styleguide-b2a398d17f5ea890c6965b50e6c0c27a8c178f72",
+    urls = ["https://github.com/google/styleguide/archive/b2a398d17f5ea890c6965b50e6c0c27a8c178f72.tar.gz"],
+)
+
 # Step 15.6: a RELEASED Debian cloud image, the guest that boots systemd as
 # PID 1 (test/qemu:mount_dcfs_systemd_test). The nocloud flavor of the current
 # stable release (Debian 13, trixie), pinned by the SHA512 that cloud.debian.org

@@ -3,7 +3,8 @@
 Why: the `dcfs(8)` man page (`//man:dcfs.8`) is generated from
 `/README.md` by pandoc inside a Bazel genrule, and the tests read it back
 with pandoc. pandoc runs only through Bazel (`@pandoc//:bin/pandoc`),
-never from the host.
+never from the host. It also renders the pinned Google style guides
+(`//third_party/google_styleguide:guides`).
 
 ## Pin
 

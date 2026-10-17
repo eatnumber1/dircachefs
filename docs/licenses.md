@@ -33,9 +33,9 @@ the wording quoted.
   tool), and 5 **unverified** because they are resolved but never fetched
   (boringssl, jq.bzl, libpfm, stardoc, tcmalloc). 19 are build-only, 2 are
   test or benchmark only, 5 are not fetched.
-- **13 other pinned downloads and tools:** 6 build tools (LLVM release,
+- **14 other pinned downloads and tools:** 7 build tools (LLVM release,
   the toolchain's runtime `.deb`s, Python, bazel_lib's tool binaries, uv,
-  pandoc) and 7 test or developer tools and images (JDK for TLC, act,
+  pandoc, Google's style guides) and 7 test or developer tools and images (JDK for TLC, act,
   pjdfstest, xfstests, the two TLA+ jars, the Debian cloud image).
 - **Two package sets for the test guests:** 78 Alpine origin packages (40
   carry a GPL term, 13 are LGPL only, 24 permissive only, 1 offers GPL or a
@@ -47,7 +47,7 @@ the wording quoted.
 - **No GPL-only code is linked into dcfs** (only GPL-with-syscall-note
   headers, compile time). Three LGPL-2.1 libraries are (libfuse, libnuma, and
   glibc in `main_static`), which is what a shipped binary has to deal with.
-- **Eight open questions** are at the end.
+- **Six open questions** are at the end.
 
 ## How dcfs is linked (evidence)
 
@@ -140,6 +140,7 @@ licence file was read there.
 | bazel_lib tool binaries (uutils coreutils, zstd, bsdtar) | per bazel_lib | uutils coreutils MIT (`coreutils/LICENSE`, "Copyright (c) uutils developers"); zstd and bsdtar **unverified** (the fetched directories hold the binary only) | | build tools |
 | uv (via rules_python) | per rules_python | **unverified** (binary only) | | build tool |
 | pandoc | 3.12 | GPL-2.0-or-later ("Released under the GPL, version 2 or greater", `pandoc.1`); the archive has no COPYRIGHT file, so the licences of the static binary's Haskell libraries are **unverified** | the man page in the archive | build tool: renders `//man:dcfs.8` from README.md; the output is a man page, not pandoc code |
+| Google style guides (`google_styleguide`) | commit b2a398d17f5e (gh-pages tip, 2026-10-17) | CC-BY-3.0 (`LICENSE`: "Creative Commons Legal Code, Attribution 3.0 Unported"; `README.md`: "The style guides in this project are licensed under the CC-By 3.0 License") | `external/+http_archive+google_styleguide/LICENSE` | build input: rendered to Markdown by pandoc for reviewers (`//third_party/google_styleguide:guides`); the rendered copies are derived works credited to Google in `third_party/google_styleguide/README.md`, never shipped |
 | act | 0.2.89 | MIT | `external/+http_archive+act/LICENSE` | developer machine only (runs CI in Docker) |
 | pjdfstest | 85a8aea9e6 | BSD-2-Clause | `COPYING`: "License for all regression tests available with pjdfstest ... Redistribution and use in source and binary forms, with or without modification, are permitted provided that ... 1. ... 2. ..." (two clauses) | test program run in the guests, built from the fetched source |
 | xfstests (`ltp/fsstress.c`, `ltp/fsx.c`, `src/log-writes`, helpers, the `check` scripts) | v2026.05.17 | GPL-2.0 (`LICENSES/GPL-2.0`; `check` is SPDX `GPL-2.0`, `common/rc` is `GPL-2.0+`, `ltp/fsstress.c` is `GPL-2.0`). **`ltp/fsx.c` states no licence** (header: "Copyright (C) 1991, NeXT Computer, Inc. All Rights Reserverd ... Rewritten 8/98 by Conrad Minshall ... Small changes to work under Linux -- davej."), and 42 C and header files of `src/`, `ltp/` and `lib/` carry no SPDX line (not all are built here) | `external/+http_archive+xfstests/` | test programs and scripts in the guests; never distributed |
@@ -378,9 +379,8 @@ libssl3, libtasn1-6, perl-base, perl-modules-5.36, perl). Their licences are
   archives: the LLVM tarball, Alpine packages, xfstests and pjdfstest source,
   the Debian `.deb`s), the disk cache (compiled objects, including those of
   libfuse, abseil and the glibc pieces) and the extracted LLVM toolchain.
-  Whether a GitHub Actions cache of a public repository counts as
-  redistribution of the GPL archives in it is not decided here (open
-  question 3).
+  Settled (russ, 2026-10-17: "No, it's fine since we're not shipping it"):
+  these caches are not redistribution, because nothing from them ships.
 - **No binary of dcfs is distributed today.** Nothing below is triggered
   until one is.
 
@@ -395,10 +395,16 @@ noted, `main`). This is a reading of the licence texts, not legal advice.
 | LLVM runtimes (Apache-2.0 WITH LLVM-exception) | The exception lets the embedded portions be redistributed in object form without Apache sections 4(a), 4(b) and 4(d) (the licence copy, the change notice, the NOTICE carry); nothing is owed for a binary. Redistributing the source would need the licence text, which is not in the tarball and has to come from the upstream tag. |
 | SQLite (public domain) | None. |
 | liburing (MIT elected) | Keep the copyright and permission notice "in all copies or substantial portions of the Software": ship the MIT text with the binary. Electing MIT leaves LGPL-2.1 out of liburing. |
-| libfuse `lib/`, libnuma (LGPL-2.1) | Linked statically in `main` and `main_static`. LGPL-2.1 section 6 lets a combined work be distributed under terms of our choice provided recipients can modify the library and relink: ship the complete corresponding source of the work or the object files, with the licence text and a notice that the library is used. dcfs's own source is MIT and public and the build is a pinned Bazel build, so a recipient can rebuild with a modified libfuse through `--override_module=libfuse=<dir>`; that recipe has not been exercised (open question 1). |
-| glibc (LGPL-2.1+, `main_static` only) | The same section 6 terms for a static glibc: the heaviest obligation here. `main` avoids it (the host's glibc is used dynamically). Relinking against a modified glibc needs a rebuilt `libc6-dev` in `sysroot_debs` (open question 1). |
+| libfuse `lib/`, libnuma (LGPL-2.1) | Linked statically in `main` and `main_static`. LGPL-2.1 section 6 lets a combined work be distributed under terms of our choice provided recipients can modify the library and relink: ship the complete corresponding source of the work or the object files, with the licence text and a notice that the library is used. dcfs's own source is MIT and public and the build is a pinned Bazel build, so a recipient can rebuild with a modified libfuse through `--override_module=libfuse=<dir>`; that recipe has not been exercised. |
+| glibc (LGPL-2.1+, `main_static` only) | The same section 6 terms for a static glibc: the heaviest obligation here. `main` avoids it (the host's glibc is used dynamically). Relinking against a modified glibc needs a rebuilt `libc6-dev` in `sysroot_debs`. |
 | Linux UAPI headers | None for the binary: the Linux-syscall-note exempts programs that use the headers. |
 | Everything in sections 2-5 | Not in the binary. Source or notice duties arise only if the tool, image or archive itself is redistributed (the cache question). |
+
+**Shipping a binary** (russ, 2026-10-17): a release binary is ideally a goal,
+and may require the system's glibc and libfuse to be installed (a dynamically
+linked `main`); the static target stays for people who build by hand. The
+build change is step 7.9, parked late. The relink recipe stays unmeasured
+until then.
 
 A notices file for the shipped set (`THIRD_PARTY_NOTICES`, assembled by Bazel
 from the pinned archives' licence files, with `http_file`s for LLVM's licence
@@ -462,32 +468,24 @@ which is an idea, not text.
 
 Pending russ's decision.
 
-1. **Shipping a binary.** `main_static` carries a static glibc and static
-   libfuse and libnuma, all LGPL-2.1: a release needs the relink offer (object
-   files or source plus the build recipe) and the licence texts. Shipping
-   `main` (dynamic glibc) removes glibc but not the other two. Is a release a
-   goal, and which binary? The relink recipe is unmeasured.
-2. **LLVM's licence text** is not in the release tarball; if sources or the
+1. **LLVM's licence text** is not in the release tarball; if sources or the
    toolchain are ever redistributed the text must be pinned from the upstream
    tag (7.8's plan was `http_file`s of the five `LICENSE.TXT`s).
-3. **The CI cache** holds GPL and LGPL archives and compiled objects of
-   libfuse and glibc pieces in a public repository's Actions cache. Does that
-   count as redistribution? (Whether others can read the cache is unverified.)
-4. **`ltp/fsx.c`** has no licence grant. It is built from the fetched archive
+2. **`ltp/fsx.c`** has no licence grant. It is built from the fetched archive
    for tests and never distributed, but a file with only a 1991 NeXT
    copyright line is not covered by xfstests's GPL-2.0 tree. Keep, replace, or
    accept?
-5. **`third_party/e2fsprogs/mke2fs.conf`** is e2fsprogs's file apart from a
+3. **`third_party/e2fsprogs/mke2fs.conf`** is e2fsprogs's file apart from a
    header comment of ours and one change; it is test-only data. Keep marking
    it GPL, or treat the profile as uncopyrightable configuration?
-6. **Alpine's `vde2`** (the origin of `vde2-libs`) states `L: GPL` with no
+4. **Alpine's `vde2`** (the origin of `vde2-libs`) states `L: GPL` with no
    version in the index, so the guest's QEMU closure has a package whose
    licence cannot be named exactly. Test-only; noted.
-7. **Unverified licences** (listed above): five unfetched Bazel modules, the
+5. **Unverified licences** (listed above): five unfetched Bazel modules, the
    toolchain's runtime `.deb`s, 18 Debian rootfs debs, the Debian cloud
    image, the bundled libraries of the TLA+ jars and of the standalone Python,
    zstd, bsdtar and uv binaries, pandoc's Haskell libraries, the BCR
    overlay licence of numactl. All are build or test inputs. Reading them
    needs archives the build does not fetch; a later pass can close them.
-8. **The gate misses the `BUILD.<name>` overlays** and `.patch` files; making
+6. **The gate misses the `BUILD.<name>` overlays** and `.patch` files; making
    it read both is a small change to `tools/repo_shape.py`, not made yet.

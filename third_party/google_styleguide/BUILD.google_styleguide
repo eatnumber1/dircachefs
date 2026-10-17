@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MIT
+# Overlay for the google/styleguide archive (README.md).
+exports_files([
+    "LICENSE",
+    "cppguide.html",
+    "docguide/style.md",
+    "pyguide.md",
+    "shellguide.md",
+])
