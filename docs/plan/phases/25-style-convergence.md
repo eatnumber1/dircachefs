@@ -1030,3 +1030,24 @@ reproducible and offline.
    (no timer), and a bump's diff of the guides is read for new rules.
 
 Implementer, medium effort.
+
+## 25.30 Suppressions count against the ratchet (russ, 2026-10-17)
+
+russ, on a NOLINTNEXTLINE added in 25.9b: "is suppression the right choice
+here? what's the purpose of ratcheting the allowlist if we just suppress?"
+A source suppression is an exception nothing counts, so it defeats
+`tools/style_checks_allow.txt`'s only-shrinks rule. Deliverables:
+
+1. A gate in the style checks: a `NOLINT`/`NOLINTNEXTLINE`/`NOLINTBEGIN`
+   in our code fails unless the same file, function and check have an
+   allowlist line, so suppressions and listed findings are one ratcheted
+   set (with a self-check). The existing suppressions are converted into
+   allowlist lines or fixed.
+2. The seven `dcfs/testonly/*.cc` link-time fakes listed for
+   `misc-use-internal-linkage` get header declarations (as 25.9b's
+   setgroups fake does), and their allowlist lines are deleted.
+3. docs/style.md 1.1 says: an exception is fixed in the code where the code
+   can satisfy the check; a suppression is an allowlist line, never a
+   comment alone.
+
+Mechanical for 2, implementer for 1 and 3.

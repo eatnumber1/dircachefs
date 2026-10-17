@@ -3502,3 +3502,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   doc; russ settled the first (a release binary needing system glibc and
   libfuse; 7.9, parked late). The SPDX gate does not read BUILD overlays
   or .patch files yet (noted in the doc).
+
+- 2026-10-17: 25.9b reviewed (Opus, high: crash-safe, mergeable after two
+  fixes; style: small rewrites). One fix round sent: a real test for the
+  non-zero exit, the crash ban's DebugFatal and raw-check gaps, data
+  references behind via lines, non-backing wrappers for the lock file, a
+  matcher that every backing wrapper starts with the door, and the style
+  items. russ questioned the NOLINT on the setgroups fake: replaced by a
+  header declaration, and 25.30 makes suppressions count against the
+  allowlist ratchet. Pending russ: approval of the third-party abort/exit
+  allow lines (Abseil internals and flags, libfuse, libnuma).
