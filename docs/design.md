@@ -1607,9 +1607,10 @@ alone.
 
 The bound: a request that starts while a commit a power loss could lose is
 one sync interval old ends with every commit durable, unless its
-checkpoint failed (`formal/durability.tla`'s `BoundAtRequestEnd`). So,
+checkpoint failed (`formal/durability.tla`'s `BoundAtRequestEnd`); a
+failed checkpoint's commits stay losable until a later one completes. So,
 counted at requests, a power loss loses only about the last interval of
-cache commits; an idle daemon's last interval waits for its next request.
+cache commits before the last request's start.
 `fault_power_test`'s `lag` and `lagclean` scenarios show, on real disks,
 a fill older than the interval surviving a cut and one after the sync
 point lost; `sqlite_durability_test` judges the crash states of the

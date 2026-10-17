@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 
 #include <cerrno>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -306,11 +307,14 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
                              "database's path)");
   }
   // The cadence of the sync points (DirCacheFS::MaybeSyncNow): 0 would run
-  // one at every request, and a negative or NaN interval means nothing.
-  if (!(absl::GetFlag(FLAGS_sync_interval_sec) > 0)) {
+  // one at every request, an infinite one none, and a negative or NaN
+  // interval means nothing.
+  if (double interval = absl::GetFlag(FLAGS_sync_interval_sec);
+      interval <= 0 || !std::isfinite(interval)) {
     return MarkUsageError(InvalidArgumentErrorBuilder()
-                          << "dcfs.sync_interval_sec must be positive, not "
-                          << absl::GetFlag(FLAGS_sync_interval_sec));
+                          << "dcfs.sync_interval_sec must be positive and "
+                             "finite, not "
+                          << interval);
   }
   const std::string cache_db = *options.cache_db;
   const char *mountpoint = args.mountpoint.c_str();

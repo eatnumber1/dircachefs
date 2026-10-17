@@ -242,7 +242,7 @@ flag is set as the option `dcfs.<flag>`, e.g. `dcfs.sync_interval_sec=2`.
 |---|---|---|
 | `dcfs.attr_timeout_sec` | `3600` | How long the kernel may cache an inode's attributes. Long by design, since dcfs has exclusive access. While a file is open for writing, its attributes are always returned with a timeout of 0. |
 | `dcfs.entry_timeout_sec` | `3600` | How long the kernel may cache a lookup result, including a negative one. |
-| `dcfs.sync_interval_sec` | `5` | The first request this many seconds after the last sync point runs a new one: while mutations have left dirty cache entries, a `syncfs` of the backing filesystem, then the dirty set is cleared; and, after that request's reply, if anything was cached since the last, a checkpoint of the cache database's WAL, which makes it durable. Bounds how much is re-read after a power loss: the entries changed, and what was cached, in about one interval before the last request (unless that checkpoint failed, which is logged). Must be positive. |
+| `dcfs.sync_interval_sec` | `5` | The first request this many seconds after the last sync point runs a new one: while mutations have left dirty cache entries, a `syncfs` of the backing filesystem, then the dirty set is cleared; and, after that request's reply, if anything was cached since the last, a checkpoint of the cache database's WAL, which makes it durable. Bounds how much is re-read after a power loss: the entries changed, and what was cached, in about one interval before the last request's start (unless a checkpoint failed and none has completed since: an I/O error of the cache disk, logged at WARNING). Must be positive and finite. |
 
 dcfs uses Abseil logging, so Abseil's logging flags work too, as options with
 Abseil's semantics:
@@ -607,11 +607,11 @@ at every sync point (its WAL checkpoint) and at a start, and rows recorded
 after it (by lookups, listings, and the objects a change creates) are
 lost, with their NFS handles. Since a sync point runs at the first request
 `dcfs.sync_interval_sec` seconds after the last, that is about one
-interval's rows before the last request, unless that sync point's
-checkpoint failed (logged at WARNING). Those fail with `ESTALE`; a nodeid
-handed out again gets a fresh random generation, so an old handle resolves
-to a different file only with probability 2^-32 (docs/design.md,
-"Generations").
+interval's rows before the last request's start, unless a checkpoint
+failed (the cache disk's I/O error, logged at WARNING) and none has
+completed since. Those fail with `ESTALE`; a nodeid handed out again gets a
+fresh random generation, so an old handle resolves to a different file
+only with probability 2^-32 (docs/design.md, "Generations").
 
 After a crash the dead FUSE mount stays in place, and accessing it fails
 with `ENOTCONN`. Unmount it (`umount -l <mountpoint>`) before mounting dcfs
