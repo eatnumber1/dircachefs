@@ -3745,3 +3745,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (AbslStringify), never `.message()`; dropping one suppresses the root
   cause. 25.33 briefed (rule, sweep of 19 production `.message()` uses, a
   mechanical check, a dropped-status matcher) and dispatched (lane-5).
+- 2026-10-17, russ on style question 4 (a lower layer's comment naming its
+  caller): no. To land in docs/style.md 1.9: "A comment in a lower layer
+  says what its function does for any caller; why a particular caller
+  calls it is written at that caller." backing.h's SetAttr comment is
+  fixed in 17.2e, which rewrites that rule.
