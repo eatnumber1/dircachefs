@@ -3419,3 +3419,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   were building at once against the plan's budget of about three (load 22
   on 8 cores). The 14.10 design agent holds its guest runs and the hooks
   tool agent skips the fast tier until a building lane frees.
+
+- Quota 2026-10-17 05:14 UTC: Claude week 3% (resets Oct 23 08:00 UTC, about
+  6.1 days); budget by process.md is (95 - 3 - 8.7 reserve - 5 red-push) /
+  6.1, about 13% a day, so Claude is underspent. Gemini general pool 1%
+  used; Argon 49% used, about 37 points of it on the one whole-tree
+  consistency sweep still running; agy Claude/GPT pool empty until Oct 17
+  19:55 UTC. The machine's building-lane budget, not tokens, now limits
+  Claude spend: extra Claude goes to non-building work (Opus reviews of
+  the protocol steps, formal-model and design work); Argon gets no new job
+  until the sweep's cost is known; Flash takes the volume reading.
