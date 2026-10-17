@@ -45,10 +45,11 @@ Contents:
 11. [Reading a counterexample](#reading-a-counterexample)
 12. [Access times of a file (step 23.8)](#access-times-of-a-file-step-238)
 13. [Born-dirty create (step 23.11)](#born-dirty-create-step-2311)
-14. [Changing the model](#changing-the-model)
-15. [The revalidation model](#the-revalidation-model)
-16. [The lifetime model](#the-lifetime-model)
-17. [The identity model](#the-identity-model)
+14. [Timely interrupts (step 22.5)](#timely-interrupts-step-225)
+15. [Changing the model](#changing-the-model)
+16. [The revalidation model](#the-revalidation-model)
+17. [The lifetime model](#the-lifetime-model)
+18. [The identity model](#the-identity-model)
 
 ## Running it
 
@@ -294,7 +295,7 @@ on the detail:
 | `inflight` | Mutations of D between phase 1 and their end | `FillGuards::inflight[D]` |
 | `durableD` | D's dirty row is known durable since the last sync point | `Context::dirty.durable` |
 | `running` | The request running code between two syscalls (others wait) | the thread itself |
-| `ps[p]` | Request slot `p`: program counter `pc`, request `kind` and names `n`/`m`, whether it holds the kernel's lock, and locals (see `IdleProc` in `dcfs.tla`); and the reply ghost (step 12.7b): `eff` (what the backing filesystem answered at the request's syscall), `win` (the answers its queries had at earlier instants since its call), and on an idle slot `rep` (the last request's reply) and `rb` (flipped at every reply) | a FUSE request being served (the ghost fields: checking only) |
+| `ps[p]` | Request slot `p`: program counter `pc`, request `kind` and names `n`/`m`, whether it holds the kernel's lock, and locals (see `IdleProc` in `dcfs.tla`); and the reply ghost (step 12.7b): `eff` (what the backing filesystem answered at the request's syscall), `win` (the answers its queries had at earlier instants since its call), and on an idle slot `rep` (the last request's reply) and `rb` (flipped at every reply); `intr`, whether its FUSE_INTERRUPT has arrived, and the ghost `nsys`, its backing syscalls since (step 22.5) | a FUSE request being served (the ghost fields: checking only) |
 | `servedWrong` | History: an answer served from the cache was wrong when served | (checking only) |
 | `stamp` | The next fresh object identity / attribute stamp | (checking only) |
 | `muts`, `crashes` | How many mutations and crashes so far, for the bounds | (checking only) |
@@ -341,7 +342,8 @@ prints. A request's first step runs inside `Arrive`.
 | (sync, first step) | Snapshot of the fill guards' clock, then syncfs: every backing write so far is durable (`SyncBarrier`; an FSYNCDIR's or FSYNC's own fsync comes first and adds nothing). A `fsync` request (step 12.8: the kernel's FSYNC of the file a name holds) is the same sync point | Sync points | `backing::SyncBacking`, `cache::BeginSync` |
 | `SyncClearDirty` | Clear D's dirty row (normal durability) unless a mutation of D began or ended since the snapshot or is in flight; forget `dirty.durable` | Sync points | `cache::ClearDirty` |
 | (write, first step), `WriteSyscall`, `WriteReply` | Step 12.8: a write of new contents to the file a name holds, through its writable open (passthrough; `ENOENT` if the name holds none), then the reply. It changes the file's data only, which no record of D's covers (the open's phase 1 and release are the file's, not modelled); it gives the crash regimes data to reorder | | `fuse_ops.cc` WRITE through passthrough |
-| `Interrupt` | With `Interrupts`: FUSE_INTERRUPT seen at an interruption point, just before a backing syscall (`RN_probe`, `PD_read`, `PD_commit`: the population's reads abandoned; `C_sys`, `U_sys`, `R_sys`, `A_sys`): the request replies `EINTR`; a mutation past phase 1 `End`s without phase 3, its names and D's attributes left unknown, D dirty, the backing unchanged. Never between a syscall and its phase 3 | Cancellation | `CheckInterrupted` (`dcfs/interruption_point.h`), `SessionLoop` |
+| `InterruptArrives` | With `Interrupts` (step 22.5): the kernel's FUSE_INTERRUPT for a request in flight arrives, at any step, once. Nothing changes but the request's `intr`; it goes on to its next checkpoint | Cancellation | libfuse's `do_interrupt` (`SessionLoop::Drain`) |
+| `Interrupt` | A checkpoint, just before a backing syscall (`RN_probe`, `PD_read`, `PD_commit`: the population's reads abandoned; `C_sys`, `U_sys`, `R_sys`, `A_sys`), finds the request's interrupt arrived: the request replies `EINTR`; a mutation past phase 1 `End`s without phase 3, its names and D's attributes left unknown, D dirty, the backing unchanged. An obligation (step 22.5): at a checkpoint an interrupted request has no other step (`Proceeds`, in `At`). Never between a syscall and its phase 3 | Cancellation | `Checkpoint` (`dcfs/checkpoint.h`), `SessionLoop` |
 | `Crash` | A kernel crash or power loss (`PowerLoss`: each disk keeps any of its possible states, the backing filesystem's from `BCrash` under its regime, and that is now all there is) or a daemon crash (`DaemonCrash`: the disks keep everything, but nothing more is durable than before, step 12.6b); memory is lost. `Next` takes it as `CrashServing`, `CrashRecovering` (from `Restart` to `ProbesDone`) and `CrashStopping`, so that coverage shows each fires. On `MC_small.cfg` (one crash, starting up) `CrashRecovering` can only follow a clean shutdown, an empty recovery; `MC_recovery.cfg` (two crashes) has a crash during the recovery of a dirty database (step 12.6) | Crashes, power loss and recovery | |
 | `Restart`, `Recover`, `StartRun`, `ProbesDone` | Start again: `RecoverDirty` (one transaction; it may also make unknown any present dentry, standing for those that point at dirty children, which the model does not track: `RecoverForgetting`; it keeps the dirty set, which only a sync point clears: step 12.6b), then `clean_shutdown = 0` with kSync, then (after `InitRoot`'s fill) the probe of the recovered rows ends | Recovery; Startup | `backing::StartRun`, `cache::RecoverDirty`, `backing::Startup` |
 | `BeginShutdown`, `StopSync`, `StopClear`, `StopCkpt`, `StopFlag` | Unmount, sync point, TRUNCATE checkpoint, `clean_shutdown = 1` with kSync, exit | Shutdown; What the clean-shutdown flag adds | `backing::FinishRun` |
@@ -367,6 +369,9 @@ prints. A request's first step runs inside `Arrive`.
 | `CacheLearnsAtCommit` | action property | The cache learns (a name it did not know, D's attributes) only at a commit of what a request read: a resolve's, a population's, an attribute fill's, a mutation's phase 3 (the actions), or, in trace validation, the fills the code makes outside a request slot (`OutOfSlotFill`, `Trace.cfg`: `GetattrWhole`). With `EffectAtSyscall`, a fill's effect is on the cache only and changes nothing anyone sees |
 | `ReplyObservable` | action property (step 12.7b) | SibylFS's observation: every reply is one the backing filesystem gave. A mutation that reached its syscall replies that syscall's result (success, `EEXIST`, `ENOENT`); an answer (a lookup's entry or negative entry, a listing, D's attributes, an unlink's or rename's `ENOENT` from its resolve) is what the backing filesystem answered at some instant between the request's call and its reply; `EAGAIN` and `EINTR` come only from a request that had no effect. See [Replies](#replies-what-replyobservable-quantifies-over) for the exact quantifier and the errno classes |
 | `RecoveryTerminates` | temporal | `(mode # "up") ~> (mode = "up")`: after any crash or shutdown, the daemon gets back to serving (recovery always terminates) |
+| `InterruptBound` | invariant (over the ghost `nsys`, step 22.5) | After its interrupt arrives, a request takes at most 2 more backing syscalls before it replies: `\A p \in Procs : ps[p].nsys <= 2`. See [Timely interrupts](#timely-interrupts-step-225) |
+| `InterruptedReplies` | temporal (step 22.5) | `\A p \in Procs : ps[p].intr ~> ps[p].pc = "idle"`: an interrupted request eventually replies (or goes with a crash), under `RequestFairness` |
+| `InterruptActedOn` | temporal (step 22.5) | `\A p \in Procs : (ps[p].intr /\ ps[p].pc \in InterruptPcs) ~> (ps[p].pc = "idle" /\ (ps[p].rep.e = "EINTR" \/ mode # "up"))`: one at a checkpoint replies `EINTR` (the checkpoint acts, rather than going on to its syscall), under `RequestFairness` |
 
 ### Replies: what `ReplyObservable` quantifies over
 
@@ -716,10 +721,12 @@ populated. Every configuration but `MC_long_names.cfg` sets it to `{}`.
 | `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes; `ReplyObservable` | 10,239,570 | ~20 min unloaded (CI 634 s on 2026-10-08 before step 12.6b's daemon crash; 27 min alone at load 11 without `ReplyObservable`, 64 min with it at load 9-12, 2026-10-08) |
 | `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; the three effect-point properties (since step 12.12a) and `ReplyObservable` (lookups and listings overlap mutations here) | 8,224,822 | ~6 min unloaded (CI 506 s before step 12.6b's daemon crash, for 6.37M states; 19 min alone at load 11, 2026-10-08) |
 | `MC_nolock_small.cfg` | `nolock_small_test` (medium) | step 12.12a (the audit's G4): as nolock with no crash and only `NolockGuardRequests` (lookups, listings, creates, unlinks, renames), so that `Mutation::Owns`, the phase-1 verification and the fill guards meeting a mutation bite before the large tier (`known_bug_rename_stale_source_nolock_small_test` finds R4 in these bounds); all invariants and the four action properties | 343,294 | ~1.5 min (load 8-14, 2026-10-10); with every kind but readdirplus 1,990,812 (6 min), with sync points added 1,185,567 |
-| `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` | 280,869 | ~1-2 min |
+| `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` and `InterruptBound` (step 22.5) | 1,134,929 (280,869 before step 22.5's arrival) | ~2.5 min at load 15 (8.4 min at load 30 beside another test, 2026-10-17) |
 | `MC_long_names.cfg` | `long_names_test` (medium) | as small with `LongNames = {"b"}`, 1 mutation | 429,426 | ~1 min |
-| `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one); `ReplyObservable` | 892,708 | ~1-2.5 min |
-| `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable` | 1,036,982 | ~1.5-4 min |
+| `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one); `ReplyObservable`, `InterruptBound` | 3,908,815 (892,708) | 26 min alone at load 30 |
+| `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable`, `InterruptBound` | 4,207,066 (1,036,982) | 26 min alone at load 30 |
+| `MC_interrupt_liveness.cfg` | `interrupt_liveness_test` (medium) | step 22.5: `FairSpec`, no VIEW; 2 names, 1 slot, every kind, 1 mutation, 1 crash; `InterruptBound`, `InterruptedReplies`, `InterruptActedOn` (the reply ghost keeps only `EINTR`: `RecordReply <- RecordEintr`) | 64,111 | ~2-3 min at load 24-30 |
+| `MC_interrupt_liveness_slots.cfg` | `interrupt_liveness_slots_test` (large) | as `MC_interrupt_liveness.cfg` with 2 slots (another request can hold the thread), 1 name (so no rename), no crash | 126,731 | 4.5 min at load 20, 8 min at load 30 |
 | `MC_atime.cfg`, `MC_atime_concurrent.cfg`, `MC_atime_crash.cfg` | `atime_test`, `atime_concurrent_test`, `atime_crash_test` (medium) | the file F (step 23.8; [Access times of a file](#access-times-of-a-file-step-238)) | 334,826; 373,534; 29,322 (step 23.11: F's setattrs also move the ghost `fs`; 260,871, 292,824, 29,322 at step 23.8b's corrected `View`; before it 263,848, 297,308, 29,950, the first two depending on TLC's workers) | ~2.5 min; ~3.5 min; ~15 s (load 10-17, 2026-10-09) |
 | `MC_borndirty.cfg`, `_ext4`; `MC_borndirty_nolock.cfg`, `_nolock_ext4`; `MC_borndirty_recovery.cfg` | `borndirty_*_test` (medium) | step 23.11 ([Born-dirty create](#born-dirty-create-step-2311)) | 275,962; 382,710; 89,998; 108,724; 3,054 | 39 s; 2.2 min; 33 s; 46 s; 7 s (by hand, load 14, 2026-10-09) |
 | `MC_crash_ext4.cfg`, `MC_crash_metaprefix.cfg` | `crash_ext4_test`, `crash_metaprefix_test` (medium) | step 12.8: the two weaker backing regimes; 2 names, 1 slot, 3 mutations, 1 crash, lookups, getattrs, creates, unlinks, renames, attribute changes of D and syncs (the litmus configurations have the writes and FSYNCs); all invariants, `CrashRefines`, the effect-point properties and `ReplyObservable` | 356,954 (ext4), 292,044 (metaprefix) | ~3 min, ~1.5 min |
@@ -736,7 +743,15 @@ every configuration.
 
 `Interrupts` (Phase 22) is off in the first five: with it, `MC_small.cfg`
 grows to 2,154,085 states (6 min), so the interrupts have configurations
-of their own. All of them check `GuardsBalanced`.
+of their own. All of them check `GuardsBalanced`. Step 22.5's arrival
+(`InterruptArrives`, at any step of a request in flight, with the `nsys`
+it counts) took each by about four; arrival only where it can matter next
+(at a checkpoint, or before a backing syscall) would merge behaviors that
+differ only in when an arrival nothing has read yet came, and took
+`MC_interrupt.cfg` to 677,637, but every new syscall step would then have
+to be added to that set, or the bound would not count it: not done. With
+`Interrupts` off, `intr` and `nsys` stay `FALSE` and 0, and the other
+configurations' state counts are unchanged.
 
 The `View` (in `MC.tla`) merges database states a crash may leave when
 recovery would make the same cache of them: a dirty state's rows are
@@ -770,6 +785,9 @@ FALSE in the real configurations.
 | `interrupt_after_syscall` | not historical (Phase 22): interruptible between the backing syscall and phase 3, cancelling by putting the resolved name back | `CacheNeverWrong` | a rename of `a` over `b` resolves `a`, runs phase 1 and renameat2; interrupted before phase 3, it puts `a` back, which the backing filesystem no longer has |
 | `interrupt_undo` | not historical: an interrupt before the syscall puts the resolved name back instead of leaving it unknown; without the kernel lock | `TriState` | a rename of `a` runs phase 1; a create of `a` runs phase 1 (in flight); the rename, interrupted before its syscall, puts `a` back while the create is in flight |
 | `interrupt_leaks_guard` | not historical: an interrupted mutation that never `End`s | `GuardsBalanced` | a create's phase 1; interrupted before its syscall, it replies without `End` |
+| `interrupt_checkpoint_removed` | not historical (step 22.5): the checkpoint before a create's syscall deleted (`InterruptPcs <- InterruptPcsWithoutCreate`) | `InterruptBound` | a create's phase 1; its interrupt arrives; it takes its syscall, the probe of its new name and the refresh of D's attributes: 3 backing syscalls after the arrival |
+| `interrupt_ignored` | not historical (step 22.5): checkpoints that never see the interrupt (`Sees <- SeesNothing`): Phase 22's model, whose `Interrupt` was a step that may happen; no `VIEW` | `InterruptActedOn` (temporal) | a lookup lists D; its interrupt arrives before the listing's commit (`PD_commit`, a checkpoint); it commits and replies its answer, never `EINTR` |
+| `interrupt_not_replied` | not historical (step 22.5): a checkpoint that stops the request, which never replies (`InterruptReplies <- InterruptNeverReplies`; the kernel waits for a reply even for a SIGKILLed caller); two slots, so that the stuck request is no deadlock; no `VIEW` | `InterruptedReplies` (temporal) | a create's phase 1; its interrupt arrives; at its checkpoint it has no step left, while getattrs go on in the other slot |
 | `attr_change_end_skipped` | 8.2's mutation survivors (step 12.11): a deleted `Mutation::End` after an attribute change (`AttrChangeEnd <- AttrChangeEndSkipped`) | `GuardsBalanced` | an attribute change of D: phase 1, its syscall; its end leaves `FillGuards::inflight` raised with no request in flight (its refresh, and every later fill of D, is then refused) |
 | `borndirty_*` | step 23.11 | `CrashSafe` | see [Born-dirty create](#born-dirty-create-step-2311) |
 | `sync_by_file_fsync` | not historical (step 12.8): a sync point after FSYNC whose only barrier is the file's fsync (`SyncBarrier <- FsyncOnly`), under the `"ext4"` regime (`MClitmus.tla`'s implied-directory-fsync program) | `CrashSafe` | create f: phase 1, its syscall, phase 3 (f recorded present); write f; FSYNC of f: its fsync makes f's data durable, not its entry in D (Ferrite's Definition 7), and `ClearDirty` takes D out of the dirty set: a power loss may now lose the create while the database says f is present and recovery has nothing to forget. Under `"seq"` the same configuration finds nothing |
@@ -798,6 +816,11 @@ test checks another property first; four needed a new variant.
 | `ForgetKnown` | lifetime | new `lifetime_lookup_uncounted` (an entry reply dcfs does not count; no existing bug breaks it) |
 | `RecoveryIdempotent` | lifetime | `lifetime_probe_list_in_memory` |
 | `HandlesResolveToTheirObject`, `GoneIsStale` | ident | `ident_skip_identity_statx` |
+
+Step 22.5's properties bite on their own known bugs, each of which checks
+that property alone: `InterruptBound` on `interrupt_checkpoint_removed`,
+`InterruptActedOn` on `interrupt_ignored`, `InterruptedReplies` on
+`interrupt_not_replied`.
 
 The step 23.11 premises (`BornDirty`, `LostRowProbed`, `DirtyBeforeChange`,
 `ClearOnlyAfterSync`, `RecoveryForgetsDirty`, `GuardsBalanced`'s F clause)
@@ -966,7 +989,7 @@ right after the code the model's step stands for, with no backing syscall
 | `ShutdownBegin`, `Checkpointed`, `CleanShutdownRecorded` | `backing::FinishRun` | `shutdown`, `checkpoint`, `clean` | `BeginShutdown`, `StopCkpt`, `StopFlag` | Shutdown |
 | `LifetimeChanged` | after every `++lookups_` (`ReplyEntry`, `Readdirplus`'s entries, `Create`, `Tmpfile`), a successful `Open`, the end of `Release`, each `Forget` and `ForgetMulti` entry, phase 3 of `RemoveChild` and of a rename over an object (`RefreshAfterRename`), and `backing::Startup`'s probe of a recovered row | (a nodeid's trace: `lookup`, `create`, `tmpfile`, `open`, `release`, `forget`, `removed`) | none in `dcfs.tla`; `lifetime.tla`'s ([below](#trace-validation-of-nodeids)) | Row lifetime; mmap after close |
 | `Destroyed` | the end of `DirCacheFS::Destroy` | (every nodeid's trace: `destroy`) | `lifetime.tla`'s `Destroy` | mmap after close |
-| `Interrupted` | `CheckInterrupted` (`dcfs/interruption_point.h`), when the request being served was interrupted | `interrupt` (a mutation's with its `End`; a population's where it started, its reads abandoned); the request's `EINTR` reply is its `reply` | `T_Interrupt` | Cancellation |
+| `Interrupted` | `Checkpoint` (`dcfs/checkpoint.h`), when the request being served was interrupted | `interrupt` (a mutation's with its `End`, after an `interrupt_arrives` line at the checkpoint, step 22.5; a population's where it started, its reads abandoned); the request's `EINTR` reply is its `reply` | `T_Interrupt` (the arrival and the act, unless an `interrupt_arrives` line came first); `T_InterruptArrives`: from then on the checkpoint's only step is `Interrupt`, so a syscall line there is rejected (`trace_fault_checkpoint_ignored_test`) | Cancellation |
 | `OutOfBandChange` | `backing::ReconcileAttrs`, when it adopts a change | `cut` | none (no out-of-band changes in the model) | Out-of-band change detection |
 | `InodeForgetting`, `InodeForgotten` | `cache::InvalidateInode` (and `DeleteInode`), before and after its DELETE | `gone`; `cut` (`invalidated`) | none. The recorder notes the present rows that point at the inode; once the (outermost) transaction has committed, a directory whose state changed by exactly those names becoming unknown is cut, any other change is `unexplained` | Identity model |
 
@@ -1205,7 +1228,8 @@ renames with flags and syscall failures.
   outside any request, which no directory's trace may show), and the
   scenarios the
   fault builds break (`CreateMarksItsNameUnknown`, `TraceScenarioUnlink`,
-  `TraceScenarioMkdirDuringSync`), whose traces must validate here.
+  `TraceScenarioMkdirDuringSync`, `TraceScenarioInterruptedUnlink`), whose
+  traces must validate here.
   `CreateThatCannotBeRecordedEndsItsTraceFailed` checks, on a recorder
   of its own (the shards allow no cut), that a create whose syscall
   succeeded but whose object could not be recorded (step 11.4's `EEXIST`)
@@ -1232,6 +1256,7 @@ renames with flags and syscall failures.
   | `snapshot_after_syncfs`: a sync point's snapshot taken after its syncfs calls | `TraceScenarioMkdirDuringSync` | `unexplained` at `SyncfsStarting`: no snapshot right before |
   | `swallow_syscall_error`: an unlink's syscall reports EBUSY, which the request ignores, replying OK | `TraceScenarioUnlink` | `unexplained` at the request's reply: a syscall error the model does not have, and its request replied OK |
   | `create_syscall_before_phase1`: a create's syscall started before its phase 1, inside a readdir's population of the same directory | `TraceScenarioMkdirDuringListing` | `unexplained` at `MutationSyscallStarting`, written although the directory's lines were held for the listing |
+  | `checkpoint_ignored` (step 22.5): a checkpoint sees the request's interrupt, and its caller carries on to the syscall | `TraceScenarioInterruptedUnlink` | the unlink's `syscall` line, after its `interrupt_arrives` line: at a checkpoint the model's interrupted request may only take `Interrupt`. Before step 22.5 the recorder wrote nothing at that checkpoint (the interrupt's line waited for the `End`), and the trace was valid |
 
   For example:
 
@@ -1701,6 +1726,146 @@ the row's mark and empties `Context::dirty.durable`, is its `sync_clear`
 step (`trace_tests/origin_mkdir_during_sync`, and `..._cleared`, a clear
 that drops the mark, rejected). File rows' marks wait for 12.11b's file traces;
 the harness's invariant checker checks them at `ChildRowRecorded`.
+
+## Timely interrupts (step 22.5)
+
+russ (2026-10-17): "Let's use the formal model to additionally provide
+some guarantees around 'interrupt in a timely manner'. Not necessarily
+wall clock, but maybe 'interrupt between every step' or something like
+that." Phase 22's `Interrupt` was a step that may happen at a checkpoint:
+the model showed that an interrupt is safe, not that one is acted on, and
+a dcfs that ignored every interrupt passed (`known_bugs/interrupt_ignored`
+is that model).
+
+**Arrival, apart from acting on it.** `InterruptArrives(p)` marks the
+request in slot `p` interrupted (`intr`), at any step while it is in flight:
+before or after any of its backing syscalls, while another request holds
+the thread, during its own phase 3. A request interrupted before its
+dispatch is the same as one interrupted right after its first step, which
+makes no backing syscall for any of D's requests but a sync point (its
+syncfs is in its first step in the model; the code checkpoints before the
+fsync and the sync point). At a checkpoint (`InterruptPcs`: `RN_probe`,
+`PD_read`, `PD_commit`, `C_sys`, `U_sys`, `R_sys`, `A_sys`) an interrupted
+request's only step is `Interrupt`: `At`, which every request step takes,
+requires `Proceeds(p)`, false there. That is what `Checkpoint` does: it asks
+`Interrupts::Interrupted` and, if so, returns `EINTR`, which the caller
+returns. Anywhere else the request goes on: between a syscall and its phase
+3, in a fill's commit, in a refresh.
+
+**The bound, counted in work.** `InterruptBound`: after its interrupt
+arrives, a request takes at most **2** more backing syscalls before it
+replies. The ghost `nsys` counts them (`Counted`, in `AfterSyscall` and
+`MutSyscall`, through which every backing syscall step of a slot goes; a
+request's first step is never after its arrival). 2 is the longest run of
+backing syscall steps with no checkpoint between them; every run, by where
+the interrupt arrives:
+
+| Arrives at | Backing syscalls before the reply | The run |
+|---|---|---|
+| a create's `C_probe` (its syscall done) | 2 | `C_probe` (`RecordNewChild`'s probe of the new name), then, after phase 3 and `End`, `C_stat` (`RefreshAttrsFromFd` of D) |
+| a create's `C_rec` or `C_stat`, a linkcreate's after its syscall | 1 | `C_stat` |
+| an unlink's, rename's or attribute change's phase 3 (`U3`, `R3`, `A3`) or refresh | 1 | `U_stat`, `R_stat`, `A_stat` (`RefreshAttrs`, `RefreshAfterRename`) |
+| a getattr of D whose attributes are unknown | 1 | `GA_stat` (`RefreshAttrs`: no checkpoint) |
+| a readdirplus whose listing is served and D's attributes unknown | 1 | `RDP_stat` (`EntryFor` of "."; no checkpoint) |
+| anywhere else: a lookup, a readdir, a mutation before its syscall, a failed mutation's re-resolve, a sync point | 0 | its next checkpoint replies `EINTR`, or it replies with no further syscall |
+
+The bound bites: `known_bugs/interrupt_checkpoint_removed` deletes the
+checkpoint before a create's syscall, and the create takes 3. A removed
+checkpoint whose run after it stays within 2 (an unlink's: its syscall and
+its refresh) does not violate the bound; the obligation itself is what
+trace validation holds the code to (below), and `CheckpointTest` in
+`dir_cache_fs_test` interrupts every checkpoint's request at it.
+
+**What the bound does not count.** Work with no backing syscall: cache
+queries and commits (on the cache's own disk). The syscall the request is
+in when the interrupt arrives: a model step is atomic, so an arrival comes
+before or after it; in the code a syscall blocked in the kernel (a disk
+spinning up, a hung network mount, `syncfs`) runs to its end first, until
+the coroutine and io_uring rewrite (`README.md`, future work). And how many
+of the code's syscalls a step stands for: a short fixed sequence on one
+object for every step (`OpenNode`'s open by handle and identity statx; a
+probe's openat, statx, name_to_handle_at, readlink, listxattr and
+getxattrs; a statx), but `PopulateRead`, which is the finding below.
+`docs/design.md`, "Cancellation", says the same for readers of the code.
+
+**Findings: where the code's population has fewer checkpoints than the
+model's.** Both are in `PopulateRead`, one step of the model, so the model
+cannot show them; both are left to russ (step 22.5 is the model's).
+
+- The listing's reads have no checkpoint between them. `PopulateDirectory`
+  reads a directory's names with `ReadDirNames`, a loop of getdents64 calls
+  (64 KiB of entries each) to the end of the directory; its checkpoints are
+  before each batch of 16 probes, the first of them after the whole
+  listing. So an interrupt that arrives while dcfs reads the listing of a
+  directory of N entries waits for the rest of the getdents64 calls, about
+  N / 2,000 of them (some 50 for 100,000 names), each of which may wait on
+  the disk: unbounded in the size of the directory, where the model's
+  bound is 2. A checkpoint between the calls (the population abandoned, as
+  between probe batches) would make that run one call.
+- A readdir's population has no checkpoint before its reads: the model's
+  `PD_read` is one for every population, but in the code only a lookup's
+  (`LookupOrPopulate`, "listing a directory") has it; `ListCached` calls
+  `PopulateDirectory` directly, whose `OpenNode`, statx and getdents64 loop
+  come before its first checkpoint. And a population of an empty directory
+  passes no checkpoint at all (the probe batches' are inside the loop over
+  names), so a readdir of an uncached empty directory replies its listing,
+  never `EINTR`, where the model's `PD_read` and `PD_commit` would stop it
+  (bounded work: an open, a statx, one getdents64 and a commit). The
+  recorder writes a population's interrupt where the population started
+  (`PD_read`), which is sound for the cache (the abandoned reads recorded
+  nothing) and is why trace validation does not see the difference. One
+  `Checkpoint` at the start of `PopulateDirectory`, in place of
+  `LookupOrPopulate`'s, would give every population the model's.
+
+**Liveness.** `InterruptedReplies`: an interrupted request eventually
+replies (`intr ~> idle`; a crash empties the slots, which counts).
+`InterruptActedOn`: one at a checkpoint replies `EINTR`, unless the daemon
+goes down first: read from the reply ghost, whose EINTR alone
+`MC_interrupt_liveness*.cfg` keep (`RecordReply <- RecordEintr`). Both under
+`FairSpec`: `Spec` and `RequestFairness`, the weak fairness of each slot's
+own steps (`RequestStep(p)`): a request that can step is not postponed forever by
+the others. The code gives more: today one thread serves a request to its
+reply before it reads the next; under coroutines the loop resumes every
+ready one. `known_bugs/interrupt_ignored` (checkpoints that never see the
+arrival, `Sees <- SeesNothing`) violates `InterruptActedOn`, and
+`known_bugs/interrupt_not_replied` (a checkpoint that stops the request
+without its reply, `InterruptReplies <- InterruptNeverReplies`)
+`InterruptedReplies`. Failing first: with the arrival and the properties
+but not yet `Proceeds` in `At`, `MC_interrupt.cfg` found a create
+interrupted at `C_sys` that took its syscall, probe and refresh (`nsys` 3),
+and `MC_interrupt_liveness.cfg` a lookup interrupted at `PD_commit` that
+committed its listing and replied its answer.
+
+**Trace validation.** The code sees an interrupt only at a checkpoint, and
+acts there. The recorder writes the act as the `interrupt` line
+(`T_Interrupt`: the arrival and the act, two model steps with nothing
+between). For a mutation interrupted before its syscall it writes the act
+with the mutation's `End` (the model's `Interrupt` ends it), and, since
+step 22.5, an `interrupt_arrives` line at the checkpoint itself
+(`T_InterruptArrives`), so that a syscall the code took there instead is a
+line the model rejects: `trace_fault_checkpoint_ignored_test` (a caller
+that ignores its checkpoint's `EINTR`) is rejected at the unlink's
+`syscall` line, and was valid before. `trace_tests/interrupt_*.log` check
+the three cases on hand-written traces.
+
+**A mechanical check, proposed.** Tie every backing call reachable from a
+FUSE handler to a checkpoint or to the named run above, in the style of
+25.9's backing-door matcher. A static matcher (`clang-query`) can say that a
+function calling a mutation's backing wrapper (`backing::MkdirAt`,
+`UnlinkAt`, `RenameAt`, `SetAttr`, ...) also calls `Checkpoint`, which
+catches the code's form of `interrupt_checkpoint_removed`; it cannot follow
+calls into `backing.cc` or check order. The complete check is dynamic, on
+the harness, where every backing call already passes
+`ProtocolEvents::BackingCall` (each with a name): an observer that counts,
+per request, the backing calls since its last checkpoint passed (a new
+event, `CheckpointPassed`) and fails when that count exceeds the run
+allowed for the call's kind (the table above, in calls of the code: a
+probe's sequence, a refresh's statx, at most 16 probes between checkpoints
+of a population). Run under every harness test, it would find a new
+backing call with no checkpoint before it in any test that reaches it,
+and the getdents64 loop above in a test that lists a large directory.
+Not built in step 22.5: it needs the production event and a
+classification of the 69 `BackingCall` sites.
 
 ## Changing the model
 

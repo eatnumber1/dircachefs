@@ -554,9 +554,22 @@ T_Syncfs ==
 T_SyncClearDirty ==
     /\ Ev("sync_clear") /\ SyncClearDirty(P) /\ Matches(E, {})
 
-\* An interruption point found the request interrupted (FUSE_INTERRUPT):
-\* it replies EINTR, ending a mutation past phase 1 without phase 3.
-T_Interrupt == Ev("interrupt") /\ Interrupt(P) /\ Matches(E, {})
+\* A checkpoint found the request interrupted (FUSE_INTERRUPT): it replies
+\* EINTR, ending a mutation past phase 1 without phase 3. The interrupt's
+\* arrival is that same event (CanArrive, then the act: two model steps
+\* with nothing between), unless an interrupt_arrives line came first.
+T_Interrupt ==
+    /\ Ev("interrupt")
+    /\ \/ Interrupt(P)
+       \/ CanArrive(P) /\ InterruptFrom(P, ps[P])
+    /\ Matches(E, {})
+
+\* Step 22.5: the interrupt became visible before the request acts on it
+\* (a mutation's, whose interrupt line waits for its End): from here on, at
+\* a checkpoint the model allows only Interrupt, so a backing syscall the
+\* code takes there instead is rejected at its line.
+T_InterruptArrives ==
+    Ev("interrupt_arrives") /\ InterruptArrives(P) /\ Matches(E, {})
 
 \* The errno of the request's reply, as the reply line records it (Linux's
 \* numbers): the one the FUSE request sent (ProtocolEvents::Replied), 0 for
@@ -642,7 +655,7 @@ TraceNext ==
     \/ T_CreateFailed \/ T_UnlinkFailed \/ T_RenameFailed
     \/ T_RenameFailed2 \/ T_Reresolve
     \/ T_ArriveSync \/ T_Syncfs \/ T_SyncClearDirty
-    \/ T_Interrupt \/ T_Reply
+    \/ T_Interrupt \/ T_InterruptArrives \/ T_Reply
     \/ T_BeginShutdown \/ T_StopSync \/ T_StopClear \/ T_StopCkpt
     \/ T_StopFlag
     \/ T_Crash \/ T_Restart \/ T_Recover \/ T_StartRun \/ T_ProbesDone

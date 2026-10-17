@@ -74,22 +74,49 @@ tlc_test(
     srcs = ["dcfs.tla"],
 )
 
-# FUSE_INTERRUPT (Phase 22): the Interrupt action, with the kernel's lock
-# (about a minute), and with two mutations or without the lock (a few
-# minutes each).
+# FUSE_INTERRUPT (Phase 22): the Interrupt action, with the kernel's lock,
+# and with two mutations or without the lock. Since step 22.5's arrival
+# (InterruptArrives, at any step) interrupt_test has 1,134,929 distinct
+# states (280,869 before), 2.5 min alone at load 15, 8.4 min at load 30
+# beside another test (2026-10-17): past "moderate".
 tlc_test(
     name = "interrupt_test",
     size = "medium",
-    timeout = "moderate",
+    timeout = "long",
     config = "MC_interrupt.cfg",
     spec = "MC.tla",
     srcs = ["dcfs.tla"],
 )
 
+# Step 22.5: an interrupted request eventually replies, EINTR at a
+# checkpoint (liveness, no VIEW): one slot (64,111 distinct states, 2 min at
+# load 24, 2.7 min at load 30), and two slots, so that another request can
+# hold the thread (126,731, 4.5 min at load 20, 8 min at load 30).
+tlc_test(
+    name = "interrupt_liveness_test",
+    size = "medium",
+    timeout = "long",
+    config = "MC_interrupt_liveness.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
+tlc_test(
+    name = "interrupt_liveness_slots_test",
+    size = "large",
+    timeout = "long",
+    config = "MC_interrupt_liveness_slots.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
+# Since step 22.5: interrupt_muts2 3,908,815 distinct states (892,708
+# before), interrupt_nolock 4,207,066 (1,036,982), each 26 min alone at
+# load 30 (2026-10-17): past "long".
 tlc_test(
     name = "interrupt_muts2_test",
     size = "large",
-    timeout = "long",
+    timeout = "eternal",
     config = "MC_interrupt_muts2.cfg",
     spec = "MC.tla",
     srcs = ["dcfs.tla"],
@@ -98,7 +125,7 @@ tlc_test(
 tlc_test(
     name = "interrupt_nolock_test",
     size = "large",
-    timeout = "long",
+    timeout = "eternal",
     config = "MC_interrupt_nolock.cfg",
     spec = "MC.tla",
     srcs = ["dcfs.tla"],
@@ -246,6 +273,12 @@ KNOWN_BUGS = {
     "interrupt_after_syscall": "Invariant CacheNeverWrong is violated",
     "interrupt_undo": "Invariant TriState is violated",
     "interrupt_leaks_guard": "Invariant GuardsBalanced is violated",
+    # Step 22.5 (not historical): what makes an interrupt timely. A
+    # checkpoint removed (the create's), checkpoints that never see the
+    # interrupt, and one that stops the request without replying.
+    "interrupt_checkpoint_removed": "Invariant InterruptBound is violated",
+    "interrupt_ignored": "Temporal properties were violated",
+    "interrupt_not_replied": "Temporal properties were violated",
     # Step 12.7: an effect point too early (phase 1 records the outcome)
     # and too late (crash F3's create: the change shows at a later fill).
     "effect_before_syscall": "Action property EffectAtSyscall is violated",
@@ -820,6 +853,15 @@ TRACE_TESTS = {
     # ... and a lookup that says the cache answered negative for an unknown
     # name (LookupOutcome; reply_lookup_answer is the valid one).
     "lookup_outcome_wrong": "\"ev\":\"lookup\"",
+    # Step 22.5: an unlink's checkpoint before its syscall sees the
+    # interrupt (its interrupt_arrives line), and the unlink ends without
+    # its syscall and replies EINTR (4): valid ...
+    "interrupt_before_syscall": None,
+    # ... the unlinkat taken after that line instead is rejected at it ...
+    "interrupt_syscall_after_arrival": "\"ev\":\"syscall\"",
+    # ... while an interrupt that arrives after the syscall lets the unlink
+    # finish (phase 3, the refresh) and reply success: valid.
+    "interrupt_after_syscall": None,
 }
 
 [

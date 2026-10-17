@@ -8,7 +8,8 @@
 #  - AtimeExpiry, FRead, File* (F's create, lookups, getattrs, releases,
 #    setattrs), WriteSyscall, WriteReply: F's requests are not in this
 #    configuration (MC_atime*, MC_borndirty* take them).
-#  - Interrupt: Interrupts = FALSE here (MC_interrupt* take it).
+#  - Interrupt, InterruptArrives: Interrupts = FALSE here (MC_interrupt*
+#    take them).
 #  - RenameFailed, RenameFailed2, UnlinkFailed: dead in every
 #    configuration (README.md, "Changing the model": nothing can remove a
 #    name between the resolve and the syscall in the model).
@@ -50,6 +51,7 @@ GetattrFill 452474
 GetattrStat 341056
 Init 4
 Interrupt 0
+InterruptArrives 0
 LookupStep 37720
 PopulateCommit 188828
 PopulateRead 188828

@@ -11,7 +11,7 @@
 #  - CrashRecovering, CrashServing, CrashStopping: MaxCrashes = 0.
 #  - AtimeExpiry, FRead, File*, WriteSyscall, WriteReply: F's requests are
 #    not in this configuration.
-#  - Interrupt: Interrupts = FALSE.
+#  - Interrupt, InterruptArrives: Interrupts = FALSE.
 #  - RenameFailed, RenameFailed2, UnlinkFailed: dead in every
 #    configuration (README.md, "Changing the model").
 Arrive 173196
@@ -52,6 +52,7 @@ GetattrFill 0
 GetattrStat 0
 Init 4
 Interrupt 0
+InterruptArrives 0
 LookupStep 18768
 PopulateCommit 129814
 PopulateRead 62394
