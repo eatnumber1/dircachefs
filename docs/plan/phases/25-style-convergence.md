@@ -1055,3 +1055,14 @@ Deliverables:
    the line is deleted.
 
 Implementer for 1, mechanical for 2's conversions.
+
+## 25.31 clang-tidy never sees header-only libraries (from 25.30)
+
+25.30's implementer found that `style_findings_here` (tools/style_checks.bzl)
+analyses only the first header-only library in a package: they all share
+`srcs = None`, so every later one is skipped, and clang-tidy has never
+analysed those headers (`dcfs/ret_check.h` among them). Fix the macro so
+every header-only library's headers are analysed. The findings it then
+surfaces cannot go on the allowlist (25.30): each is fixed, or becomes a
+NOLINT naming its check with its reason. Show the count of new findings
+before fixing. Implementer, mechanical for a large batch of fixes.
