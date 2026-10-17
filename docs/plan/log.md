@@ -4046,3 +4046,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 2026-10-17, russ asks for an in-memory cache mode, between M2 and M3.
   Phase 27 (27.1 design with the model and the kernel-cache question,
   27.2 build) and milestone M2.5.
+- 2026-10-17, 22.6 merged (b838960, Gemini Flash, prompted ahead of the
+  in-flight steps at russ's "this is dangerous for us to wait on"):
+  dcfs::Checkpoint is CheckInterrupted in dcfs/interruption_point.h, the
+  prose says "interruption point". Verified: no edited line touches the
+  SQLite sense (grep of the diff's +/- lines for WAL/SQLite names is
+  empty), no old call remains, and the SQLite calls are intact. Test-name
+  leftovers (FakeInterrupts::checkpoints, CheckpointTest, the cancel.sh
+  check name, a VLOG prefix) are left for a follow-up. Phase 27: the
+  kernel-cache answer goes into the code (russ).

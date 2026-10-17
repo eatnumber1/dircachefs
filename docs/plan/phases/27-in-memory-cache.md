@@ -31,5 +31,10 @@ dcfs's cache adds over the kernel's dentry, inode and attribute caches
 long negative entries) and whether this setup wants the kernel leaned on
 more (26.40's effectively infinite timeouts, FOPEN_CACHE_DIR,
 keep_cache). Tuning, not abstraction; decisions go to russ with numbers.
+The answer goes into the code, not into the docs as advice (russ,
+2026-10-17: "When we get an answer, put the answer into the code. Don't
+make users have to figure out the right settings here."): dcfs detects
+that its database is on tmpfs (statfs) and sets the kernel-facing
+choices itself; no new option.
 
 Scheduled between M2 and M3 (milestone M2.5).

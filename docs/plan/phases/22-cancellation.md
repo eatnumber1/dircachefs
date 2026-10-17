@@ -179,7 +179,7 @@ Owner: dcfs-protocol. Docs: `formal/README.md` (actions and properties
 tables), `docs/design.md` "Cancellation", README's EINTR paragraph if
 the guarantee is user-visible.
 
-## 22.6 Interruption points: the cancellation checkpoint renamed (russ, 2026-10-17; queued after 22.5 and 25.28b)
+## 22.6 Interruption points: the cancellation checkpoint renamed (russ, 2026-10-17; merged 2026-10-17, b838960, Gemini Flash)
 
 "Checkpoint" meant both a SQLite WAL checkpoint and Phase 22's place where
 a request checks for FUSE_INTERRUPT. russ: "Agreed. Interruption points
