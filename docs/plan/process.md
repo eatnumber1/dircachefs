@@ -359,7 +359,11 @@ reading. Not for writing code, nor for subtle protocol judgement.
    merge, as it would a Claude subagent's (russ, the same day: "you can
    even be a little looser than that"): it spot-checks the claimed test
    runs (the quoted output, a rerun of what looks doubtful) rather than
-   rerunning everything, and the style review is the usual one. Read-only jobs still use
+   rerunning everything, and the style review is the usual one. agy's
+   print mode cannot ask for approval and `--mode auto` is not on this
+   account, so write jobs run with `--sandbox --dangerously-skip-permissions`
+   in their own lane checkout (russ, 2026-10-17, chosen over read-only
+   Gemini and over approving by hand). Read-only jobs still use
    `--mode plan` and write to the orchestrator's scratchpad. No protocol,
    crash-safety or identity work (rule 6's table).
 5. Narrow jobs, several of them (russ, 2026-10-17: "The long context is
