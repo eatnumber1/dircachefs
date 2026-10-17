@@ -384,9 +384,11 @@ one of its checks, so a kernel that changes one fails that test):
   (the server's inode number, which is also `st_ino`), the file type and
   the server's own handle (`nfs_encode_fh`, fs/nfs/export.c); the handle
   type is its length in 32-bit words. knfsd's handle carries the export's
-  fsid and the server filesystem's own handle, inode number and
-  generation, so the server's generation travels in the bytes, opaque to
-  the client. `open_by_handle_at` works on it, also after the client
+  fsid (the `fsid=` number, or by default the filesystem's UUID) and the
+  server filesystem's own handle, inode number and generation, so the
+  server's generation travels in the bytes, opaque to the client. Measured
+  sizes for an ext4 file: 32 bytes under `fsid=1`, 44 under the UUID fsid,
+  well inside `MAX_HANDLE_SZ`. `open_by_handle_at` works on it, also after the client
   dropped the inode (it asks the server with a GETATTR on the embedded
   handle).
 - Generations: `FS_IOC_GETVERSION` fails with `ENOTTY` (the client has no
@@ -456,11 +458,12 @@ check, is in README ("Network backings"):
   `fsid=`, or a filesystem with a UUID). This is also what makes the
   server's handles persistent; a server that hands out volatile handles
   cannot give it.
-- **No replacement while dcfs runs**: the server does not serve the
-  export's path before the filesystem is mounted on it (knfsd's
-  `mountpoint` export option) and does not swap in a replica under the same
-  fsid without the cache database being deleted: delete the cache before
-  failing over to a replica (russ confirmed the three, 2026-10-17).
+- **No replacement while dcfs runs**: README says "If the exported
+  filesystem is ever replaced by another copy of it, for example on
+  failover to a replica, stop dcfs and delete the cache database first."
+  The server also does not serve the export's path before the filesystem
+  is mounted on it (knfsd's `mountpoint` export option). russ confirmed
+  the three guarantees on 2026-10-17.
 
 Two things are deliberately not required (russ, 2026-10-17):
 
