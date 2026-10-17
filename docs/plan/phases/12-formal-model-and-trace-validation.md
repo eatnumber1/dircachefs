@@ -573,6 +573,11 @@ on the plain backing, checks both with `fs_test_check -arch linux --root`,
 and fails only where dcfs is rejected and the backing accepted (the 2015
 Linux model diverges from current kernels on a few adhoc cases). The source
 build is the fallback (about 14 archives under a custom repository rule).
+Licence correctness (russ, 2026-10-16): every pinned artifact's licence,
+including what the prebuilt bundles, is found from primary sources and
+recorded in third_party/sibylfs/README.md with how we use it (fetched,
+test guests only, `testonly`, never vendored or shipped); anything
+unlicensed or unclear goes to russ, not decided by the agent.
 Follow-up: a mechanical check of 12.16's Ideal.tla against the checker
 (bounded TLC behaviours rendered as SibylFS traces). Investigator.
 
