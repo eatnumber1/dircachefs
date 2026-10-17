@@ -3826,3 +3826,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the sentence into docs/style.md section 2 and test/qemu/README.md). On
   "everything in C++": "I'm on the fence. So I'll let your recommendation
   stand for now. Python can stay in host tooling."
+- 2026-10-17, russ on 25.28b's Q1: FSYNC does not syncfs ("A client
+  asking for FSYNC doesn't expect a syncfs ... stronger guarantees than
+  the client asked for"); the cache is made durable before the reply. And:
+  "Maybe we should make the formal model include guarantees around *non*
+  durability? ... You're doing a decent job keeping this kind of
+  overzealous safety under control, but we need something stronger." In
+  25.28b: the fsync litmus outcomes the backing permits become
+  reachability checks (an invariant forbidding the loss, its test expecting
+  the counterexample), so a barrier added back fails; `fsync sync` budgeted
+  exactly. Extending the pattern to every operation is queued (12.19).

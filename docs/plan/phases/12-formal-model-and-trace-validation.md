@@ -606,3 +606,20 @@ proven our model covers everything SibylFS does." So 12.16 ends with:
    archive, wrapper) are deleted in the same change; the SibylFS test suite's
    scripts may stay as a pinned corpus if they still feed the guest test,
    without the checker.
+
+## 12.19 No stronger than the backing: pinned non-guarantees (russ, 2026-10-17; queued)
+
+russ: "Maybe we should make the formal model include guarantees around
+*non* durability? E.g. cases where functions are not guaranteed to be
+durable, perhaps we should test that they in fact are not? ... we need
+something stronger" against overzealous safety. 25.28b introduces the
+pattern for fsync: for an outcome the backing's crash regime permits (a
+loss, a reordering), a config whose invariant forbids it and whose test
+expects TLC's counterexample, so dcfs adding a barrier (a syncfs, a
+synchronous commit) makes the outcome unreachable and fails the test. This
+step extends it to every operation in the litmus set (create, rename,
+unlink, setattr, write, fsyncdir) and to the cost side: each request's
+backing barriers and cache fsyncs budgeted exactly in
+`syscall_budgets.txt`, so an extra one fails. Owner: dcfs-protocol, after
+25.28b.
+
