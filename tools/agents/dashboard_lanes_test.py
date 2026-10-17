@@ -191,6 +191,11 @@ class PostAgentTest(Fixture):
         self.launch(agent_id="a3")
         self.assertEqual(self.rows()["lane-2"]["model"], "sonnet")
 
+    def test_explicit_effort_wins_over_the_type_default(self):
+        # dcfs-reviewer's frontmatter says high; the call passes medium.
+        self.launch(subagent_type="dcfs-reviewer", effort="medium")
+        self.assertEqual(self.rows()["lane-2"]["effort"], "medium")
+
     def test_unknown_agent_type_has_empty_model_and_effort(self):
         self.run_hook("post-agent", {
             "tool_input": {"prompt": "dircachefs-lanes/lane-2",

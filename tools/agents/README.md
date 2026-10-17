@@ -83,8 +83,9 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
   agent (`status` `async_launched`) with its lane (the first
   `dircachefs-lanes/lane-N` in the prompt), model (`tool_input.model`, else
   `resolvedModel`, else the `model:` of `.claude/agents/<type>.md`) and effort
-  (that file's `effort:`); a foreground agent records nothing. Calls made by a
-  subagent (the input has `agent_id`) are ignored. If the table changed since
+  (`tool_input.effort`, else that file's `effort:`); a foreground agent
+  records nothing. Calls made by a subagent (the input has `agent_id`) are
+  ignored. If the table changed since
   the last upload it prints `additionalContext` telling the orchestrator to
   upload the file.
 - `post-message` (PostToolUse, matcher `SendMessage`): when `tool_input.to`

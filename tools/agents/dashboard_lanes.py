@@ -118,7 +118,7 @@ def record_agent(env, event):
         "model": tool_input.get("model")
         or response.get("resolvedModel")
         or front.get("model", ""),
-        "effort": front.get("effort", ""),
+        "effort": tool_input.get("effort") or front.get("effort", ""),
     }
     write_atomic(env.path("running.json"), json.dumps(running, indent=2))
 
