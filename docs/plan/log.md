@@ -3392,3 +3392,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   lines is documented as verified with a positive control (systemd fscks the
   ext4 device line), and an NFS refusal test backs the README's sentence. One
   style review round.
+
+- 2026-10-16: CI run 39000396656 on the force-pushed main (58a1f17) is red.
+  mount_dcfs_systemd_test failed in full, asan and ubsan (15.11c, merged since,
+  repairs it). Every xfstests shard on all three filesystems failed within a
+  minute, which points at setup. The coverage gate fell to 94.71/80.85 against
+  96.50/81.24. mutation-changed failed only because its range starts at
+  d215c09, a commit the force-push removed. 26.30 (investigator, lane-2)
+  triages; the baseline is not lowered.

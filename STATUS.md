@@ -31,6 +31,7 @@ _Last updated: 2026-10-16._
 
 | Step | What | State |
 |---|---|---|
+| 26.30 | Triage the red CI run on the force-pushed main: every xfstests shard, the coverage gate, the systemd test | in flight |
 | 25.9b | Finish "no intentional crashes": the poisoned-backing shutdown test, banned symbols, remove unreachable checks | in flight |
 | 25.28b | The sync interval bounds the cache's own durability lag after a power cut | queued |
 | 17.2b | Setgid on writes through passthrough: reproduce, then fix | queued |
