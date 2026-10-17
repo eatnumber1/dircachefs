@@ -3851,3 +3851,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (docs/plan/notes/gemini-sweep-2026-10-17.md). Once the agy Claude pool
   resets, the protocol reviews (17.2e, 25.28b, 22.5) go to agy's Opus
   rather than the Claude plan, and non-protocol style reviews to Argon.
+- 2026-10-17, russ: "Gemini isn't so bad it must be only read-only. Feel
+  free to use it. But check its work and keep an eye on it." process.md
+  rule 4 now allows agy write work under a Claude subagent's rules, with
+  every diff reviewed and its checks rerun by the orchestrator.

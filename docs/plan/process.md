@@ -332,11 +332,17 @@ reading. Not for writing code, nor for subtle protocol judgement.
    takes read-only reviews that would otherwise spend the Claude plan;
    stop at 10% of that pool. Paid top-ups ("AI credits") are still not
    enabled without russ.
-4. Safety: agy is a weaker model with shell access. Only read-only work,
-   `--sandbox --mode plan`, in a lane checkout with nothing unmerged,
-   output to the orchestrator's scratchpad; the orchestrator verifies
-   findings before anything enters the repository. No write work until a
-   cage exists (a labelled, `--rm` container with one lane mounted).
+4. Safety: agy is a weaker model with shell access. Write work is allowed
+   (russ, 2026-10-17: "Gemini isn't so bad it must be only read-only.
+   Feel free to use it. But check its work and keep an eye on it."), under
+   the same rules as a Claude subagent: its own lane checkout and step
+   branch, `--sandbox`, the brief's AGENTS.md/CLAUDE.md rules spelled out
+   in the prompt (never push, Docker is production, no timers or retry
+   loops, test first), and the orchestrator reviews every diff and reruns
+   the checks itself before a merge, plus the usual style review. Its
+   claims of tests run are verified, not trusted. Read-only jobs still use
+   `--mode plan` and write to the orchestrator's scratchpad. No protocol,
+   crash-safety or identity work (rule 6's table).
 5. Narrow jobs, several of them (russ, 2026-10-17: "The long context is
    good, but be wary of Flash's limitations. Consider using multiple,
    narrowly targeted reviewers."). Give each job the whole tree as
