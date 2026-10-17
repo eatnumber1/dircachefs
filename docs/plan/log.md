@@ -3336,3 +3336,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   systemd; NFS backings cannot start (GetDeviceId refuses filesystems without FS_IOC_GETFSUUID), so
   the network-backing support russ wants has never worked. Fix steps queued as 15.11c, 25.9b,
   17.2b; 25.28 pending russ.
+- Antigravity quota is readable non-interactively: `agy -p "/usage"` prints the Gemini weekly and
+  five-hour limits, the Claude/GPT pool (0% left this week: no free Claude through agy) and Gemini
+  4 Argon's own weekly limit. One Argon review (still running) took about 9% of Argon's weekly
+  limit, against 2% of the general Gemini pool: Argon is the heavy one, as russ expected. Use:
+  Argon for medium-difficulty read-only work (reviews, investigations), about ten such jobs a
+  week; Gemini 3.8 Flash for volume (censuses, surveys, mechanical reading). Check `/usage` before
+  each agy dispatch.
