@@ -3373,3 +3373,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   a model of the kernel's FUSE client between) with one change: verify Ideal.tla against SibylFS
   mechanically, in both directions over its test suite and bounded enumerations, then delete
   SibylFS's checker and pins once agreement holds. Phase 12 records it.
+- 26.29 merged (lane-2, seven commits after one style-review round): act README and template,
+  nfs.sh's leftover timeout check removed, DCFS_PIN_NON_SMT documented as set by hand, style 1.9
+  examples from this repository (and the concurrency bullet restored, an orchestrator's ruling),
+  sg kvm gone from docs/conformance.md and formal/README.md, tools/agents/claude_usage.py with a
+  --cwd flag and tests of its parsing (fixture synthetic: no real panel captured by that agent).
