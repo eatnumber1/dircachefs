@@ -3458,3 +3458,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   19:55 UTC) and fixes from the Gemini sweep to Haiku where mechanical; the
   orchestrator keeps its turns lean, its own context being the largest
   consumer.
+
+- 2026-10-17: 26.31 merged (20aae36): the Argon sweep's 35 findings
+  re-verified: 21 confirmed, 11 partly, 3 wrong; 17 cited code or text that
+  does not exist; all were marked "certain" and the two real bugs were not
+  ranked first. Real bugs: since 15.11 the daemon refuses a block device as
+  SOURCE, which matches every xfstests shard failing (passed to 26.30); and
+  test/qemu/guest/names_random.sh has never run past line 118 (a parse error
+  after `exit`; nothing runs `sh -n` on guest scripts): 26.33 once a
+  building lane frees. The mechanical doc and stale-reference fixes go to
+  26.32 (Haiku, low, lane-6, no builds). GetGroups' EINVAL retry loop is
+  already 25.10's. The finish hook works: SubagentStop removed 26.31's agent
+  from the lanes record when it finished in the background.
