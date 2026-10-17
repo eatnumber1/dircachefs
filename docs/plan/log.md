@@ -3840,3 +3840,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Because C++ style applies to our entire C++ codebase, if there's a style
   question it might benefit our prod code too!" docs/style.md section 5:
   open C++ style questions go to russ wherever the code lives.
+- 2026-10-17, quota: Claude week 33% (day 2; about twice the pace), so no
+  new Claude dispatches until back on pace. agy at dispatch: Gemini week
+  81% left, Argon 36% left, Claude/GPT pool 0% until 19:55 UTC today.
+  Read-only work moves to Gemini as process.md says (russ: "Don't forget
+  you still have plenty of Gemini quota unspent"). Started the Flash
+  broad-versus-narrow experiment (rule 5): six Flash-medium jobs (one
+  with the five sweep questions, five with one each) on a read-only
+  worktree at c645222, to be scored against 26.31's verified key
+  (docs/plan/notes/gemini-sweep-2026-10-17.md). Once the agy Claude pool
+  resets, the protocol reviews (17.2e, 25.28b, 22.5) go to agy's Opus
+  rather than the Claude plan, and non-protocol style reviews to Argon.
