@@ -4019,3 +4019,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   stays in lane-1 and lane-2 and both resume from their transcripts by a
   message. 17.2e's security fix continues. No other Claude work until the
   daily budget (about 7%/day to 95% at the Oct 23 reset) allows.
+- 2026-10-17 ~16:50, russ works weekdays from Monday until the Oct 23
+  reset and wants quota weighted by his free time: more today and
+  tomorrow, less Monday to Thursday. Claude week at 55%; to 95% at the
+  reset less his interactive reserve (~8%) and a red-push reserve (~3%)
+  leaves ~29%. Weights: the rest of Saturday 1.5, Sunday 3, each weekday 1
+  (8.5 units, ~3.4% each): the rest of today ~5%, Sunday ~10%, Monday to
+  Thursday ~3.4% a day, which is roughly one protocol round or one review
+  a day while Gemini carries the rest. Today: 17.2e's review, then 25.28b
+  resumes. Sunday: 22.5 round 2, the 25.28b review, 17.2e's fixes if any,
+  25.10 started. Questions for russ are batched for evenings on weekdays.
