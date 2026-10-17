@@ -3794,3 +3794,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   'hey the admin has a shell open' isn't a useful log message." Moot for
   durability once the periodic sync point's durable point is a kSync
   commit; passed to round 2.
+- 2026-10-17, russ on the idle timer: "This definitely needs to get added
+  to the formal model too." 25.28c briefed (one-shot timerfd in the
+  session loop, the wall-clock property moved from limitations/ into the
+  model); queued for after 25.28b. Read as confirming the 2026-10-12 timer
+  exception.

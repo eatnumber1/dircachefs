@@ -1004,6 +1004,44 @@ modes with them. Cancellation: the flush is a backing-free step but sits
 at a request boundary; keep it off the request path (the sync point's own
 place) so no user request waits on it.
 
+
+## 25.28c An idle daemon reaches its sync point: a one-shot timer, modelled (russ, 2026-10-17; after 25.28b)
+
+25.28 built the "periodic" checkpoint as a clock check on request arrival,
+so an idle daemon never reaches a sync point: its last interval's commits
+stay losable until the next request (25.28b's model states the bound only
+at request ends; `limitations/durability_idle.cfg` shows the wall-clock
+property violated). russ (2026-10-12) approved tying the checkpoint to
+`--sync_interval_sec` as an exception to the no-timers rule; asked on
+2026-10-17 whether a real timer is that exception, he answered "This
+definitely needs to get added to the formal model too", which the
+orchestrator reads as yes (russ may say otherwise).
+
+- **The timer:** a one-shot `timerfd`, armed when something becomes
+  losable or dirty with no sync point pending (a commit since the last
+  durable point, a dirty row), to fire one interval after it; disarmed by
+  a sync point that leaves nothing losable. `SessionLoop` waits on
+  `/dev/fuse` and the timerfd together. When it fires between requests,
+  it runs the periodic sync point (25.28b's shape: syncfs if dirty, then
+  its one kSync commit). An idle, clean daemon never wakes, so disks spin
+  down; the timer fires once after the last write.
+- **The model, in the same change** (AGENTS.md, "The protocol has a
+  model"): `durability.tla` gains the timer (armed, firing between
+  requests) and the wall-clock property 25.28b's limitation config shows
+  violated today (every commit a power loss may lose is younger than
+  Interval, unless a sync point failed) becomes a real property, its
+  limitation config retired into the model. `dcfs.tla` if the sync point
+  between requests interleaves with anything it models.
+- **Tests first:** a ClockTest in which commits are followed by no request
+  and the injected clock passes the interval: a sync point runs (fails
+  today); the guest `fault_power` lag scenario with an idle tail.
+- **Docs:** design.md's "the one timed action" made true, the exception's
+  comment at the timer naming russ's approvals (2026-10-12, 2026-10-17),
+  README's idle limitation removed.
+- Coordinate with 25.10's signal handling if it moves signals to a
+  `signalfd` in the same loop.
+
+Owner: dcfs-protocol, then an Opus review.
 ## 25.29 A pinned local copy of Google's style guides for reviewers (russ, 2026-10-17)
 
 `docs/style.md` extends Google's C++, Python, Shell and Markdown guides but
