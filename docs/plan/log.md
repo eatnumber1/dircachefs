@@ -3318,3 +3318,21 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the prebuilt binary (x86_64, sha256 080c5bce...) and the suite at 14f8150, a wrapper turning
   "# trace accepted" into an exit status, a guest test running fs_test_posix on dcfs and on the
   backing. 12.16 stands and could gain a mechanical check of Ideal.tla against the checker.
+- Restored (deleted by Gemini's 77a7c5d): russ, 2026-10-11: investigate mechanical duplicate-code
+  detection later (token/AST tools pinned through Bazel, a shrinking baseline, named sites); parked
+  as 25.27 with the known duplicates as the labelled set. Not now: overage credits.
+- Opus review of Gemini's 25.9, 25.28, 17.2 and 15.11 (2026-10-16): none clean. Verified:
+  mount_dcfs_systemd_test fails on main (15.11's fixture mounts under the SOURCE of a bind line);
+  17.2's guest test passes with the fix reverted (owner-written files: the empty SETATTR path
+  clears setgid anyway), and could not run at merge time; 25.9 skipped the setgroups fault test and
+  the banned-symbols ban, reversed the null-check ruling (unreachable RET_CHECK branches) and the
+  cannot-refuse-INIT ruling (returns instead of exiting the session: a mount served without
+  default_permissions), added a mutable global g_fuse_session, exits 0 when poisoned, broke
+  cov_fork_fixture's build (patched in production under 7.2/7.4); 25.28 never runs under writes
+  (each sync point resets its clock without checkpointing), and its premise (reader starvation)
+  does not hold for a single-connection daemon with autocheckpoint on. Suspected, needing russ: a
+  non-owner write to a world-writable setgid file fails EPERM through dcfs (pre-existing);
+  passthrough writes to 06666 files keep setgid; passno 2 on a bind line checks nothing under
+  systemd; NFS backings cannot start (GetDeviceId refuses filesystems without FS_IOC_GETFSUUID), so
+  the network-backing support russ wants has never worked. Fix steps queued as 15.11c, 25.9b,
+  17.2b; 25.28 pending russ.
