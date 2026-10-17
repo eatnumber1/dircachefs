@@ -388,9 +388,11 @@ one of its checks, so a kernel that changes one fails that test):
   server filesystem's own handle, inode number and generation, so the
   server's generation travels in the bytes, opaque to the client. Measured
   sizes for an ext4 file: 32 bytes under `fsid=1`, 44 under the UUID fsid,
-  well inside `MAX_HANDLE_SZ`. `open_by_handle_at` works on it, also after the client
-  dropped the inode (it asks the server with a GETATTR on the embedded
-  handle).
+  well inside `MAX_HANDLE_SZ`. `open_by_handle_at` works on it, also after
+  the client dropped the inode, when it asks the server with a GETATTR on
+  the embedded handle (the probe counts it in `/proc/self/mountstats`);
+  while the client still holds the inode it asks the server nothing
+  (`nfs_ilookup` in `nfs_fh_to_dentry`).
 - Generations: `FS_IOC_GETVERSION` fails with `ENOTTY` (the client has no
   ioctls), so dcfs records generation 0 (`ReadGeneration` already treats
   `ENOTTY` as unknown). The birth time is the server's (NFSv4
@@ -427,7 +429,14 @@ which kind it is):
 
 - a filesystem UUID where the kernel gives one (ext4, xfs, btrfs with its
   subvolume id), as today's `DeviceId`;
-- otherwise only the filesystem type (`f_type`).
+- for an NFS client (`f_type` `NFS_SUPER_MAGIC`) only, the filesystem
+  type. Every other filesystem without a UUID stays refused at start
+  (`Unimplemented`), as today: jfs and ntfs3 have export operations but no
+  UUID and a root handle that is the same on every instance (a fixed root
+  inode number and generation), so the root row's check below could not
+  tell two of them apart; OpenZFS has handles but no `FS_IOC_GETFSUUID`.
+  NFS is accepted because the root's handle is the server's and carries
+  the export's fsid.
 
 The database records it when it is created and the start refuses a
 mismatch, naming both values and saying that deleting the database starts
@@ -438,9 +447,10 @@ server's, so it changes when the export's fsid changes, and when another
 directory, or another filesystem under its UUID fsid, is exported in its
 place; it stays when the export only moved to another path, which keeps
 the cache warm. What it cannot tell apart is two filesystems exported
-under one `fsid=` number (their root handles are byte-identical), which is
-why README requires a unique, fixed fsid per export, as exports(5) already
-does. There is no administrator-supplied name and no use of the mount's
+under one `fsid=` number, on one server or on two (their root handles are
+byte-identical), which is why README requires a fsid that is unique and
+fixed per export, across every server the database is ever used with.
+There is no administrator-supplied name and no use of the mount's
 source (russ, 2026-10-17): the mountinfo source is the superblock's, not
 what was mounted (measured above), and an fsid that is unique and fixed
 identifies the export better than any name. `f_fsid` is not part of the
@@ -453,11 +463,13 @@ check, is in README ("Network backings"):
 
 - **Exclusive access**: no other client, and nothing on the server,
   changes the exported tree while dcfs serves it or between its runs.
-- **A unique, fixed fsid per export**: no two exports share an fsid, and
-  an export keeps its fsid across server restarts (knfsd: an explicit
-  `fsid=`, or a filesystem with a UUID). This is also what makes the
-  server's handles persistent; a server that hands out volatile handles
-  cannot give it.
+- **A unique, fixed fsid per export**: no two exports share an fsid,
+  across every server this cache database is ever used with (two servers
+  that both export `fsid=1` give byte-identical root handles), and an
+  export keeps its fsid across server restarts (knfsd: an explicit
+  `fsid=`, or a filesystem with a UUID; exports(5) asks for a unique one).
+  This is also what makes the server's handles persistent; a server that
+  hands out volatile handles cannot give it.
 - **No replacement while dcfs runs**: README says (russ, 2026-10-17):
   "NFS failover to a replica under a running dcfs is not recommended. The
   replica answers with the same address, filesystem id and, for a
@@ -469,6 +481,21 @@ check, is in README ("Network backings"):
   using it again." The server also does not serve the export's path
   before the filesystem is mounted on it (knfsd's `mountpoint` export
   option). russ confirmed the three guarantees on 2026-10-17.
+
+README also lists two requirements on the server, which dcfs relies on and
+cannot check (review of 14.10, 2026-10-17):
+
+- **The server's handle changes when an inode number is reused.** knfsd
+  over ext4, xfs and btrfs puts the inode's generation in the handle
+  (measured for ext4: a recycled inode number gives other handle bytes and
+  the old handle `ESTALE`). A server whose handle is only the inode number
+  would let a recycled number take over an old row (the model's
+  `limitations/ident_no_generations`) and, under Phase 14, give a new
+  object the old generation digest (`OneHandleOneObject`).
+- **`no_root_squash`.** dcfs reaches, probes and lists objects as root
+  (see [Caller credentials](#caller-credentials): only mutations run as the
+  caller), and a squashed root is the server's anonymous user, who cannot
+  read the directories and files a caller can.
 
 Two things are deliberately not required (russ, 2026-10-17):
 
@@ -496,17 +523,21 @@ the evidence the identity model calls `handle_gen` (enforced by the
 server, not decoded by dcfs) and, where the server's filesystem has one,
 `btime`; `MC_ident_power.cfg` and `MC_ident_btime.cfg` show that either
 alone keeps every identity invariant. A server whose handles are longer
-than `MAX_HANDLE_SZ` allows (the client's handle is 12 bytes plus the
-server's, padded; 128 in all) cannot be a backing: `name_to_handle_at` of
+than `MAX_HANDLE_SZ` allows (the client's handle is 12 bytes, then the
+server's handle with its 2-byte size in front, padded to 4 bytes; 128 in
+all, so at most 114 bytes of server handle) cannot be a backing:
+`name_to_handle_at` of
 SOURCE fails with `EOVERFLOW` at start, and the start says so.
 
 Phase 14 (the nodeid is the backing inode number, the generation the
 backing's) meets two differences on NFS. The generation cannot be decoded
 from the server's opaque handle; the generation dcfs hands out is then a
 digest of the server's handle bytes (russ, 2026-10-17), nonzero, the same
-for one object
-every time it is probed (its handle bytes are stable, see above) and
-different for a recycled inode (other bytes). And a nodeid without a row
+for one object every time it is probed (its handle bytes are stable, see
+above) and different for a recycled inode, because the server's handle
+changes when an inode number is reused (the requirement above; a server
+whose handle does not would hand the new object the old digest, and one
+nodeid and generation would stand for two objects). And a nodeid without a row
 cannot be opened by inode number, since the client needs the server's
 handle: the reply is `ESTALE`. NFS handles of dcfs then survive a daemon
 restart (rows persist); after a power loss that loses a row, or a cache
@@ -525,29 +556,45 @@ and `limitations/ident_target_net_wipe`.
   request blocked in the NFS client cannot be interrupted (it waits
   `TASK_KILLABLE`). On a soft mount the syscall fails after the timeout
   and the request gets the error, as for any backing `EIO`. Requests
-  resume when the server answers; a descriptor dcfs holds keeps working.
-- *An error during an outage is not absence.* Only `ESTALE` that the
-  parent check confirms forgets a row (step 11.3b's rule, unchanged:
-  [Matching a row to a backing
-  object](#matching-a-row-to-a-backing-object)); `EIO`, `ETIMEDOUT` or an
-  `ESTALE` the check cannot confirm keep it, with its attributes unknown.
-  A transient `ESTALE` (nfs.sh saw one when a request reached the server
-  before the export was loaded) meets a parent that is stale too: the
-  check climbs to the root (opened `O_PATH` through the mount fd, which
-  asks the server nothing), whose `name_to_handle_at` of the child's name
-  fails with `ESTALE` as well, a name that cannot be checked, so every
-  level answers `EIO`. The model's
-  `ServerDown` and `ServerUp` and `known_bugs/ident_net_forget_on_error`
-  show what
-  forgetting on such an error costs: a live object's handle answered
-  `ESTALE` once the server is back.
+  resume when the server answers. A descriptor dcfs holds keeps working
+  across a restart that answers nothing but delays (measured), but not
+  across a window of transient `ESTALE` (next item): a GETATTR answered
+  `ESTALE` marks a non-directory client inode stale for good
+  (`__nfs_revalidate_inode`, fs/nfs/inode.c; directories only have their
+  caches dropped), and every descriptor on it answers `ESTALE` from then
+  on, while a reopen by handle gets a fresh client inode. 14.10b measures
+  what that does to dcfs's held descriptors and passthrough files.
+- *An error during an outage is not absence.* Only an `ESTALE` that the
+  parent check confirms may forget a row (step 11.3b's rule: [Matching a
+  row to a backing object](#matching-a-row-to-a-backing-object)); `EIO`,
+  `ETIMEDOUT` or an `ESTALE` the check cannot confirm keep it, with its
+  attributes unknown. **The check is not sound on NFS yet** (review of
+  14.10): `StaleOrUnreadable` takes a parent's `ESTALE` as "that directory
+  is gone" (backing.cc, the `continue` after `OpenNode` of the parent), and
+  during a window of transient `ESTALE` (the export not loaded yet, which
+  nfs.sh saw; a `mountpoint` export whose filesystem is unmounted) a
+  parent's `open_by_handle_at` can succeed from the client's inode cache
+  (`nfs_fh_to_dentry` finds the inode with `nfs_ilookup` and asks the
+  server nothing) while the identity statx after it gets `ESTALE`, which
+  `OpenNode` passes up unconfirmed. An object at depth two or more is then
+  forgotten although it exists: `known_bugs/ident_net_unconfirmed_estale`.
+  (At depth one the parent is the root, opened `O_PATH` through the mount
+  fd, and the child's `name_to_handle_at` fails, a name that cannot be
+  checked, so the answer is `EIO`.) 14.10b fixes it: a parent's `ESTALE`
+  counts as "gone" only if the parent's own row was confirmed gone and
+  forgotten; any other `ESTALE` from the parent is a name that cannot be
+  checked (`EIO`). The model's `ServerDown` and `ServerUp` (with
+  `TransientEstale`), `known_bugs/ident_net_forget_on_error` and
+  `known_bugs/ident_net_unconfirmed_estale` show what forgetting on such an
+  error costs: a live object's handle answered `ESTALE` once the server is
+  back.
 - *The export's fsid changed, or another filesystem was exported in its
   place, while dcfs runs*: every handle is `ESTALE` and so is the client
-  mount's root, so no parent check can confirm anything (as for the
-  transient `ESTALE` above) and no row is forgotten; requests that reach
-  the backing fail until the administrator
-  mounts the export again and restarts dcfs, whose start then finds the
-  root's handle changed and refuses (delete the database). A replacement
+  mount's root, so, once 14.10b's fix is in, no parent check can confirm
+  anything and no row is forgotten (today the depth-two case above can
+  forget rows here too); requests that reach the backing fail until the
+  administrator mounts the export again and restarts dcfs, whose start
+  then finds the root's handle changed and refuses (delete the database). A replacement
   that keeps the handles valid (a replica under the same fsid, or the
   export's path served before its filesystem is mounted) is not detected
   while dcfs runs, as any change behind dcfs's back is not
@@ -563,11 +610,14 @@ and `limitations/ident_target_net_wipe`.
   unique, fixed fsid per export.
 - *Volatile handles* (a server that hands out new handles after a restart,
   such as knfsd exporting a filesystem without a UUID and without
-  `fsid=`): every row's handle is `ESTALE`, the parent check finds the name
-  with another handle and forgets the row, and NFS clients of dcfs get
-  `ESTALE` for live objects; never another object
-  (`limitations/ident_net_volatile_handles`). Unsupported: excluded by the
-  guarantee of a unique, fixed fsid.
+  `fsid=`, whose fsid then comes from the device number): every row's
+  handle is `ESTALE`, the parent check finds the name with another handle
+  and forgets the row, and NFS clients of dcfs get `ESTALE` for live
+  objects (`limitations/ident_net_volatile_handles`). That is never another
+  object only while no other filesystem gets the old fsid: a device number
+  is reused by whatever is mounted next, and old handles would then decode
+  on that filesystem. Unsupported: excluded by the guarantee of a unique,
+  fixed fsid.
 
 The identity model (`formal/ident.tla`, README "The identity model")
 checks these: a backing swapped while dcfs is down (`Swap`) for one whose
@@ -575,8 +625,11 @@ root handle differs, refused by the start's root check even if its
 objects' handles were byte-identical to the old ones (`MC_ident_net.cfg`;
 `known_bugs/ident_net_no_source_check` without the check), and the swap
 the check cannot see, two filesystems under one fsid number
-(`limitations/ident_net_same_identity`); the outage; volatile handles; and
-Phase 14 without opening by inode number.
+(`limitations/ident_net_same_identity`); the outage, answering `EIO` or a
+transient `ESTALE`, with the parent check abstracted as "confirmed only
+while the server answers" (14.10b's fix; today's depth-two behaviour is
+`known_bugs/ident_net_unconfirmed_estale`); volatile handles; and Phase 14
+without opening by inode number.
 
 ### Why submounts are refused
 

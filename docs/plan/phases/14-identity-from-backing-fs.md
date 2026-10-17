@@ -276,19 +276,26 @@ the README go to 14.10b below. What was settled:
   follow-up for identity; it would need the handle-free access path russ
   rejected on 2026-10-08. No samba or ksmbd-tools in the guests either.
 - The design: docs/design.md "Backings without a filesystem UUID (network
-  filesystems)": `SourceIdentity` (a UUID, or only `f_type`), with the root
-  row's handle check as what tells two exports apart, `f_fsid` dropped from
-  2026-10-08's plan (it is 0), the administrator's guarantees (exclusive
-  access, a unique and fixed fsid per export, no replacement while dcfs
-  runs; neither a hard mount nor a sync export is required), the handle and
-  generation rules (today's matching
-  unchanged; Phase 14 needs a digest generation and no open by number on
-  NFS), and what the cache does on a server restart, an outage, a changed
-  fsid, a moved export and volatile handles.
+  filesystems)": `SourceIdentity` (a UUID, or only `f_type` for an NFS
+  client), with the root row's handle check as what tells two exports
+  apart, `f_fsid` dropped from 2026-10-08's plan (it is 0), the
+  administrator's guarantees (exclusive access, a fsid unique across every
+  server and fixed, no replacement while dcfs runs; neither a hard mount
+  nor a sync export is required) and two server requirements (handles
+  change when an inode number is reused, `no_root_squash`), the handle and
+  generation rules (today's matching unchanged; Phase 14 needs a digest
+  generation and no open by number on NFS), and what the cache does on a
+  server restart, an outage (with the parent check's unsoundness on NFS
+  that 14.10b item 4 fixes), a changed fsid, a moved export and volatile
+  handles.
 - The model: ident.tla gains `Swap`/`StartRefused`, `ServerDown`/`ServerUp`
-  with `VolatileHandles`, and `OpenByIno`; `MC_ident_net.cfg`,
-  `MC_ident_target_net.cfg`, two known bugs (`ident_net_no_source_check`,
-  `ident_net_forget_on_error`) and four limitations (formal/README.md).
+  with `VolatileHandles` and `TransientEstale`, the parent check as
+  `Confirmed`, and `OpenByIno`; `MC_ident_net.cfg`,
+  `MC_ident_target_net.cfg`, three known bugs (`ident_net_no_source_check`,
+  `ident_net_forget_on_error`, `ident_net_unconfirmed_estale`) and four
+  limitations (formal/README.md).
+- The Opus review of 2026-10-17 (H1, H2, M1-M5, L1-L6) is folded into the
+  design, the model, the probe and the brief below.
 - russ's rulings (2026-10-17): a soft mount is neither refused nor
   recommended against (its timeout is a backing `EIO`, which the tri-state
   protocol already handles), and README says nothing about hard or soft; a
@@ -321,14 +328,36 @@ Code:
 1. `SourceIdentity` (dcfs/device_id.{h,cc}, renamed or not) replaces
    `DeviceId` as the source's identity, one type with one interface
    (russ, 2026-10-08; style 25.5): a UUID with btrfs's subvolume id, or
-   only `f_type` for a backing without one. `Serialize`/`Parse` become
+   only `f_type` for an NFS client. `Serialize`/`Parse` become
    variable-length with a kind byte; `ToString` prints the filesystem type
    by name (`FstypeName`). `GetDeviceId`'s `ENOTTY` branch builds the
-   `f_type` kind instead of `Unimplemented`; ZFS and the like keep failing
-   later, at their first handle. Decide in the step whether `FileHandle` and
-   the `filesystems` table keep a per-handle device at all (one backing per
-   database since amendment 12; the schema may change without a migration
-   before release): one way to do it, and the report says which.
+   `f_type` kind **only for `NFS_SUPER_MAGIC`**; every other filesystem
+   without a UUID stays `Unimplemented` at start (review H2: jfs and ntfs3
+   have export operations but no UUID and a root handle that is the same
+   on every instance; OpenZFS has handles too). Decide in the step whether
+   `FileHandle` and the `filesystems` table keep a per-handle device at all
+   (one backing per database since amendment 12; the schema may change
+   without a migration before release): one way to do it, and the report
+   says which.
+1b. (review M5) Every place that reads `DeviceId` equality as "the same
+   filesystem" stops doing so, since two NFS filesystems (a crossmnt child
+   the client automounts, or a second export) share the `f_type` identity:
+   - `FileHandle::FromDirEntry` (file_handle.cc): after a mount-id change
+     it calls `GetDeviceId` on the entry and tags the handle with it; on
+     NFS that is the source's identity again, so a child filesystem's
+     handle would be opened against the source's mount fd. The mount-id
+     change itself (as `IsBoundary` uses it) must decide "another
+     filesystem": refuse or treat as a boundary, never tag with the
+     source's identity.
+   - `MountFds` (mount_fds.h), keyed by `DeviceId`: holds only the source
+     since amendment 12; a second key equal to the source's must be
+     impossible (a RET_CHECK naming the invariant), or the map goes.
+   - the `filesystems` table and `PurgeFilesystem` (metadata_cache.cc,
+     backing.cc's start-time purge of submount rows): a row whose device
+     equals the source's but is not the source must not exist; say what
+     the purge does with one (it would purge the source).
+   The step lists every other `DeviceId ==` or `MountFds::Get` it finds and
+   what each does.
 2. The start compares the stored identity with the current one in main.cc's
    existing check and refuses a mismatch naming both and the remedy (delete
    the database). The root row's check stays as it is; for a backing
@@ -336,18 +365,45 @@ Code:
    so (an export re-made with another fsid, or another export).
 3. `name_to_handle_at` of SOURCE failing with `EOVERFLOW` at start gets an
    error naming the server's handle size as the cause.
-4. No change to `OpenNode`/`StaleOrUnreadable`, and nothing that looks at
-   hard or soft mounts (russ, 2026-10-17): the rule the design relies on
-   (only a confirmed `ESTALE` forgets a row; an `EIO` or `ETIMEDOUT` from a
-   soft mount's timeout is a backing error like any other) already holds;
-   the tests below pin it for NFS.
+4. (review H1) The parent check made sound for NFS. Today
+   `StaleOrUnreadable` (backing.cc) takes a parent's `ESTALE` from
+   `OpenNode` as "that directory is gone" and skips the name; on an NFS
+   client a parent's `open_by_handle_at` can succeed from the client's
+   inode cache while `VerifyBackingIdentity`'s statx gets a transient
+   `ESTALE`, which `OpenNode` passes up unconfirmed, so an object at depth
+   two or more is forgotten although it exists. The fix: a parent's
+   `ESTALE` counts as gone only if the parent's own row was confirmed gone
+   (its own `StaleOrUnreadable` said so and `ForgetStale` ran, which the
+   caller can see: the parent's row is absent afterwards); any other
+   `ESTALE` from the parent is a name that cannot be checked (`EIO`, row
+   kept). An alternative with the same effect: route the identity statx's
+   `ESTALE` through `StaleOrUnreadable` too, so `OpenNode` never returns an
+   unconfirmed `ESTALE`. One of the two, and the report says which and why.
+   Nothing looks at hard or soft mounts (russ, 2026-10-17): an `EIO` or
+   `ETIMEDOUT` from a soft mount's timeout is a backing error like any
+   other.
 
 Tests (failing first; the guests chrooted into the Debian rootfs with the
 guest's own knfsd, as nfs_backing_test sets it up):
 - Unit: `SourceIdentity` round trips, comparison and printing of both
   kinds; device_id_fault_test's `NfsIsRefusedBecauseItHasNoFilesystemUuid`
-  becomes the `f_type` case; a database made on one `f_type` refused on
-  another; the `EOVERFLOW` refusal.
+  becomes the `f_type` case; a fault test that a non-NFS filesystem whose
+  `FS_IOC_GETFSUUID` answers `ENOTTY` (the fault layer's `fstatfs_type`
+  set to jfs's magic, say) is still refused with `Unimplemented`; a
+  database made on one `f_type` refused on another; the `EOVERFLOW`
+  refusal; the parent check's new rule (a parent whose `OpenNode` answers
+  an unconfirmed `ESTALE` makes the child `EIO`, row kept; a parent
+  confirmed gone forgets the child), with a fake for the parent's open.
+- The transient-`ESTALE` window in the guest, opened deterministically (no
+  timers): export with knfsd's `mountpoint` option and unmount the
+  exported filesystem under it (or have nfsd serve before `exportfs`
+  loads the export), mount the client with `actimeo=0` so the client asks
+  the server, and touch an object at depth two whose parent's client inode
+  is cached; the request gets `EIO`, no row is forgotten (`testutil sql`),
+  and after the export is back the object is served again. Then the same
+  for a file dcfs holds a descriptor on: what the stale client inode does
+  to the held descriptor and to a passthrough file, measured and written
+  into design.md.
 - A guest test of dcfs on a loopback NFS mount of ext4: listing and content
   match the export; a warm metadata pass makes no NFS round trip (the
   client's `/proc/self/mountstats` GETATTR/LOOKUP counts unchanged) and
@@ -375,15 +431,24 @@ guest's own knfsd, as nfs_backing_test sets it up):
   nfs-kernel-server to that guest's image or export from a second guest, the
   cheaper one measured first. Assert that the NFS line and the dcfs line on
   it mount at boot in order after the network, and unmount before it.
-- formal: nothing new expected (the model has the swap, the outage and the
-  refusal); if the code's start check emits a trace event, IdentTrace
-  validates it.
+- formal: nothing new expected (the model has the swap, the outage with a
+  transient `ESTALE`, the confirmed-only forgetting and the refusal); if
+  the code's start check emits a trace event, IdentTrace validates it.
+- (review M4) Every behavioural assertion above fails today for the wrong
+  reason (dcfs refuses NFS at start), so each one gets a mutation of the
+  new code shown to fail it, quoted in the report: forgetting a row on
+  `EIO` (`forget-on-eio`), taking a parent's unconfirmed `ESTALE` as gone
+  (today's code), skipping the start's root check, building the `f_type`
+  identity for every `ENOTTY` filesystem, and tagging a mount-id-changed
+  entry with the source's identity.
 
 Docs: README's network-backing paragraph and fstab example restored as
 supported, with exactly these three guarantees (russ, 2026-10-17):
 - exclusive access: nothing but dcfs changes the exported tree, on the
   server or from another client;
-- a unique, fixed fsid per export (as exports(5) requires);
+- a unique, fixed fsid per export, unique across every server this cache
+  database is ever used with (two servers that both export `fsid=1` look
+  the same to dcfs; exports(5) asks for a unique fsid per server);
 - no replacement while dcfs runs, in these words (russ, 2026-10-17): "NFS
   failover to a replica under a running dcfs is not recommended. The
   replica answers with the same address, filesystem id and, for a
@@ -394,7 +459,15 @@ supported, with exactly these three guarantees (russ, 2026-10-17):
   failover to a replica, stop dcfs and delete the cache database before
   using it again.";
 
+two requirements on the server (review M2, M3; russ sees them as README
+requirements):
+- the server's file handle changes when an inode number is reused (knfsd
+  over ext4, xfs and btrfs does: the generation is in the handle);
+- the export has `no_root_squash` (dcfs reaches and probes objects as
+  root);
+
 and the `async`-export note (after a server crash the cache may list
 changes the server lost, so delete the cache database), and nothing about
 hard or soft mounts; the Requirements list says what a backing without a
-UUID needs; design.md's section loses its "until then" sentence.
+UUID needs (only NFS is accepted); design.md's section loses its "until
+then" sentence and its "not sound on NFS yet" paragraph once item 4 lands.

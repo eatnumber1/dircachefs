@@ -663,6 +663,9 @@ IDENT_KNOWN_BUGS = {
     "ident_net_no_source_check": "Invariant HandlesResolveToTheirObject is violated",
     # Step 14.10: a row forgotten on an error during a server outage.
     "ident_net_forget_on_error": "Invariant ServedWhileLive is violated",
+    # Step 14.10's review: a row forgotten on an unconfirmed ESTALE (today's
+    # parent check at depth two; 14.10b fixes it).
+    "ident_net_unconfirmed_estale": "Invariant ServedWhileLive is violated",
 }
 
 [

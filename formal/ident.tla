@@ -116,6 +116,8 @@ CONSTANTS
     SwapWhileUp,   \* a swap may come while dcfs runs, not only between runs
     MaxOutages,    \* bound on server outages (ServerDown, then ServerUp)
     VolatileHandles, \* the server hands out new handles after an outage
+    TransientEstale, \* during an outage the backing answers ESTALE (an
+                   \* export not loaded yet), not EIO or a wait
     OpenByIno,     \* Phase 14: a nodeid without a row can be opened by its
                    \* number (ext4, xfs, btrfs; not an NFS client)
     \* Bugs, each put back by one constant (known_bugs/ident_*):
@@ -124,8 +126,10 @@ CONSTANTS
     BugStubGenFixed,   \* a stub's generation is not drawn afresh
     BugRowIdFromMax,   \* a row's id is MAX(id) + 1, not AUTOINCREMENT
     BugNoSourceCheck,  \* the start does not compare the backing's identity
-    BugForgetOnError   \* a row goes on any error from the backing, not only
+    BugForgetOnError,  \* a row goes on any error from the backing, not only
                        \* on an ESTALE the parent check confirms
+    BugUnconfirmedEstale \* a row goes on an ESTALE the parent check could
+                       \* not confirm (today's code at depth two, 14.10b)
 
 None == "none"
 Estale == "estale"
@@ -281,15 +285,15 @@ ByIno(i) ==
 \* What a request on nodeid r that reaches the backing filesystem resolves
 \* to (OpenNode: open_by_handle_at, then VerifyBackingIdentity): the removed
 \* record's object, the row's object if its handle reaches one that
-\* matches the row, a stub's name (answered from its row), or ESTALE; EIO
-\* while the server is out (nothing reached). Phase 14, without a row: the
-\* inode found by number (its plan: "any request for an uncached nodeid
-\* resolves through 14.2").
+\* matches the row, a stub's name (answered from its row), or ESTALE; EIO,
+\* or with TransientEstale ESTALE, while the server is out (nothing
+\* reached). Phase 14, without a row: the inode found by number (its plan:
+\* "any request for an uncached nodeid resolves through 14.2").
 Resolve(r) ==
     IF r \in Ids /\ rec[r] # None THEN rec[r]
     ELSE IF rows[r].ex /\ rows[r].stub THEN rows[r].obj
     ELSE IF ~rows[r].ex /\ ~(Target /\ OpenByIno /\ r \in Inos) THEN Estale
-    ELSE IF ~Answering THEN Eio
+    ELSE IF ~Answering THEN IF TransientEstale THEN Estale ELSE Eio
     ELSE IF ~rows[r].ex THEN IF ByIno(r) # None THEN ByIno(r) ELSE Estale
     ELSE LET x == Decode(rows[r]) IN
          IF x = None THEN Estale
@@ -465,16 +469,24 @@ Rename(n, m) ==
     /\ UNCHANGED <<bState, nextId, stubHigh, rec, kin, nfs, mints, probe, run,
                    clean, countVars, badMade>>
 
+\* ESTALE the parent check confirms (StaleOrUnreadable asks the parent, by
+\* name, whether the object is gone). Abstracted: the check gives an answer
+\* only while the server answers; during an outage its lookups fail too, a
+\* name that cannot be checked, and the row stays (14.10b's rule that a
+\* parent's unconfirmed ESTALE is not "gone"; BugUnconfirmedEstale is
+\* today's code at depth two).
+Confirmed(r) == Resolve(r) = Estale /\ (Answering \/ BugUnconfirmedEstale)
+
 \* A request on nodeid r that reaches the backing filesystem (a refresh, an
-\* open, ParentOf) and resolves to ESTALE: the row goes (ForgetStale). A
-\* request that is served changes nothing here, nor does one that fails
-\* during an outage (EIO: StaleOrUnreadable keeps the row), unless
-\* BugForgetOnError.
+\* open, ParentOf) and resolves to a confirmed ESTALE: the row goes
+\* (ForgetStale). A request that is served changes nothing here, nor does
+\* one that fails during an outage (EIO, or an unconfirmed ESTALE:
+\* StaleOrUnreadable keeps the row), unless BugForgetOnError.
 Access(r) ==
     /\ Up /\ Idle
     /\ kin[r].held \/ \E h \in nfs : h.id = r
     /\ rows[r].ex /\ ~rows[r].stub
-    /\ Resolve(r) = Estale \/ (BugForgetOnError /\ Resolve(r) = Eio)
+    /\ Confirmed(r) \/ (BugForgetOnError /\ Resolve(r) = Eio)
     /\ rows' = [rows EXCEPT ![r] = NoRow]
     /\ UNCHANGED <<bName, bState, nextId, stubHigh, dirty, dur, rec, kin, nfs,
                    mints, probe, run, clean, countVars, badMade>>
@@ -648,8 +660,8 @@ Wipe ==
 \* database recorded (or a new database records it); RecoverDirty empties
 \* the dirty set, StartRun's commit is durable, and after an unclean
 \* shutdown every row that was dirty is probed by handle
-\* (ProbeRecoveredRows: OpenNode) and goes if that resolves to ESTALE (no
-\* removed record exists yet, so a live object is a named one: no nlink-0
+\* (ProbeRecoveredRows: OpenNode) and goes if that resolves to a confirmed
+\* ESTALE (no removed record exists yet, so a live object is a named one: no nlink-0
 \* case).
 Start ==
     /\ run = "down"
@@ -660,7 +672,7 @@ Start ==
     /\ rows' = IF clean THEN rows
                ELSE [r \in AllIds |->
                        IF r \in dirty /\ rows[r].ex /\ ~rows[r].stub
-                          /\ Resolve(r) = Estale
+                          /\ Confirmed(r)
                        THEN NoRow ELSE rows[r]]
     /\ UNCHANGED <<bName, bState, nextId, stubHigh, rec, kin, nfs, mints,
                    probe, countVars, badMade, sid, srv, hep, swaps, outages>>

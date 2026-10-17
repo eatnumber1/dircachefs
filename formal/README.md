@@ -2253,8 +2253,11 @@ differs, the administrator then deleting the database (`StartRefused`),
 and cannot see when it does not (`SameIdentity`: two filesystems exported
 under one fsid number, or a replica; the identity of a backing without a
 UUID is only `f_type` and the root row's handle); a server outage, during which a
-request reaching the backing gets `EIO` and no row goes for it
-(`ServerDown`, `ServerUp`), and a server that comes back with new handles
+request reaching the backing gets `EIO` or, with `TransientEstale`, an
+`ESTALE`, and no row goes for it because the parent check cannot confirm
+anything while the server is out (`ServerDown`, `ServerUp`, `Confirmed`:
+14.10b's rule; `BugUnconfirmedEstale` is today's depth-two parent check),
+and a server that comes back with new handles
 (`VolatileHandles`); and, under Phase 14, a nodeid without a row that cannot
 be opened by its number (`OpenByIno = FALSE`: the client needs the server's
 handle).
@@ -2314,7 +2317,7 @@ directories), the birth time (`btime`); 0 is "unknown", as in the code.
 | `Refuse(n)` | a refused name's stub: the one it has, else the next id up from `last_stub_id` with a fresh generation | `cache::SetRefused` |
 | `Create(n)` | a new object, maybe on a recycled inode number, recorded and replied | `RecordNewChild` |
 | `Unlink(n)`, `Rename(n, m)` | phase 1 marks the row dirty (a durable commit unless it already was); an unlink's removed record holds the object if the kernel holds the nodeid, and phase 3 deletes the row; a rename keeps the row and nodeid | `RemoveChild`, `HoldForRemoval`, `Rename` |
-| `Access(r)` | a request on a nodeid the kernel or a handle names reaches the backing filesystem and resolves to `ESTALE`: the row goes | `OpenNode`, `VerifyBackingIdentity`, `ForgetStale` (and through `OpenNode`: `ParentOf`, refreshes, opens) |
+| `Access(r)` | a request on a nodeid the kernel or a handle names reaches the backing filesystem and resolves to an `ESTALE` the parent check confirms (`Confirmed`: only while the server answers): the row goes | `OpenNode`, `VerifyBackingIdentity`, `ForgetStale` (and through `OpenNode`: `ParentOf`, refreshes, opens) |
 | `DotLookup(h)` | the client presents a handle the kernel has no matching inode for: `LOOKUP(id, ".")`, answered from the row (Phase 14 without a row: by inode number); the kernel makes its inode and compares generations | `Lookup` of `"."`, `EntryFor` |
 | `NfsTake(r)`, `Evict(r)` | the client takes a handle of an inode the kernel holds; the kernel evicts an inode (its removed record goes) | `fuse_encode_fh`; `Forget` |
 | `Sync`, `Persist` | a sync point empties the dirty set (not durable by itself); a durable commit (a phase 1 elsewhere, a WAL checkpoint) | `SyncBacking`, `ClearDirty` |
@@ -2323,7 +2326,7 @@ directories), the birth time (`btime`); 0 is "unknown", as in the code.
 | `ProbeStat(n)`, `ProbeRead` | with `ProbeByName` (not the code): the statx, then the handle and the generation in `ProbeOrder`, each read resolving the name again | |
 | `Swap` | the backing replaced by another (`SwapBName`), between runs or, with `SwapWhileUp`, while dcfs runs; its objects may have byte-identical handles to this one's, which are out of reach (dead) from then on; it presents another identity (root handle) unless `SameIdentity` | (the administrator, the server) |
 | `StartRefused` | the start finds another identity than the database's and refuses; the administrator deletes the database and starts again, cold (`Start` itself requires the identity the database recorded, unless `BugNoSourceCheck`) | `main.cc`'s source-identity and root checks |
-| `ServerDown`, `ServerUp` | a server outage: requests that reach the backing get `EIO` (soft mount) or wait (hard), and requests that probe or mutate it are not taken; `Access` does not forget a row for `EIO` (unless `BugForgetOnError`); with `VolatileHandles` every handle changes when it comes back | `StaleOrUnreadable` |
+| `ServerDown`, `ServerUp` | a server outage: requests that reach the backing get `EIO` (soft mount) or wait (hard), or with `TransientEstale` an `ESTALE` (an export not loaded yet), and requests that probe or mutate it are not taken; `Access` does not forget a row for either (unless `BugForgetOnError` for `EIO`, `BugUnconfirmedEstale` for the `ESTALE`); with `VolatileHandles` every handle changes when it comes back | `StaleOrUnreadable` |
 
 | Property | Says |
 |---|---|
@@ -2367,7 +2370,7 @@ workers, other lanes running).
 | `MC_ident_btime.cfg` | `ident_btime_test` (medium) | the birth time the only evidence, changes behind dcfs's back; every property | 49,833 | ~25 s |
 | `MC_ident_stubs.cfg` | `ident_stubs_test` (medium) | filesystems mounted at a and b, 2 stub ids, mounts and unmounts behind dcfs's back, a power loss; every property but `ServedWhileLive` | 217,366 | ~70 s |
 | `MC_ident_target.cfg` | `ident_target_test` (medium) | Phase 14's identity, a crash, a power loss and a cache wipe; every property | 145,136 | ~60 s |
-| `MC_ident_net.cfg` | `ident_net_test` (medium) | step 14.10: today's identity on an NFS client (`NfsEvidence`), a server outage, a crash, and the backing swapped between runs for one with another identity whose o4 has o1's handle bytes (refused, then cold); every property (run of 2026-10-17, lane-4) | 53,574 | ~20 s |
+| `MC_ident_net.cfg` | `ident_net_test` (medium) | step 14.10: today's identity on an NFS client (`NfsEvidence`), a server outage answering a transient `ESTALE`, a crash, and the backing swapped between runs for one with another identity whose o4 has o1's handle bytes (refused, then cold); every property (run of 2026-10-17, lane-4) | 53,574 | ~20 s |
 | `MC_ident_target_net.cfg` | `ident_target_net_test` (medium) | step 14.10: Phase 14's identity on an NFS client (no open by number), a crash, a server outage; every property (run of 2026-10-17) | 8,961 | ~17 s |
 
 Coverage (`-coverage 1`): every action fires where its constants allow it
@@ -2398,7 +2401,8 @@ tier, a few seconds each).
 | `limitations/ident_target_uncached_nodeid` | Phase 14 with a recycling behind dcfs's back, a held nodeid whose row went | `HeldResolvesToItsObject` | look a up; a replaced behind dcfs's back by o3 on the same inode number; a request finds the row stale (`ESTALE`, the row goes); the next request opens inode 1 by number and reaches o3. Only `LOOKUP(".")` has the kernel compare generations: Phase 14 must compare the generation it handed out in this mount (or answer `ESTALE`) for every other request on a nodeid without a row |
 | `known_bugs/ident_net_no_source_check` | step 14.10: a start that does not compare the backing's identity | `HandlesResolveToTheirObject` | look a up (o1, row 1); the client takes its handle; stop; the backing is swapped (o4 at a, with o1's handle bytes); start without the check: the client's handle is accepted from row 1 and decodes to o4 |
 | `known_bugs/ident_net_forget_on_error` | step 14.10: a row forgotten on any error during a server outage, not only on a confirmed `ESTALE` | `ServedWhileLive` | look a up; the client takes its handle; the server goes down; a request on row 1 fails and the row goes; the server comes back: the client's handle of the live o1 is `ESTALE` |
-| `limitations/ident_net_same_identity` | step 14.10: the backing swapped between runs for one presenting the same root handle: two filesystems under one fsid number (the guarantee of a unique, fixed fsid per export) | `HandlesResolveToTheirObject` | as `ident_net_no_source_check`, with the check passing |
+| `known_bugs/ident_net_unconfirmed_estale` | step 14.10's review: a row forgotten on an `ESTALE` the parent check did not confirm (today's code at depth two: a parent's `ESTALE` taken as "gone", while on NFS a parent opens from the client's inode cache and its statx gets the transient `ESTALE`; 14.10b fixes it) | `ServedWhileLive` | look a up; the client takes its handle; the server goes out answering `ESTALE`; a request on row 1 forgets the row; the server comes back: the client's handle of the live o1 is `ESTALE` |
+| `limitations/ident_net_same_identity` | step 14.10: the backing swapped between runs for one presenting the same root handle: two filesystems under one fsid number, on one server or two (the guarantee of a fsid unique across every server the database is used with) | `HandlesResolveToTheirObject` | as `ident_net_no_source_check`, with the check passing |
 | `limitations/ident_net_swap_while_running` | step 14.10: the swap while dcfs runs (the guarantee of no replacement) | `HeldResolvesToItsObject` | look a up; the backing is swapped: the nodeid the kernel holds for o1 decodes to o4 |
 | `limitations/ident_net_volatile_handles` | step 14.10: a server that hands out new handles after an outage (the guarantee of a unique, fixed fsid) | `ServedWhileLive` | look a up; the client takes its handle; an outage; the server comes back with new handles: row 1 no longer decodes, and the client's handle of the live o1 is `ESTALE` |
 | `limitations/ident_target_net_wipe` | step 14.10: Phase 14 on an NFS client, a cache wipe | `ServedWhileLive` | look a up; the client takes its handle; stop; wipe; start: no row, and no open by number, so `ESTALE` for a live object until something finds it by name |
