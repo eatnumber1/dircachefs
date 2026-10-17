@@ -17,9 +17,9 @@ import tempfile
 import time
 
 
-def default_status_file():
+def default_status_file(environ=os.environ):
   """Returns $XDG_RUNTIME_DIR/dcfs_agent_status.md, or the tmp dir if unset."""
-  runtime_dir = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+  runtime_dir = environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
   return os.path.join(runtime_dir, "dcfs_agent_status.md")
 
 
@@ -314,7 +314,9 @@ def run_watchdog(brain_dir, parent_id, status_file,
             f"updated {status_file}")
       break
 
-    # Exception to docs/style.md 1.11 (developer tool); see README.md.
+    # Poll: a stall is the absence of activity in the harness's transcript
+    # files, which no event can report; the interval bounds how stale the
+    # status file may be.
     time.sleep(interval_sec)
   return 0
 

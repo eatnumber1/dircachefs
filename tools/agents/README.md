@@ -34,6 +34,6 @@ The monitor runs only while an orchestrator of that harness is working
 unattended. Stop it when that orchestrator stops; a leftover daemon keeps
 writing a stale dashboard.
 
-Its polling interval is a deliberate exception to `docs/style.md` 1.11
-(no timers): this is a developer tool outside dcfs, and the transcript files
-offer no event to wait on.
+It polls on a timer, as `docs/style.md` 1.11 allows when nothing can signal:
+a stall is the absence of activity in the harness's transcript files, which
+no event reports. The `--interval` bounds how stale the status file may be.

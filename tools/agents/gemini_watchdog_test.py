@@ -6,12 +6,11 @@ import os
 import tempfile
 import time
 import unittest
-from unittest import mock
 
 import gemini_watchdog
 
 
-class AgentWatchdogTest(unittest.TestCase):
+class GeminiWatchdogTest(unittest.TestCase):
 
   def setUp(self):
     self.temp_dir = tempfile.TemporaryDirectory()
@@ -76,8 +75,8 @@ class AgentWatchdogTest(unittest.TestCase):
     with open(subagent_log, "w", encoding="utf-8") as f:
       f.write(json.dumps(entry) + "\n")
 
-    status = gemini_watchdog.inspect_subagent(self.brain_dir, subagent_id,
-                                             now=time.time())
+    status = gemini_watchdog.inspect_subagent(
+        self.brain_dir, subagent_id, now=time.time())
     self.assertEqual(status["state"], "running")
     self.assertEqual(status["step_index"], 5)
     self.assertIn("Compiling source", status["detail"])
@@ -175,16 +174,15 @@ class AgentWatchdogTest(unittest.TestCase):
     self.assertEqual({a["id"] for a in agents}, {"agent-1", "agent-2"})
 
   def test_default_status_file_uses_xdg_runtime_dir(self):
-    with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/run/user/1000"},
-                         clear=True):
-      self.assertEqual(gemini_watchdog.default_status_file(),
-                       "/run/user/1000/dcfs_agent_status.md")
+    self.assertEqual(
+        gemini_watchdog.default_status_file(
+            {"XDG_RUNTIME_DIR": "/run/user/1000"}),
+        "/run/user/1000/dcfs_agent_status.md")
 
   def test_default_status_file_falls_back_to_tmp_dir(self):
-    with mock.patch.dict(os.environ, {}, clear=True):
-      self.assertEqual(
-          gemini_watchdog.default_status_file(),
-          os.path.join(tempfile.gettempdir(), "dcfs_agent_status.md"))
+    self.assertEqual(
+        gemini_watchdog.default_status_file({}),
+        os.path.join(tempfile.gettempdir(), "dcfs_agent_status.md"))
 
 
 if __name__ == "__main__":
