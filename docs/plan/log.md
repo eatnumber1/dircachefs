@@ -3349,3 +3349,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   says passno 0 on dcfs lines under systemd (no systemd-fsck@ unit for a directory source) and
   fsck.dcfs by hand; what util-linux `fsck -A` and other inits do with a non-zero passno is
   documented only as far as verified in a guest.
+- russ agreed to rework 25.28 rather than revert it: 25.28b (protocol agent, after 25.9b) makes
+  the sync interval bound the cache's own durability lag, folded into the sync point, with the
+  model's durability abstraction gaining the bound and a power-cut test. Order of the protocol
+  queue: 15.11c (running, Sonnet), then 25.9b, then 25.28b, then 17.2b, then 14.10.

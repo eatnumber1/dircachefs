@@ -945,3 +945,30 @@ exception to the "no timers" rule per russ, 2026-10-12). If a sync point
 is due, `SyncBackingNow` performs the sync point and updates
 `last_wal_checkpoint_ = last_sync_`. Completed in 3a0785a.
 
+
+## 25.28b The sync interval bounds the cache's durability lag (russ, 2026-10-16; protocol agent, after 25.9b)
+
+Replaces 25.28's separate WAL-checkpoint clock (reviewed: it never runs
+under writes, because each sync point resets its clock without
+checkpointing, and its premise, reader starvation, does not hold for a
+single-connection daemon). russ's reason for approving the original stands
+and is the step's purpose: fills and phase-3 commits are written under
+SQLite's synchronous=NORMAL and stay unsynced until the next kSync commit
+or a 1000-page autocheckpoint, so on a read-mostly server a power cut can
+discard a long stretch of cache work, which recovery then re-reads from
+the backing, spinning disks up. The step: at each sync point, and on the
+same cadence when only unsynced cache commits are pending (no dirty
+backing state), the cache's WAL is made durable (fsync, then a PASSIVE
+checkpoint); 25.28's MaybeCheckpointWal, last_wal_checkpoint_ and its
+request-arrival trigger go (one mechanism, the sync point); the false
+"approved exception to the no-timers rule" comments go; the
+WalCheckpointed event gets its row in formal/README.md's event table; the
+TLA+ durability abstraction (12.14) gains the bound ("a power cut loses at
+most one sync interval of cache commits") as a checked property; a
+power-cut guest test shows fills older than one interval survive and
+younger ones may not; README and design.md say it; the unreachable
+SQLITE_BUSY swallow and the closed-connection early return in
+Connection::Checkpoint go, and its test-only out-parameters and unused
+modes with them. Cancellation: the flush is a backing-free step but sits
+at a request boundary; keep it off the request path (the sync point's own
+place) so no user request waits on it.
