@@ -982,32 +982,40 @@ russ, 2026-10-12: "Comments explain invariants and the non-obvious why, never
 the obvious what or how." Apply the core principles:
 
 - **Self-explanatory code first.** Express preconditions, valid states, and
-  argument order through the type system (`DEFINE_STRONG_INT_TYPE`), RAII
-  wrappers (`FdHolder`, `FileDescriptor`), `static_assert`, and C++20 `requires`
-  concepts. Zero comments on obvious accessors, getters, setters, or standard
-  operators (`operator*`, `operator->`). If a comment merely restates what the
-  types, names, or compiler checks say, delete the comment.
+  argument order through the type system (`DeviceId` in dcfs/device_id.h,
+  `FileHandle` in dcfs/file_handle.h), RAII wrappers (`FileDescriptor` in
+  dcfs/fd.h), `static_assert`, and C++20 `requires` concepts. Zero comments on
+  obvious accessors, getters, setters, or standard operators (`operator==` on
+  `DeviceId` needs none). If a comment merely restates what the types, names,
+  or compiler checks say, delete the comment.
 - **Document timeless invariants, footguns, and deliberate omissions.** Comments
   are strictly reserved for things the type system cannot express:
   - *Deliberate design omissions*: Why an obvious method or capability was
-    intentionally excluded (e.g. `RunningUnderBorglet is intentionally not
-    available here...`).
+    intentionally excluded. `ReadOne` (dcfs/metadata_cache.cc) stops after the
+    first row and does not step a second time to check for the end: a step per
+    lookup is what the budget counts (test/qemu/guest/syscall_budgets.txt), and
+    a lookup whose result cannot have more rows does not need it.
   - *Subtle kernel / hardware caveats*: Traps, signal safety, or platform
-    behaviors (e.g., why ASan shadow memory must be excluded from userfaultfd).
-  - *Concurrency & memory-ordering protocols*: Non-obvious memory orders (e.g.,
-    explaining why `active_start` relaxed stores are paired with
-    `sys_membarrier(MEMBARRIER_CMD_GLOBAL_EXPEDITED)` on the evictor side).
+    behaviors. `setfsuid(2)` reports no failure and returns the previous fsuid,
+    so `fsuid()` passes -1 (which changes nothing) and reads the value back
+    (dcfs/syscalls.cc); `setfsuid()` checks that read-back.
   - *Permanent bug workarounds*: Workarounds for infrastructure defects citing
-    permanent trackers (e.g., `// Per github.com/torvalds/linux/bug/...,
-    prevents ext4 corruption`).
+    permanent trackers (e.g., a comment that names the in-tree reproducer,
+    `tools/kernel_bugs/ext4_casefold_tune/README.md`, for the ext4 casefold
+    tune oops). Where the defect is a filesystem's behavior
+    with no tracker, say what it does and what dcfs does about it: ext4 casefold
+    (`chattr +F`) makes lookups case-insensitive, so dcfs refuses the
+    `FS_IOC_SETFLAGS` that sets it (dcfs/dir_cache_fs.cc, step 23.7).
 - **Ban redundant method-name-echoing docstrings.** Never write a docstring
-  whose words simply mirror the function name and arguments:
-  - ❌ `// Prefaults a virtual address range into memory.`
-    `absl::Status PrefaultRange(uintptr_t vaddr, size_t len);`
-  - ❌ `// Discards pages in range.`
-    `absl::Status DiscardRange(...);`
-  - ❌ `// Returns the page state.`
-    `PageState GetPageState(...);`
+  whose words simply mirror the function name and arguments. Bad (the real
+  declarations in dcfs/backing.h, with the echoing comment that would replace
+  their real ones):
+  - Bad: `// Syncs the file descriptor.`
+    `absl::Status FsyncFd(int fd, bool datasync);`
+  - Bad: `// Unlinks the name in the parent.`
+    `absl::Status UnlinkAt(Context &ctx, const Credentials &caller, InodeId parent, std::string_view name, int flags);`
+  - Bad: `// Returns the generation.`
+    `absl::StatusOr<uint64_t> ReadGeneration(int opath_fd, mode_t mode);`
   Only document a method if it has non-obvious lifetime bindings
   (`ABSL_ATTRIBUTE_LIFETIME_BOUND`), transfer of ownership, side-effects, or
   concurrency preconditions.
