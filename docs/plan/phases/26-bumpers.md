@@ -1177,3 +1177,33 @@ The first CI run after 12.18b, 26.30 and 26.34 failed in two places.
   the current numbers; the before/after goes to the commit and the log.
 - The dropped write-side lines are the dashboard's provisional ruling
   (restore a write budget over the shard's non-timed tests), not this step.
+
+## 26.40 The two stale kernel-cache cases (from the 2026-10-17 inventory; queued)
+
+`docs/plan/notes/kernel-cache-invalidation-2026-10-17.md`: two places the
+kernel's cached attributes go stale with no help from its own FUSE code.
+russ (2026-10-17) asked for tests and a model that fail today, and prefers
+synchronous invalidation before the reply to a deferred one (racy).
+
+- **chattr (`FS_IOC_SETFLAGS`, `FS_IOC_FSSETXATTR`):** after the backing
+  ioctl succeeds and before the reply, `fuse_lowlevel_notify_inval_inode`
+  with a negative offset (attributes only). That path takes only spinlocks
+  (`fuse_reverse_inval_inode`, fs/fuse/inode.c:548), so it cannot deadlock
+  against the inode lock `vfs_fileattr_set` holds, and its `attr_version`
+  bump keeps an in-flight GETATTR from restoring the old ctime.
+  docs/design.md's "dcfs never notifies" paragraph is corrected: entry
+  invalidation deadlocks in related operations (it locks the parent);
+  attribute-only inode invalidation does not.
+- **Stores through a passthrough `MAP_SHARED` mapping after close:** dcfs
+  refreshes the row only at FORGET; design the fix (e.g. the row's
+  attributes unknown while the kernel may still hold a writable shared
+  mapping, refreshed at the next getattr) and invalidate as above.
+- **Failing first:** guest tests (C++, 25.34's helpers) that chattr through
+  dcfs and stat (the ctime differs from the backing's today, for up to the
+  attr timeout), and that write through a mapping after close and stat
+  (stale until eviction today); 12.20's model shows both as
+  counterexamples before the fix, with a known-bug variant.
+- Then 26.39's attr/entry default can become effectively infinite
+  (dashboard question Q-2026-10-17-09).
+
+Owner: dcfs-protocol (kernel cache coherence), after 12.20 or with it.

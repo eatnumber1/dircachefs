@@ -3921,3 +3921,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   30-minute background limit expired on the first cold Bazel build). The
   25.32 post-merge review's fixes; the orchestrator read the diff and
   reran the tests (4 of 4 pass).
+- 2026-10-17, russ questions the "no notifications, deadlock" rationale.
+  Checked: entry invalidation does lock the parent (deadlocks in related
+  operations); attribute-only inode invalidation takes only spinlocks and
+  is safe synchronously before a reply. 26.40 queued (chattr and the
+  MAP_SHARED-after-close case, failing first, synchronous invalidation);
+  kernel-patches.md gains a fuse_fileattr_set ctime row.
