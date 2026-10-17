@@ -1294,6 +1294,21 @@ proposal"):
    largest size is the stated limit.
 3. CPU work is instructions retired (user and kernel, 26.36's PMU
    findings) in a few dedicated benchmark scenarios, unheld without a PMU.
+1a. Costs are vectors by kind, not a sum of "1 per syscall" (russ,
+   2026-10-17: "Is cost 1 really the right number? shutdown() or
+   connect() has a very different cost than gettimeofday()"): each count
+   is per syscall kind (as syscall_budgets.txt's backing/procfd/sync split
+   already starts), so an fsync never trades against a statx. The line at
+   the kernel is drawn because a call's kernel-side cost depends on state
+   dcfs does not control (the backing filesystem, its caches, the
+   hardware, the kernel version), not because the kernel is opaque: its
+   source is here, and where dcfs's design depends on a kernel cost (what
+   syncfs flushes, getdents64's batch size) that cost is reasoned from the
+   source. The A/B benchmark measures the total, kernel included.
+1b. **Query-plan check** (russ: "Yes"): a test runs `EXPLAIN QUERY PLAN`
+   on every SQL statement in dcfs against the real schema and fails on a
+   full-table SCAN not allowed with a reason, so each statement's cost is
+   O(log n) per row returned. Small; Gemini.
 2a. Each operation gets a worst-case input family next to its typical one
    (readdir with every attribute unknown, lookup among many negative
    entries, recovery with N dirty rows, rename of a directory with N

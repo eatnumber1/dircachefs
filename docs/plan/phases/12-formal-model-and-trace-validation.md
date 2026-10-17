@@ -712,3 +712,16 @@ and bounded exhaustive testing (Jackson's Alloy; Korat, TestEra).
 4. Every family found joins 26.41's exact-collinearity slope tests, next
    to each operation's typical family and a hand-listed worst-case family.
 
+## 12.23 A static cost analyser on dcfs's code: an Infer spike (russ, 2026-10-17: "Yes"; after M1)
+
+Infer's cost analysis (Meta) computes symbolic complexity bounds per
+function and reports a diff that raises one (EXECUTION_TIME_COMPLEXITY_
+INCREASE). Pin it through Bazel, run it on `dcfs/` with models at the
+boundary: each backing syscall a cost of its kind (26.41 1a), each SQL
+statement O(log n) per row once 26.41's query-plan check holds, and see
+what bounds it proves for the main request paths. Expected obstacles: its
+C++ maturity next to Java, and dcfs's virtual calls through the Syscalls
+interface (models or devirtualisation). If it works, a differential check
+in CI: a diff that raises a function's complexity fails. Owner:
+dcfs-investigator.
+

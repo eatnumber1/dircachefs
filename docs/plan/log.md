@@ -3991,3 +3991,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   worst-case families in 26.41.
 - 2026-10-17, russ: the worst-case search (12.22) comes after M3 ("Let's
   deploy to my machine first"). 12.20 still adds the cost counters.
+- 2026-10-17, russ: "cost 1" per syscall is wrong (shutdown vs
+  gettimeofday), and the kernel is not a black box (we have its source):
+  26.41 counts by syscall kind and states the real reason for the line at
+  the kernel. Yes to the query-plan check (26.41 1b) and an Infer
+  cost-analysis spike after M1 (12.23).
