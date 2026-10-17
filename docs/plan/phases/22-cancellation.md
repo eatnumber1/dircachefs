@@ -192,3 +192,16 @@ the plan's current text; history in log.md stays as written). "Checkpoint"
 then means only the SQLite WAL checkpoint. Mechanical, after 22.5 round 2
 and 25.28b merge (both edit those call sites). Owner: Gemini (agy), a
 style review after.
+
+**Do not confuse the two** (russ, 2026-10-17: "be careful the agent doing
+the refactor doesn't get the two kinds of checkpoint confused"): rename
+only `dcfs::Checkpoint` from `dcfs/checkpoint.h`, its call sites, and
+prose about checking for FUSE_INTERRUPT. Never touch SQLite's:
+`Connection::Checkpoint`, `CheckpointMode`, `sqlite3_wal_checkpoint*`,
+`CheckpointCache`, `wal_checkpoint`/`WalCheckpoint`/`WalCheckpointed`
+(model, trace, events), `wal_autocheckpoint`, "WAL checkpoint" prose. The
+prompt lists every file:line to change, from a review of `git grep -n
+-i checkpoint` sorted into the two senses by the orchestrator before the
+job; the job changes only those lines, and the review checks that no
+SQLite sense changed (a grep of the diff for those names must be empty
+of edits).
