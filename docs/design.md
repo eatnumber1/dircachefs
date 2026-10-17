@@ -449,23 +449,32 @@ database pointed at another server, an export re-made with another fsid).
 What the administrator guarantees for a network backing, and dcfs cannot
 check, is in README ("Network backings"):
 
-1. exclusive access: no other client, and nothing on the server, changes
-   the exported tree while dcfs serves it or between its runs;
-2. persistent handles: the export keeps its fsid across server restarts
-   (knfsd: an explicit `fsid=`, or a filesystem with a UUID), and the server
-   does not hand out volatile handles;
-3. a `sync` export (knfsd's default): the server makes a change stable
-   before it answers, so the sync point's `syncfs` (which on the client
-   writes back and COMMITs the data) leaves nothing that a server crash
-   can lose;
-4. a `hard` mount (the NFS default): a backing syscall waits out a server
-   outage instead of failing in the middle of a mutation. dcfs reads the
-   mount's options at start (mountinfo says `hard`) and refuses a soft
-   mount;
-5. the export is not replaced while dcfs runs: the server must not serve
-   the export's path before the filesystem is mounted on it (knfsd's
-   `mountpoint` export option) and must not swap in a replica under the
-   same fsid without the cache database being deleted.
+- **Exclusive access**: no other client, and nothing on the server,
+  changes the exported tree while dcfs serves it or between its runs.
+- **Persistent handles**: the export keeps its fsid across server restarts
+  (knfsd: an explicit `fsid=`, or a filesystem with a UUID), and the server
+  does not hand out volatile handles.
+- **No replacement while dcfs runs**: the server does not serve the
+  export's path before the filesystem is mounted on it (knfsd's
+  `mountpoint` export option) and does not swap in a replica under the same
+  fsid without the cache database being deleted.
+
+Two things are deliberately not required (russ, 2026-10-17):
+
+- *A hard mount.* On a soft mount a server outage turns a backing syscall
+  into `EIO` or `ETIMEDOUT` after the timeout, which is a backing error
+  like any other: a mutation's records are unknown before its syscall and
+  re-probed after, whatever the syscall's answer (the tri-state rule), and
+  an error never forgets a row (below). README says nothing about hard or
+  soft.
+- *A `sync` export.* With an `async` export the server answers before a
+  change is stable, so after a server crash the cache may list changes the
+  server lost: the cache recorded what the server acknowledged. README says
+  so, and that after such a crash the administrator probably wants to
+  delete the cache database (a cold cache is always correct). With a `sync`
+  export (knfsd's default) a change the server acknowledged survives its
+  crash, and the sync point's `syncfs` (which on the client writes back and
+  COMMITs the data) leaves nothing a server crash can lose.
 
 **Handles and generations.** Rows are matched as on ext4 (see [Matching a
 row to a backing object](#matching-a-row-to-a-backing-object)): inode
@@ -483,7 +492,8 @@ SOURCE fails with `EOVERFLOW` at start, and the start says so.
 Phase 14 (the nodeid is the backing inode number, the generation the
 backing's) meets two differences on NFS. The generation cannot be decoded
 from the server's opaque handle; the generation dcfs hands out is then a
-digest of the server's handle bytes, nonzero, the same for one object
+digest of the server's handle bytes (russ, 2026-10-17), nonzero, the same
+for one object
 every time it is probed (its handle bytes are stable, see above) and
 different for a recycled inode (other bytes). And a nodeid without a row
 cannot be opened by inode number, since the client needs the server's
@@ -496,14 +506,15 @@ and `limitations/ident_target_net_wipe`.
 
 **`ESTALE`, outages and what the cache does.**
 
-- *Server restart, persistent handles*: nothing changes in the cache.
-  During the outage a backing syscall blocks (hard mount); dcfs is one
+- *Server restart, persistent handles*: nothing changes in the cache. On
+  a hard mount a backing syscall blocks during the outage; dcfs is one
   thread, so every request waits, cached ones included (step 11.6's
   finding for a frozen backing, see [A backing filesystem that is frozen or
   stalled](#a-backing-filesystem-that-is-frozen-or-stalled)), and a
   request blocked in the NFS client cannot be interrupted (it waits
-  `TASK_KILLABLE`). Requests resume when the server answers; a descriptor
-  dcfs holds keeps working.
+  `TASK_KILLABLE`). On a soft mount the syscall fails after the timeout
+  and the request gets the error, as for any backing `EIO`. Requests
+  resume when the server answers; a descriptor dcfs holds keeps working.
 - *An error during an outage is not absence.* Only `ESTALE` that the
   parent check confirms forgets a row (step 11.3b's rule, unchanged:
   [Matching a row to a backing
@@ -515,7 +526,8 @@ and `limitations/ident_target_net_wipe`.
   asks the server nothing), whose `name_to_handle_at` of the child's name
   fails with `ESTALE` as well, a name that cannot be checked, so every
   level answers `EIO`. The model's
-  `Outage` action and `known_bugs/ident_net_forget_on_error` show what
+  `ServerDown` and `ServerUp` and `known_bugs/ident_net_forget_on_error`
+  show what
   forgetting on such an error costs: a live object's handle answered
   `ESTALE` once the server is back.
 - *The export's fsid changed, or another filesystem was exported in its
@@ -528,7 +540,8 @@ and `limitations/ident_target_net_wipe`.
   that keeps the handles valid (a replica under the same fsid, or the
   export's path served before its filesystem is mounted) is not detected
   while dcfs runs, as any change behind dcfs's back is not
-  (`limitations/ident_net_swap_while_running`); that is guarantee 5.
+  (`limitations/ident_net_swap_while_running`); that is the guarantee of no
+  replacement while dcfs runs.
 - *The export moved, same fsid*: invisible while dcfs runs (the handles
   stay valid). At the next start the root's handle matches; the name
   matches if it is `dcfs.backing_id`, and if it is the mount source and the
@@ -539,7 +552,8 @@ and `limitations/ident_target_net_wipe`.
   `fsid=`): every row's handle is `ESTALE`, the parent check finds the name
   with another handle and forgets the row, and NFS clients of dcfs get
   `ESTALE` for live objects; never another object
-  (`limitations/ident_net_volatile_handles`). Unsupported: guarantee 2.
+  (`limitations/ident_net_volatile_handles`). Unsupported: the guarantee of
+  persistent handles.
 
 The identity model (`formal/ident.tla`, README "The identity model")
 checks these: a backing swapped while dcfs is down (`Swap`) with objects
