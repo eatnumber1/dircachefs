@@ -1090,7 +1090,8 @@ start, or something?"
   explicitly). First, the failing-first guest test verifies the premise:
   `sysctl -w` (a `write(2)` through `vfs_write`) raises `IN_MODIFY` on
   procfs. If it does not, report it and keep the startup reading only.
-  A watch that cannot be added is logged once at INFO, not an error.
+  A watch that cannot be added is logged once at WARNING (russ,
+  2026-10-17), and dcfs keeps the startup value.
 - Test first: `--attr_timeout=90m` parses and reaches the FUSE replies;
   the old names are refused as unknown; the default sync interval follows
   a changed `vm.dirty_expire_centisecs` in the guest.
