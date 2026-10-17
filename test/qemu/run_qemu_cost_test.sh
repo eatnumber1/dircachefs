@@ -68,6 +68,11 @@ canned() {
 	} >"$WORK/canned"
 }
 
+# The budget files run() holds a target to: these tests' own, set below, or the
+# checked-in ones for the one section that holds the real lines.
+CPU_FILE="$WORK/cpu_budgets.txt"
+IO_FILE="$WORK/io_budgets.txt"
+
 # run TARGET [ENV=VALUE... [-- run-qemu.sh flags]]: run-qemu.sh --unit on the
 # canned log as the target TARGET, budgets given; sets RC.
 run() {
@@ -79,7 +84,7 @@ run() {
 		sh "$RUN_QEMU" --unit --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
 		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
 		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
-		--budget-lib "$BUDGET_LIB" --cpu-budgets "$WORK/cpu_budgets.txt" --io-budgets "$WORK/io_budgets.txt" \
+		--budget-lib "$BUDGET_LIB" --cpu-budgets "$CPU_FILE" --io-budgets "$IO_FILE" \
 		"$WORK/kernel" "$WORK/initrd" >"$WORK/stdout" 2>&1 || RC=$?
 }
 
@@ -373,6 +378,28 @@ if command -v taskset >/dev/null 2>&1; then
 		fail "synthetic affinity not logged as pinned to 0,2: $(cat "$WORK/out/serial.log")"
 fi
 echo "PASS: non-SMT pinning is off by default, enabled by DCFS_PIN_NON_SMT=1"
+
+# --- a shard whose work includes a duration, against the checked-in budgets ----
+#
+# xfstests_1_test_ext4 runs generic/364, which loops direct writes and fsyncs
+# for 10 s (`timeout 10s`): the requests it issues are a rate, not work. The
+# same shard issued 853 to 1,060 writes of that test at a load average of 36
+# (85% host CPU pressure, 3 runs) and 45,012 on CI's quiet runner (run
+# 39046531637, 14,404 of its 15,620 flushes), so the shard's writes, flushes
+# and the daemon's writes moved by a factor of 4 between hosts for the same
+# code. Both hosts' COST lines are held to the real budgets: a line that
+# counts what such a loop does fails one of them. (The 3540 s is what the
+# target's `eternal` timeout leaves the guest.)
+XFSTESTS_QUIET="COST cpu_us=8269532 reads=2153 writes=57097 sectors_read=963214 sectors_written=4546248 flushes=15620 dcfs_reads=18 dcfs_writes=14896 dcfs_read_bytes=73728 dcfs_write_bytes=24764416"
+XFSTESTS_LOADED="COST cpu_us=19163765 reads=2121 writes=13965 sectors_read=952942 sectors_written=4483072 flushes=1878 dcfs_reads=14 dcfs_writes=2435 dcfs_read_bytes=57344 dcfs_write_bytes=19111936"
+CPU_FILE=$REAL_CPU_BUDGETS
+IO_FILE=$REAL_IO_BUDGETS
+for line in "$XFSTESTS_QUIET" "$XFSTESTS_LOADED"; do
+	canned "$line"
+	run //test/qemu:xfstests_1_test_ext4 TIMEOUT=3540
+	[ "$RC" -eq 0 ] || fail "xfstests_1_test_ext4 over the checked-in budgets at \"$line\": $(cat "$WORK/stdout")"
+done
+echo "PASS: xfstests_1_test_ext4 is within its budgets on a quiet host and on a loaded one"
 
 # The checked-in budgets: every line is OP KIND MAX with a number, the kind a
 # COST field, and no target twice (a second line would be ignored by the awk

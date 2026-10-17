@@ -45,11 +45,16 @@
 # with no line is reported, not held. test/qemu/README.md, "Budgets in three
 # parts", has the table of what varied.
 #
-# //test/qemu:xfstests_1_test_ext4 awaits a whole re-measure: its workload has
-# changed since 26.17 (now about 2,100 reads, not 18,000), so its lines are
-# stale as a set, and its reads and writes are still the completed counts.
-# Nine runs in 26.34 issued at most 2,130 reads and 19,595 writes, which these
-# lines cover.
+# //test/qemu:xfstests_1_test_ext4 has only read-side lines (step 26.37): its
+# shard runs generic/364, which loops direct writes and fsyncs for 10 s, so what
+# it issues is a rate of the host. The shard's writes were 13,644 to 13,965 at
+# a load average of 36 (3 runs, 85% host CPU pressure, 853 to 1,060 of them
+# generic/364's) and 57,097 on CI's quiet runner (45,012 of them), with the
+# same code; flushes 1,787 to 1,971 and 15,620; the daemon's writes 2,392 to
+# 2,514 and 14,896; the sectors written 4.46 to 4.55 million. No line for a
+# count that moves with the host's speed can hold on both, so writes,
+# sectors_written, flushes, dcfs_writes and dcfs_write_bytes have none; the
+# reads do not move (below).
 
 
 # //dcfs:backing_test (15 runs; reads and writes: 20 runs)
@@ -164,13 +169,9 @@
 //test/qemu:fault_ace_mixed_test_ext4 dcfs_read_bytes 17993728   # observed 17969152..17981440
 //test/qemu:fault_ace_mixed_test_ext4 dcfs_write_bytes 15790080   # observed 15732736..15761408
 
-# //test/qemu:xfstests_1_test_ext4 (3 runs)
-//test/qemu:xfstests_1_test_ext4 reads 18105   # observed 18051..18078
-//test/qemu:xfstests_1_test_ext4 writes 21437   # observed 19577..20507
-//test/qemu:xfstests_1_test_ext4 sectors_read 1286513   # observed 1256849..1271681
-//test/qemu:xfstests_1_test_ext4 sectors_written 4665040   # observed 4519600..4592320
-//test/qemu:xfstests_1_test_ext4 flushes 8950   # observed 8466..8708
-//test/qemu:xfstests_1_test_ext4 dcfs_reads 17609   # observed 17535..17572
-//test/qemu:xfstests_1_test_ext4 dcfs_writes 11906   # observed 11242..11574
-//test/qemu:xfstests_1_test_ext4 dcfs_read_bytes 160780288   # observed 159240192..160010240
-//test/qemu:xfstests_1_test_ext4 dcfs_write_bytes 48300032   # observed 41615360..44957696
+# //test/qemu:xfstests_1_test_ext4 (4 runs: 3 here, loaded, and 1 on CI, quiet;
+# the workload is 123 tests of which 25 run, since 26.30)
+//test/qemu:xfstests_1_test_ext4 reads 2190   # observed 2116..2153
+//test/qemu:xfstests_1_test_ext4 sectors_read 1006126   # observed 952942..979534
+//test/qemu:xfstests_1_test_ext4 dcfs_reads 26   # observed 10..18
+//test/qemu:xfstests_1_test_ext4 dcfs_read_bytes 106496   # observed 40960..73728

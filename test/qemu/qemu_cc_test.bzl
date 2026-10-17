@@ -39,7 +39,7 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//test/qemu:coverage.bzl", "coverage_args", "coverage_data")
 load("//test/qemu:guest_libs.bzl", "GUEST_LIBS_ENV", "GUEST_LIBS_TOOLS")
 load("//test/qemu:modules.bzl", "modules_cpio", "test_modules")
-load("//test/qemu:qemu_test.bzl", "BUDGET_ARGS", "BUDGET_DATA", "QEMU_OVERHEAD_MB", "mem_args_for", "resolve_mem")
+load("//test/qemu:qemu_test.bzl", "BUDGET_ARGS", "BUDGET_DATA", "QEMU_OVERHEAD_MB", "mem_args_for", "resolve_mem", "sanitizer_args")
 
 # Unit guests (step 6.2): the plain tests peak at 35 MiB (MemTotal - MemAvailable
 # at its lowest), the ASan ones at 234 MiB (the sanitizer libraries in the
@@ -201,7 +201,7 @@ def qemu_cc_test(
         ] + coverage_data([":" + bin_name]),
         args = [
             "--unit",
-        ] + qemu_args + BUDGET_ARGS + coverage_args([":" + bin_name]) + mem_args_for(mem, asan_mem) + kernel_args + [
+        ] + qemu_args + BUDGET_ARGS + coverage_args([":" + bin_name]) + mem_args_for(mem, asan_mem) + sanitizer_args() + kernel_args + [
             "$(location :" + initramfs_out + ")",
         ] + disk_args,
         # run-qemu.sh --unit: -smp 1 and the allowance above.

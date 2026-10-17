@@ -1098,3 +1098,68 @@ start, or something?"
 
 Owner: dcfs-implementer, effort medium (the default touches 25.28b's
 bound and its model's Interval; check the model's comment still holds).
+
+## 26.37 CI run 39046531637 (3441f89): the asan shards and xfstests_1 (2026-10-17)
+
+The first CI run after 12.18b, 26.30 and 26.34 failed in two places.
+
+1. **All three asan shards: 55 guests and `//dcfs:backing_test`.** 55 guests
+   died with `Initramfs unpacking failed: write error` and then `No space left
+   on device` for every file `guest/init` and the scripts wrote. Nothing was
+   full on the runner or in the cache or backing disks: the kernel unpacks the
+   archives into the rootfs, a tmpfs capped at half of the RAM free when it
+   is mounted, `MemTotal` less the compressed archives, which are still in RAM
+   then. At the default `E2E_ASAN_MEM` of 384 that cap is 145,800 kB; the
+   shared asan initramfs and a btrfs modules archive unpacked to about 138,000
+   kB before 12.18b and to 147,400 after (its SibylFS binaries and suite are
+   9.6 MB in every e2e initramfs), and `peak_shmem` stopped at 143,300. Only
+   asan: the e2e initramfs unpacks to 46 MiB plain and 105 MiB under ubsan
+   (both passed in this run) and 134 MiB under asan. 12.18b sized its own
+   guests (asan_mem 1152) and not the others it grew. Reproduced locally:
+   `bazel test --config=asan //test/qemu:rename_test_btrfs` died the same
+   way ("-m 384 MiB is probably too little for the initramfs"). Fix:
+   `E2E_ASAN_MEM` 512 (cap 209,400 kB against 155,700 for the largest modules
+   set), and the rule in test/qemu/README.md, "Guest memory". The unit guests
+   (`qemu_cc_test`, per-test initramfs) are unaffected.
+
+   `//dcfs:backing_test` was another failure: 1.027 s of CPU against a budget of
+   0.509 s with the 100% tolerance, in a run flagged load-starved. The budgets
+   are not held for a sanitizer run (`budget_unheld_reason` reads
+   `dcfs_sanitizer=` from the guest's command line), but `qemu_cc_test` never
+   passed `--cmdline dcfs_sanitizer=...` as `qemu_test` does, so an asan or
+   ubsan unit test was held to the plain build's budget since 26.17, and
+   passes only while the host is fast. `qemu_cc_test` now passes `sanitizer_args()`
+   (one helper for both macros); `//dcfs:sanitizer_cmdline_test` fails
+   (`/proc/cmdline` is `console=ttyS0 ... dcfs_accel=kvm`, no
+   `dcfs_sanitizer`) without it, under asan and ubsan. 26.36's item 1 (not
+   holding CPU budgets on load-starved runs) is still open and is the other
+   half of this test's fragility.
+
+2. **`//test/qemu:xfstests_1_test_ext4`: a budget failure, not a test failure**
+   (25 passed, 98 notrun, 0 failed; the verdict `XFSTESTS PASSED`). `writes`
+   57,097 against 21,437, `flushes` 15,620 against 8,950, `dcfs_writes`
+   14,896 against 11,906. The cause is not 26.34's change of what `writes`
+   means, and no re-measure of the same kind can fix it: the shard runs
+   generic/364, `timeout 10s` of a two-thread direct-write-and-fsync loop, so
+   its requests are the host's rate. Per-test lines in the CI log: 364 alone
+   issued 45,012 of the 57,097 writes and 14,404 of the 15,620 flushes; three
+   local runs at a load average of 36 issued 853 to 1,060 and 402 to 489 of
+   them, and the shard 13,644 to 13,965 writes in all. 26.34 measured nine runs
+   at 19,595 at most, and nothing about the budget was wrong for that host.
+   The write-side lines (`writes`, `sectors_written`, `flushes`,
+   `dcfs_writes`, `dcfs_write_bytes`) are dropped for this target with the
+   evidence in `io_budgets.txt` and the README; the read side (`reads`,
+   `sectors_read`, `dcfs_reads`, `dcfs_read_bytes`) was measured again over
+   all four runs (3 local, 1 CI), 2,116 to 2,153 reads on both hosts, as the
+   highest count plus the spread seen. The CPU line was left (17.1 to 19.2 s
+   here under load, 8.3 s on CI, against 20.8 s with its tolerance); a
+   re-measure takes a quiet host. `run_qemu_cost_test` holds both hosts'
+   COST lines to the checked-in budgets and failed on CI's with the three
+   messages of the log. 037 (a free-running setter loop against 1,000 reads)
+   is the same in kind and belongs in 26.36's audit, with every other
+   xfstests test that counts a duration.
+
+   For russ: dropping the write-side lines leaves xfstests with no check of
+   what it writes. If it should have one, the timed tests have to leave the
+   shard that carries it (a new shard split, or a `xfstests.timed` list
+   run apart), which is a change to which tests run where.

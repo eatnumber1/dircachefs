@@ -456,8 +456,8 @@ MEM total=1018448 min_avail=964728 peak_used=54452 peak_cached=... peak_anon=...
 
 (all KiB except `samples` and `up`, seconds of guest uptime at the last sample). `peak_used` is the highest `MemTotal - MemAvailable`: what could
 not be reclaimed. `peak_shmem` is tmpfs (`/tmp`, and the initramfs itself:
-about 22 MiB plain, 84 MiB under ASan, whose runtime libraries are copied
-in); `peak_ramdisks` is what the RAM disks' own tmpfs holds (0 without them)
+about 46 MiB plain, 105 MiB under UBSan and 140 to 149 MiB under ASan, whose
+runtime libraries are copied in; 2026-10-17); `peak_ramdisks` is what the RAM disks' own tmpfs holds (0 without them)
 and `peak_shmem_other` is tmpfs without it, which is what the cap and the
 warning below are about. `dcfs_hwm` is the kernel's own `VmHWM` of the daemon. The same
 `run-qemu.sh` that reads the line prints a summary of it, warns when a guest
@@ -492,6 +492,25 @@ reservation and what a runaway can take, but it also keeps a test honest: a
 guest at 1024 MiB hid that ASan `bench_smoke_test` was having dcfs killed by
 the guest's OOM killer while the test passed.
 
+**The initramfs has a floor of its own (step 26.37).** The kernel unpacks the
+archives into the rootfs, a tmpfs that holds at most half of the RAM free when
+it is mounted: `MemTotal` less the compressed archives, which are still in
+RAM then (the kernel's reservation was 42 MiB at 384 and 44 MiB at 512). So
+`2 x U + G + the reservation` must fit in `-m` before the guest has run a
+command, where `U` is the unpacked size of the e2e initramfs and of the test's
+modules archive (and its mkfs and RAM disk archives) and `G` their compressed
+size. A guest short of it says `Initramfs unpacking failed: write error`, then
+`No space left on device` for every file the init script writes, and its
+`peak_shmem` stops just under the cap. Under ASan the e2e initramfs is 134 MiB unpacked and
+55 MiB compressed (the checking build's 136 and 56) and the modules archives
+add 0.6 to 16.3 MiB (xfs, btrfs and ext4 together) unpacked; at 384 the cap
+was 145,800 kB and the btrfs variant of a small test needed 147,400, so every
+default-sized ASan guest failed (CI run 39046531637: 55 guests in the three
+shards; the SibylFS binaries and suite of step 12.18b had taken that variant
+from 138,000 kB to 147,400). At 512 the cap is 209,400 kB against 155,700 for
+the largest set. Raise `E2E_ASAN_MEM` (`qemu_test.bzl`), not one
+test's `asan_mem`, when the shared initramfs grows again: all of them share it.
+
 Measured peaks (`peak_used`, MiB; KVM, 2026-10-07; ranges are across the
 ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 `--config=asan`/`ubsan`, in `test/qemu/qemu_test.bzl`, `qemu_cc_test.bzl` and
@@ -500,7 +519,7 @@ ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 | Test | peak plain | peak ASan | `mem` | `asan_mem` |
 |---|---|---|---|---|
 | unit tests (`qemu_cc_test`) | 22-35 | 52-612 (`dir_cache_fs_test` 612 under ASan, 383 without ReaddirWorkTest, `metadata_cache_test` 224, `backing_test` 187, the rest under 125) | 192 | 384 (`dir_cache_fs_test` 960) |
-| boot, cache_permissions, lifecycle, atime, removed, copy, boundary, credentials, create, crash, handles, power, readonly, rename, setattr, release_leak, nfs, passthrough (60-102 plain) | 52-102 | 145-190 (nfs 169) | 256 | 384 |
+| boot, cache_permissions, lifecycle, atime, removed, copy, boundary, credentials, create, crash, handles, power, readonly, rename, setattr, release_leak, nfs, passthrough (60-102 plain) | 52-102 | 179-224 (145-190 before the SibylFS files of step 12.18b, 2026-10-17; nfs 221) | 256 | 512 (384 before step 26.37: see the initramfs floor above) |
 | names, names_random, readdir_boundary, idle_short, idle_long, pjdfstest (3 shards) | 57-75 | 433-570 | 256 | 832 |
 | xfstests (6 shards per file system; step 17.1, 122-123 tests each; `holetest` and `fsx` in shards 3 and 5 hold 460-520 MiB of anonymous memory) | 716-739 at 1024 (min available 231 MiB, no OOM kill; the guest's MemTotal is 971 MiB; at 512 the OOM killer took `holetest`, at 768 min available fell to 33 MiB); `reclaim_scans` is nonzero in shards 3, 5 and 6 (xfstests drops the caches itself and the tests write more than the guest holds), which does not matter here: no check counts held inodes or FORGETs | not run (incompatible with `--config=asan` and `--config=ubsan`) | 1024 | - |
 | enospc_backing (step 11.4c; ASan measured at 1536, 2026-10-08) | 72-90 | 286-314 ext4/xfs, 486 btrfs (`reclaim_scans=0`; 384 ran out on btrfs in CI) | 256 | 832 |
@@ -516,7 +535,7 @@ ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 | bench_readdir | 157 | 1432-1509 | 320 | 2304 |
 | bench_full | 569 | 2697 at 4096 (`reclaim_scans=0`; 3072 was killed by the OOM killer in CI; `dcfs_hwm` 625, five daemons at 410-625 each, see `BUILD.bazel`) | 896 | 4352 |
 
-What fills the memory, in the plain guests: the initramfs (22 MiB of
+What fills the memory, in the plain guests: the initramfs (46 MiB of
 tmpfs, always), the kernel (about 30 MiB at 1024), the page cache of the
 scratch disks (a 320 MiB disk written once adds 25-90 MiB; `write_test`'s
 `dd`s 150 MiB), and dcfs itself, which is small (8-11 MiB of `VmHWM`, 16 for
@@ -525,8 +544,8 @@ slab growing to 140-430 MiB for 100,000 entries, mostly the kernel's dentry
 and inode caches for the FUSE and backing trees, reclaimable). sqlite,
 pjdfstest and the Debian chroot for `nfs_test` add nothing visible (the
 chroot's rootfs is a disk, `nfs_test` peaks at 67 MiB). Under ASan, what
-grows is the initramfs (+62 MiB for the runtime and its shared-library
-closure) and dcfs (and the benchmark binary, and each test binary), by a
+grows is the initramfs (+88 MiB for the runtime and its shared-library
+closure, and the sanitizer-built helpers) and dcfs (and the benchmark binary, and each test binary), by a
 factor of 40 or more in resident set: 400-620 MiB per daemon once it holds
 tens of thousands of objects.
 
@@ -704,6 +723,7 @@ gate is disabled.
 | banned symbols in `//dcfs:main_static` (26.8; the crash symbols since 25.9b) | `//tools:banned_symbols_self_check_test` (the real checker and deny list over a program that calls `realpath`; an allow line's `via` silences only the functions it names, and never a reference from data) |
 | the ASan build reports and dies (C++ runtime linked, 7.1) | `//dcfs:asan_runtime_test` (only under `--config=asan`: alloc-dealloc-mismatch must kill the process) |
 | the UBSan build reports and dies (7.4) | `//dcfs:ubsan_runtime_test` (only under `--config=ubsan`: a signed overflow, a misaligned load and a vptr misuse must each kill the process; the vptr one failed to die until `-fsanitize=vptr` was named) |
+| a sanitizer build's guest says so on its command line, which leaves the run out of the budgets (26.37: unit tests did not, and `backing_test` was held to the plain build's CPU budget under ASan) | `//dcfs:sanitizer_cmdline_test` (only under `--config=asan` and `--config=ubsan`: `/proc/cmdline` has the `dcfs_sanitizer=` word of the sanitizer the binary was built with) |
 | the fault-injection harness injects (11.1) | `//test/qemu:fault_selftest_test` (each mode of `guest/fault_lib.sh` on a filesystem over the wrapped disk; with `fault_table` answering `healthy` for every mode, 6 of its checks and the checks of all three failure tests below fail) |
 | a power cut's first boot has a verdict (11.2) | `//test/qemu:run_qemu_verdict_test` (fake QEMUs: no marker, the marker only inside another line, a failed check, an oops on the console, a `KERNEL-OOPS:` or `MEM-OOM:` line (the guest prints the kernel log's failures and OOM-killer lines itself before the marker, from `guest/lib.sh`, whose patterns the test checks are `guest/init`'s), an invariant violation, a QEMU that ended on its own: each fails; QEMU must die of our SIGKILL, status 137) |
 | the kill-mode cut keeps what was synced and loses the rest (11.2) | `//test/qemu:fault_power_kill_test_ext4` and its xfs and btrfs variants (the `before` scenario: a file synced before the cut must survive it and a file written after must not) |
@@ -1363,8 +1383,38 @@ merged reads (field 2) and writes (field 6) to the completed ones (fields 1 and
 (14 to 20 runs each) as the highest count plus the spread seen. What still
 moves is real: the cache database's writes (`fault_cache_test_ext4`, 254 to 297
 requests issued) follow sqlite's checkpoints, and the lines for them keep their
-slack. `xfstests_1_test_ext4` awaits a whole re-measure (its workload has
-changed since 26.17): its lines are as they were.
+slack.
+
+**A shard that includes a duration has no write-side lines (26.37).**
+`xfstests_1_test_ext4` runs generic/364, a program that writes directly and
+fsyncs in two threads for `timeout 10s`: what it issues is the host's rate
+for ten seconds, not work. Its shard issued 853 to 1,060 writes and 402 to 489
+flushes in that test at a load average of 36 (3 runs, 85% host CPU pressure)
+and 45,012 and 14,404 on CI's quiet runner (run 39046531637), so the shard's
+totals, the same code, were:
+
+| | 3 loaded runs | CI, quiet |
+|---|---|---|
+| `writes` | 13,644 to 13,965 | 57,097 |
+| `flushes` | 1,787 to 1,971 | 15,620 |
+| `dcfs_writes` | 2,392 to 2,514 | 14,896 |
+| `dcfs_write_bytes` | 19.1 million | 24.8 million |
+| `sectors_written` | 4.46 to 4.48 million | 4.55 million |
+| `reads` | 2,116 to 2,121 | 2,153 |
+| `sectors_read` | 952,942 to 971,406 (979,534) | 963,214 |
+| `dcfs_reads` | 10 to 18 | 18 |
+
+(its 037 is the same in kind: a loop that sets an attribute while the test
+reads it 1,000 times). The old lines, measured before 26.30 changed the
+workload (18,105 reads, now about 2,100), failed the CI run on `writes`,
+`flushes` and `dcfs_writes`. The five write-side counts have no line, because
+no number holds on a host of any speed; the four read-side ones (generic/364
+reads 4 or 5 times) were measured again as the highest count plus the spread
+seen over these four runs. `run_qemu_cost_test` holds both hosts' COST lines to
+the checked-in budgets. The CPU line (20,809 ms with the 100% tolerance) was
+not re-measured: it takes a quiet host, and the shard used 17.1 to 19.2 s here
+under pressure and 8.3 s on CI. The audit of step 26.36 is where the other
+tests of this kind belong.
 
 ### Wall time: the hang guard
 
@@ -1402,7 +1452,7 @@ the measured tests, against the guest's allowance with their current timeouts:
 | `//test/qemu:fault_ace_mixed_test_ext4` | 172 s | long (840 s) |
 | `//test/qemu:fault_ace_b_test` | 388 s | long (840 s) |
 | `//test/qemu:fault_ace_a_test` | 760 s | eternal (3540 s) |
-| `//test/qemu:xfstests_1_test_ext4` | 900 s | eternal (3540 s) |
+| `//test/qemu:xfstests_1_test_ext4` | 138 s (900 s before its write-side lines went) | eternal (3540 s) |
 
 None is refused; none was changed. `fault_ace_a_test` takes 35 s and waits an
 hour to call a hang, which `long` (840 s) would still cover with 150 s to spare;

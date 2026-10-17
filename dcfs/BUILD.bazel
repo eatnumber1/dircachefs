@@ -1900,6 +1900,29 @@ qemu_cc_test(
     deps = ["@googletest//:gtest_main"],
 )
 
+# A sanitizer build's guest says so on its command line, which is how
+# run-qemu.sh leaves the run out of the CPU budgets (step 26.37: a unit test
+# without the word was held to a plain build's budget). Only under
+# --config=asan and --config=ubsan.
+qemu_cc_test(
+    name = "sanitizer_cmdline_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["sanitizer_cmdline_test.cc"],
+    target_compatible_with = select({
+        "//test/qemu:asan_build": [],
+        "//test/qemu:ubsan_build": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//dcfs/testonly:assert_ok_and_assign",
+        "//dcfs/testonly:files",
+        "@absl//absl/algorithm:container",
+        "@absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # The direct dependents of //dcfs:syscalls_backing, for
 # //tools:syscalls_backing_users_test (step 26.7): which targets may reach the
 # backing filesystem through syscalls is a golden list
