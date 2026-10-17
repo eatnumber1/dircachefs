@@ -3540,6 +3540,28 @@ TEST_F(ClockTest, FailedCheckpointIsLoggedAndLeftToTheNextSyncPoint) {
       << "the next sync point checkpoints what the failed one left";
 }
 
+// A FORGET or BATCH_FORGET that starts the periodic sync point (they have no
+// reply) finishes it too: the checkpoint runs after the handler, not at the
+// next request.
+TEST_F(ClockTest, ForgetsFinishTheSyncPointTheyStart) {
+  WriteFile(Path("f"));
+  WriteFile(Path("g"));
+  Start(absl::StrCat(source_, "_wal.sqlite"));
+  auto [lf, ef] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lf.error, 0);
+  auto [lg, eg] = Lookup(kRootInode, "g");
+  ASSERT_EQ(lg.error, 0);
+  ASSERT_EQ(Mkdir(kRootInode, "d").first.error, 0);
+  counter_.Reset();
+  clock_.AdvanceTime(absl::Seconds(5));
+  Forget(static_cast<InodeId>(ef.nodeid), 1);
+  EXPECT_EQ(counter_.counts().wal_checkpoints, 1) << "FORGET";
+  ASSERT_EQ(Mkdir(kRootInode, "e").first.error, 0);
+  clock_.AdvanceTime(absl::Seconds(5));
+  BatchForget({{static_cast<InodeId>(eg.nodeid), 1}});
+  EXPECT_EQ(counter_.counts().wal_checkpoints, 2) << "BATCH_FORGET";
+}
+
 // A writable open refused for the backing file's flag says which flag, in
 // the failure the request's log shows at -v=2 (the errno alone is replied).
 TEST_F(DirCacheFSTest, RefusedWritableOpenNamesTheBackingFlag) {
