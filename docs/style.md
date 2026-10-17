@@ -995,15 +995,17 @@ the obvious what or how." Apply the core principles:
     first row and does not step a second time to check for the end: a step per
     lookup is what the budget counts (test/qemu/guest/syscall_budgets.txt), and
     a lookup whose result cannot have more rows does not need it.
+  - *Concurrency & memory-ordering protocols*: dcfs is single-threaded today
+    (docs/design.md). When threads or coroutines arrive, a non-obvious memory
+    order or lock-ordering protocol gets its comment here, naming the other
+    side of the pairing.
   - *Subtle kernel / hardware caveats*: Traps, signal safety, or platform
     behaviors. `setfsuid(2)` reports no failure and returns the previous fsuid,
     so `fsuid()` passes -1 (which changes nothing) and reads the value back
-    (dcfs/syscalls.cc); `setfsuid()` checks that read-back.
+    (dcfs/syscalls.h); `setfsuid()` checks that read-back.
   - *Permanent bug workarounds*: Workarounds for infrastructure defects citing
-    permanent trackers (e.g., a comment that names the in-tree reproducer,
-    `tools/kernel_bugs/ext4_casefold_tune/README.md`, for the ext4 casefold
-    tune oops). Where the defect is a filesystem's behavior
-    with no tracker, say what it does and what dcfs does about it: ext4 casefold
+    permanent trackers. Where the defect is a filesystem's behavior with no
+    tracker, say what it does and what dcfs does about it: ext4 casefold
     (`chattr +F`) makes lookups case-insensitive, so dcfs refuses the
     `FS_IOC_SETFLAGS` that sets it (dcfs/dir_cache_fs.cc, step 23.7).
 - **Ban redundant method-name-echoing docstrings.** Never write a docstring

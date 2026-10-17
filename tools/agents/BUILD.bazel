@@ -30,12 +30,28 @@ py_test(
     deps = [":gemini_watchdog_lib"],
 )
 
-# Prints Claude Code's /usage panel (step 26.29). No py_test: it needs a
-# logged-in `claude` CLI and drives it in a pseudo-terminal, which no test
-# can provide. Run it by hand; see README.md in this directory.
+# Prints Claude Code's /usage panel (step 26.29). The tests cover the screen
+# cleaning and the panel extraction; only the pty driver is untested, since it
+# needs a logged-in `claude` CLI. See README.md in this directory.
+py_library(
+    name = "claude_usage_lib",
+    srcs = ["claude_usage.py"],
+    imports = ["."],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
 py_binary(
     name = "claude_usage",
     srcs = ["claude_usage.py"],
     main = "claude_usage.py",
     target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+py_test(
+    name = "claude_usage_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["claude_usage_test.py"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":claude_usage_lib"],
 )

@@ -50,14 +50,21 @@ Run it from the repository root, with a logged-in `claude` on the `PATH`:
 timeout 90 python3 -I tools/agents/claude_usage.py
 ```
 
+`--cwd DIR` picks the checkout claude runs in (default: the current
+directory). That checkout must already be one claude trusts, so that no trust
+dialog appears.
+
 - It prints the panel's lines, one per line, with runs of spaces collapsed.
 - The figures are approximate: they count this machine's local sessions only,
   not the account's usage elsewhere.
 - It exits 1 with `usage panel not found` when the panel does not appear within
-  its own 60 s deadline, and it kills `claude` before exiting. The `timeout 90`
-  is the outer bound.
-- It has no test and no Bazel test target: it needs a logged-in CLI. The
-  `py_binary` target `//tools/agents:claude_usage` runs it through Bazel too.
+  its own 60 s deadline. It kills `claude` before exiting; `timeout 90` is the
+  outer bound.
+- The screen cleaning and the panel extraction are tested
+  (`//tools/agents:claude_usage_test`, on a synthetic capture). The pty driver
+  is not: it needs a logged-in CLI. The `py_binary` target
+  `//tools/agents:claude_usage` runs the tool through Bazel too.
 
 Its waits are bounded deadlines, as `docs/style.md` 1.11 allows: the pty has no
-event for "the panel has drawn" or "the prompt is up", so it polls.
+event for "the panel has drawn" or "the prompt is up", so it polls until a
+deadline.
