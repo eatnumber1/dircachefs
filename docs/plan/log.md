@@ -3599,3 +3599,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   slot), 14.10's Opus review on Claude (identity work stays on Claude),
   12.18b's review on Gemini 4 Argon medium (test infrastructure, sandboxed,
   lane-3). The Flash scoring still waits for agy's Claude pool.
+
+- 2026-10-17: 26.30 merged (two commits; one style round): the xfstests
+  guests mount the backing devices natively and serve a directory of each,
+  with mount/umount wrappers for xfstests' assumptions (all 18 shards pass
+  locally; raw-device tests not run through dcfs, per russ); coverage tests
+  for the backing and process wrappers' plain failures and the option
+  errors raise the baseline to 96.95 lines / 82.90 branches (from
+  96.50 / 81.24). The mutation-changed failure was the force-push's missing
+  base, no fix needed. main should now pass CI; russ may push.
