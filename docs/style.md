@@ -1270,9 +1270,11 @@ necessary, but if you think one is necessary, come to me."
   one.** russ, 2026-10-17: "When there's ambiguity, you should be choosing
   the most _useful_ result." A readdir interrupted after it has built
   some entries replies them as a short listing (a valid getdents result;
-  the next call continues) rather than EINTR, which would discard them; a
-  read interrupted after some bytes returns them. The same test applies to
-  any choice the backing's contract leaves open.
+  the next call continues) rather than EINTR, which would discard them. (A
+  short batch is not the "partial answer" ruled out above: getdents
+  returns listings in batches, and the listing across calls stays one
+  snapshot.) A read interrupted after some bytes returns them. The same
+  test applies to any choice the backing's contract leaves open.
 - **Not retry loops:** restarting a syscall the kernel asked to restart
   (`EINTR` when the caller has not cancelled: `umount_helper.cc`'s blocking
   lock); the kernel's own revalidation retry of a failed open; an
