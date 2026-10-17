@@ -273,8 +273,10 @@ russ is on Google AI Pro: the Antigravity quota is part of a paid
 subscription, so the aim is to spend all of it before each weekly reset,
 responsibly. Facts (local `agy -p "/usage"`, and Google's developer forum;
 Google publishes no per-model numbers):
-- Pools are separate: the general Gemini pool (weekly and five-hour),
-  Gemini 4 Argon's own weekly limit, and a Claude-and-GPT pool. One Argon
+- Pools: the general Gemini pool (weekly and five-hour), Gemini 4 Argon's
+  weekly limit, and a Claude-and-GPT pool. Argon's limit may be on top of
+  the general pool, not instead of it (russ, 2026-10-16): an Argon job
+  spends from both, so watch both and stop at whichever is lower. One Argon
   review took about 9% of Argon's week and 2% of the general pool.
 - The Claude-and-GPT pool on Pro is a small baseline, drains much faster,
   and forum reports describe multi-day lockouts once it is empty; it was
