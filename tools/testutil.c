@@ -233,6 +233,9 @@
  *       FS_IOC_FSGETXATTR: prints "xflags=<hex> extsize=<n> projid=<n>".
  *   testutil getversion <path>
  *       FS_IOC_GETVERSION: prints the inode generation.
+ *   testutil fsuuid <path>
+ *       FS_IOC_GETFSUUID: prints the filesystem UUID as "<len> <hex>"
+ *       (what dcfs identifies a backing by; step 14.10's NFS facts).
  *   testutil ioctl-unknown <path>
  *       An ioctl dcfs does not forward (FS_IOC_GETFSLABEL on a file):
  *       prints its outcome.
@@ -1463,6 +1466,22 @@ static int cmd_getversion(const char *path) {
     return 1;
   }
   printf("%lu\n", (unsigned long)(uint32_t)gen);
+  return 0;
+}
+
+static int cmd_fsuuid(const char *path) {
+  struct fsuuid2 u;
+  int fd = open(path, O_RDONLY | O_NONBLOCK);
+
+  memset(&u, 0, sizeof(u));
+  if (fd == -1 || ioctl(fd, FS_IOC_GETFSUUID, &u) == -1) {
+    print_err(errno);
+    return 1;
+  }
+  printf("%u ", (unsigned)u.len);
+  for (unsigned i = 0; i < u.len && i < sizeof(u.uuid); i++)
+    printf("%02x", u.uuid[i]);
+  printf("\n");
   return 0;
 }
 
@@ -2905,6 +2924,7 @@ int main(int argc, char *argv[]) {
   if (argc == 3 && strcmp(argv[1], "fsxattr") == 0) return cmd_fsxattr(argv[2]);
   if (argc == 3 && strcmp(argv[1], "getversion") == 0)
     return cmd_getversion(argv[2]);
+  if (argc == 3 && strcmp(argv[1], "fsuuid") == 0) return cmd_fsuuid(argv[2]);
   if (argc == 3 && strcmp(argv[1], "ioctl-unknown") == 0)
     return cmd_ioctl_unknown(argv[2]);
   if (argc == 5 && strcmp(argv[1], "tmpfile") == 0)

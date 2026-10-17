@@ -904,6 +904,26 @@ qemu_test(
     timeout = "long",
 )
 
+# Step 14.10: what an NFS client mount offers as a dcfs backing (identity,
+# handles, generations, a server restart, an export moved or given another
+# fsid), measured on the guest's kernel against its own knfsd; no dcfs runs.
+# docs/design.md ("Backings without a filesystem UUID") rests on these facts.
+qemu_test(
+    name = "nfs_backing_test",
+    disks = [
+        ("vdb", "ext4", "64M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/nfs_backing.sh",
+    modules = [
+        "nfsd",
+        "nfsv4",
+    ],
+    rootfs = "//third_party/debian:rootfs",
+    size = "large",
+    timeout = "moderate",
+)
+
 # pjdfstest (step 4.5): POSIX conformance, ~8800 checks
 # (github.com/pjd/pjdfstest) run twice -- through the dcfs mount and
 # directly against the backing filesystem -- and diffed; see
