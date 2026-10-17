@@ -3819,3 +3819,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   decided by the reviewer, not put to russ. Edited by the orchestrator
   directly (a one-paragraph correction of its own wrong text; every lane
   was busy).
+- 2026-10-17, russ on the re-asked questions: 9 (the wall hang guard
+  charging issued requests) "Keep it until we replace with
+  non-load-sensitive tests"; 10 (a target's budget lines re-measured
+  together or not at all) "Agreed". Both passed to 26.36 (audit class (a);
+  the sentence into docs/style.md section 2 and test/qemu/README.md). On
+  "everything in C++": "I'm on the fence. So I'll let your recommendation
+  stand for now. Python can stay in host tooling."
