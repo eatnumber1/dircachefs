@@ -621,7 +621,8 @@ IDENT = [
 # The identity model (README.md, "The identity model"): today's identity,
 # with changes behind dcfs's back, with a power loss and the weakest
 # supported evidence, with the birth time as the only evidence, with
-# boundary stubs, and Phase 14's identity.
+# boundary stubs, and Phase 14's identity; step 14.10's network backing
+# (a swapped backing, a server outage), today's and Phase 14's.
 [
     tlc_test(
         name = "ident%s_test" % suffix,
@@ -639,6 +640,8 @@ IDENT = [
         "_btime",
         "_stubs",
         "_target",
+        "_net",
+        "_target_net",
     ]
 ]
 
@@ -656,6 +659,10 @@ IDENT_KNOWN_BUGS = {
     "ident_stub_generation_reused": "Invariant OneHandleOneObject is violated",
     # Row ids as MAX(id) + 1, not AUTOINCREMENT.
     "ident_rowid_from_max": "Invariant NoBadInode is violated",
+    # Step 14.10: a start that does not compare the backing's identity.
+    "ident_net_no_source_check": "Invariant HandlesResolveToTheirObject is violated",
+    # Step 14.10: a row forgotten on an error during a server outage.
+    "ident_net_forget_on_error": "Invariant ServedWhileLive is violated",
 }
 
 [
@@ -678,6 +685,11 @@ IDENT_LIMITATIONS = {
     "ident_no_generations": "Invariant ReuseDetected is violated",
     "ident_target_out_of_band": "Invariant NoBadInode is violated",
     "ident_target_uncached_nodeid": "Invariant HeldResolvesToItsObject is violated",
+    # Step 14.10's network backing: what the administrator guarantees.
+    "ident_net_same_identity": "Invariant HandlesResolveToTheirObject is violated",
+    "ident_net_swap_while_running": "Invariant HeldResolvesToItsObject is violated",
+    "ident_net_volatile_handles": "Invariant ServedWhileLive is violated",
+    "ident_target_net_wipe": "Invariant ServedWhileLive is violated",
 }
 
 [

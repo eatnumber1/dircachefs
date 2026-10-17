@@ -37,6 +37,15 @@
 (* without a row opens the inode by number (any generation) and replies   *)
 (* with the generation it finds, which the kernel compares.               *)
 (*                                                                         *)
+(* A network backing (step 14.10; docs/design.md "Backings without a      *)
+(* filesystem UUID"): the backing may be replaced by another whose        *)
+(* objects present byte-identical handles (Swap), which the start's       *)
+(* identity check refuses (StartRefused: the administrator deletes the    *)
+(* database); the server may be out (ServerDown, ServerUp: requests reach *)
+(* nothing, EIO, and no row goes for it) and may come back with new       *)
+(* handles (VolatileHandles); under Phase 14 an NFS client cannot open a  *)
+(* nodeid without a row by its number (OpenByIno = FALSE).                *)
+(*                                                                         *)
 (* Invariants (the PROPERTIES section): no two references the kernel or   *)
 (* an NFS client holds with one (nodeid, generation) stand for different  *)
 (* objects (OneHandleOneObject); a nodeid the kernel holds, and a handle  *)
@@ -95,16 +104,35 @@ CONSTANTS
     OutOfBand,     \* the backing directory changes behind dcfs's back
     ProbeByName,   \* a probe's reads each resolve the name (not the code)
     ProbeOrder,    \* ... "handle_first" (the code's order) or "gen_first"
+    \* Network backings (step 14.10; docs/design.md "Backings without a
+    \* filesystem UUID"):
+    SwapBName,     \* the directory of another backing that may replace
+                   \* this one (Swap), or None at every name
+    SameIdentity,  \* ... which presents the same identity (name and root)
+    MaxSwaps,      \* bound on swaps
+    SwapWhileUp,   \* a swap may come while dcfs runs, not only between runs
+    MaxOutages,    \* bound on server outages (ServerDown, then ServerUp)
+    VolatileHandles, \* the server hands out new handles after an outage
+    OpenByIno,     \* Phase 14: a nodeid without a row can be opened by its
+                   \* number (ext4, xfs, btrfs; not an NFS client)
     \* Bugs, each put back by one constant (known_bugs/ident_*):
     BugSkipVerify,     \* no identity statx after open_by_handle_at
     BugGenFromId,      \* a row's generation follows from its id (a counter)
     BugStubGenFixed,   \* a stub's generation is not drawn afresh
-    BugRowIdFromMax    \* a row's id is MAX(id) + 1, not AUTOINCREMENT
+    BugRowIdFromMax,   \* a row's id is MAX(id) + 1, not AUTOINCREMENT
+    BugNoSourceCheck,  \* the start does not compare the backing's identity
+    BugForgetOnError   \* a row goes on any error from the backing, not only
+                       \* on an ESTALE the parent check confirms
 
 None == "none"
 Estale == "estale"
+\* A request reaching the backing during a server outage fails (soft mount)
+\* or waits until it ends (hard mount); either way it reaches no object.
+Eio == "eio"
 
 Files == Objs \ Boundaries
+\* The objects only the other backing has (Swap brings them).
+SwapObjs == {SwapBName[n] : n \in Names} \ {None}
 RowIds == 1..MaxRowId
 Inos == {InoOf[o] : o \in Files}
 \* The nodeids of files and directories: row ids, or (Phase 14) inode numbers.
@@ -123,16 +151,19 @@ Min(S) == CHOOSE x \in S : \A y \in S : x <= y
 HGen(o) == IF "handle_gen" \in Evidence THEN GenOf[o] ELSE 0
 VGen(o) == IF "getversion" \in Evidence THEN GenOf[o] ELSE 0
 Btime(o) == IF "btime" \in Evidence THEN GenOf[o] ELSE 0
-IdentOf(o) == [ino |-> InoOf[o], hino |-> InoOf[o], hgen |-> HGen(o),
-               gen |-> VGen(o), bt |-> Btime(o)]
+\* IdentOf(o), after the variables: also the handle's epoch (hep), which
+\* changes the bytes of every handle when a server with volatile handles
+\* comes back (ServerUp).
 
 \* A row (inodes, or stubs): `obj` is the object it was made for (or, for a
 \* stub, its name: a stub stands for the refused name), checking only.
 NoRow == [ex |-> FALSE, stub |-> FALSE, obj |-> None, ino |-> 0, hino |-> 0,
-          hgen |-> 0, gen |-> 0, bt |-> 0, fgen |-> 0, name |-> None]
+          hgen |-> 0, hep |-> 0, gen |-> 0, bt |-> 0, fgen |-> 0,
+          name |-> None]
 FileRow(x, i, g) ==
     [ex |-> TRUE, stub |-> FALSE, obj |-> x, ino |-> i.ino, hino |-> i.hino,
-     hgen |-> i.hgen, gen |-> i.gen, bt |-> i.bt, fgen |-> g, name |-> None]
+     hgen |-> i.hgen, hep |-> i.hep, gen |-> i.gen, bt |-> i.bt, fgen |-> g,
+     name |-> None]
 StubRow(n, g) == [NoRow EXCEPT !.ex = TRUE, !.stub = TRUE, !.obj = n,
                                !.fgen = g, !.name = n]
 
@@ -153,7 +184,7 @@ SameObject(row, i) ==
 \* birth times agree.
 UpsertMatch(row, i) ==
     /\ row.ino = i.ino /\ Agree(row.gen, i.gen)
-    /\ row.hino = i.hino /\ row.hgen = i.hgen
+    /\ row.hino = i.hino /\ row.hgen = i.hgen /\ row.hep = i.hep
     /\ Agree(row.bt, i.bt)
 
 -----------------------------------------------------------------------------
@@ -174,21 +205,32 @@ VARIABLES
     run,       \* "up", or "down" (stopped, crashed)
     clean,     \* the last run shut down cleanly (the clean-shutdown flag)
     crashes, powers, wipes,  \* counts, for the bounds
-    badMade    \* dcfs made the kernel mark an inode bad (history)
+    badMade,   \* dcfs made the kernel mark an inode bad (history)
+    \* Network backings:
+    sid,       \* the identity the backing presents (1, or 2 after a swap
+               \* to a backing with another one)
+    dbSid,     \* the identity the database recorded when it was created
+    srv,       \* the server: "up", or "down" (an outage)
+    hep,       \* the epoch of the server's handles (VolatileHandles)
+    swaps, outages  \* counts, for the bounds
 
 dbVars == <<rows, nextId, stubHigh, dirty>>
 countVars == <<crashes, powers, wipes>>
+netVars == <<sid, dbSid, srv, hep, swaps, outages>>
 vars == <<bName, bState, rows, nextId, stubHigh, dirty, dur, rec, kin, nfs,
-          mints, probe, run, clean, countVars, badMade>>
+          mints, probe, run, clean, countVars, badMade, netVars>>
+
+IdentOf(o) == [ino |-> InoOf[o], hino |-> InoOf[o], hgen |-> HGen(o),
+               hep |-> hep, gen |-> VGen(o), bt |-> Btime(o)]
 
 NoProbe == [n |-> None, st |-> None, ino |-> 0, bt |-> 0, hino |-> 0,
-            hgen |-> 0, gen |-> 0, step |-> 0]
+            hgen |-> 0, hep |-> 0, gen |-> 0, step |-> 0]
 
 Durable == [rows |-> rows, nextId |-> nextId, stubHigh |-> stubHigh,
             dirty |-> dirty]
 
 RowType == [ex : BOOLEAN, stub : BOOLEAN, obj : Objs \cup Names \cup {None},
-            ino : Nat, hino : Nat, hgen : Nat, gen : Nat, bt : Nat,
+            ino : Nat, hino : Nat, hgen : Nat, hep : Nat, gen : Nat, bt : Nat,
             fgen : Nat, name : Names \cup {None}]
 
 TypeOK ==
@@ -204,8 +246,13 @@ TypeOK ==
     /\ mints \in 0..MaxMints
     /\ run \in {"up", "down"} /\ clean \in BOOLEAN
     /\ badMade \in BOOLEAN
+    /\ sid \in {1, 2} /\ dbSid \in {0, 1, 2}
+    /\ srv \in {"up", "down"} /\ hep \in Nat
+    /\ swaps \in 0..MaxSwaps /\ outages \in 0..MaxOutages
 
 Up == run = "up"
+\* The server answers (no outage).
+Answering == srv = "up"
 Idle == probe = NoProbe
 \* The durable copy is kept only while a power loss can still come (it
 \* changes nothing else, and freezing it keeps the state space small).
@@ -218,38 +265,45 @@ Track == powers < MaxPowerLosses
 \* number, unless the handle's generation (if it carries one) differs.
 Decode(row) ==
     LET c == {x \in Files : bState[x] = "alive" /\ InoOf[x] = row.hino
-                            /\ (row.hgen = 0 \/ row.hgen = HGen(x))}
+                            /\ (row.hgen = 0 \/ row.hgen = HGen(x))
+                            /\ row.hep = hep}
     IN IF c = {} THEN None ELSE CHOOSE x \in c : TRUE
 
 \* Phase 14: the live file with inode number i (opened by number, any
-\* generation).
+\* generation), where the backing can open by number (OpenByIno).
 ByIno(i) ==
     LET c == {x \in Files : bState[x] = "alive" /\ InoOf[x] = i}
-    IN IF c = {} THEN None ELSE CHOOSE x \in c : TRUE
+    IN IF c = {} \/ ~OpenByIno THEN None ELSE CHOOSE x \in c : TRUE
 
 \* What a request on nodeid r that reaches the backing filesystem resolves
 \* to (OpenNode: open_by_handle_at, then VerifyBackingIdentity): the removed
 \* record's object, the row's object if its handle reaches one that
-\* matches the row, a stub's name (answered from its row), or ESTALE.
-\* Phase 14, without a row: the inode found by number (its plan: "any
-\* request for an uncached nodeid resolves through 14.2").
+\* matches the row, a stub's name (answered from its row), or ESTALE; EIO
+\* while the server is out (nothing reached). Phase 14, without a row: the
+\* inode found by number (its plan: "any request for an uncached nodeid
+\* resolves through 14.2").
 Resolve(r) ==
     IF r \in Ids /\ rec[r] # None THEN rec[r]
-    ELSE IF ~rows[r].ex
-         THEN IF Target /\ r \in Inos /\ ByIno(r) # None THEN ByIno(r)
-              ELSE Estale
-    ELSE IF rows[r].stub THEN rows[r].obj
+    ELSE IF rows[r].ex /\ rows[r].stub THEN rows[r].obj
+    ELSE IF ~rows[r].ex /\ ~(Target /\ OpenByIno /\ r \in Inos) THEN Estale
+    ELSE IF ~Answering THEN Eio
+    ELSE IF ~rows[r].ex THEN IF ByIno(r) # None THEN ByIno(r) ELSE Estale
     ELSE LET x == Decode(rows[r]) IN
          IF x = None THEN Estale
          ELSE IF BugSkipVerify \/ SameObject(rows[r], IdentOf(x)) THEN x
          ELSE Estale
+
+\* What Resolve may answer for a request that reaches no object: ESTALE,
+\* and EIO during an outage.
+NotServed == IF Answering THEN {Estale} ELSE {Estale, Eio}
 
 \* The generation of dcfs's reply to LOOKUP(r, "."), or 0 for ESTALE
 \* (RequireAttr: no row). From the row (EntryFor); Phase 14, without a
 \* row: the generation of the inode found by number.
 DotAnswer(r) ==
     IF rows[r].ex THEN rows[r].fgen
-    ELSE IF Target /\ r \in Inos /\ ByIno(r) # None THEN HGen(ByIno(r))
+    ELSE IF Target /\ r \in Inos /\ Answering /\ ByIno(r) # None
+         THEN HGen(ByIno(r))
     ELSE 0
 
 \* The kernel accepts an NFS handle: it holds a matching inode, or dcfs's
@@ -342,8 +396,10 @@ RowsOf(o) == {r \in FileRowIds(rows) : UpsertMatch(rows[r], IdentOf(o))}
 (* Requests.                                                               *)
 
 \* LOOKUP of n (or a READDIRPLUS entry): the probe, through one descriptor.
+\* Every request that probes or mutates the backing waits out (or fails
+\* during) a server outage: Answering.
 Lookup(n) ==
-    /\ Up /\ Idle /\ ~ProbeByName /\ bName[n] \in Files
+    /\ Up /\ Idle /\ Answering /\ ~ProbeByName /\ bName[n] \in Files
     /\ Record(n, IdentOf(bName[n]), bName[n])
     /\ UNCHANGED <<bName, bState, stubHigh, dirty, dur, rec, nfs, probe, run,
                    clean, countVars>>
@@ -352,7 +408,7 @@ Lookup(n) ==
 \* the name has one, else the next nodeid up from the highest ever handed
 \* out, with a fresh random generation.
 Refuse(n) ==
-    /\ Up /\ Idle /\ bName[n] \in Boundaries
+    /\ Up /\ Idle /\ Answering /\ bName[n] \in Boundaries
     /\ IF StubOf(rows, n) # {}
        THEN LET s == CHOOSE s \in StubOf(rows, n) : TRUE IN
             /\ Reply(s, rows[s].fgen, n)
@@ -370,8 +426,8 @@ Refuse(n) ==
 \* CREATE (MKDIR, ...) of n: a new object, maybe on a recycled inode
 \* number, probed and recorded (RecordNewChild).
 Create(n) ==
-    /\ Up /\ Idle /\ bName[n] = None
-    /\ \E o \in Files :
+    /\ Up /\ Idle /\ Answering /\ bName[n] = None
+    /\ \E o \in Files \ SwapObjs :
          /\ bState[o] = "unborn"
          /\ ~\E x \in Files : bState[x] = "alive" /\ InoOf[x] = InoOf[o]
          /\ bName' = [bName EXCEPT ![n] = o]
@@ -384,7 +440,7 @@ Create(n) ==
 \* record holds the object if the kernel holds its nodeid (HoldForRemoval);
 \* phase 3 deletes the row (the object has no link left).
 Unlink(n) ==
-    /\ Up /\ Idle /\ bName[n] \in Files
+    /\ Up /\ Idle /\ Answering /\ bName[n] \in Files
     /\ LET o == bName[n]
            R == RowsOf(o)
        IN /\ MarkDirty(R)
@@ -398,7 +454,8 @@ Unlink(n) ==
 
 \* RENAME of n to a free name m: the object keeps its row and nodeid.
 Rename(n, m) ==
-    /\ Up /\ Idle /\ n # m /\ bName[n] \in Files /\ bName[m] = None
+    /\ Up /\ Idle /\ Answering /\ n # m /\ bName[n] \in Files
+    /\ bName[m] = None
     /\ MarkDirty(RowsOf(bName[n]))
     /\ bName' = [bName EXCEPT ![m] = bName[n], ![n] = None]
     /\ rows' = WithoutStubOf(rows, m)
@@ -407,11 +464,14 @@ Rename(n, m) ==
 
 \* A request on nodeid r that reaches the backing filesystem (a refresh, an
 \* open, ParentOf) and resolves to ESTALE: the row goes (ForgetStale). A
-\* request that is served changes nothing here.
+\* request that is served changes nothing here, nor does one that fails
+\* during an outage (EIO: StaleOrUnreadable keeps the row), unless
+\* BugForgetOnError.
 Access(r) ==
     /\ Up /\ Idle
     /\ kin[r].held \/ \E h \in nfs : h.id = r
-    /\ rows[r].ex /\ ~rows[r].stub /\ Resolve(r) = Estale
+    /\ rows[r].ex /\ ~rows[r].stub
+    /\ Resolve(r) = Estale \/ (BugForgetOnError /\ Resolve(r) = Eio)
     /\ rows' = [rows EXCEPT ![r] = NoRow]
     /\ UNCHANGED <<bName, bState, nextId, stubHigh, dirty, dur, rec, kin, nfs,
                    mints, probe, run, clean, countVars, badMade>>
@@ -474,7 +534,7 @@ Persist ==
 (* one descriptor (Lookup).                                                *)
 
 ProbeStat(n) ==
-    /\ Up /\ Idle /\ ProbeByName /\ bName[n] \in Files
+    /\ Up /\ Idle /\ Answering /\ ProbeByName /\ bName[n] \in Files
     /\ probe' = [NoProbe EXCEPT !.n = n, !.st = bName[n],
                                 !.ino = InoOf[bName[n]],
                                 !.bt = Btime(bName[n]), !.step = 1]
@@ -482,7 +542,7 @@ ProbeStat(n) ==
                    nfs, mints, run, clean, countVars, badMade>>
 
 ProbeRead ==
-    /\ Up /\ probe.step \in {1, 2}
+    /\ Up /\ Answering /\ probe.step \in {1, 2}
     /\ LET x == bName[probe.n]
            handle == (probe.step = 1) = (ProbeOrder = "handle_first")
            p == IF handle
@@ -497,8 +557,8 @@ ProbeRead ==
                /\ UNCHANGED <<rows, nextId, mints, kin, badMade>>
           ELSE /\ probe' = NoProbe
                /\ Record(probe.n, [ino |-> p.ino, hino |-> p.hino,
-                                   hgen |-> p.hgen, gen |-> p.gen,
-                                   bt |-> p.bt], probe.st)
+                                   hgen |-> p.hgen, hep |-> hep,
+                                   gen |-> p.gen, bt |-> p.bt], probe.st)
     /\ UNCHANGED <<bName, bState, stubHigh, dirty, dur, rec, nfs, run, clean,
                    countVars>>
 
@@ -516,7 +576,7 @@ OobUnlink(n) ==
 \* mounted there: a boundary).
 OobCreate(n) ==
     /\ OutOfBand /\ bName[n] = None
-    /\ \E o \in Objs :
+    /\ \E o \in Objs \ SwapObjs :
          /\ bState[o] = "unborn"
          /\ o \in Files =>
               ~\E x \in Files : bState[x] = "alive" /\ InoOf[x] = InoOf[o]
@@ -577,17 +637,21 @@ Wipe ==
                     stubHigh |-> 0, dirty |-> {}]
               ELSE dur
     /\ clean' = TRUE /\ wipes' = wipes + 1
+    /\ dbSid' = 0
     /\ UNCHANGED <<bName, bState, rec, kin, nfs, mints, probe, run, crashes,
-                   powers, badMade>>
+                   powers, badMade, sid, srv, hep, swaps, outages>>
 
-\* The start (backing::Startup): RecoverDirty empties the dirty set,
-\* StartRun's commit is durable, and after an unclean shutdown every row
-\* that was dirty is probed by handle (ProbeRecoveredRows: OpenNode) and
-\* goes if that resolves to ESTALE (no removed record exists yet, so a live
-\* object is a named one: no nlink-0 case).
+\* The start (backing::Startup): the backing's identity is the one the
+\* database recorded (or a new database records it); RecoverDirty empties
+\* the dirty set, StartRun's commit is durable, and after an unclean
+\* shutdown every row that was dirty is probed by handle
+\* (ProbeRecoveredRows: OpenNode) and goes if that resolves to ESTALE (no
+\* removed record exists yet, so a live object is a named one: no nlink-0
+\* case).
 Start ==
     /\ run = "down"
-    /\ run' = "up" /\ clean' = FALSE
+    /\ BugNoSourceCheck \/ dbSid \in {0, sid}
+    /\ run' = "up" /\ clean' = FALSE /\ dbSid' = sid
     /\ dirty' = {}
     /\ dur' = IF Track THEN [Durable EXCEPT !.dirty = {}] ELSE dur
     /\ rows' = IF clean THEN rows
@@ -596,7 +660,64 @@ Start ==
                           /\ Resolve(r) = Estale
                        THEN NoRow ELSE rows[r]]
     /\ UNCHANGED <<bName, bState, nextId, stubHigh, rec, kin, nfs, mints,
-                   probe, countVars, badMade>>
+                   probe, countVars, badMade, sid, srv, hep, swaps, outages>>
+
+\* The start finds another backing's identity (main.cc: the database's
+\* source identity, then the root row's handle) and refuses; the
+\* administrator deletes the database, which is always safe, and starts
+\* again with a cold cache. (Not a Wipe: no bound, since refusing is the
+\* only way on.)
+StartRefused ==
+    /\ run = "down" /\ ~BugNoSourceCheck /\ dbSid \notin {0, sid}
+    /\ run' = "up" /\ clean' = FALSE /\ dbSid' = sid
+    /\ rows' = [r \in AllIds |-> NoRow] /\ nextId' = 1 /\ stubHigh' = 0
+    /\ dirty' = {}
+    /\ dur' = IF Track
+              THEN [rows |-> [r \in AllIds |-> NoRow], nextId |-> 1,
+                    stubHigh |-> 0, dirty |-> {}]
+              ELSE dur
+    /\ UNCHANGED <<bName, bState, rec, kin, nfs, mints, probe, countVars,
+                   badMade, sid, srv, hep, swaps, outages>>
+
+-----------------------------------------------------------------------------
+(* The server of a network backing.                                        *)
+
+\* The backing is replaced by another one (SwapBName: another server, or
+\* another filesystem exported in its place) whose objects may have the
+\* same inode numbers and generations as this one's, hence byte-identical
+\* handles (two filesystems under one fsid number; a replica). This one's
+\* objects are out of reach from then on (dead, for dcfs). Between runs, or
+\* (SwapWhileUp) while dcfs runs.
+Swap ==
+    /\ swaps < MaxSwaps /\ SwapObjs # {}
+    /\ ~Up \/ SwapWhileUp
+    /\ bName' = SwapBName
+    /\ bState' = [o \in Objs |->
+                    IF o \in SwapObjs THEN "alive"
+                    ELSE IF bState[o] = "alive" THEN "dead" ELSE bState[o]]
+    /\ sid' = IF SameIdentity THEN sid ELSE 3 - sid
+    /\ swaps' = swaps + 1
+    /\ UNCHANGED <<rows, nextId, stubHigh, dirty, dur, rec, kin, nfs, mints,
+                   probe, run, clean, countVars, badMade, dbSid, srv, hep,
+                   outages>>
+
+\* A server outage: requests that reach the backing get EIO (soft mount)
+\* or wait (hard mount) until ServerUp; a server with volatile handles
+\* comes back with new handle bytes for every object.
+ServerDown ==
+    /\ Answering /\ outages < MaxOutages
+    /\ srv' = "down" /\ outages' = outages + 1
+    /\ UNCHANGED <<bName, bState, rows, nextId, stubHigh, dirty, dur, rec, kin,
+                   nfs, mints, probe, run, clean, countVars, badMade, sid,
+                   dbSid, hep, swaps>>
+
+ServerUp ==
+    /\ ~Answering
+    /\ srv' = "up"
+    /\ hep' = IF VolatileHandles THEN hep + 1 ELSE hep
+    /\ UNCHANGED <<bName, bState, rows, nextId, stubHigh, dirty, dur, rec, kin,
+                   nfs, mints, probe, run, clean, countVars, badMade, sid,
+                   dbSid, swaps, outages>>
 
 -----------------------------------------------------------------------------
 
@@ -619,15 +740,24 @@ Init ==
     /\ clean = FALSE
     /\ crashes = 0 /\ powers = 0 /\ wipes = 0
     /\ badMade = FALSE
+    /\ sid = 1 /\ dbSid = 1
+    /\ srv = "up" /\ hep = 0
+    /\ swaps = 0 /\ outages = 0
 
+\* The actions that leave the server and the backing's identity alone
+\* (netVars), and those that do not.
 Next ==
-    \/ \E n \in Names : Lookup(n) \/ Refuse(n) \/ Create(n) \/ Unlink(n)
-                        \/ ProbeStat(n) \/ OobUnlink(n) \/ OobCreate(n)
-    \/ \E n, m \in Names : Rename(n, m) \/ OobRename(n, m)
-    \/ \E r \in AllIds : Access(r) \/ NfsTake(r) \/ Evict(r)
-    \/ \E h \in nfs : DotLookup(h)
-    \/ ProbeRead \/ Sync \/ Persist
-    \/ Crash \/ PowerLoss \/ Stop \/ Wipe \/ Start
+    \/ /\ \/ \E n \in Names : Lookup(n) \/ Refuse(n) \/ Create(n)
+                              \/ Unlink(n) \/ ProbeStat(n) \/ OobUnlink(n)
+                              \/ OobCreate(n)
+          \/ \E n, m \in Names : Rename(n, m) \/ OobRename(n, m)
+          \/ \E r \in AllIds : Access(r) \/ NfsTake(r) \/ Evict(r)
+          \/ \E h \in nfs : DotLookup(h)
+          \/ ProbeRead \/ Sync \/ Persist
+          \/ Crash \/ PowerLoss \/ Stop
+       /\ UNCHANGED netVars
+    \/ Wipe \/ Start \/ StartRefused
+    \/ Swap \/ ServerDown \/ ServerUp
 
 Spec == Init /\ [][Next]_vars
 
@@ -645,19 +775,20 @@ OneHandleOneObject ==
     \A h1, h2 \in Refs : h1.id = h2.id /\ h1.gen = h2.gen => h1.obj = h2.obj
 
 \* ... and a nodeid the kernel holds resolves to the object it was handed
-\* out for, or to ESTALE: never to another.
+\* out for, or to ESTALE (EIO during a server outage): never to another.
 HeldResolvesToItsObject ==
-    Up => \A r \in AllIds : kin[r].held => Resolve(r) \in {kin[r].obj, Estale}
+    Up => \A r \in AllIds :
+            kin[r].held => Resolve(r) \in {kin[r].obj} \cup NotServed
 
 \* ... nor does a handle the kernel accepts.
 HandlesResolveToTheirObject ==
-    Up => \A h \in nfs : Accepts(h) => Resolve(h.id) \in {h.obj, Estale}
+    Up => \A h \in nfs : Accepts(h) => Resolve(h.id) \in {h.obj} \cup NotServed
 
 \* (2) ESTALE exactly when gone or replaced: a handle of an object that
-\* still exists is accepted and reaches it ...
+\* still exists is accepted and reaches it (once the server answers) ...
 ServedWhileLive ==
-    (Up /\ Idle) => \A h \in nfs : Live(h.obj) =>
-                       Accepts(h) /\ Resolve(h.id) = h.obj
+    (Up /\ Idle /\ Answering) => \A h \in nfs : Live(h.obj) =>
+                                   Accepts(h) /\ Resolve(h.id) = h.obj
 
 \* ... and one of an object that is gone is not served (not for a stub
 \* whose boundary went behind dcfs's back: answered from its row, until its
@@ -665,16 +796,17 @@ ServedWhileLive ==
 GoneIsStale ==
     Up => \A h \in nfs :
             ~Live(h.obj) /\ ~(h.obj \in Names /\ OutOfBand)
-              => ~Accepts(h) \/ Resolve(h.id) = Estale
+              => ~Accepts(h) \/ Resolve(h.id) \in NotServed
 
 \* (3) A row whose object is gone (its inode number maybe recycled)
-\* resolves to ESTALE at every entry point: a reopen by handle (OpenNode,
-\* and through it ParentOf and the start's probe) and a probe of a name
-\* (UpsertInode, which must not take it over for another object).
+\* resolves to ESTALE (EIO during an outage) at every entry point: a reopen
+\* by handle (OpenNode, and through it ParentOf and the start's probe) and
+\* a probe of a name (UpsertInode, which must not take it over for another
+\* object).
 ReuseDetected ==
     Up => \A r \in Ids :
             rows[r].ex /\ ~rows[r].stub /\ ~Live(rows[r].obj) =>
-              /\ Resolve(r) = Estale
+              /\ Resolve(r) \in NotServed
               /\ \A o \in Files :
                    bState[o] = "alive" => ~UpsertMatch(rows[r], IdentOf(o))
 

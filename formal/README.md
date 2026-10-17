@@ -2242,6 +2242,21 @@ The model has both identities, by a constant:
   `LOOKUP(nodeid, ".")` replies with the generation it finds, which the
   kernel compares.
 
+Either identity can sit on a **network backing** (step 14.10,
+`docs/design.md` "Backings without a filesystem UUID"; the evidence an NFS
+client gives, measured by `//test/qemu:nfs_backing_test`, is `NfsEvidence`:
+the server's generation inside the handle, enforced by the server's
+decode). Three things only a network backing does are in the model: the
+backing replaced by another whose objects have byte-identical handles
+(`Swap`, `SwapBName`: two filesystems exported under one fsid number, or a
+replica), which the start's identity check refuses, the administrator then
+deleting the database (`StartRefused`); a server outage, during which a
+request reaching the backing gets `EIO` and no row goes for it
+(`ServerDown`, `ServerUp`), and a server that comes back with new handles
+(`VolatileHandles`); and, under Phase 14, a nodeid without a row that cannot
+be opened by its number (`OpenByIno = FALSE`: the client needs the server's
+handle).
+
 How it relates to the others: it shares no module and no state.
 `lifetime.tla` owns the kernel's lookup counts, the open files and the
 held descriptor, and when rows and removed records go; it takes a row's
@@ -2257,7 +2272,8 @@ would find; here every lookup probes.
 
 ```sh
 bazel test //formal:ident_test //formal:ident_oob_test //formal:ident_power_test \
-  //formal:ident_btime_test //formal:ident_stubs_test //formal:ident_target_test
+  //formal:ident_btime_test //formal:ident_stubs_test //formal:ident_target_test \
+  //formal:ident_net_test //formal:ident_target_net_test
 bazel test //formal:known_bug_ident_skip_identity_statx_test   # and the other known_bug_ident_*
 bazel test //formal:limitation_ident_wipe_test                 # and the other limitation_ident_*
 ```
@@ -2287,6 +2303,8 @@ directories), the birth time (`btime`); 0 is "unknown", as in the code.
 | `mints` | random generations drawn: each is fresh | `Context::rng` |
 | `probe` | a probe by name in flight (only with `ProbeByName`, not the code) | |
 | `run`, `clean`, `crashes`, `powers`, `wipes`, `badMade` | the run; the clean-shutdown flag; the bounds' counts; dcfs made the kernel mark an inode bad (history) | |
+| `sid`, `dbSid` | the identity the backing presents (1, or 2 after a swap to a backing with another one); the one the database recorded (0 after a wipe, until the next start records it) | `SourceIdentity` and `cache_state` (step 14.10b) |
+| `srv`, `hep`, `swaps`, `outages` | the server answers or is out; the epoch of its handles (bumped when a server with volatile handles comes back); the bounds' counts | the NFS server (model-only) |
 
 | Action | What it does | dcfs |
 |---|---|---|
@@ -2301,6 +2319,9 @@ directories), the birth time (`btime`); 0 is "unknown", as in the code.
 | `OobUnlink(n)`, `OobCreate(n)`, `OobRename(n, m)` | with `OutOfBand`, changes behind dcfs's back, running or not (a create may recycle an inode number, or mount a filesystem at a name) | |
 | `Crash`, `PowerLoss`, `Stop`, `Wipe`, `Start` | the daemon dies (the database keeps its commits) or the power goes (it rolls back to `dur`; the backing filesystem keeps what it did); a clean stop; the database deleted while stopped; the start, which after an unclean shutdown probes the dirty rows by handle | `StartRun`, `ProbeRecoveredRows`, `FinishRun` |
 | `ProbeStat(n)`, `ProbeRead` | with `ProbeByName` (not the code): the statx, then the handle and the generation in `ProbeOrder`, each read resolving the name again | |
+| `Swap` | the backing replaced by another (`SwapBName`), between runs or, with `SwapWhileUp`, while dcfs runs; its objects may have byte-identical handles to this one's, which are out of reach (dead) from then on; it presents another identity unless `SameIdentity` | (the administrator, the server) |
+| `StartRefused` | the start finds another identity than the database's and refuses; the administrator deletes the database and starts again, cold (`Start` itself requires the identity the database recorded, unless `BugNoSourceCheck`) | `main.cc`'s source-identity and root checks |
+| `ServerDown`, `ServerUp` | a server outage: requests that reach the backing get `EIO` (soft mount) or wait (hard), and requests that probe or mutate it are not taken; `Access` does not forget a row for `EIO` (unless `BugForgetOnError`); with `VolatileHandles` every handle changes when it comes back | `StaleOrUnreadable` |
 
 | Property | Says |
 |---|---|
@@ -2344,6 +2365,8 @@ workers, other lanes running).
 | `MC_ident_btime.cfg` | `ident_btime_test` (medium) | the birth time the only evidence, changes behind dcfs's back; every property | 49,833 | ~25 s |
 | `MC_ident_stubs.cfg` | `ident_stubs_test` (medium) | filesystems mounted at a and b, 2 stub ids, mounts and unmounts behind dcfs's back, a power loss; every property but `ServedWhileLive` | 217,366 | ~70 s |
 | `MC_ident_target.cfg` | `ident_target_test` (medium) | Phase 14's identity, a crash, a power loss and a cache wipe; every property | 145,136 | ~60 s |
+| `MC_ident_net.cfg` | `ident_net_test` (medium) | step 14.10: today's identity on an NFS client (`NfsEvidence`), a server outage, a crash, and the backing swapped between runs for one with another identity whose o4 has o1's handle bytes (refused, then cold); every property (run of 2026-10-17, lane-4) | 53,574 | ~20 s |
+| `MC_ident_target_net.cfg` | `ident_target_net_test` (medium) | step 14.10: Phase 14's identity on an NFS client (no open by number), a crash, a server outage; every property (run of 2026-10-17) | 8,961 | ~17 s |
 
 Coverage (`-coverage 1`): every action fires where its constants allow it
 (`Refuse` needs boundaries, `PowerLoss` and `Persist` a power loss, `Wipe`
@@ -2371,6 +2394,12 @@ tier, a few seconds each).
 | `limitations/ident_no_generations` | no generation in the handle, no `FS_IOC_GETVERSION`, no birth time | `ReuseDetected` | look a up; unlink a; the kernel evicts it; create o3 on o1's inode number; power loss (the deletion of a's row is lost, the dirty mark is not); the start's probe reaches o3 and keeps the row for it |
 | `limitations/ident_target_out_of_band` | Phase 14 with a recycling behind dcfs's back | `NoBadInode` | look a up (inode 1, o1's generation); a unlinked behind dcfs's back; create b: o3 gets inode 1, and the reply's generation makes the kernel mark the old inode bad (`EIO`). Today's identity gives o3 a new nodeid (`MC_ident_oob.cfg`) |
 | `limitations/ident_target_uncached_nodeid` | Phase 14 with a recycling behind dcfs's back, a held nodeid whose row went | `HeldResolvesToItsObject` | look a up; a replaced behind dcfs's back by o3 on the same inode number; a request finds the row stale (`ESTALE`, the row goes); the next request opens inode 1 by number and reaches o3. Only `LOOKUP(".")` has the kernel compare generations: Phase 14 must compare the generation it handed out in this mount (or answer `ESTALE`) for every other request on a nodeid without a row |
+| `known_bugs/ident_net_no_source_check` | step 14.10: a start that does not compare the backing's identity | `HandlesResolveToTheirObject` | look a up (o1, row 1); the client takes its handle; stop; the backing is swapped (o4 at a, with o1's handle bytes); start without the check: the client's handle is accepted from row 1 and decodes to o4 |
+| `known_bugs/ident_net_forget_on_error` | step 14.10: a row forgotten on any error during a server outage, not only on a confirmed `ESTALE` | `ServedWhileLive` | look a up; the client takes its handle; the server goes down; a request on row 1 fails and the row goes; the server comes back: the client's handle of the live o1 is `ESTALE` |
+| `limitations/ident_net_same_identity` | step 14.10: the backing swapped between runs for one presenting the same identity (guarantee 5) | `HandlesResolveToTheirObject` | as `ident_net_no_source_check`, with the check passing |
+| `limitations/ident_net_swap_while_running` | step 14.10: the swap while dcfs runs (guarantee 5) | `HeldResolvesToItsObject` | look a up; the backing is swapped: the nodeid the kernel holds for o1 decodes to o4 |
+| `limitations/ident_net_volatile_handles` | step 14.10: a server that hands out new handles after an outage (guarantee 2) | `ServedWhileLive` | look a up; the client takes its handle; an outage; the server comes back with new handles: row 1 no longer decodes, and the client's handle of the live o1 is `ESTALE` |
+| `limitations/ident_target_net_wipe` | step 14.10: Phase 14 on an NFS client, a cache wipe | `ServedWhileLive` | look a up; the client takes its handle; stop; wipe; start: no row, and no open by number, so `ESTALE` for a live object until something finds it by name |
 
 ### The order of the handle and the generation (step 26.3's question)
 

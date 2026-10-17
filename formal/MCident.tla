@@ -8,7 +8,7 @@
 (***************************************************************************)
 EXTENDS ident, TLC
 
-CONSTANTS o1, o2, o3, m1, m2, a, b
+CONSTANTS o1, o2, o3, o4, m1, m2, a, b
 
 \* The directory at the start: a and b name o1 and o2; o3 is not created
 \* yet, and gets o1's inode number (a recycling) once o1 is freed. m1 and
@@ -16,10 +16,24 @@ CONSTANTS o1, o2, o3, m1, m2, a, b
 MCInitBName == (a :> o1) @@ (b :> o2)
 \* For the stubs: a filesystem mounted at each name.
 MCInitBNameStubs == (a :> m1) @@ (b :> m2)
-MCInoOf == (o1 :> 1) @@ (o2 :> 2) @@ (o3 :> 1) @@ (m1 :> 0) @@ (m2 :> 0)
-MCGenOf == (o1 :> 1) @@ (o2 :> 2) @@ (o3 :> 3) @@ (m1 :> 4) @@ (m2 :> 5)
+\* o4 is on another backing (step 14.10's Swap): at a, with o1's inode
+\* number and generation, so its handle is byte-identical to o1's (two
+\* filesystems exported under one fsid number, or a replica). The only
+\* generation that is not unique, and only across backings.
+MCInoOf == (o1 :> 1) @@ (o2 :> 2) @@ (o3 :> 1) @@ (o4 :> 1) @@ (m1 :> 0)
+           @@ (m2 :> 0)
+MCGenOf == (o1 :> 1) @@ (o2 :> 2) @@ (o3 :> 3) @@ (o4 :> 1) @@ (m1 :> 4)
+           @@ (m2 :> 5)
+\* No other backing; the other backing (o4 at a).
+MCNoSwap == (a :> None) @@ (b :> None)
+MCSwapBName == (a :> o4) @@ (b :> None)
 
 \* Every kind of evidence ext4, xfs and btrfs give for a regular file or a
 \* directory.
 AllEvidence == {"handle_gen", "getversion", "btime"}
+\* What an NFS client gives (step 14.10, nfs_backing_test): the server's
+\* generation inside the handle, enforced by the server's decode; no
+\* FS_IOC_GETVERSION; the birth time only where the server's filesystem has
+\* one, so not assumed.
+NfsEvidence == {"handle_gen"}
 =============================================================================
