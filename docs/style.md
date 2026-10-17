@@ -653,11 +653,16 @@ until 2026-10-10; this section is it.)
   in Constructors").
 - **Every remaining crash site is one russ approved**, listed in the
   allowlist of the check that finds it with his approval date and the
-  reason the process could not continue correctly; nothing else. There are
-  none (25.9, 25.9b): `fuse_ops.cc`'s null checks were deleted (1.10a),
-  `RestoreRoot` poisons the backing door (below), `FuseRequest::ReplyNone`
-  refuses and logs a second reply, and `ForkSplit`'s parent returns the
-  exit status that `ForkSplit` `_exit`s with.
+  reason; nothing else. No crash site of ours remains (25.9, 25.9b):
+  `fuse_ops.cc`'s null checks were deleted (1.10a), `RestoreRoot` poisons
+  the backing door (below), `FuseRequest::ReplyNone` refuses and logs a
+  second reply, and `ForkSplit`'s parent returns the exit status that
+  `ForkSplit` `_exit`s with. The third-party `abort` and `exit` paths in
+  the shipped binary (Abseil's raw logging, symbolizer, fatal log message
+  and flag parsing; libfuse's high-level API, signal, io_uring and mount
+  helpers; libnuma) are `allow` lines in `tools/banned_symbols.txt`, each
+  naming the object, why dcfs does not reach it, and russ's approval
+  (2026-10-17).
 - **Tests may crash on what is not under test, and must not ASSERT it**
   (russ, 2026-10-09): "crashes are permitted in tests when invariants
   fail that aren't under test ... The inverse applies too. Don't
@@ -694,16 +699,19 @@ until 2026-10-10; this section is it.)
   `SyscallsBackingTest.EveryWrapperRefusesOnceTheDoorIsPoisoned` walks
   every wrapper; a new wrapper joins its list.
 - **Mechanically** (25.9b): `tools/banned_symbols.txt` bans `abort`,
-  `exit`, `__assert_fail`, `std::terminate` and Abseil's fatal log messages
-  (`CHECK*`, `LOG(FATAL)`) in the shipped binary; Abseil's headers put
-  `__assert_fail` and the compiler's `__clang_call_terminate` puts
-  `std::terminate` into every object, so those allow lines name the
-  functions they cover (`via`), and a function of ours that references
-  either is still a violation. `tools/style_matchers/check_in_production.query`
-  (25.21) reports a `CHECK`, `QCHECK`, `DCHECK`, `LOG(FATAL)`, `assert`,
-  `abort`, `std::terminate`, `exit` or `quick_exit` (not a forked child's
-  `_exit`) in any file that is not `*_test.cc` or under `testonly/`; its
-  allowlist has no such site.
+  `exit`, `__assert_fail`, `std::terminate` and Abseil's fatal and
+  debug-fatal log messages (`CHECK*`, `LOG(FATAL)`, `DLOG(FATAL)`) in the
+  shipped binary; Abseil's headers put `__assert_fail` and the compiler's
+  `__clang_call_terminate` puts `std::terminate` into every object, so
+  those allow lines name the functions they cover (`via`), and a function
+  of ours that references either, or any reference from data, is still a
+  violation. `tools/style_matchers/check_in_production.query` (25.21)
+  reports a `CHECK`, `QCHECK`, `DCHECK`, `LOG(FATAL)`, `LOG(DFATAL)`,
+  `DLOG(FATAL)`, `ABSL_RAW_CHECK`, an `ABSL_RAW_LOG` or `LOG(LEVEL(...))`
+  whose severity is not INFO, WARNING or ERROR (or a choice between them),
+  `assert`, `abort`, `std::terminate`, `exit` or `quick_exit` (not a forked
+  child's `_exit`) in any file that is not `*_test.cc` or under
+  `testonly/`; its allowlist has no such site.
 
 ### 1.6a Shape of a function that does several things
 
