@@ -3947,3 +3947,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   `.message()` is appropriate (assuming Status is warranted at all)."
   The provisional ToString() ruling is replaced; a follow-up classifies
   25.33's changed lines (dashboard Q-2026-10-17-14 for the mechanism).
+- 2026-10-17, russ: "ok" to the three-kinds mechanism (FindingText as the
+  one exempt helper); asks why the waitexit test should let a broken
+  waitexit slip past. 25.33b queued: the classification sweep and an exact
+  waitexit unit test with --wrap fakes.

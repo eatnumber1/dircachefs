@@ -1249,3 +1249,31 @@ trees plus the real tree) are the checks. The archive has 85 published
 `totw` posts for 83 tips (TotW 3 and 5 are published twice; the later file is
 taken) and TotW 132 unpublished, not 86. The tree cites TotW 42 and 103 only;
 both are published, so the check finds nothing today.
+
+## 25.33b Three kinds of message, and waitexit tested exactly (russ, 2026-10-17; queued)
+
+russ: "there's three types of messages: 1. I succeeded in doing the thing 2.
+I failed in doing the thing 3. The infrastructure underneath me failed ...
+It's really 3 where the full debugging payload for a Status comes into
+play"; and "ok" to the mechanism:
+- Kind (2) outcomes stop being Statuses where practical: fsck's findings
+  become plain results (the FsckReport's words), benchmark skips say what
+  could not be measured.
+- Where a lower layer's Status is itself the domain answer, the caller
+  turns it into finding text through one named helper, `FindingText(const
+  absl::Status&)` (its message), which the `status_message` matcher
+  exempts; nothing else may call `.message()`.
+- Kind (3) keeps the whole Status, full payload, in logs and in report
+  lines alike.
+- Classify every line 25.33 changed (fsck, bench, the invariant checker)
+  and the provisional `ToString()` uses its fix round added; docs/style.md
+  1.6 states the three kinds with russ's words.
+
+Also (from 26.36's review, russ: "why do we need to let a broken waitexit
+slip past?"): a unit test of `testutil`'s `waitexit` with `-Wl,--wrap`
+fakes of `pidfd_open` and `poll`: a first "not ready" must make it poll
+again, a readable pidfd must make it return 0; failing first against a
+`waitexit` that returns at once. boot.sh's guest check stays as an
+end-to-end smoke test.
+
+Owner: Gemini (agy) for the sweep and the test, a style review after.
