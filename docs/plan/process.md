@@ -49,7 +49,9 @@ process (its waves and file ownership table) is in `history.md`.
    below. Agents are told not to explore the tree beyond that, not to touch
    files outside the step, to stop and report after two failed attempts at
    the same build or test error, and to leave the lane's Bazel server
-   running (it is reused by the next step).
+   running (it is reused by the next step). After dispatching, refresh
+   the dashboard's lanes and steps (step 6 says how), and do the same
+   when a lane's agent finishes or is stopped, or a Gemini job ends.
 3. **Test first.** The agent writes the step's tests, runs them, and
    records them failing on the unchanged code (quoted output), then makes
    them pass.
@@ -116,6 +118,9 @@ process (its waves and file ownership table) is in `history.md`.
    upload each as an asset and point its dataset at the new file with a
    fresh `updated` time. Its datasets go stale after a day or two and
    say so on the page, which is the reminder when a refresh is missed.
+   Before any refresh, list what each lane's checkout is on (`git -C
+   <lane> branch --show-current`) against the running agents, so the
+   lanes table reflects the lanes, not memory.
    The lane stays for the next step.
 7. **Sync-point suites** run in a lane checked out at `main` (already
    built), not in `~/Sources/dircachefs`, whose Bazel server is russ's.
