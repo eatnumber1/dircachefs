@@ -3486,3 +3486,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   exist; some evidence links are loose and three states were stale and
   corrected, so the counts are approximate. The census lives beside the
   lanes file and is updated at each merge.
+
+- 2026-10-17: 26.32 merged: the Gemini sweep's verified doc and comment
+  fixes (Haiku, low effort; one style review round; format, repo-shape and
+  man tests pass). Comment-only in code files. Left for implementer steps:
+  the NativeMountError rename, the fsck test's stand-in programs, and the
+  stale fail() strings in cache_permissions.sh.
