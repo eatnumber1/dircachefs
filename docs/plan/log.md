@@ -3774,3 +3774,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   README's future work.
 - 2026-10-17, russ approves 25.32 (pinned Abseil tips, an index, a
   citation check): "OK". Briefed and dispatched (lane-6).
+- 2026-10-17, russ on 25.28b's FSYNC cost (backing fsync + syncfs + 3
+  cache fsyncs): "I'd love to get that down to 'commit to log begin', do
+  backing op, 'commit to log done', with committing 'done''s fsync skipped
+  in some cases ... So 2 fsyncs at most, and in some cases just 1." Sent
+  to 25.28b's round 2: FSYNC/FSYNCDIR are no longer sync points (backing
+  fsync only, no clock reset), the periodic sync point's durable point is
+  one kSync commit instead of a checkpoint, the model and oracle follow.
