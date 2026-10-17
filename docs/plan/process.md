@@ -118,7 +118,10 @@ process (its waves and file ownership table) is in `history.md`.
    on every agent launch and finish (`tools/agents/README.md`; after an
    upload, `mark-uploaded`, or the Stop hook holds the turn open); the
    quota readings
-   from "Quota management" below; `gh run list --limit 12`),
+   from "Quota management" below; `gh run list --limit 12`; and
+   `~/.cache/dcfs-dashboard/plan.json`, every plan step and its state
+   from the 2026-10-17 census, in which a merge flips its step to done
+   and a new step is added as queued),
    upload each as an asset and point its dataset at the new file with a
    fresh `updated` time, all datasets in one batch write. At most one
    refresh per turn, at its end, covering every change in it; old

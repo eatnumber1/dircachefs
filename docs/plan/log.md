@@ -3470,3 +3470,16 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   26.32 (Haiku, low, lane-6, no builds). GetGroups' EINVAL retry loop is
   already 25.10's. The finish hook works: SubagentStop removed 26.31's agent
   from the lanes record when it finished in the background.
+
+- 2026-10-17: russ on releases: shipping a binary is ideally a goal, and it
+  may require glibc and libfuse to be installed (the dynamic `main`); keep
+  the static target for people who build by hand. So the release artifact
+  is dynamically linked against glibc and libfuse, and the LGPL relinking
+  offer applies only to anyone who redistributes the static build;
+  docs/licenses.md records this when 4.15 merges.
+- 2026-10-17: the dashboard shows every plan step by state, from a Gemini
+  3.8 Flash census (read-only, lane-5): 236 steps, 170 done, 6 in progress,
+  6 queued, 23 open, 29 parked, 2 dropped. Sampled evidence hashes all
+  exist; some evidence links are loose and three states were stale and
+  corrected, so the counts are approximate. The census lives beside the
+  lanes file and is updated at each merge.
