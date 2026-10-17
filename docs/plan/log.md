@@ -3996,3 +3996,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   26.41 counts by syscall kind and states the real reason for the line at
   the kernel. Yes to the query-plan check (26.41 1b) and an Infer
   cost-analysis spike after M1 (12.23).
+- 2026-10-17, russ: track model and effort against outcomes ("Do it soon
+  so we start getting data"). docs/plan/dispatch-ledger.tsv started,
+  backfilled with today's 23 jobs; the hook and `ledger` command are on
+  Gemini (lane-6).

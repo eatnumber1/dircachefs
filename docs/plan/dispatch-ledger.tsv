@@ -1,0 +1,24 @@
+id	dispatched	step	task_class	agent	model	effort	tokens	duration_s	rounds	blockers	shoulds	nits	escapes	verdict	notes
+bf-26.34	2026-10-17	26.34	investigation	dcfs-investigator	claude-sonnet-5-5	high	244850		2	0	9	0	0	merged	fix round from the style review; effort probably a notch high
+bf-26.34-sr	2026-10-17	26.34	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	116254							useful	9 findings, 3 questions
+bf-26.35	2026-10-17	26.35	investigation	dcfs-investigator	claude-sonnet-5-5	high	95229		2	0	2	0	0	merged	two small orchestrator asks
+bf-25.28b-rr	2026-10-17	25.28b	review	dcfs-reviewer	claude-opus-5-5	xhigh	256951			0	7	6		useful	S1 (held-back checkpoint) later judged moot by russ
+bf-style-rulings	2026-10-17	25	mechanical	dcfs-mechanical	claude-haiku-5-5	low	62745		1	0	0	0	1	merged	one rule later reversed by russ (host-tool style), the orchestrator's brief, not the agent's
+bf-25.32	2026-10-17	25.32	implementation	dcfs-implementer	claude-sonnet-5-5	medium	65473		1	0	10	0	10	merged	merged without style review; post-merge review found 10 rule violations
+bf-25.32-sr	2026-10-17	25.32	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	131523							useful	post-merge
+bf-25.34	2026-10-17	25.34	implementation	dcfs-implementer	claude-sonnet-5-5	medium	397512		3					in review	rounds: wrappers, directory move
+bf-26.37	2026-10-17	26.37	investigation	dcfs-investigator	claude-sonnet-5-5	high	280863		1	0	8	0	0	merged	post-merge Flash review: 8 style findings
+bf-26.36	2026-10-17	26.36	investigation	dcfs-investigator	claude-sonnet-5-5	high	433280		2	0	3	9	3	merged	3 tests could pass without the change, found by Flash review; effort probably a notch high
+bf-25.33	2026-10-17	25.33	implementation	dcfs-implementer	claude-sonnet-5-5	medium	190415				12			in progress	Flash review 12 findings
+bf-17.2e	2026-10-17	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high	576896		2	1				in progress	security regression (uid-0 setuid) self-reported; uid-0 exemption bug from 17.2b caught by russ
+bf-22.5	2026-10-17	22.5	protocol	dcfs-protocol	claude-opus-5-5	high	522489		1					in review	two code findings self-reported
+bf-25.28b	2026-10-17	25.28b	protocol	dcfs-protocol	claude-opus-5-5	high	955492		3					in progress	round 3: FSYNC redesign
+bf-g-25.32b	2026-10-17	25.32b	mechanical	agy	gemini-3.8-flash	high			1					merged	3 runs: 2 lost to agy's 30-minute limit in a cold lane
+bf-g-26.37b	2026-10-17	26.37b	mechanical	agy	gemini-3.8-flash	high			1					merged	
+bf-g-26.36fix	2026-10-17	26.36	mechanical	agy	gemini-3.8-flash	high			1					merged	fixed the 3 weak tests
+bf-g-sloc	2026-10-17	dashboard	implementation	agy	gemini-3.8-flash	high			1					merged	2 runs: first lost to a baseline Bazel run
+bf-g-flash-exp	2026-10-17	26.31	review	agy	gemini-3.8-flash	medium								measured	broad 4/34 recall, narrow 11/34; 0 known-wrong
+bf-g-inval	2026-10-17	26.39	investigation	agy	gemini-3.8-flash	medium								useful	38 candidates; 29 were kernel-handled (false positives)
+bf-g-inval-verify	2026-10-17	26.39	review	agy	gemini-4-argon	medium								useful	classified 38; citations spot-checked correct
+bf-g-budgets	2026-10-17	26.41	investigation	agy	gemini-3.8-flash	high								useful	hashes real; GitHub links invented
+bf-agy-opus-25.34	2026-10-17	25.34	review	agy	claude-opus-5-5	high								failed	quota exhausted before any output (56% of agy's Claude week)
