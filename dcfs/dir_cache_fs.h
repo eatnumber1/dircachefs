@@ -210,20 +210,17 @@ class DirCacheFS : private events::Bookkeeping {
   bool IsUnnamedTmpfile(fuse_ino_t ino) const;
 
   // Called at the start of every request (see fuse_ops.cc): runs a sync
-  // point if the dirty set may be non-empty and opts_.sync_interval has
-  // passed since the last one. dcfs is single-threaded inside libfuse's
-  // blocking session loop, which offers no idle hook, so there is no timer:
-  // an idle daemon keeps a non-empty dirty set until its next request, its
-  // next fsync, or a clean shutdown. That is safe; it only makes the
-  // re-read after a crash larger.
+  // point (SyncNow) once opts_.sync_interval has passed since the
+  // last one. dcfs is single-threaded inside libfuse's blocking session
+  // loop, which offers no idle hook, so there is no timer: an idle daemon
+  // keeps a non-empty dirty set and its unsynced cache commits until its
+  // next request, its next fsync, or a clean shutdown. That is safe; it
+  // only makes the re-read after a crash larger. So a power cut loses at
+  // most one interval of cache commits, counted up to the last request
+  // (formal/durability.tla, step 25.28b).
   void MaybeSyncBacking();
-  // Periodic WAL checkpoint tied to --sync_interval_sec (russ, 2026-10-12:
-  // permitted exception to the "no timers" rule). Folds committed WAL frames
-  // into the database file on request arrival if opts_.sync_interval has
-  // elapsed since the last checkpoint, preventing WAL starvation under
-  // read-heavy workloads.
-  void MaybeCheckpointWal(absl::Time now);
-  // Whether a sync point has a reason to run now (see SyncBackingNow).
+  // Whether a sync point's backing half has a reason to run now (see
+  // SyncNow).
   bool SyncDue(absl::Time now) const;
 
   // Called by the request handler after a request that reached the backing
@@ -510,10 +507,16 @@ class DirCacheFS : private events::Bookkeeping {
   // outstanding then cannot record or clear anything about it.
   void EndWriting(InodeId id);
 
-  // A sync point now (if the dirty set may be non-empty), logging a failure
-  // at WARNING: nothing that calls this may fail over it. `why` names the
-  // caller in the log line.
-  void SyncBackingNow(std::string_view why);
+  // A sync point now: the backing filesystems' syncfs and the dirty set's
+  // clearing (if it may be non-empty, SyncDue), then a checkpoint of the
+  // cache's WAL (if anything committed since the last, CheckpointCache).
+  // Logs a failure at WARNING: nothing that calls this may fail over it.
+  // `why` names the caller in the log line.
+  void SyncNow(std::string_view why);
+  // The sync point's checkpoint (step 25.28b): makes every cache commit so
+  // far durable, so that a power cut cannot lose one older than the last
+  // sync point.
+  absl::Status CheckpointCache();
 
   // Shared phase-1/2/3 wiring for Create/Mkdir/Mknod/Symlink (see
   // dir_cache_fs.cc's "write-through op" rule for what those phases are):
@@ -687,10 +690,10 @@ class DirCacheFS : private events::Bookkeeping {
   // Context::open_files).
   absl::flat_hash_set<int64_t> open_files_held_;
   // When the last sync point ran (or was attempted); see MaybeSyncBacking.
+  // Set only by SyncNow, which then checkpoints: a reset without the
+  // checkpoint would let commits older than one interval wait
+  // (formal/known_bugs/durability_sync_point_skips_checkpoint.tla).
   absl::Time last_sync_;
-  // When the last periodic WAL checkpoint ran (or was attempted); see
-  // MaybeCheckpointWal.
-  absl::Time last_wal_checkpoint_;
   // When a request last reached the backing filesystem; InfinitePast before
   // the first (the start's own reads are not requests).
   absl::Time last_backing_access_ = absl::InfinitePast();

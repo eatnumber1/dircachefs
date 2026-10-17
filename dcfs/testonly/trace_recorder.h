@@ -174,6 +174,7 @@ class TraceRecorder final : public ProtocolEvents {
   void SyncfsStarting(Context &ctx) override;
   void SyncfsDone(Context &ctx) override;
   void SyncCleared(Context &ctx) override;
+  void WalCheckpointed(Context &ctx) override;
 
   void RunStarting(Context &ctx) override;
   void Recovered(Context &ctx) override;

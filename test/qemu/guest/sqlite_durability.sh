@@ -22,9 +22,12 @@
 # runs a scripted sequence of mutations whose durability is known: creates,
 # unlinks, a rename, a mkdir and rmdir, a write, a chmod, a setxattr (each
 # phase 1 synced unless the inodes are durably dirty already: the fast path,
-# normal), a sync point (an fsync through dcfs, after which the next phase 1
-# is synced again), and a writeback of the WAL by the filesystem alone (an
-# fsync of the -wal from outside, as periodic writeback would). After each
+# normal), and a writeback of the WAL by the filesystem alone (an fsync of
+# the -wal from outside, as periodic writeback would). No sync point: since
+# step 25.28b each one checkpoints the WAL, and the next commit restarts
+# it, which the one WAL generation this test judges leaves out (the
+# reference states are the final database with its WAL cut); the sync
+# point's checkpoint is checked by fault_power_test's lag scenario. After each
 # one a STATFS through dcfs (served only after every request queued before
 # it) orders what follows, and the test records the WAL's commits so far
 # (crash_states wal-info: what SQLite's recovery would accept of the -wal as
@@ -314,14 +317,14 @@ script_full() {
 	op rename-d1-b-c normal mv "$MNT/d1/b" "$MNT/d1/c"
 	op wal-writeback - "$TESTUTIL" fsync "$DB-wal"
 	op create-d3-g1-g2 normal creates "$MNT/d3" g1 g2
-	op sync-point normal "$TESTUTIL" fsync "$MNT/d3/g1"
-	op create-d3-g3 synced creates "$MNT/d3" g3
+	op create-d3-g3 normal creates "$MNT/d3" g3
 	op write-d4-w synced write_file "$MNT/d4/w"
 	op chmod-d4-keep synced chmod 600 "$MNT/d4/keep"
 	op setxattr-d4-keep normal "$TESTUTIL" setxattr "$MNT/d4/keep" user.k v
-	# x is born dirty by mkdir's phase 3, a normal commit; no phase 1 named
-	# it, so it is not durably dirty and the rmdir's phase 1 is synced.
-	op rmdir-d2-x synced rmdir "$MNT/d2/x"
+	# x is born dirty by mkdir's phase 3, a normal commit, which the synced
+	# commits since have made durable, as d2's row: with no sync point
+	# since, the rmdir's phase 1 takes the fast path.
+	op rmdir-d2-x normal rmdir "$MNT/d2/x"
 	op create-d5-t1-t6 synced creates "$MNT/d5" t1 t2 t3 t4 t5 t6
 	op unlink-d5-t1 normal rm "$MNT/d5/t1"
 	op cache-flush - cache_flush
@@ -332,7 +335,6 @@ script_short() {
 	op create-d1-a synced creates "$MNT/d1" a
 	op create-d1-b normal creates "$MNT/d1" b
 	op unlink-d1-a normal rm "$MNT/d1/a"
-	op sync-point normal "$TESTUTIL" fsync "$MNT/d1/b"
 	op create-d3-t1-t3 synced creates "$MNT/d3" t1 t2 t3
 	op unlink-d3-t1 normal rm "$MNT/d3/t1"
 	op cache-flush - cache_flush

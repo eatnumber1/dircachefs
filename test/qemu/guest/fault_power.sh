@@ -37,6 +37,10 @@
 #              there; the restart's lookup records the new row, which must
 #              be born dirty: after a cut that loses the create, a handle of
 #              it saved before gets ESTALE
+#   lag        (step 25.28b) fills on either side of a periodic sync point
+#              with a dirty set: the one older than the interval survives the
+#              cut (the sync point checkpointed the cache's WAL), the one after
+#              it does not
 #
 # After each, the invariant: every entry dcfs serves matches the backing
 # filesystem exactly (type, size, mode, and the listing of every directory),
@@ -572,6 +576,62 @@ check_syncpoint() {
 	served_equals_backing sync-served
 }
 
+# lag (step 25.28b): the sync interval bounds how old a cache commit a cut
+# can take away. A fresh cache (so that d9 and d10 were never listed) under a
+# daemon with a 60 s interval; the cache filesystem gets no periodic writeback
+# and a journal commit interval longer than the test, so a commit nothing
+# synced is only in memory at the cut. A create in d8 (its phase 1's kSync
+# commit makes everything before it durable, and leaves a dirty row), then
+# d9's listing: a fill, a normal commit. The clock is moved one interval on
+# (no sleep: the daemon reads the real-time clock), and the next request's
+# periodic sync point syncs the backing filesystem, clears the dirty set and
+# checkpoints the cache's WAL; then d10's listing, a fill after it. After
+# the cut the cache has d9's listing, older than the interval, and not d10's,
+# younger than the sync point: the witness that the cut loses an unsynced
+# commit, without which d9's would prove nothing. (Before 25.28b a sync point
+# that cleared a dirty set did not checkpoint, and d9's listing was lost.)
+LAG_INTERVAL=60
+setup_lag() {
+	fd_crash
+	rm -f "$DB" "$DB-wal" "$DB-shm"
+	if start --sync_interval_sec="$LAG_INTERVAL"; then pass lag-mount; else
+		fail lag-mount "daemon did not mount within 10s"
+		exit "$FAILED"
+	fi
+	LAG_WRITEBACK=$(cat /proc/sys/vm/dirty_writeback_centisecs)
+	echo 0 >/proc/sys/vm/dirty_writeback_centisecs
+	mount -o remount,commit=600 "$CACHE_DIR" ||
+		fail lag-remount "remounting the cache filesystem with commit=600 failed"
+	touch "$MNT/d8/lag"
+	ls "$MNT/d9" >/dev/null
+	date -s "@$(($(date +%s) + LAG_INTERVAL + 1))" >/dev/null
+	ls "$MNT" >/dev/null
+	ls "$MNT/d10" >/dev/null
+}
+cut_lag() {
+	power_cut
+	echo "$LAG_WRITEBACK" >/proc/sys/vm/dirty_writeback_centisecs
+}
+# lag_listed DIR: 1 if the cache has DIR's whole listing, else 0 or nothing.
+lag_listed() {
+	"$TESTUTIL" sql "$DB" "SELECT children_complete FROM directories WHERE inode = (SELECT id FROM inodes WHERE backing_ino = $(stat -c %i "$SRC/$1"))"
+}
+check_lag() {
+	ll_old=$(lag_listed d9)
+	if [ "$ll_old" = 1 ]; then
+		pass lag-older-fill-kept
+	else
+		fail lag-older-fill-kept "d9's listing, committed more than an interval before the cut, is not in the cache ('$ll_old')"
+	fi
+	ll_young=$(lag_listed d10)
+	if [ "$ll_young" != 1 ]; then
+		pass lag-younger-fill-lost
+	else
+		fail lag-younger-fill-lost "d10's listing, committed after the last sync point and never synced, survived the cut"
+	fi
+	served_equals_backing lag-served
+}
+
 # The flags dcfs runs the scenario with.
 flags_for() {
 	case "$1" in
@@ -653,6 +713,11 @@ setup_syncpoint
 cut_syncpoint
 after_cut syncpoint
 check_syncpoint
+
+setup_lag
+cut_lag
+after_cut lag
+check_lag
 
 # Self-check of the comparison: what it does not see, every check above passes
 # for the wrong reason. After dcfs listed and stat'ed d1, each of these changes

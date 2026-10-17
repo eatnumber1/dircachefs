@@ -28,6 +28,10 @@ inode number, at a crash, a power loss or a cache wipe, and with changes
 behind dcfs's back, for today's identity and Phase 14's: see
 [The identity model](#the-identity-model).
 
+A fifth, `durability.tla`, gives the cache database's durability a clock:
+how old a cache commit a power loss can take away, given when sync points
+checkpoint the WAL: see [The durability model](#the-durability-model).
+
 This file assumes no TLA+ background.
 
 Contents:
@@ -50,6 +54,7 @@ Contents:
 16. [The revalidation model](#the-revalidation-model)
 17. [The lifetime model](#the-lifetime-model)
 18. [The identity model](#the-identity-model)
+19. [The durability model](#the-durability-model)
 
 ## Running it
 
@@ -208,7 +213,13 @@ on the detail:
   no checkpoint, restart or growth of the WAL meanwhile; dm-log-writes
   replays of the cache disk (ext4, xfs, btrfs) to every FLUSH after the
   start, write subsets between FLUSHes that keep every FUA write, and torn
-  multi-block writes (the WAL's writeback among them).
+  multi-block writes (the WAL's writeback among them). The database's last
+  sync is its last kSync commit or a checkpoint: the clean shutdown's
+  (`StopCkpt`) or a sync point's (`WalCheckpoint`, step 25.28b), which
+  `fault_power_test`'s `lag` scenario checks on real disks (a fill before
+  the sync point survives a cut, one after it does not). How old a commit
+  stays losable needs a clock, which this model has not:
+  [The durability model](#the-durability-model).
 - `clean_shutdown` is modelled but changes nothing: `StartRun` runs
   `RecoverDirty` whatever it says, and `RecoverDirty` with an empty dirty
   set does nothing.
@@ -250,7 +261,9 @@ on the detail:
   across directories, out-of-band changes and `ReconcileAttrs`,
   `InvalidateInode` after `ESTALE`, refused boundaries, `ParentOf` of a
   non-root directory, `RENAME_EXCHANGE`/`RENAME_NOREPLACE`, and the
-  periodic sync's timing (any request may be a sync point at any time).
+  periodic sync's timing (any request may be a sync point at any time, and
+  `WalCheckpoint` may run between any two requests' steps; the durability
+  model has the clock).
 - A handle that fails to open while its object exists is not modelled:
   xfs and btrfs answer ESTALE for an inode the device cannot read, and
   dcfs took every ESTALE as "gone" (forgetting the row and replying
@@ -289,7 +302,7 @@ on the detail:
 | `bCur` | The backing filesystem now: D's `names` (name -> object or `"-"`), `ver` (D's attributes), `f` (F's attributes, step 23.8), `fs` (F's last change that was not a read, a ghost) and `fn` (F exists, under its name in D; step 23.11), and `data` (object -> its contents: 0 empty, else a stamp; only the `write` requests of step 12.8 change it) | the real directory and its files |
 | `bSeq` | The backing filesystem's states since its last durable point, in the order the syscalls made them: `bSeq[1]` is durable, the last is `bCur` (step 12.8). Which states a power loss may leave of them is the regime's (`BCrash`, `MetaCrash`) | the backing filesystem's page cache and journal |
 | `dbCur` | The cache database now (for D): `dent`, `complete`, `epoch`, `attrValid`, `attr`, `dirty`, `clean`; for F (steps 23.8, 23.11): `fRow` (its row exists), `fDent` (its dentry in D), `fValid`, `fAttr`, `fDirty` | `dentries`, `directories.children_complete`/`epoch`, `inodes.attrs_valid` and attributes, `dirty`, `cache_state.clean_shutdown` |
-| `dbOpts` | Database states a crash may leave: the last fsynced commit and every later one | the WAL at `synchronous=NORMAL` |
+| `dbOpts` | Database states a crash may leave: the last fsynced commit and every later one | the WAL at `synchronous=NORMAL`, since its last fsync (a kSync commit or a checkpoint) |
 | `mode` | `"up"` (serving), `"down"`, `"recover"`/`"start"` (startup), `"stop_*"` (shutdown) | `main.cc`'s lifecycle |
 | `seq` | The fill guards' logical clock | `FillGuards::seq` |
 | `inflight` | Mutations of D between phase 1 and their end | `FillGuards::inflight[D]` |
@@ -341,6 +354,7 @@ prints. A request's first step runs inside `Arrive`.
 | `RenameStat`, `RenameFill`, `RenameFailed`, `RenameFailed2` | As for create (a failure re-resolves both names) | | `RefreshAfterRename`, `ReresolveAfterFailure` |
 | (sync, first step) | Snapshot of the fill guards' clock, then syncfs: every backing write so far is durable (`SyncBarrier`; an FSYNCDIR's or FSYNC's own fsync comes first and adds nothing). A `fsync` request (step 12.8: the kernel's FSYNC of the file a name holds) is the same sync point | Sync points | `backing::SyncBacking`, `cache::BeginSync` |
 | `SyncClearDirty` | Clear D's dirty row (normal durability) unless a mutation of D began or ended since the snapshot or is in flight; forget `dirty.durable` | Sync points | `cache::ClearDirty` |
+| `WalCheckpoint` | Step 25.28b: a sync point's checkpoint of the cache's WAL: every commit so far is durable (`dbOpts` becomes `{dbCur}`). At any moment no request is between two syscalls, which covers where the code runs it: after a sync point's `ClearDirty` (the periodic one, an FSYNC's or FSYNCDIR's), and alone at the periodic one when only cache commits are pending | Sync points (the sync point's checkpoint) | `DirCacheFS::CheckpointCache`, `sqlite3::Connection::Checkpoint` |
 | (write, first step), `WriteSyscall`, `WriteReply` | Step 12.8: a write of new contents to the file a name holds, through its writable open (passthrough; `ENOENT` if the name holds none), then the reply. It changes the file's data only, which no record of D's covers (the open's phase 1 and release are the file's, not modelled); it gives the crash regimes data to reorder | | `fuse_ops.cc` WRITE through passthrough |
 | `InterruptArrives` | With `Interrupts` (step 22.5): the kernel's FUSE_INTERRUPT for a request in flight arrives, at any step, once (in the safety configurations, only where its next step reads it: `CanArriveWhereItMatters`). Nothing changes but the request's `intr`; it goes on to its next interruption point | Cancellation | libfuse's `do_interrupt` (`SessionLoop::Drain`) |
 | `Interrupt` | An interruption point, just before a backing syscall (`RN_probe`, `PD_read`, `PD_commit`: the population's reads abandoned, `PD_commit` standing for the checks between probe batches only; `GA_stat`: the refresh not taken; `C_sys`, `U_sys`, `R_sys`, `A_sys`; F's `FC_sys`, `FS_sys`, `FG_stat`, `FG_rstat`, a write's `W_sys`), finds the request's interrupt arrived: the request replies `EINTR`; a mutation past phase 1 `End`s (D's, or F's for F's setattr) without phase 3, its names and attributes left unknown and dirty, the backing unchanged. An obligation (step 22.5): at an interruption point an interrupted request has no other step (`Proceeds`, in `At`). Never between a syscall and its phase 3 | Cancellation | `CheckInterrupted` (`dcfs/interruption_point.h`), `SessionLoop` |
@@ -709,6 +723,15 @@ with the kernel's lock only a getattr can. Step 12.11's attribute change
 from 935,825 to 1,479,307, recovery from 25,861 to 39,635, liveness from
 101,898 to 146,504 and interrupt from 230,662 to 280,869 (run of
 2026-10-08); the large configurations leave it out and are unchanged.
+Step 25.28b's `WalCheckpoint` (every configuration but `MC_large.cfg` and
+`MC_nolock.cfg`, which leave it out: `MC.tla`'s `NoWalCheckpoint` says
+why it cannot hide a violation) took small from 1,479,307 to 1,869,733,
+recovery from 39,635 to 42,479, liveness from 146,504 to 244,552,
+interrupt from 280,869 to 388,382, interrupt_muts2 from 892,708 to
+1,325,533 and interrupt_nolock from 1,036,982 to 1,500,767. The counts
+and times below for the configurations that have it are from the runs of
+2026-10-17 (load 7-12); `MC_large.cfg`'s and `MC_nolock.cfg`'s are
+unchanged by it.
 
 `LongNames` (step 12.24) is the set of names longer than the backing's
 `f_namelen` (`Context::name_max`). A lookup of one never reads the cache:
@@ -717,9 +740,9 @@ populated. Every configuration but `MC_long_names.cfg` sets it to `{}`.
 
 | Configuration | Test (tier) | Bounds | States | Time |
 |---|---|---|---|---|
-| `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds (the attribute change included, step 12.11), all invariants, the three effect-point properties (step 12.7; also in `MC_recovery.cfg`, `MC_liveness.cfg` and `MC_interrupt.cfg`, and in `Trace.cfg`: every recorded trace is checked for them) and `ReplyObservable` (step 12.7b; also in `MC_recovery.cfg`, `MC_large.cfg`, `MC_nolock.cfg`, every `MC_interrupt*.cfg` and `Trace.cfg`) | 1,479,307 | ~3 min unloaded (12 min at load 13, 2026-10-08) |
-| `MC_recovery.cfg` | `recovery_test` (medium) | 1 name, 1 slot, 2 mutations, 2 crashes (one can come during the recovery of a dirty database: steps 12.6, 12.6b), all request kinds, all invariants and properties | 39,635 | ~20 s |
-| `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates`. It checks the invariants, the three effect-point properties and `RecoveryTerminates` (TLC reads both of its `PROPERTIES` sections), but not `ReplyObservable`: the reply ghost is off (`RecordReply <- ForgetReply`), since without a VIEW the idle slot's last reply tripled the states (338,790) | 146,504 | ~1-2 min |
+| `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds (the attribute change included, step 12.11), all invariants, the three effect-point properties (step 12.7; also in `MC_recovery.cfg`, `MC_liveness.cfg` and `MC_interrupt.cfg`, and in `Trace.cfg`: every recorded trace is checked for them) and `ReplyObservable` (step 12.7b; also in `MC_recovery.cfg`, `MC_large.cfg`, `MC_nolock.cfg`, every `MC_interrupt*.cfg` and `Trace.cfg`) | 1,869,733 | 4.2 min (12 min at load 13 for 1,479,307, 2026-10-08) |
+| `MC_recovery.cfg` | `recovery_test` (medium) | 1 name, 1 slot, 2 mutations, 2 crashes (one can come during the recovery of a dirty database: steps 12.6, 12.6b), all request kinds, all invariants and properties | 42,479 | ~12 s |
+| `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates`. It checks the invariants, the three effect-point properties and `RecoveryTerminates` (TLC reads both of its `PROPERTIES` sections), but not `ReplyObservable`: the reply ghost is off (`RecordReply <- ForgetReply`), since without a VIEW the idle slot's last reply tripled the states (338,790) | 244,552 | ~2 min |
 | `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes; `ReplyObservable` | 10,239,570 | ~20 min unloaded (CI 634 s on 2026-10-08 before step 12.6b's daemon crash; 27 min alone at load 11 without `ReplyObservable`, 64 min with it at load 9-12, 2026-10-08) |
 | `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; the three effect-point properties (since step 12.12a) and `ReplyObservable` (lookups and listings overlap mutations here) | 8,224,822 | ~6 min unloaded (CI 506 s before step 12.6b's daemon crash, for 6.37M states; 19 min alone at load 11, 2026-10-08) |
 | `MC_nolock_small.cfg` | `nolock_small_test` (medium) | step 12.12a (the audit's G4): as nolock with no crash and only `NolockGuardRequests` (lookups, listings, creates, unlinks, renames), so that `Mutation::Owns`, the phase-1 verification and the fill guards meeting a mutation bite before the large tier (`known_bug_rename_stale_source_nolock_small_test` finds R4 in these bounds); all invariants and the four action properties | 343,294 | ~1.5 min (load 8-14, 2026-10-10); with every kind but readdirplus 1,990,812 (6 min), with sync points added 1,185,567 |
@@ -734,6 +757,7 @@ populated. Every configuration but `MC_long_names.cfg` sets it to `{}`.
 | `MC_borndirty.cfg`, `_ext4`; `MC_borndirty_nolock.cfg`, `_nolock_ext4`; `MC_borndirty_recovery.cfg` | `borndirty_*_test` (medium) | step 23.11 ([Born-dirty create](#born-dirty-create-step-2311)) | 275,962; 382,710; 89,998; 108,724; 3,054 | 39 s; 2.2 min; 33 s; 46 s; 7 s (by hand, load 14, 2026-10-09) |
 | `MC_crash_ext4.cfg`, `MC_crash_metaprefix.cfg` | `crash_ext4_test`, `crash_metaprefix_test` (medium) | step 12.8: the two weaker backing regimes; 2 names, 1 slot, 3 mutations, 1 crash, lookups, getattrs, creates, unlinks, renames, attribute changes of D and syncs (the litmus configurations have the writes and FSYNCs); all invariants, `CrashRefines`, the effect-point properties and `ReplyObservable` | 356,954 (ext4), 292,044 (metaprefix) | ~3 min, ~1.5 min |
 | `MC_litmus_*.cfg` | `litmus_*_test` (small) | step 12.8: the litmus tests that must hold (`MClitmus.tla`; [the table](#the-backing-filesystems-crash-consistency)); 1 slot, 1-2 names, a fixed program of 2-3 mutations and a sync point, 1 crash; every invariant and property besides | 679-1,475 each | seconds |
+| `MC_durability.cfg` | `durability_test` (small) | step 25.28b: [The durability model](#the-durability-model) | 46 | seconds |
 
 `small_coverage_test` and `nolock_small_coverage_test` (large, step
 12.12a) run `MC_small.cfg` and `MC_nolock_small.cfg` with TLC's
@@ -1004,6 +1028,7 @@ right after the code the model's step stands for, with no backing syscall
 | `SyncfsStarting` | `SyncBacking`, before the syncfs calls | (`unexplained` unless the snapshot came right before) | none: the recorder requires `SyncSnapshotTaken` to be the callback right before it | Sync points |
 | `SyncfsDone` | `SyncBacking`, after the syncfs calls | `syncfs` | nothing (the model's syncfs takes effect at S1) | Sync points |
 | `SyncCleared` | `SyncBacking`, after `cache::ClearDirty` | `sync_clear`, `stop_clear` | `SyncClearDirty`; `StopClear` | Sync points |
+| `WalCheckpointed` | `DirCacheFS::CheckpointCache`, after a sync point's checkpoint (step 25.28b) | `wal_checkpoint`, in every directory's trace | `WalCheckpoint` | Sync points (the sync point's checkpoint) |
 | `RunStarting` | `backing::StartRun`, first | `crash` (if the clean-shutdown flag is 0), `restart` | `Crash`, `Restart` | Crashes, power loss and recovery |
 | `Recovered` | `StartRun`, after `cache::RecoverDirty` | `recover`, with the keys of the inodes that were dirty (read at `RunStarting`) | `Recover`, a dentry made unknown in a clean D only if its object's key is among them | Recovery |
 | `RunStarted` | `StartRun`, after its kSync commit | `start_run` | `StartRun` | Startup |
@@ -1302,7 +1327,10 @@ renames with flags and syscall failures.
   object its resolve probed, and a negative entry after that probe is
   rejected), and the end of an attribute change (step 12.11: an
   attrchange with its `end` line is valid, one without it is rejected at
-  the refresh's `stat` that follows).
+  the refresh's `stat` that follows), and the sync point's checkpoint
+  (step 25.28b: a power loss may lose a fill's normal commit, but not once
+  a `wal_checkpoint` line has followed it: kept is valid, lost is rejected
+  at the `crash` line).
 
 A crash during recovery (steps 12.6, 12.6b):
 `//dcfs:trace_crash_during_recovery_test` runs the harness built so that
@@ -1356,6 +1384,7 @@ the run of 2026-10-06). `Arrive` is split by request kind.
 | `UnlinkPhase1` (begin, retry, EAGAIN, ENOENT), `UnlinkSyscall`, `UnlinkPhase3`, `UnlinkStat`, `UnlinkFill` | harness, power, rename |
 | `RenameResolveDst`, `RenamePhase1` (begin, retry, EAGAIN), `RenameSyscall`, `RenamePhase3`, `RenameStat`, `RenameFill` | harness, power |
 | `SyncClearDirty` | harness, power, rename |
+| `WalCheckpoint` (step 25.28b; run of 2026-10-17) | harness, power, rename |
 | `Crash`, `Restart`, `Recover`, `StartRun` | crash, power (`Restart`, `Recover`, `StartRun` also rename, create) |
 | `BeginShutdown`, `StopSync` | crash, power, rename, create |
 | `StopClear`, `StopCkpt`, `StopFlag` | power, rename, create |
@@ -1976,6 +2005,9 @@ model in the same change (AGENTS.md). In practice:
   and its held descriptors, row retirement, DESTROY, the start's sweep of
   unnamed rows) updates `lifetime.tla`, with its `LifetimeChanged` events
   and `LifetimeTrace.tla` (see [The lifetime model](#the-lifetime-model)).
+- A change to when a sync point runs, or to what makes the cache's commits
+  durable (the checkpoint, the kSync commits), updates `durability.tla`
+  too (see [The durability model](#the-durability-model)).
 - Every table or column that mirrors the backing filesystem (a row, a
   dentry, a mark, a completeness flag) has its row lifecycle in the
   model, not only its contents: where the code creates and deletes it,
@@ -2734,3 +2766,68 @@ kernel's `LOOKUP(".")` reconnections and its NFS handles are checked only
 by `handles_test` and `nfs_test`, not against the model; no traced run has
 a power loss, a wipe or a recycling the handle does not show (the harness
 fakes one by changing the row's recorded generation).
+
+## The durability model
+
+`durability.tla` (step 25.28b) answers one question `dcfs.tla` cannot,
+having no clock: how old a cache commit can a power loss take away? Its
+abstraction of the cache database is `dcfs.tla`'s (step 12.14's, checked
+against SQLite by `sqlite_durability_test`): a normal commit may be lost,
+a kSync one may not, nor any commit before one, and a checkpoint makes
+every commit so far durable. To it the model adds a discrete clock and
+keeps only what the question needs:
+
+| Variable | Meaning | In dcfs |
+|---|---|---|
+| `since` | ticks since the last sync point | `DirCacheFS::last_sync_` |
+| `oldest` | ticks since the first commit a power loss may lose (`None`: nothing to lose) | the WAL frames since its last fsync |
+| `dirty` | the dirty set may be non-empty | `DirCacheFS::SyncDue` |
+| `started` | the last step was a request's start | (checking only) |
+
+| Action | What it does | dcfs |
+|---|---|---|
+| `Commit` | A normal commit (a fill, a phase 3) | every transaction at `Durability::kNormal` |
+| `Phase1` | A kSync commit that marks a row dirty: everything so far durable | `cache::BeginMutation` |
+| `AutoCheckpoint` | SQLite's own checkpoint, every 1000 pages | SQLite |
+| `Start` | A request starts: the periodic sync point first, once `Interval` ticks have passed since the last | `DirCacheFS::MaybeSyncBacking` |
+| `Fsync` | An FSYNC's or FSYNCDIR's sync point | `DirCacheFS::Fsync`, `Fsyncdir` |
+| `Tick` | One tick of time passes (saturating at `Interval`) | the clock |
+| `PowerLossAndRestart` | The commits a power loss may lose are lost; the next process's clock starts | `backing::StartRun` |
+
+The sync point (`SyncPoint`, `DirCacheFS::SyncNow`) resets the clock,
+clears the dirty set (`ClearDirty`, a normal commit) if it may be
+non-empty, and checkpoints. Commits may come at any moment, not only
+inside requests, in any number between two request starts: a request may
+run for many intervals on a slow backing, and under coroutines several
+overlap. That only adds behaviors. A checkpoint that fails is left out:
+it is the cache disk failing, after which nothing is durable anyway.
+
+Properties: `AtRequestStart`, the bound, says that when a request starts
+every commit a power loss may lose is younger than one sync interval
+(`oldest < Interval`); `LostOnlySinceSync`, the reason, says that every
+commit a power loss may lose came after the last sync point (`oldest <=
+since`). The bound is at requests, not at every moment: with no timer
+(docs/style.md, "No timers") an idle daemon runs nothing, so its last
+interval's commits wait for its next request. `MC_durability.cfg` checks
+both at an interval of three ticks (46 states).
+
+Known bugs, each the code before this step (`Bug*` constants, FALSE in
+the real configuration; small tests):
+
+| Variant | Bug | Expected | The counterexample |
+|---|---|---|---|
+| `durability_never_checkpoint` | before step 25.28: no sync point checkpointed | `AtRequestStart` | a fill, three ticks, a request starts with the fill still losable |
+| `durability_sync_point_skips_checkpoint` | step 25.28: a sync point that clears a dirty set resets the clock without a checkpoint (its `MaybeCheckpointWal` ran only when no sync point was due) | `AtRequestStart` | a phase 1, a tick, a phase 3, three ticks; the request's sync point clears the dirty set and leaves phase 3's commit losable |
+
+`premise_lost_only_since_sync_test` checks `LostOnlySinceSync` alone on
+the second. Its link to the code: `WalCheckpoint` is the sync point's
+checkpoint in `dcfs.tla` and its traces (the `WalCheckpointed` event), and
+`fault_power_test`'s `lag` scenario cuts the power on real disks with a
+fill on each side of a periodic sync point: the one before survives, the
+one after does not.
+
+```sh
+bazel test //formal:durability_test //formal:known_bug_durability_never_checkpoint_test \
+           //formal:known_bug_durability_sync_point_skips_checkpoint_test \
+           //formal:premise_lost_only_since_sync_test
+```

@@ -242,7 +242,7 @@ flag is set as the option `dcfs.<flag>`, e.g. `dcfs.sync_interval_sec=2`.
 |---|---|---|
 | `dcfs.attr_timeout_sec` | `3600` | How long the kernel may cache an inode's attributes. Long by design, since dcfs has exclusive access. While a file is open for writing, its attributes are always returned with a timeout of 0. |
 | `dcfs.entry_timeout_sec` | `3600` | How long the kernel may cache a lookup result, including a negative one. |
-| `dcfs.sync_interval_sec` | `5` | While mutations have left dirty cache entries, the first request this many seconds after the last sync point runs a new one (`syncfs` of the backing filesystem, then the dirty set is cleared). Bounds how much is re-read after a power loss. |
+| `dcfs.sync_interval_sec` | `5` | The first request this many seconds after the last sync point runs a new one: while mutations have left dirty cache entries, a `syncfs` of the backing filesystem, then the dirty set is cleared; and if anything was cached since the last, a checkpoint of the cache database's WAL, which makes it durable. Bounds how much is re-read after a power loss: the entries changed, and what was cached, in about one interval before the last request. |
 
 dcfs uses Abseil logging, so Abseil's logging flags work too, as options with
 Abseil's semantics:
@@ -603,9 +603,12 @@ changed since the last sync point, so that they are re-read from the
 backing filesystem. Inode rows are kept, so NFS handles keep working,
 except after a power loss or kernel crash: the cache database makes a
 durable commit at the first change through dcfs since the last sync point,
-at a WAL checkpoint and at a start, and rows recorded after it (by
-lookups, listings, and the objects a change creates) are lost, with their
-NFS handles. Those fail with `ESTALE`; a nodeid handed out again gets a
+at every sync point (its WAL checkpoint) and at a start, and rows recorded
+after it (by lookups, listings, and the objects a change creates) are
+lost, with their NFS handles. Since a sync point runs at the first request
+`dcfs.sync_interval_sec` seconds after the last, that is at most about one
+interval's rows before the last request. Those fail with `ESTALE`; a
+nodeid handed out again gets a
 fresh random generation, so an old handle resolves to a different file
 only with probability 2^-32 (docs/design.md, "Generations").
 
@@ -1143,13 +1146,15 @@ about to change as unknown and records the affected inodes in a durable
 dirty set, committed with an fsync of the WAL; (2) performs the backing
 syscall, as the calling user where that matters; (3) records the new
 state. A crash at any point leaves at worst unknown entries, which are
-re-read on demand. Sync points (`syncfs`, then clearing the dirty set) run
-on `fsync`, every few seconds while a mutation has left dirty state, and at
-shutdown; after an unclean shutdown, everything still in the dirty set is
-forgotten. This bounds what a power loss costs to re-reading the entries
-changed in the last few seconds. A file that was only read is in the dirty
-set too, for its access time only: that alone makes no sync point run
-until the kernel's own dirtytime expiry (12 hours by default,
+re-read on demand. Sync points (`syncfs`, then clearing the dirty set,
+while a mutation has left dirty state; then a checkpoint of the cache's
+WAL, if anything was cached since the last) run on `fsync`, every few
+seconds while there is something to do, and at shutdown; after an unclean
+shutdown, everything still in the dirty set is forgotten. This bounds what
+a power loss costs to re-reading the entries changed, and what was cached,
+in the last few seconds. A file that was only read is in the dirty set
+too, for its access time only: that alone makes no `syncfs` run until the
+kernel's own dirtytime expiry (12 hours by default,
 `fs/fs-writeback.c:64`, Linux v7.3-rc4), and after a
 crash it costs only that file's attributes. A new file or directory is
 created dirty until the next sync point, like a real filesystem's: a crash
@@ -1416,10 +1421,12 @@ recovery protocol, concurrency, and the test strategy.
 - **Power loss re-reads recent changes.** After a power loss or kernel
   crash, everything cached about entries changed in the last
   `dcfs.sync_interval_sec` seconds (or since the last `fsync`) is forgotten
-  and re-read from the backing filesystem, which spins it up. An idle dcfs
-  has no timer, so a dirty set left by the last burst of activity is only
-  cleared by the next request, `fsync` or shutdown; that is safe but makes
-  the re-read larger.
+  and re-read from the backing filesystem, which spins it up; so is what
+  the cache recorded in that time (lookups and listings), which the cache
+  database had not yet made durable. An idle dcfs has no timer, so a dirty
+  set and the cache's unsynced work left by the last burst of activity are
+  only made durable by the next request, `fsync` or shutdown; that is safe
+  but makes the re-read larger.
 - **xfs writes to the disk by itself for about a minute after the last
   write.** Not dcfs: after the last change to an xfs filesystem, its log
   worker writes two small log records (+4 block writes in all), one per

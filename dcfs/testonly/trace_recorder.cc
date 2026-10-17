@@ -1528,6 +1528,16 @@ void TraceRecorder::SyncCleared(Context &ctx) {
   After(ctx);
 }
 
+void TraceRecorder::WalCheckpointed(Context &ctx) {
+  Enter("WalCheckpointed");
+  // Every directory: the checkpoint makes the whole cache durable
+  // (dcfs.tla's WalCheckpoint).
+  for (auto &[dir, state] : dirs_) {
+    if (!state.dead) Emit(ctx, dir, nullptr, "wal_checkpoint");
+  }
+  After(ctx);
+}
+
 // --- Startup and shutdown ----------------------------------------------------
 
 void TraceRecorder::RunLineWritten(Context &ctx, Ino dir) {

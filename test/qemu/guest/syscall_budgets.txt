@@ -74,7 +74,11 @@ write sql_txns 6
 
 fsync backing 12
 fsync procfd 3
-fsync sync 2
+# Step 25.28b: 2 before (the backing fsync and syncfs). The sync point now
+# checkpoints the cache's WAL: SQLite fsyncs the WAL before it copies and
+# the database file after, and the release's commit, the first after a whole
+# checkpoint, restarts the WAL and fsyncs its new header.
+fsync sync 5
 fsync sql_stmts 76
 fsync sql_txns 8
 

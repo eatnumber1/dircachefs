@@ -177,10 +177,7 @@ absl::Status CreatedButNotCompleted(InodeId parent, std::string_view name,
 }  // namespace
 
 DirCacheFS::DirCacheFS(Context &ctx, const Options &opts)
-    : ctx_(ctx),
-      opts_(opts),
-      last_sync_(ctx.clock->TimeNow()),
-      last_wal_checkpoint_(ctx.clock->TimeNow()) {
+    : ctx_(ctx), opts_(opts), last_sync_(ctx.clock->TimeNow()) {
   ctx_.open_for_write = &open_for_write_;
   ctx_.open_files = &open_files_held_;
   std::string source;
@@ -642,30 +639,19 @@ bool DirCacheFS::SyncDue(absl::Time now) const {
                                                     ctx_.dirty.atime_expiry);
 }
 
-void DirCacheFS::MaybeCheckpointWal(absl::Time now) {
-  if (opts_.sync_interval <= absl::ZeroDuration()) return;
-  if (now - last_wal_checkpoint_ < opts_.sync_interval) return;
-  last_wal_checkpoint_ = now;
-  // Periodic WAL checkpoint tied to --sync_interval_sec (russ, 2026-10-12:
-  // permitted exception to the "no timers" rule). Prevents WAL accumulation
-  // and reader starvation during continuous read workloads.
-  absl::Status s =
-      ctx_.db.Checkpoint(sqlite3::Connection::CheckpointMode::kPassive);
-  if (!s.ok()) {
-    LOG(WARNING) << "periodic WAL checkpoint failed: " << s;
-    return;
-  }
-  ctx_.events->WalCheckpointed(ctx_);
+void DirCacheFS::MaybeSyncBacking() {
+  if (ctx_.clock->TimeNow() - last_sync_ < opts_.sync_interval) return;
+  SyncNow("periodic");
 }
 
-void DirCacheFS::MaybeSyncBacking() {
-  absl::Time now = ctx_.clock->TimeNow();
-  if (!SyncDue(now)) {
-    MaybeCheckpointWal(now);
-    return;
-  }
-  if (now - last_sync_ < opts_.sync_interval) return;
-  SyncBackingNow("periodic");
+absl::Status DirCacheFS::CheckpointCache() {
+  ASSIGN_OR_RETURN(bool committed, ctx_.db.CommittedSinceCheckpoint());
+  if (!committed) return absl::OkStatus();
+  RETURN_IF_ERROR(
+      ctx_.db.Checkpoint(sqlite3::Connection::CheckpointMode::kPassive));
+  // Model: WalCheckpoint.
+  ctx_.events->WalCheckpointed(ctx_);
+  return absl::OkStatus();
 }
 
 void DirCacheFS::NoteBackingAccess(std::string_view what, absl::Time at) {
@@ -678,19 +664,25 @@ void DirCacheFS::NoteBackingAccess(std::string_view what, absl::Time at) {
   }
 }
 
-void DirCacheFS::SyncBackingNow(std::string_view why) {
-  if (!SyncDue(ctx_.clock->TimeNow())) return;
+void DirCacheFS::SyncNow(std::string_view why) {
   last_sync_ = ctx_.clock->TimeNow();
-  last_wal_checkpoint_ = last_sync_;
   // Only the periodic sync points are announced at INFO: an fsync runs one
-  // per call, while the dirty set is non-empty.
-  if (absl::Status status = backing::SyncBacking(ctx_, why == "periodic");
-      !status.ok()) {
-    // Safe to carry on: the dirty entries stay, and only cost a larger
-    // re-read after a crash. The next request past the interval retries.
-    LOG(WARNING) << why << " sync of the backing filesystems failed, "
-                 << "keeping the dirty set: " << status;
-  }
+  // per call, while the dirty set is non-empty. With nothing dirty no
+  // backing syscall is made: the disks may be spun down.
+  const absl::Status synced =
+      SyncDue(last_sync_) ? backing::SyncBacking(ctx_, why == "periodic")
+                          : absl::OkStatus();
+  // Safe to carry on after either failure: the dirty entries stay, and the
+  // commits stay for SQLite's autocheckpoint or the next sync point; both
+  // only cost a larger re-read after a crash. The checkpoint comes after
+  // the backing half, so that it covers the dirty set's clearing too.
+  LOG_IF(WARNING, !synced.ok())
+      << why << " sync of the backing filesystems failed, "
+      << "keeping the dirty set: " << synced;
+  const absl::Status checkpointed = CheckpointCache();
+  LOG_IF(WARNING, !checkpointed.ok())
+      << why << " checkpoint of the cache's WAL failed, leaving its "
+      << "commits unsynced: " << checkpointed;
 }
 
 absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
@@ -2220,10 +2212,11 @@ absl::Status DirCacheFS::Fsync(FuseRequest &req, fuse_ino_t ino, int datasync,
   BackingCall("FsyncFd");
   RETURN_IF_ERROR(backing::FsyncFd(fd, datasync != 0));
   // The caller wants what it did durable, and that includes what dcfs
-  // cached about it: a sync point makes the backing filesystems durable
-  // and then empties the dirty set (a no-op if it is already empty).
+  // cached about it: a sync point makes the backing filesystems durable,
+  // empties the dirty set (a no-op if it is already empty) and checkpoints
+  // the cache's WAL.
   RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("a sync point")));
-  SyncBackingNow("fsync");
+  SyncNow("fsync");
   return req.ReplyErrno(0);
 }
 
@@ -2516,7 +2509,7 @@ absl::Status DirCacheFS::Fsyncdir(FuseRequest &req, fuse_ino_t ino,
     // A removed directory (step 23.2): through its record's descriptor.
     BackingCall("FsyncDirFd");
     RETURN_IF_ERROR(backing::FsyncDirFd(*it->second.fd, datasync != 0));
-    SyncBackingNow("fsyncdir");
+    SyncNow("fsyncdir");
     return req.ReplyErrno(0);
   }
   // Missing row -> ESTALE; see RequireAttr(). There is no phase 1/3 here:
@@ -2525,7 +2518,7 @@ absl::Status DirCacheFS::Fsyncdir(FuseRequest &req, fuse_ino_t ino,
   RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("an fsyncdir")));
   RETURN_IF_ERROR(backing::FsyncDir(ctx_, id, datasync != 0));
   RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("a sync point")));
-  SyncBackingNow("fsyncdir");
+  SyncNow("fsyncdir");
   return req.ReplyErrno(0);
 }
 

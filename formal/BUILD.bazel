@@ -16,12 +16,12 @@ MODEL = [
 
 # The real model. MC_small: every request kind and invariant, today's
 # kernel locking. MC_liveness: RecoveryTerminates. Timeout of small_test:
-# 1,479,307 distinct states since step 12.11's attribute change; at about
-# 80 us per state on the CI runner that is about 120 s, but 12 min alone
-# at load 13 on russ's machine, past "moderate"'s 300 s. The others stay
-# "moderate": recovery 39,635 states (about 3 s on the runner, 19 s at
-# load 13), liveness 146,504 (about 12 s; 104 s), interrupt 280,869 (about
-# 22 s; 136 s).
+# 1,869,733 distinct states since step 25.28b's sync point checkpoint
+# (1,479,307 since step 12.11's attribute change); at about 80 us per
+# state on the CI runner that is about 150 s, but 12 min alone at load 13
+# on russ's machine (4.7 min at load 7-12, 2026-10-17), past "moderate"'s
+# 300 s. The others stay "moderate": recovery 42,479 states (12 s at load
+# 7-12), liveness 244,552 (130 s), interrupt 388,382.
 tlc_test(
     name = "small_test",
     size = "medium",
@@ -46,8 +46,8 @@ tlc_test(
 # Step 12.12a (the audit's G4): without the kernel's lock, small enough for
 # the medium tier (no crash), so that Mutation::Owns, the phase-1
 # verification and the fill guards of lookups and listings meeting a
-# mutation are checked before the large tier: 343,294 distinct states,
-# about 80 s at load 8 (2026-10-10).
+# mutation are checked before the large tier: 350,330 distinct states,
+# about 60 s at load 7-12 (2026-10-17; 343,294 before step 25.28b).
 tlc_test(
     name = "nolock_small_test",
     size = "medium",
@@ -681,6 +681,46 @@ REVAL_LIMITATIONS = {
     for limitation, violation in REVAL_LIMITATIONS.items()
 ]
 
+# The durability model (durability.tla; README.md, "The durability model",
+# step 25.28b): how old a cache commit a power loss can take away. A few
+# hundred states; each test takes seconds.
+tlc_test(
+    name = "durability_test",
+    size = "small",
+    timeout = "short",
+    config = "MC_durability.cfg",
+    spec = "durability.tla",
+)
+
+# Its known bugs: the code before 25.28 (no checkpoint at a sync point) and
+# 25.28's (none at a sync point that clears a dirty set).
+[
+    tlc_test(
+        name = "known_bug_%s_test" % bug,
+        size = "small",
+        timeout = "short",
+        config = "known_bugs/%s.cfg" % bug,
+        expect_violation = "Invariant AtRequestStart is violated",
+        spec = "known_bugs/%s.tla" % bug,
+        srcs = ["durability.tla"],
+    )
+    for bug in [
+        "durability_never_checkpoint",
+        "durability_sync_point_skips_checkpoint",
+    ]
+]
+
+# The reason, LostOnlySinceSync, bites on 25.28's.
+tlc_test(
+    name = "premise_lost_only_since_sync_test",
+    size = "small",
+    timeout = "short",
+    config = "known_bugs/premise_lost_only_since_sync.cfg",
+    expect_violation = "Invariant LostOnlySinceSync is violated",
+    spec = "known_bugs/durability_sync_point_skips_checkpoint.tla",
+    srcs = ["durability.tla"],
+)
+
 # The lifetime model (lifetime.tla; README.md, "The lifetime model"): which
 # nodeids the kernel holds and what dcfs keeps for each. Every invariant in
 # each: MC_lifetime; MC_lifetime_stubs, with boundary stubs going out of
@@ -963,6 +1003,12 @@ TRACE_TESTS = {
     # behavior, checked against Trace.tla; not the known bug of the same
     # name, BugInterruptAfterSyscall, which acts on it there.)
     "interrupt_after_syscall": None,
+    # Step 25.28b: a power loss may lose a fill's normal commit (valid) ...
+    "fill_lost_without_wal_checkpoint": None,
+    # ... but not once a sync point's checkpoint has followed it: kept is
+    # valid, lost is rejected at the crash.
+    "wal_checkpoint_keeps_fill": None,
+    "wal_checkpoint_fill_lost": "\"ev\":\"crash\"",
 }
 
 [

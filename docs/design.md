@@ -1538,17 +1538,20 @@ today), `ClearDirty` empties the table in one statement and puts back the
 kept rows: every row then is in the snapshot and passes the per-row test,
 so the result is the same, without a statement per row.
 
-Sync points run:
+Sync points run (`DirCacheFS::SyncNow`, but for the shutdown's):
 
 - after the kernel's `FSYNC` or `FSYNCDIR` (after the fsync itself),
   because the caller asked for what it did to be durable, and that
   includes what dcfs cached about it;
 - at the start of the first request `--sync_interval_sec` (default 5)
-  after the previous sync point, while the dirty set may hold a row that
-  is not `atime_only` (`Context::dirty.any`; `DirCacheFS::MaybeSyncBacking`,
-  called from `fuse_ops.cc`);
+  after the previous sync point (`DirCacheFS::MaybeSyncBacking`, called
+  from `fuse_ops.cc`); its backing half (`syncfs`, `ClearDirty`) only
+  while the dirty set may hold a row that is not `atime_only`
+  (`Context::dirty.any`, `DirCacheFS::SyncDue`);
 - at clean shutdown (`backing::FinishRun`), which is clean only if no row
   of either kind is left.
+
+Each of the first two ends with a checkpoint of the cache's WAL (below).
 
 An `atime_only` row does not make a sync point run on its own, after an
 `FSYNC` either, until it is older than the kernel's dirtytime expiry: the
@@ -1558,8 +1561,9 @@ purpose (the kernel writes them back after
 `/proc/sys/vm/dirtytime_expire_seconds`, 12 hours by default, and dcfs
 lets them drive a sync point from then on), and a spin-up for an access
 time is what dcfs exists to avoid. Such rows are cleared by whichever sync
-point runs (for a mutation's row, an `FSYNC` with one, the timer with one,
-or their expiry), by the clean shutdown's, or, after a crash, recovered
+point runs its backing half (for a mutation's row, an `FSYNC` with one, the
+periodic one with one, or their expiry), by the clean shutdown's, or, after
+a crash, recovered
 (their attributes only: [Access times](#access-times)), staying dirty
 across the restart until then.
 
@@ -1576,14 +1580,44 @@ not ours: the times a backing filesystem stamps (including `UTIME_NOW` in
 
 dcfs is single-threaded inside libfuse's blocking loop, which has no idle
 hook, so sync points have no timer: an idle daemon keeps a non-empty dirty
-set until its next request, fsync or shutdown. That is safe; it only makes
-the re-read after a crash larger. (libfuse 3.18.2 has no `SYNCFS` handler,
-and the kernel only sends `SYNCFS` to fuseblk servers anyway.)
+set, and unsynced cache commits, until its next request, fsync or
+shutdown. That is safe; it only makes the re-read after a crash larger.
+(libfuse 3.18.2 has no `SYNCFS` handler, and the kernel only sends
+`SYNCFS` to fuseblk servers anyway.)
 
-The one timed action is a passive WAL checkpoint, run once per
-`--sync_interval_sec` when no sync point is due (`MaybeCheckpointWal` in
-`dcfs/dir_cache_fs.cc`; russ, 2026-10-12, a permitted exception to the no-timer
-rule). It keeps the WAL from growing during a long read-only workload.
+**The sync point's checkpoint** (step 25.28b; `DirCacheFS::CheckpointCache`).
+Fills and phase 3s commit at `synchronous=NORMAL`: in the WAL, not fsynced.
+Without a checkpoint they would become durable only at the next kSync
+commit (a mutation's phase 1) or at SQLite's autocheckpoint, every 1000
+pages, so on a read-mostly server a power loss could take away hours of
+fills, which recovery then reads again from the backing, spinning its
+disks up. So every sync point (but the shutdown's, which has its own
+`TRUNCATE` checkpoint) ends, after its backing half if any, with a
+`PASSIVE` checkpoint whenever anything committed since the last one
+(`sqlite3::Connection::CommittedSinceCheckpoint`, SQLite's data version):
+under `synchronous=NORMAL` SQLite fsyncs the WAL before it copies a frame
+into the database file, so every commit so far is durable once it returns,
+the dirty set's clearing included. It is the sync point's own cadence, not
+a clock of its own: with nothing dirty and nothing committed a periodic
+sync point does nothing, and no backing syscall is made for a checkpoint
+alone. The bound: when a request starts, a power loss can lose only cache
+commits younger than one sync interval (`formal/durability.tla`'s
+`AtRequestStart`; `fault_power_test`'s `lag` scenario shows a fill older
+than the interval surviving a cut and one after the sync point lost). It
+is counted at requests: an idle daemon's last interval waits for its next
+request.
+
+The checkpoint is a backing-free step at a request boundary, in the sync
+point's place (before the request at the periodic one, after the fsync at
+an `FSYNC`), so it needs no cancellation checkpoint. A reader outside dcfs
+holding a snapshot (an administrator's `sqlite3` shell: `dcfs fsck`
+refuses a database in use) can keep a `PASSIVE` checkpoint from copying,
+and then from fsyncing the WAL; the commits then wait for the reader to
+go. A checkpoint that fails (the cache disk's I/O error) is logged, the
+commits stay unsynced, and the next sync point checkpoints again. SQLite
+answers a `PASSIVE` checkpoint `SQLITE_BUSY` only while another connection
+runs one; dcfs runs the only one, so that answer is a failure like any
+other.
 
 ### Why not `synchronous=FULL` everywhere
 

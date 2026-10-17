@@ -689,7 +689,8 @@ class ProtocolEvents {
   virtual void ShutdownBegin(Context &ctx) {}
   // FinishRun's checkpoint completed. Model: StopCkpt.
   virtual void Checkpointed(Context &ctx) {}
-  // Periodic or intermediate WAL checkpoint completed.
+  // A sync point's checkpoint of the cache's WAL completed
+  // (DirCacheFS::CheckpointCache; step 25.28b). Model: WalCheckpoint.
   virtual void WalCheckpointed(Context &ctx) {}
   // FinishRun's clean_shutdown = 1 committed. Model: StopFlag.
   virtual void CleanShutdownRecorded(Context &ctx) {}

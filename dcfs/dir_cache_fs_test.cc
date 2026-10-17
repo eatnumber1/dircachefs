@@ -3343,40 +3343,82 @@ TEST_F(ClockTest, PeriodicSyncPointFollowsTheInjectedClock) {
   EXPECT_EQ(attr.st.st_size, 5);
 }
 
-// The periodic WAL checkpoint runs once opts_.sync_interval has elapsed on the
-// injected clock, even if there are no dirty rows, checkpointing accumulated
-// WAL frames passively without blocking readers or requiring timers.
-TEST_F(ClockTest, PeriodicWalCheckpointFollowsTheInjectedClock) {
-  std::string db_file = absl::StrCat(source_, "_wal.sqlite");
-  WriteFile(Path("f"));
-  Start(db_file);
-
-  // Clear the initial startup dirty state so that ctx_.dirty.any is false.
-  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());
+// Step 25.28b: the periodic sync point that a mutation's dirty row drives
+// also checkpoints the cache's WAL, so the fills committed since the last
+// one stop depending on SQLite's autocheckpoint to become durable.
+TEST_F(ClockTest, PeriodicSyncPointCheckpointsTheWal) {
+  Start(absl::StrCat(source_, "_wal.sqlite"));
+  auto [mkdir, d] = Mkdir(kRootInode, "d");
+  ASSERT_EQ(mkdir.error, 0);
+  ASSERT_THAT(Dirty(), Contains(d));
   counter_.Reset();
 
-  auto [lookup, entry] = Lookup(kRootInode, "f");
+  clock_.AdvanceTime(absl::Seconds(5));
+  Tick();
+  EXPECT_THAT(Dirty(), ::testing::IsEmpty()) << "the sync point ran";
+  EXPECT_EQ(counter_.counts().wal_checkpoints, 1) << "and checkpointed the WAL";
+}
+
+// Step 25.28b: with no dirty row, commits alone (a fill) drive the
+// checkpoint, once an interval has passed since the last sync point, and
+// with no backing syscall; with no commit since the last checkpoint, there
+// is none. A periodic sync point with nothing to do still restarts the
+// interval.
+TEST_F(ClockTest, CommitsAloneDriveThePeriodicCheckpoint) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  WriteFile(Path("d/x"));
+  WriteFile(Path("f"));
+  Start(absl::StrCat(source_, "_wal.sqlite"));
+  // A sync point now: the start's commits checkpointed, nothing dirty.
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  ASSERT_THAT(Dirty(), ::testing::IsEmpty());
+  counter_.Reset();
+
+  clock_.AdvanceTime(absl::Seconds(5));
+  Tick();
+  EXPECT_EQ(counter_.counts().wal_checkpoints, 0)
+      << "no commit since the last checkpoint";
+
+  auto [lookup, entry] = Lookup(kRootInode, "f");  // A fill: root's listing.
   ASSERT_EQ(lookup.error, 0);
-
-  EXPECT_EQ(counter_.counts().wal_checkpoints, 0);
-
+  ASSERT_THAT(Dirty(), ::testing::IsEmpty());
   clock_.AdvanceTime(absl::Seconds(4));
   Tick();
   EXPECT_EQ(counter_.counts().wal_checkpoints, 0)
       << "before the interval has elapsed";
-
-  clock_.AdvanceTime(absl::Seconds(2));
+  clock_.AdvanceTime(absl::Seconds(1));
+  counter_.Reset();
   Tick();
   EXPECT_EQ(counter_.counts().wal_checkpoints, 1)
-      << "once, after the interval has elapsed";
-  Tick();
-  EXPECT_EQ(counter_.counts().wal_checkpoints, 1)
-      << "not again until another interval has elapsed";
+      << "the fill's commit, once the interval has elapsed";
+  EXPECT_EQ(counter_.counts().backing_calls, 0)
+      << "a checkpoint alone reaches no backing filesystem";
 
   clock_.AdvanceTime(absl::Seconds(5));
   Tick();
-  EXPECT_EQ(counter_.counts().wal_checkpoints, 2)
-      << "again after the second interval has elapsed";
+  EXPECT_EQ(counter_.counts().wal_checkpoints, 1)
+      << "not again without another commit";
+  auto [dir_lookup, dir_entry] = Lookup(kRootInode, "d");
+  ASSERT_EQ(dir_lookup.error, 0);
+  auto [fill, fill_entry] =  // Another fill: d's listing.
+      Lookup(static_cast<InodeId>(dir_entry.nodeid), "x");
+  ASSERT_EQ(fill.error, 0);
+  Tick();
+  EXPECT_EQ(counter_.counts().wal_checkpoints, 1)
+      << "nor within an interval of the last sync point, which had nothing "
+         "to do";
+}
+
+// Step 25.28b: an FSYNCDIR's sync point checkpoints the WAL too (the same
+// sync point as the periodic one).
+TEST_F(ClockTest, FsyncdirCheckpointsTheWal) {
+  Start(absl::StrCat(source_, "_wal.sqlite"));
+  auto [mkdir, d] = Mkdir(kRootInode, "d");
+  ASSERT_EQ(mkdir.error, 0);
+  counter_.Reset();
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_THAT(Dirty(), ::testing::IsEmpty());
+  EXPECT_EQ(counter_.counts().wal_checkpoints, 1);
 }
 
 // Collects every log line, VLOG lines included, with its severity while it
@@ -3416,6 +3458,54 @@ class ScopedVerbosity {
  private:
   int saved_;
 };
+
+// Once a sync point has cleared the dirty set, steps a read statement and
+// leaves it part way through its rows until the next request begins (the
+// periodic sync point runs before it): the connection holds a read
+// transaction meanwhile, in which SQLite refuses a checkpoint
+// (SQLITE_LOCKED), as a cache disk's I/O error would make it fail.
+class HoldReadAfterSyncClear : public ProtocolEvents {
+ public:
+  void SyncCleared(Context &ctx) override {
+    absl::StatusOr<sqlite3::Statement> stmt =
+        sqlite3::Statement::Prepare(ctx.db, "SELECT id FROM inodes");
+    ASSERT_THAT(stmt, IsOk());
+    ASSERT_THAT(stmt->Step(), IsOkAndHolds(true));
+    held_ = *std::move(stmt);
+  }
+  void RequestBegin(Context &, const events::Request &) override {
+    held_ = sqlite3::Statement();
+  }
+
+ private:
+  sqlite3::Statement held_;
+};
+
+// Step 25.28b: a checkpoint that fails is logged, and the sync point's
+// backing half has still cleared the dirty set; the commits stay for the
+// next sync point's checkpoint.
+TEST_F(ClockTest, FailedCheckpointIsLoggedAndLeftToTheNextSyncPoint) {
+  Start(absl::StrCat(source_, "_wal.sqlite"));
+  auto [mkdir, d] = Mkdir(kRootInode, "d");
+  ASSERT_EQ(mkdir.error, 0);
+  counter_.Reset();
+  HoldReadAfterSyncClear hold;
+  observers_->Add(&hold);
+  {
+    AllLogCapture capture;
+    clock_.AdvanceTime(absl::Seconds(5));
+    Tick();
+    EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning, "checkpoint"), 1)
+        << capture.Dump();
+  }
+  observers_->Remove(&hold);
+  EXPECT_THAT(Dirty(), ::testing::IsEmpty());
+  EXPECT_EQ(counter_.counts().wal_checkpoints, 0);
+
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_EQ(counter_.counts().wal_checkpoints, 1)
+      << "the next sync point checkpoints what the failed one left";
+}
 
 // A writable open refused for the backing file's flag says which flag, in
 // the failure the request's log shows at -v=2 (the errno alone is replied).

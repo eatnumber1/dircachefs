@@ -1160,6 +1160,19 @@ S2(p) ==
     /\ Reply(p, ps[p], Rep("ok", {}))
     /\ UnchangedBacking /\ UNCHANGED <<seq, inflight, servedWrong, stamp>>
 
+\* The sync point's checkpoint of the cache's WAL (step 25.28b,
+\* DirCacheFS::CheckpointCache): every commit so far is durable. In the
+\* code it follows a sync point's ClearDirty (the periodic one, an FSYNC's,
+\* an FSYNCDIR's), and runs alone at the periodic one when only cache
+\* commits are pending; here it may run at any moment no request is between
+\* two syscalls, which covers both. When it runs, and the bound on what a
+\* power loss loses that this gives, is durability.tla's subject.
+WalCheckpoint ==
+    /\ mode = "up" /\ running = None
+    /\ dbOpts' = {dbCur}
+    /\ UNCHANGED <<bCur, bSeq, dbCur, mode, seq, inflight, durableD, running,
+                   ps, servedWrong, fm, stamp, muts, crashes>>
+
 (***************************************************************************)
 (* A write to the file a name of D holds (step 12.8): the kernel's WRITE   *)
 (* through the file's writable open, which reaches the backing file by     *)
@@ -2077,7 +2090,7 @@ RequestStep(p) ==
 
 Next ==
     \/ \E p \in Procs : Arrive(p) \/ RequestStep(p) \/ InterruptArrives(p)
-    \/ FRead \/ AtimeExpiry
+    \/ FRead \/ AtimeExpiry \/ WalCheckpoint
     \/ CrashServing \/ CrashRecovering \/ CrashStopping
     \/ Restart \/ Recover \/ StartRun \/ ProbesDone
     \/ BeginShutdown \/ StopSync \/ StopClear \/ StopCkpt \/ StopFlag

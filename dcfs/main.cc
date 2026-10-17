@@ -77,10 +77,12 @@ ABSL_FLAG(double, attr_timeout_sec, 3600,
 ABSL_FLAG(double, entry_timeout_sec, 3600,
           "How long the kernel may cache a directory entry (lookup result).");
 ABSL_FLAG(double, sync_interval_sec, 5,
-          "While mutations have left cache entries dirty (see README \"Crash "
-          "robustness\"), the first request after this many seconds since the "
-          "last sync point syncfs()es the backing filesystems and marks them "
-          "clean. Bounds how much is re-read after a power loss or crash.");
+          "The first request after this many seconds since the last sync "
+          "point runs a new one: while mutations have left cache entries "
+          "dirty (see README \"Crash robustness\"), it syncfs()es the backing "
+          "filesystems and marks them clean; then, if anything was cached "
+          "since the last, it checkpoints the cache database's WAL. Bounds "
+          "how much is re-read after a power loss or crash.");
 
 namespace dcfs {
 namespace {

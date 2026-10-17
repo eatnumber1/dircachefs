@@ -421,6 +421,7 @@ qemu_test_matrix(
         "frozen_rename",
         "atime",
         "born",
+        "lag",
     ],
     size = "medium",
     other_size = "large",

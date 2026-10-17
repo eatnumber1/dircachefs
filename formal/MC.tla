@@ -97,6 +97,19 @@ ChildFilledIfDirOk(dirOk, childOk) == dirOk /\ childOk
 \* refused (the parent is in flight, or was touched since the snapshot).
 FillMarksIfDirNotOk(newRow, dirOk) == newRow /\ ~dirOk
 
+(***************************************************************************)
+(* MC_large.cfg and MC_nolock.cfg leave the sync point's checkpoint out    *)
+(* (WalCheckpoint <- NoWalCheckpoint; step 25.28b). It only shrinks        *)
+(* dbOpts, and every property quantifies over dbOpts universally and every *)
+(* step that reads it (PowerLoss) has at least the same choices in a       *)
+(* larger one, so a behavior with it breaks a property only if the same    *)
+(* behavior without it does. It added about half again to the states of   *)
+(* the configurations that have it, and these two run near their          *)
+(* timeouts; trace validation has it, and so does every other             *)
+(* configuration.                                                          *)
+(***************************************************************************)
+NoWalCheckpoint == FALSE
+
 View == <<bCur, bSeq,
           IF mode \in {"down", "recover"} THEN CrashImage(dbCur) ELSE dbCur,
           {CrashImage(s) : s \in dbOpts},
