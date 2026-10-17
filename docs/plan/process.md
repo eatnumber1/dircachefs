@@ -332,11 +332,15 @@ first.
   snapshot when a day starts.
 - **The Claude plan is the scarce resource** (the orchestrator runs on it and
   every coding agent does). Pace it so the week ends near 95%, never empty
-  before its reset: daily budget = (90% - used) / days left; keep 15% back for
-  red pushes until the last day, then release it, and never touch the last
-  5-10%: russ's own interactive use outside this project (russ, 2026-10-16:
-  "save a little bit (maybe 5-10%?) for unrelated interactive use throughout
-  the week").
+  before its reset. russ's own interactive use outside the project happens
+  throughout the week (russ, 2026-10-16: "save a little bit (maybe 5-10%?)
+  for unrelated interactive use", then "my interactive use will happen
+  throughout the week. That means as we get close to quota reset, you
+  should target getting closer to 100% (maybe 95%?)"). So the reserve for
+  him shrinks as the week runs out: the week's target is 95% at the reset,
+  and on each day the plan leaves (days left / 7) x 10% unspent for him, on
+  top of a reserve for red pushes that is released on the last day. Daily
+  budget = (95% - used - his reserve - red-push reserve) / days left.
   The orchestrator itself is the largest consumer: lean turns, hands-on work
   delegated, Opus subagents only for protocol, identity, oracle and
   security-relevant work, Sonnet for routine implementation, Haiku for
