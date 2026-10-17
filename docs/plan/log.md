@@ -3772,3 +3772,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   `system("mount a b")` if that makes things significantly simpler. Don't
   overcomplicate it too much." Passed to 25.34; the full port is in the
   README's future work.
+- 2026-10-17, russ approves 25.32 (pinned Abseil tips, an index, a
+  citation check): "OK". Briefed and dispatched (lane-6).

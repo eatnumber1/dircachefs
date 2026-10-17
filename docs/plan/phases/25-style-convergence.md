@@ -1139,3 +1139,26 @@ the guest.
 
 Owner: dcfs-implementer; an Opus review of the helper API before the
 port is merged, since every future guest test is written against it.
+
+## 25.32 A pinned copy of Abseil's Tips of the Week (russ, 2026-10-17: "OK")
+
+The Tips of the Week are adopted as design guidance (`docs/style.md`,
+russ 2026-10-09) and cited by number in reviews, from memory today, and
+not at all by a reviewer without network. Like 25.29's style guides:
+
+- **Pin** `github.com/abseil/abseil.github.io` (Apache-2.0; the tips are
+  Markdown in `_posts/`, 86 published, TotW 1 to 234 with gaps) as an
+  `http_archive` with a sha256, in `third_party/abseil_tips/` with a
+  README (why, the pin, how to update, licence) and an entry in
+  `docs/licenses.md`. No render step is needed (already Markdown).
+- **An index:** a build output mapping tip number to title and file
+  (the files are named by date), so "read tip 122" is one lookup.
+- **A test** in the style of 25.29's `headings_test`: the archive still
+  has every tip we cite.
+- **A citation check:** every TotW number cited in `docs/style.md`,
+  `docs/abseil-utilities.md`, `docs/design.md` and C++ comments (forms
+  like "TotW 103", "tips/103", "Tip of the Week #103") is a published
+  tip, so a number cited from memory that does not exist fails. With its
+  unit test.
+
+Host-only. Owner: dcfs-implementer; a style review before merge.
