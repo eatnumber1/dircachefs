@@ -109,10 +109,10 @@ process (its waves and file ownership table) is in `history.md`.
    ~/Sources/dircachefs-lanes/lane-K step-N.M` and `git merge --ff-only
    FETCH_HEAD`. Update the status table and `log.md` and commit them.
    Then refresh russ's private dashboard, "dcfs Mission Control"
-   (https://claude.ai/artifact/EVypNNcogbNcxzRjBYp8rK): rewrite its three
+   (https://claude.ai/artifact/EVypNNcogbNcxzRjBYp8rK): rewrite its four
    snapshot files (the steps in flight and queued, in the Queue's order;
-   the quota readings from "Quota management" below; `gh run list
-   --limit 12`),
+   each lane's step, agent type, model and effort; the quota readings
+   from "Quota management" below; `gh run list --limit 12`),
    upload each as an asset and point its dataset at the new file with a
    fresh `updated` time. Its datasets go stale after a day or two and
    say so on the page, which is the reminder when a refresh is missed.
