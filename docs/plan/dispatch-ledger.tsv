@@ -23,3 +23,6 @@ bf-g-inval-verify	2026-10-17	26.39	review	agy	gemini-4-argon	medium								usefu
 bf-g-budgets	2026-10-17	26.41	investigation	agy	gemini-3.8-flash	high								useful	hashes real; GitHub links invented
 bf-agy-opus-25.34	2026-10-17	25.34	review	agy	claude-opus-5-5	high								failed	quota exhausted before any output (56% of agy's Claude week)
 bf-22.5-rev	2026-10-17	22.5	review	dcfs-reviewer	claude-opus-5-5	high	136018	493		1	4	5		useful	found B1 (bound blind to 6 of 7 checkpoints) and a third code finding (readdir refreshes); high was enough
+a295f17a3169f6d3f	2026-10-17T23:08:53Z	17.2e	review	dcfs-reviewer	claude-opus-5-5	high									
+bf-25.28b-r3	2026-10-17	25.28b	protocol	dcfs-protocol	claude-opus-5-5	high	680883		3					in review	FSYNC redesign done; raised fsyncgate design question
+bf-17.2e-r2	2026-10-17	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high	600651	9031	2				1	in review	round 2 closed the uid-0 regression; uid-0 exemption was an escape from 17.2b caught by russ
