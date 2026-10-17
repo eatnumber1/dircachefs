@@ -3412,3 +3412,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   lane-4; the implementation becomes 14.10b), and a read-only Gemini 4 Argon
   consistency sweep (lane-6, sandboxed, plan mode; Gemini week 99%, Argon
   88%). 25.28b and 17.2b stay behind 25.9b: they touch the same code.
+
+- 2026-10-16: russ asked for licence correctness, first for SibylFS (added
+  to 12.18b's done criteria) and then for everything we use: step 4.15
+  (investigator, lane-7, a new clone; non-building). Also found: five lanes
+  were building at once against the plan's budget of about three (load 22
+  on 8 cores). The 14.10 design agent holds its guest runs and the hooks
+  tool agent skips the fast tier until a building lane frees.

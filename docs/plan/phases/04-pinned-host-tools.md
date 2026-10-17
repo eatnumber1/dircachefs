@@ -90,3 +90,36 @@ the Debian guest's own tools:
 - Remaining: `test/qemu/scripts/run-qemu.sh` still formats with host
   `mkfs.*` until the lane that owns it merges (the switch is a ready-made
   patch in the R3 hand-off).
+
+## 4.15 Licence correctness for everything we use (russ, 2026-10-16)
+
+russ: "Other code and projects we use need to be license-correct too." An
+inventory and a fix list, not a campaign. Deliverables:
+
+1. **Inventory.** Every third-party input: the Bazel Central Registry
+   modules in `MODULE.bazel`, every `http_archive`/`http_file`, the Alpine
+   packages and the Debian cloud image the guests boot, the kernel we
+   build and its patches, the LLVM toolchain, the TLA+ tools, Python and
+   GitHub Actions dependencies, and anything copied into the tree. For
+   each: licence (SPDX id), where it is stated (primary source, quoted),
+   and how we use it (linked into the dcfs binary, statically or
+   dynamically; build tool only; run in test guests only; redistributed in
+   a CI artifact or cache). One table in `docs/licenses.md`, linked from
+   README.md.
+2. **Obligations.** What each use triggers: notices to carry (Apache-2.0
+   NOTICE files, BSD attribution) if dcfs is ever shipped as a binary;
+   LGPL relinking terms if libfuse is linked statically; GPL-2.0 for
+   anything derived from the kernel (our kernel patches, any kernel
+   header copied into the tree). Patches derived from GPL code are marked
+   with that licence, not MIT.
+3. **Our own tree.** `LICENSE` and the SPDX headers: files missing a
+   header, and files whose header claims MIT for code that is not ours to
+   license (copied or derived).
+4. **Fixes** that are mechanical go in this step (headers, licence
+   markings, the inventory). Anything that needs a decision (an
+   unlicensed dependency, an incompatible term, whether a CI cache counts
+   as redistribution, how dcfs would be distributed) goes to russ as a
+   question with the facts, not decided.
+
+Investigator; no builds needed beyond `bazel query`. SibylFS is covered
+inside 12.18b and only cross-referenced here.
