@@ -3508,7 +3508,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   non-zero exit, the crash ban's DebugFatal and raw-check gaps, data
   references behind via lines, non-backing wrappers for the lock file, a
   matcher that every backing wrapper starts with the door, and the style
-  items. russ questioned the NOLINT on the setgroups fake: replaced by a
-  header declaration, and 25.30 makes suppressions count against the
-  allowlist ratchet. Pending russ: approval of the third-party abort/exit
+  items. russ questioned the NOLINT on the setgroups fake, then ruled
+  that NOLINT comments are preferred to the allowlist ("an apology for
+  breaking the style guide") provided each carries an explanatory
+  comment: the NOLINT stays, and 25.30 gates the reason comment and makes
+  the allowlist backlog-only. Pending russ: approval of the third-party abort/exit
   allow lines (Abseil internals and flags, libfuse, libnuma).

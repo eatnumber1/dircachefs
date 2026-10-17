@@ -1031,23 +1031,27 @@ reproducible and offline.
 
 Implementer, medium effort.
 
-## 25.30 Suppressions count against the ratchet (russ, 2026-10-17)
+## 25.30 Every suppression carries its reason (russ, 2026-10-17)
 
-russ, on a NOLINTNEXTLINE added in 25.9b: "is suppression the right choice
-here? what's the purpose of ratcheting the allowlist if we just suppress?"
-A source suppression is an exception nothing counts, so it defeats
-`tools/style_checks_allow.txt`'s only-shrinks rule. Deliverables:
+russ first asked, of a NOLINTNEXTLINE added in 25.9b, "what's the purpose of
+ratcheting the allowlist if we just suppress?", then ruled: "I like the
+nolint comments over a separate allowlist, since it acts as an apology for
+breaking the style guide. However all nolint comments must have an
+explanatory comment attached." So a deliberate exception is a NOLINT at
+the site, with its reason; `tools/style_checks_allow.txt` is the legacy
+backlog of findings to fix, which only shrinks and never gains a line.
+Deliverables:
 
-1. A gate in the style checks: a `NOLINT`/`NOLINTNEXTLINE`/`NOLINTBEGIN`
-   in our code fails unless the same file, function and check have an
-   allowlist line, so suppressions and listed findings are one ratcheted
-   set (with a self-check). The existing suppressions are converted into
-   allowlist lines or fixed.
-2. The seven `dcfs/testonly/*.cc` link-time fakes listed for
-   `misc-use-internal-linkage` get header declarations (as 25.9b's
-   setgroups fake does), and their allowlist lines are deleted.
-3. docs/style.md 1.1 says: an exception is fixed in the code where the code
-   can satisfy the check; a suppression is an allowlist line, never a
-   comment alone.
+1. A gate in the style checks: every `NOLINT`, `NOLINTNEXTLINE` and
+   `NOLINTBEGIN` in our code names its check(s) and has an explanatory
+   comment on the same line or the line directly above (not just the check
+   name), with a self-check (good and bad fixtures). The existing ones meet
+   it.
+2. docs/style.md 1.1 says so: fix the code where it can satisfy the check;
+   otherwise a NOLINT naming the check, with the reason beside it; the
+   allowlist is backlog only. Where an allowlist line is really a
+   deliberate exception (the seven `dcfs/testonly/*.cc` link-time fakes for
+   `misc-use-internal-linkage`), it becomes a NOLINT with its reason and
+   the line is deleted.
 
-Mechanical for 2, implementer for 1 and 3.
+Implementer for 1, mechanical for 2's conversions.
