@@ -3810,3 +3810,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   syscalls ("why not both? I agree to doing them"): signalfd in the
   session loop, SA_RESTART only where a reachable window remains. Added
   to 25.10's brief.
+- 2026-10-17, russ corrects the host-tooling style sentence merged in
+  951eef7 ("neither reviewed nor asked about"): "STOP. Just because I
+  don't care about style in tools doesn't mean you shouldn't. I want
+  *some* style. I just don't care what it is. That's why I adopted the
+  Google shell style guide!" docs/style.md section 5 now says host tooling
+  follows the guides and is reviewed; questions the guides leave open are
+  decided by the reviewer, not put to russ. Edited by the orchestrator
+  directly (a one-paragraph correction of its own wrong text; every lane
+  was busy).

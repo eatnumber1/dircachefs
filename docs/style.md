@@ -1481,10 +1481,19 @@ spaces."). A tab-indented file is converted, in one commit, by
   (orchestrator's ruling, 2026-10-16): `def f(environ=os.environ)`, a
   `now` argument; `mock.patch` only for what cannot be injected (the
   injection rule of AGENTS.md).
-- **Pure style in host tooling is neither reviewed nor asked about**
-  (`tools/`, `.github/ci`, the harness scripts; russ, 2026-10-17: "I don't
-  care at all about pure style questions in host tooling"). Correctness
-  rules still apply: a Claude Code hook always exits 0, for instance.
+- **Host tooling has a style, and it is reviewed; where the guides are
+  silent, the reviewer decides instead of asking russ** (`tools/`,
+  `.github/ci`, the harness scripts). russ, 2026-10-17: "I don't care at
+  all about pure style questions in host tooling", and, correcting a
+  reading of that as "no style": "Just because I don't care about style in
+  tools doesn't mean you shouldn't. I want *some* style. I just don't care
+  what it is. That's why I adopted the Google shell style guide!" So the
+  Google Python and Shell guides and this section apply to host tools as
+  to everything else, and reviewers check them. A question the guides do
+  not settle is decided by the reviewer, consistently with the code around
+  it, and recorded here if it will recur; it is not put to russ.
+  Correctness rules apply as always: a Claude Code hook always exits 0,
+  for instance.
 
 ## 6. TLA+
 
