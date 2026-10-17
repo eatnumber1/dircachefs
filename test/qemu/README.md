@@ -1215,6 +1215,15 @@ dcfs's code (this section), the I/O operations it causes and the counts that
 already had budgets; wall time is left as the hang guard, and a run that lost a
 large share of its wall time to other guests says so.
 
+**Re-measuring.** A target's budget lines (CPU and I/O alike) are re-measured
+together or not at all, with one run count stated in the header of the section
+that holds them (russ, 2026-10-17: "Agreed"): a file whose lines were measured
+on different days, or over different numbers of runs, has budgets that are not
+comparable with each other. The wall-clock allowance that `run-qemu.sh` derives
+from them is a hang guard and stays one until the tests that need it are
+replaced by tests that do not depend on load (russ, 2026-10-17: "Keep it until
+we replace with non-load-sensitive tests.").
+
 ### CPU time of dcfs
 
 `guest/init` makes a cgroup (`/sys/fs/cgroup/dcfs`, cgroup v2) before the test
@@ -1301,6 +1310,84 @@ their counts, which `request_budgets.txt` has. If a
 tighter CPU gate is ever wanted, the way is to scale each reading by a
 calibration the guest measures itself (a fixed loop timed before and after),
 not to narrow the tolerance.
+
+### Instructions instead of CPU time (step 26.36: measured, not switched)
+
+russ, 2026-10-17: "in general for all our tests I'm interested in them being
+load-agnostic." CPU time is not (the table above, and 100 backing_test runs on a
+starved host: 0.26 to 1.0 s). Instructions retired are a count: the guest sees a
+virtual PMU here, and the same work reads the same number under load.
+
+**Visibility.** On this host (Xeon D-2123IT, `kvm.enable_pmu=Y`) the guest's
+`perf_event_open(PERF_COUNT_HW_INSTRUCTIONS)` works with the command line
+`run-qemu.sh` already uses (`-cpu host`, QEMU 11.0.3 from Alpine: no `pmu=on`
+needed) and the kernel `linux-virt` has `CONFIG_PERF_EVENTS` and
+`CONFIG_CGROUP_PERF`. `//test/qemu:pmu_test` (`testutil pmu`) runs a loop of a
+million iterations and a thousand `getppid` calls: 10020151 and 10020152 user
+instructions in two runs, 478605 and 501838 in the kernel. Under TCG there is
+no PMU (`perf_event_open` fails: the probe prints `pmu: not visible`). On CI's
+runners, which are virtual machines, I expect there is none, but did not
+measure: the `fast` job's step "Report the PMU" (`.github/ci/pmu.sh`) prints the
+guest's `pmu:` lines and whether the runner's kernel has a CPU PMU, in the log
+and the job summary, so the next CI run says. It reports and never fails.
+
+**Measurement.** A throwaway `testutil pmu-hold` (the patch is
+`docs/plan/notes/pmu-experiment-2026-10-17.patch`) opened user-mode and
+kernel-mode instruction counters and a cycle counter on `/sys/fs/cgroup/dcfs`
+(`PERF_FLAG_PID_CGROUP`, every vCPU) before each test and printed them at the
+end, beside the `COST` line. Runs of nine of the twelve targets of
+`cpu_budgets.txt` (`fault_ace_a_test`, `fault_ace_mixed_test_ext4` and
+`xfstests_1_test_ext4` were not measured), classified by the host's CPU
+pressure during the run: quiet is under 5% of the wall time, loaded 20% or more
+(46 to 77% for the large ones; other agents were using the host, load average 15
+to 40, and no busy loops of my own). Spread is (max - min) / median. Raw lines:
+`docs/plan/notes/pmu-measurements-2026-10-17.txt`.
+
+| target | user instructions (median) | spread, quiet / loaded runs | CPU time spread with the counter, quiet / loaded | CPU time spread without it, loaded |
+|---|---:|---|---|---|
+| `//dcfs:backing_test` | 933.0 M | 0.08% / 0.07% (8 / 6) | 14% / 72% | 72% (8) |
+| `//dcfs:metadata_cache_test` | 1233.4 M | 0.01% / 0.01% (8 / 6) | 20% / 154% (max/min 17.6) | 74% |
+| `create_test_ext4` | 123.1 M | 0.77% / 0.75% (7 / 7) | 15% / 97% | 117% |
+| `request_counts_test` | 350.5 M | 0.11% / 0.61% (5 / 6) | 14% / 121% | 84% |
+| `write_test_ext4` | 261.3 M | 0.38% / 0.46% (8 / 6) | 12% / 49% | 195% |
+| `fault_backing_test_ext4` | 77.0 M | 0.36% / 2.14% (6 / 6) | 22% / 109% | 176% |
+| `fault_cache_test_ext4` | 132.7 M | 0.55% / 0.94% (8 / 6) | 28% / 90% | 326% (max/min 14) |
+| `readdir_boundary_test` | 24317 M | - / 0.03% (0 / 5) | - / 52% | - |
+| `fault_ace_b_test` | 7071 M | - / 0.01% (0 / 5) | - / 62% | - |
+
+User instructions are steady to under 1% on a quiet host and under 2.2% in the
+worst loaded case (a test of 77 M instructions); CPU time is 12 to 28% quiet and
+49 to 326% loaded, with a largest-to-smallest ratio of up to 17.6. The
+`readdir_boundary_test` runs show it most plainly: wall time 133 to 369 s, CPU
+time 20.8 to 39.3 s, and 24312.2 to 24319.7 M user instructions. Kernel-mode
+instructions are less steady (0.8% for `backing_test`, 1.3 to 2% for the large
+tests, 5% for the thousand `getppid` calls of the probe) and cycles are not
+(5% for `fault_ace_b_test`): count user instructions, and kernel ones only with
+a wider tolerance.
+
+**Observer effect.** Counters on a cgroup cost CPU time under a vPMU: with them,
+`backing_test` used 0.84 to 0.97 s of CPU on a quiet host and 0.56 to 0.66 s
+without (3 runs). The counts are not changed by it, but the CPU budget and the
+instruction budget cannot be measured in the same run: the switch replaces the
+CPU lines, it does not sit beside them. (The disks' I/O budgets are not
+immune to load either: at 87 to 91% host pressure `write_test_ext4`'s `writes`,
+`sectors_written` and `flushes` ran up to 3.5% over their budgets (no counter
+in those runs), probably because ext4's periodic journal commit fires by guest
+time (not measured);
+`docs/plan/notes/load-agnostic-tests-2026-10-17.md`, follow-up 11.)
+
+**Recommendation (not done here).** Replace `cpu_us` in `cpu_budgets.txt` by
+`instr_user`, read from per-vCPU cgroup counters that `guest/init` opens before
+the test and reads in `cost_report`; hold it with a tolerance of 10% (the worst
+spread seen is 2.2%, so it still catches the daemon doing 10% more work, where
+CPU time's 100% catches a doubling); and where `perf_event_open` fails (TCG, no
+vPMU, CI if the probe says so) print the number and say that the budget is not
+held, as `budget_unheld_reason` does for a sanitizer, with one mechanism, not two
+(the CPU time stays in the `COST` line as information). The same counts would
+replace the CPU ticks of `readdir_boundary.sh`'s linear-versus-quadratic check.
+Sanitizer, coverage and noisy-kernel runs retire
+other instructions and stay unheld. The budgets are then re-measured together,
+over one run count, per russ's rule above.
 
 ### I/O of the disks
 

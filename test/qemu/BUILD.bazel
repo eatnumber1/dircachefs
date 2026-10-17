@@ -293,6 +293,16 @@ sh_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
+# Step 26.36: does the guest see a hardware instruction counter? Reports it
+# (guest/pmu.sh; .github/ci/pmu.sh collects the lines into the CI job summary)
+# and checks that the same work reads the same count twice.
+qemu_test(
+    name = "pmu_test",
+    guest_script = "guest/pmu.sh",
+    size = "small",
+    timeout = "short",
+)
+
 # Step 23: `dcfs --help` lists every flag and `dcfs --version` works under
 # the installed name -- see guest/help.sh.
 qemu_test(

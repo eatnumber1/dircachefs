@@ -9,6 +9,7 @@ exports_files([
     "README.md",
     "MODULE.bazel.lock",
     "osv-scanner.toml",
+    ".github/ci/pmu.sh",  # //tools:pmu_report_test (26.36)
     ".github/ci/prepare.sh",
     ".github/ci/collect-logs.sh",  # //tools:collect_logs_test (26.22)
     ".github/ci/commit_subjects.sh",  # //tools:commit_subjects_test (26.13)

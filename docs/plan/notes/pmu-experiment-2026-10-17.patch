@@ -1,0 +1,96 @@
+/* ---- EXPERIMENT (step 26.36, not to be committed as is): PMU ---- */
+/* testutil pmu-hold <cgroup>: counts instructions (user, kernel) and cycles
+ * of every task in the cgroup, all CPUs, until SIGUSR1; prints one line. */
+static int cmd_pmu_hold(const char *cgroup) {
+  int ncpu = (int)sysconf(_SC_NPROCESSORS_ONLN);
+  int cg = open(cgroup, O_RDONLY | O_DIRECTORY);
+  int fds[3][64], k, c;
+  uint64_t tot[3] = {0, 0, 0};
+
+  if (cg == -1) {
+    print_err(errno);
+    return 1;
+  }
+  for (c = 0; c < ncpu; c++) {
+    fds[0][c] = perf_open(PERF_TYPE_HARDWARE, PERF_COUNT_HW_INSTRUCTIONS, 1, 0,
+                          cg, c, PERF_FLAG_PID_CGROUP);
+    fds[1][c] = perf_open(PERF_TYPE_HARDWARE, PERF_COUNT_HW_INSTRUCTIONS, 0, 1,
+                          cg, c, PERF_FLAG_PID_CGROUP);
+    fds[2][c] = perf_open(PERF_TYPE_HARDWARE, PERF_COUNT_HW_CPU_CYCLES, 1, 1,
+                          cg, c, PERF_FLAG_PID_CGROUP);
+    for (k = 0; k < 3; k++)
+      if (fds[k][c] == -1) {
+        printf("PMU-ERR open %d cpu %d: %s\n", k, c, strerror(errno));
+        return 1;
+      }
+  }
+  {
+    sigset_t set;
+    int sig;
+
+    sigemptyset(&set);
+    sigaddset(&set, SIGUSR1);
+    sigprocmask(SIG_BLOCK, &set, NULL);
+    printf("PMU-READY\n");
+    fflush(stdout);
+    sigwait(&set, &sig);
+  }
+  for (c = 0; c < ncpu; c++)
+    for (k = 0; k < 3; k++) {
+      uint64_t v = 0;
+
+      if (read(fds[k][c], &v, sizeof(v)) == sizeof(v)) tot[k] += v;
+    }
+  printf("PMU instr_user=%llu instr_kernel=%llu cycles=%llu\n",
+         (unsigned long long)tot[0], (unsigned long long)tot[1],
+         (unsigned long long)tot[2]);
+  return 0;
+}
+
+
+===== guest/init
+diff --git a/test/qemu/guest/init b/test/qemu/guest/init
+index a7aafec2..278a0fdf 100755
+--- a/test/qemu/guest/init
++++ b/test/qemu/guest/init
+@@ -405,6 +405,24 @@ echo $$ >"$COST_CGROUP/cgroup.procs" && exec "$@"
+ EOF_COST_EXEC
+ chmod +x /tests/cost_exec.sh
+ 
++# EXPERIMENT 26.36 (not committed): instructions retired by the cgroup.
++PMU_PID=""
++PMU_BIN=$(find /bin /test/data -name testutil 2>/dev/null | head -n 1)
++if [ -n "$PMU_BIN" ] && ! grep -q dcfs_nopmu=1 /proc/cmdline; then
++	chmod +x "$PMU_BIN"
++	"$PMU_BIN" pmu-hold "$COST_CGROUP" >/tmp/pmu.out 2>&1 &
++	PMU_PID=$!
++	until grep -q 'PMU-' /tmp/pmu.out; do :; done
++fi
++pmu_report() {
++	if [ -n "$PMU_PID" ]; then
++		kill -USR1 "$PMU_PID"
++		wait "$PMU_PID"
++		cat /tmp/pmu.out
++		PMU_PID=""
++	fi
++}
++
+ if [ -f /test/run ]; then
+ 	# --- unit-test mode -------------------------------------------------
+ 	mkdir -p /tmp/test_tmpdir
+@@ -440,6 +458,7 @@ if [ -f /test/run ]; then
+ 	COST_DISKS_BEFORE=$(cost_disk_counts)
+ 	$COST_EXEC /test/run $(cat /test/args 2>/dev/null)
+ 	rc=$?
++	pmu_report
+ 	cost_report
+ 	dump_profraw
+ 	mem_report
+@@ -678,6 +697,7 @@ else
+ 	rc=$?
+ fi
+ 
++pmu_report
+ cost_report
+ dump_profraw
+ mem_report

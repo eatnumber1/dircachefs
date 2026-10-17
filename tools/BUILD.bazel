@@ -335,6 +335,17 @@ sh_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
+# Self-check of .github/ci/pmu.sh (step 26.36), which reports into the CI log
+# and job summary whether the runner and the guests see a hardware counter.
+sh_test(
+    name = "pmu_report_test",
+    size = "small",
+    srcs = ["pmu_report_test.sh"],
+    args = ["$(location //:.github/ci/pmu.sh)"],
+    data = ["//:.github/ci/pmu.sh"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
 # Self-check of .github/ci/shard.sh (step 7.4b), which deals the suite's test
 # targets out to the CI shards: a partition, stable, size-balanced.
 sh_test(
