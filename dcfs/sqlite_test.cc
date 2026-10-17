@@ -109,7 +109,7 @@ TEST(ConnectionTest, FileBackedWithoutWalFailsToOpen) {
   ASSERT_FALSE(conn.ok()) << "opened in a journal mode other than WAL";
   EXPECT_EQ(conn.status().code(), absl::StatusCode::kFailedPrecondition)
       << conn.status();
-  EXPECT_THAT(conn.status().message(), testing::HasSubstr("journal_mode"));
+  EXPECT_THAT(conn, StatusIs(testing::_, testing::HasSubstr("journal_mode")));
 }
 
 // An in-memory database has no WAL ("memory") and still opens: the unit

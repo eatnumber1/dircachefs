@@ -5547,7 +5547,7 @@ TEST_F(DirCacheFSTest, SyncPointKeepsTheDirtySetIfTheBackingWentReadOnly) {
   StatvfsReadOnly() = true;
   absl::Status synced = backing::SyncBacking(ctx_);
   EXPECT_THAT(GetErrnoFromStatus(synced), IsOkAndHolds(EROFS));
-  EXPECT_THAT(synced.message(), HasSubstr("read-only"));
+  EXPECT_THAT(synced, StatusIs(::testing::_, HasSubstr("read-only")));
   EXPECT_THAT(Dirty(), Contains(kRootInode));
   EXPECT_THAT(backing::FinishRun(ctx_), Not(IsOk()));
   EXPECT_THAT(GetCleanShutdown(db_), IsOkAndHolds(false));
@@ -5979,7 +5979,8 @@ TEST_F(DirCacheFSTest, InvariantChecksReportAsAStatus) {
   book.lookups[f] = 0;
   absl::Status all = checker_->CheckAll(ctx_, &book);
   EXPECT_EQ(all.code(), absl::StatusCode::kFailedPrecondition);
-  EXPECT_THAT(all.message(), ::testing::StartsWith("lookup-count: "));
+  EXPECT_THAT(all, StatusIs(absl::StatusCode::kFailedPrecondition,
+                            ::testing::StartsWith("lookup-count: ")));
   book.lookups[f] = 1;
   EXPECT_THAT(checker_->CheckAll(ctx_, &book), IsOk());
 }
@@ -6314,10 +6315,12 @@ TEST_F(DirCacheFSTest, InvariantChecksRecountOnlyBelowTheLimit) {
   ++book.held_fds;  // Says one does.
   EXPECT_THAT(checker_->CheckChanged(ctx_, &book, {}), IsOk());
   absl::Status all = checker_->CheckAll(ctx_, &book);
-  EXPECT_THAT(all.message(), ::testing::StartsWith("held-fds: "));
+  EXPECT_THAT(all, StatusIs(absl::StatusCode::kFailedPrecondition,
+                            ::testing::StartsWith("held-fds: ")));
   book.written.clear();
   absl::Status changed = checker_->CheckChanged(ctx_, &book, {});
-  EXPECT_THAT(changed.message(), ::testing::StartsWith("held-fds: "));
+  EXPECT_THAT(changed, StatusIs(absl::StatusCode::kFailedPrecondition,
+                                ::testing::StartsWith("held-fds: ")));
   --book.held_fds;
   EXPECT_THAT(checker_->CheckChanged(ctx_, &book, {}), IsOk());
 }
@@ -8213,7 +8216,7 @@ class FaultIteration : public DirCacheFSTest {
   std::vector<std::string> CheckAndRecover() {
     std::vector<std::string> found;
     if (absl::Status s = checker_->CheckAll(ctx_, Book()); !s.ok()) {
-      found.push_back(absl::StrCat("after the workload: ", s.message()));
+      found.push_back(absl::StrCat("after the workload: ", s));
     }
     MountFds mounts;
     Context ctx{.db = db_, .mounts = mounts, .rng = bitgen_};
@@ -8228,7 +8231,7 @@ class FaultIteration : public DirCacheFSTest {
     if (!started.ok()) {
       found.push_back(absl::StrCat("recovery failed: ", started.ToString()));
     } else if (absl::Status s = checker_->CheckAll(ctx, nullptr); !s.ok()) {
-      found.push_back(absl::StrCat("after recovery: ", s.message()));
+      found.push_back(absl::StrCat("after recovery: ", s));
     }
     for (const std::string &v : checker_->violations()) {
       found.push_back(absl::StrCat("hook: ", v));

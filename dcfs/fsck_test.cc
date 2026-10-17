@@ -16,6 +16,9 @@
 #include <vector>
 
 #include "absl/log/check.h"
+#include "absl/log/log_entry.h"
+#include "absl/log/log_sink.h"
+#include "absl/log/log_sink_registry.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
@@ -90,6 +93,7 @@ using ::testing::Field;
 using ::testing::HasSubstr;
 using ::testing::Not;
 using ::testing::SizeIs;
+using ::testing::StartsWith;
 
 using Strings = std::vector<std::string>;
 
@@ -418,7 +422,7 @@ TEST(CheckCacheDatabaseTest, ADatabaseSQLiteHasLockedIsReportedNotTouched) {
   for (FsckMode mode : {FsckMode::kReport, FsckMode::kRepair}) {
     CacheReport report = CheckCacheDatabase(path, mode);
     EXPECT_EQ(report.status, kFsckOperational) << Joined(report);
-    EXPECT_THAT(Joined(report), HasSubstr("is locked"));
+    EXPECT_THAT(Joined(report), HasSubstr("is locked: UNAVAILABLE: "));
     EXPECT_TRUE(Exists(path)) << "a locked database is never deleted";
   }
 }
@@ -485,6 +489,19 @@ class StandInPrograms {
   std::vector<std::string> installed_;
 };
 
+// The text of the ERROR lines logged while it lives.
+class ErrorLines : public absl::LogSink {
+ public:
+  ErrorLines() { absl::AddLogSink(this); }
+  ~ErrorLines() override { absl::RemoveLogSink(this); }
+  void Send(const absl::LogEntry &entry) override {
+    if (entry.log_severity() == absl::LogSeverity::kError) {
+      lines.emplace_back(entry.text_message());
+    }
+  }
+  std::vector<std::string> lines;
+};
+
 class FsckMainTest : public ::testing::Test {
  protected:
   static std::string Contents(const std::string &path) {
@@ -512,6 +529,19 @@ TEST_F(FsckMainTest, TheFstabLineSuppliesTheOptions) {
   EXPECT_EQ(Contents(findmnt_log),
             "--fstab --noheadings --raw --output OPTIONS --source "
             "/dev/fstabdev\n");
+}
+
+// Each refusal of FsckMain logs the whole status, its code included.
+TEST_F(FsckMainTest, ARefusedLineLogsTheWholeStatus) {
+  ErrorLines logged;
+  EXPECT_EQ(Run({}), kFsckUsage);
+  programs_.InstallScript("/bin/findmnt", TestFile("findmnt.args"), "exit 1");
+  EXPECT_EQ(Run({"-n", "/dev/nowhere"}), kFsckOperational);
+  EXPECT_EQ(Run({"-o", "dcfs.nosuchoption=1", "/dev/fake"}), kFsckOperational);
+  ASSERT_THAT(logged.lines, SizeIs(3));
+  EXPECT_THAT(logged.lines[0], StartsWith("INVALID_ARGUMENT: "));
+  EXPECT_THAT(logged.lines[1], StartsWith("NOT_FOUND: "));
+  EXPECT_THAT(logged.lines[2], StartsWith("INVALID_ARGUMENT: "));
 }
 
 TEST_F(FsckMainTest, NoFstabLineIsOperational) {
@@ -565,6 +595,9 @@ TEST_F(FsckFaultTest, ALockThatCannotBeTakenIsReported) {
   EXPECT_EQ(report.status, kFsckOperational);
   ASSERT_THAT(report.lines, SizeIs(1));
   EXPECT_THAT(report.lines[0], HasSubstr("cannot lock the cache database"));
+  // The whole status: the code and the errno payload, not only its message.
+  EXPECT_THAT(report.lines[0], HasSubstr(": UNAVAILABLE: "));
+  EXPECT_THAT(report.lines[0], HasSubstr(kErrnoTypeUrl));
   EXPECT_THAT(syscalls::fstatat(AT_FDCWD, path), absl_testing::IsOk())
       << "a database that could not be locked is never deleted";
 }
@@ -578,6 +611,8 @@ TEST_F(FsckFaultTest, ACorruptCacheThatCannotBeDeletedIsReported) {
   EXPECT_EQ(report.status, kFsckOperational);
   ASSERT_THAT(report.lines, SizeIs(1));
   EXPECT_THAT(report.lines[0], HasSubstr("cannot delete the corrupt cache"));
+  EXPECT_THAT(report.lines[0], HasSubstr(": FAILED_PRECONDITION: "));
+  EXPECT_THAT(report.lines[0], HasSubstr(kErrnoTypeUrl));
   EXPECT_THAT(syscalls::fstatat(AT_FDCWD, path), absl_testing::IsOk());
 }
 

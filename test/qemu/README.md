@@ -264,7 +264,7 @@ serial log, `bazel-testlogs/<package>/<test>/test.outputs/serial.log`) and
 aborts,
 
 ```text
-DCFS-INVARIANT-VIOLATION writable-open: inode 7 is open for writing but has no dirty row (in request GETATTR nodeid 1)
+DCFS-INVARIANT-VIOLATION FAILED_PRECONDITION: writable-open: inode 7 is open for writing but has no dirty row (in request GETATTR nodeid 1)
 ```
 
 and `run-qemu.sh` fails the run with `FAIL (dcfs invariant violated ...)`,

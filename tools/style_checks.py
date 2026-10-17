@@ -46,7 +46,8 @@ FUNCTION_RULE = "function"
 # Matcher rules that are reported and not enforced: a preference
 # (status_uninitialized, docs/style.md 1.6a) or waiting for a step
 # (pointer_without_nullability, 25.16).
-REPORT_ONLY = frozenset({"status_uninitialized", "pointer_without_nullability"})
+REPORT_ONLY = frozenset({"status_uninitialized", "pointer_without_nullability",
+                         "status_dropped"})
 
 # The matchers (tools/style_matchers/<rule>.query), each with a known-bad and
 # a known-good fixture.
@@ -59,6 +60,8 @@ MATCHER_RULES = (
     "happy_path_nested",
     "iterator_pair_algorithm",
     "pointer_without_nullability",
+    "status_message",
+    "status_dropped",
     "status_uninitialized",
 )
 

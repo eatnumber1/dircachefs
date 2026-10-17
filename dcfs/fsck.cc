@@ -158,12 +158,10 @@ Finding Inspect(const std::string &path) {
           .Open();
   if (!opened.ok()) {
     if (absl::IsUnavailable(opened.status())) {
-      return Finding{
-          .kind = Finding::Kind::kBusy,
-          .detail = absl::StrCat("is locked: ", opened.status().message())};
+      return Finding{.kind = Finding::Kind::kBusy,
+                     .detail = absl::StrCat("is locked: ", opened.status())};
     }
-    return Corrupt(
-        absl::StrCat("cannot be opened: ", opened.status().message()));
+    return Corrupt(absl::StrCat("cannot be opened: ", opened.status()));
   }
   sqlite3::Connection &db = *opened;
 
@@ -171,7 +169,7 @@ Finding Inspect(const std::string &path) {
       FirstRows(db, "PRAGMA integrity_check", 3);
   if (!integrity.ok()) {
     return Corrupt(
-        absl::StrCat("integrity_check failed: ", integrity.status().message()));
+        absl::StrCat("integrity_check failed: ", integrity.status()));
   }
   if (integrity->size() != 1 || integrity->front() != "ok") {
     return Corrupt(absl::StrCat("integrity_check found: ",
@@ -180,8 +178,8 @@ Finding Inspect(const std::string &path) {
 
   absl::StatusOr<int> version = GetSchemaVersion(db);
   if (!version.ok()) {
-    return Corrupt(absl::StrCat("has no readable schema version: ",
-                                version.status().message()));
+    return Corrupt(
+        absl::StrCat("has no readable schema version: ", version.status()));
   }
   Finding found;
   if (*version > kSchemaVersion) {
@@ -215,7 +213,7 @@ Finding Inspect(const std::string &path) {
     });
   }();
   if (!read.ok()) {
-    return Corrupt(absl::StrCat("dirty set unreadable: ", read.message()));
+    return Corrupt(absl::StrCat("dirty set unreadable: ", read));
   }
   if (!missing.empty()) {
     return Corrupt(
@@ -225,7 +223,7 @@ Finding Inspect(const std::string &path) {
   absl::StatusOr<bool> clean = GetCleanShutdown(db);
   if (!clean.ok()) {
     return Corrupt(absl::StrCat("the clean-shutdown flag is unreadable: ",
-                                clean.status().message()));
+                                clean.status()));
   }
   if (*clean && dirty != 0) {
     return Corrupt(absl::StrCat(
@@ -297,8 +295,7 @@ CacheReport CheckCacheDatabase(const std::string &path, FsckMode mode) {
     }
     report.status = kFsckOperational;
     report.lines.push_back(absl::StrCat("cannot open the cache database ",
-                                        shown, ": ",
-                                        opened.status().message()));
+                                        shown, ": ", opened.status()));
     return report;
   }
   // The daemon's own lock (dcfs/main.cc): held while one runs. Reported, never
@@ -312,7 +309,7 @@ CacheReport CheckCacheDatabase(const std::string &path, FsckMode mode) {
                            " is in use by a running dcfs: unmount the "
                            "filesystem before checking it")
             : absl::StrCat("cannot lock the cache database ", shown, ": ",
-                           locked.message()));
+                           locked));
     return report;
   }
 
@@ -351,7 +348,7 @@ CacheReport CheckCacheDatabase(const std::string &path, FsckMode mode) {
       report.status = kFsckOperational;
       report.lines.push_back(absl::StrCat("cannot delete the corrupt cache ",
                                           "database ", shown, suffix, ": ",
-                                          removed.message()));
+                                          removed));
       return report;
     }
   }
@@ -365,7 +362,7 @@ CacheReport CheckCacheDatabase(const std::string &path, FsckMode mode) {
 int FsckMain(std::span<const std::string> words) {
   absl::StatusOr<FsckArgs> args = ParseFsckArgs(words);
   if (!args.ok()) {
-    LOG(ERROR) << args.status().message() << "; " << kUsage;
+    LOG(ERROR) << args.status() << "; " << kUsage;
     return kFsckUsage;
   }
   if (args->version) {
@@ -380,7 +377,7 @@ int FsckMain(std::span<const std::string> words) {
   } else {
     absl::StatusOr<std::string> found = FstabOptions(args->device);
     if (!found.ok()) {
-      LOG(ERROR) << found.status().message();
+      LOG(ERROR) << found.status();
       return kFsckOperational;
     }
     options = *std::move(found);
@@ -389,7 +386,7 @@ int FsckMain(std::span<const std::string> words) {
       absl::StrSplit(options, ',', absl::SkipEmpty());
   absl::StatusOr<HelperOptions> split = SplitHelperOptions(option_list);
   if (!split.ok()) {
-    LOG(ERROR) << split.status().message();
+    LOG(ERROR) << split.status();
     return kFsckOperational;
   }
 

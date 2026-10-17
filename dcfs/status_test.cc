@@ -113,8 +113,7 @@ TEST(ProducedByDcfsTest, ProducedErrnoToStatusKeepsTheErrno) {
                   .find("status_test.cc"),                               \
               std::string::npos);                                        \
     absl::Status status = std::move(builder) << "went wrong: " << 42;    \
-    EXPECT_EQ(status.code(), expected_code);                             \
-    EXPECT_EQ(status.message(), "went wrong: 42");                       \
+    EXPECT_THAT(status, StatusIs(expected_code, "went wrong: 42"));      \
     /* The Status itself records the call site, not only the builder. */ \
     ASSERT_FALSE(status.GetSourceLocations().empty());                   \
     EXPECT_EQ(status.GetSourceLocations().front().line(), __LINE__);     \
@@ -180,8 +179,7 @@ TEST(StatusToErrnoTest, PrefersPayloadOverCodeTable) {
   EXPECT_EQ(StatusToErrno(with_payload), EACCES);
 
   // With the payload stripped, the same code falls back to the code table.
-  absl::Status code_only(with_payload.code(),
-                         std::string(with_payload.message()));
+  absl::Status code_only(with_payload.code(), "open");
   EXPECT_EQ(StatusToErrno(code_only), EPERM);
 }
 

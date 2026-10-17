@@ -12,6 +12,7 @@ namespace {
 
 using ::absl_testing::IsOk;
 using ::absl_testing::StatusIs;
+using ::testing::AllOf;
 using ::testing::HasSubstr;
 
 absl::Status CheckTrue() {
@@ -78,14 +79,13 @@ TEST(RetCheckTest, PassingCheckFallsThrough) {
 
 TEST(RetCheckTest, FailingCheckIsInternal) {
   absl::Status st = CheckFalse();
-  EXPECT_THAT(st, StatusIs(absl::StatusCode::kInternal));
-  EXPECT_THAT(st.message(), HasSubstr("1 == 2"));
+  EXPECT_THAT(st, StatusIs(absl::StatusCode::kInternal, HasSubstr("1 == 2")));
 }
 
 TEST(RetCheckTest, ContextIsAppended) {
   absl::Status st = CheckFalseWithContext();
-  EXPECT_THAT(st, StatusIs(absl::StatusCode::kInternal));
-  EXPECT_THAT(st.message(), HasSubstr("extra context"));
+  EXPECT_THAT(
+      st, StatusIs(absl::StatusCode::kInternal, HasSubstr("extra context")));
 }
 
 TEST(RetCheckTest, UsableInStatusOrReturningFunction) {
@@ -95,22 +95,20 @@ TEST(RetCheckTest, UsableInStatusOrReturningFunction) {
 
 TEST(RetCheckTest, EqFailureMessageHasBothOperands) {
   absl::Status st = CheckEqFails();
-  EXPECT_THAT(st, StatusIs(absl::StatusCode::kInternal));
-  EXPECT_THAT(st.message(), HasSubstr("2"));
-  EXPECT_THAT(st.message(), HasSubstr("3"));
+  EXPECT_THAT(st, StatusIs(absl::StatusCode::kInternal,
+                           AllOf(HasSubstr("2"), HasSubstr("3"))));
 }
 
 TEST(RetCheckTest, NeFailureMessageHasOperand) {
   absl::Status st = CheckNeFails();
-  EXPECT_THAT(st, StatusIs(absl::StatusCode::kInternal));
-  EXPECT_THAT(st.message(), HasSubstr("5"));
+  EXPECT_THAT(st, StatusIs(absl::StatusCode::kInternal, HasSubstr("5")));
 }
 
 TEST(RetCheckTest, OkPropagatesNonOkStatusAsInternal) {
   absl::Status original = absl::NotFoundError("the thing was not found");
   absl::Status st = CheckOkPropagatesFailure(original);
-  EXPECT_THAT(st, StatusIs(absl::StatusCode::kInternal));
-  EXPECT_THAT(st.message(), HasSubstr("the thing was not found"));
+  EXPECT_THAT(st, StatusIs(absl::StatusCode::kInternal,
+                           HasSubstr("the thing was not found")));
 }
 
 TEST(RetCheckTest, OkPassesThroughOnOkStatus) {

@@ -1,0 +1,7 @@
+# docs/style.md 1.6 and 1.7 (russ, 2026-10-17): a failed Status that is not
+# returned is logged or put into the message that replaces it, whole:
+# absl::StrCat(what, ": ", status) or LOG(...) << status. Status::message()
+# drops the code and the payload (the errno), so a call of it on an
+# absl::Status (a StatusOr's status() included) is refused in dcfs/, tools/
+# and bench/, tests included.
+match cxxMemberCallExpr(callee(cxxMethodDecl(hasName("message"), ofClass(hasName("::absl::Status")))), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("status_message")

@@ -92,16 +92,16 @@ namespace syscalls = dcfs::syscalls;
 using dcfs::FileDescriptor;
 
 // Calls `visit(name)` for every entry of the directory `dir_fd` except "."
-// and "..", read with getdents64. Returns false if the directory cannot be
-// read.
+// and "..", read with getdents64. Returns why the directory cannot be read,
+// if it cannot.
 template <typename Visit>
-bool ForEachEntry(int dir_fd, Visit visit) {
+absl::Status ForEachEntry(int dir_fd, Visit visit) {
   std::vector<char> buf(32768);
   while (true) {
     absl::StatusOr<ssize_t> n =
         syscalls::getdents64(dir_fd, buf.data(), buf.size());
-    if (!n.ok()) return false;
-    if (*n == 0) return true;
+    if (!n.ok()) return n.status();
+    if (*n == 0) return absl::OkStatus();
     for (ssize_t pos = 0; pos < *n;) {
       const auto *entry =
           reinterpret_cast<const syscalls::linux_dirent64 *>(buf.data() + pos);
@@ -117,12 +117,14 @@ bool ForEachEntry(int dir_fd, Visit visit) {
 // FTW_PHYS walk does; adds them to `walked`.
 void WalkDir(int dir_fd, uint64_t &walked) {
   std::vector<std::string> subdirs;
+  // A directory that cannot be read counts the entries it gave: the walk is
+  // a rough find, not a check.
   ForEachEntry(dir_fd, [&](std::string_view name) {
     ++walked;
     absl::StatusOr<struct stat> st =
         syscalls::fstatat(dir_fd, name, AT_SYMLINK_NOFOLLOW);
     if (st.ok() && S_ISDIR(st->st_mode)) subdirs.emplace_back(name);
-  });
+  }).IgnoreError();
   for (const std::string &name : subdirs) {
     absl::StatusOr<FileDescriptor> sub =
         syscalls::openat(dir_fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
@@ -226,8 +228,8 @@ void Cycle(benchmark::State &state, const Target &t, Op op) {
   DropCaches(3);
   for (auto _ : state) {
     std::string path = t.root + "/" + EntryPath((i * stride) % n);
-    if (!op(path)) {
-      state.SkipWithError("operation failed on " + path);
+    if (absl::Status done = op(path); !done.ok()) {
+      state.SkipWithError(absl::StrCat("operation on ", path, ": ", done));
       return;
     }
     ++i;
@@ -241,23 +243,28 @@ void Cycle(benchmark::State &state, const Target &t, Op op) {
 
 void BM_Stat(benchmark::State &state, const Target *t) {
   Cycle(state, *t, [](const std::string &p) {
-    return syscalls::fstatat(AT_FDCWD, p).ok();
+    return syscalls::fstatat(AT_FDCWD, p).status();
   });
 }
 
 void BM_OpenClose(benchmark::State &state, const Target *t) {
   Cycle(state, *t, [](const std::string &p) {
-    return syscalls::openat(AT_FDCWD, p, O_RDONLY).ok();
+    return syscalls::openat(AT_FDCWD, p, O_RDONLY).status();
   });
 }
 
 void BM_SmallRead(benchmark::State &state, const Target *t) {
   Cycle(state, *t, [](const std::string &p) {
     absl::StatusOr<FileDescriptor> fd = syscalls::openat(AT_FDCWD, p, O_RDONLY);
-    if (!fd.ok()) return false;
+    if (!fd.ok()) return fd.status();
     char buf[4096];
     absl::StatusOr<size_t> r = syscalls::pread(**fd, buf, sizeof buf, 0);
-    return r.ok() && *r == kFileBytes;
+    if (!r.ok()) return r.status();
+    if (*r != kFileBytes) {
+      return absl::DataLossError(
+          absl::StrCat("read ", *r, " bytes, not ", kFileBytes));
+    }
+    return absl::OkStatus();
   });
 }
 
@@ -269,8 +276,9 @@ void BM_Lookup(benchmark::State &state, const Target *t) {
     state.PauseTiming();
     DropCaches(3);
     state.ResumeTiming();
-    if (!syscalls::fstatat(AT_FDCWD, p).ok()) {
-      state.SkipWithError("stat failed");
+    if (absl::StatusOr<struct stat> st = syscalls::fstatat(AT_FDCWD, p);
+        !st.ok()) {
+      state.SkipWithError(absl::StrCat("stat ", p, ": ", st.status()));
       return;
     }
   }
@@ -287,12 +295,14 @@ void BM_Readdir(benchmark::State &state, const Target *t) {
     absl::StatusOr<FileDescriptor> d =
         syscalls::openat(AT_FDCWD, p, O_RDONLY | O_DIRECTORY);
     if (!d.ok()) {
-      state.SkipWithError("opening the directory failed");
+      state.SkipWithError(absl::StrCat("open ", p, ": ", d.status()));
       return;
     }
     seen = 2;  // "." and ".."
-    if (!ForEachEntry(**d, [&](std::string_view) { ++seen; })) {
-      state.SkipWithError("getdents64 failed");
+    if (absl::Status read =
+            ForEachEntry(**d, [&](std::string_view) { ++seen; });
+        !read.ok()) {
+      state.SkipWithError(absl::StrCat("read ", p, ": ", read));
       return;
     }
   }
@@ -311,8 +321,7 @@ void WriteMiB(benchmark::State &state, const Target &t, std::string_view name) {
   absl::StatusOr<FileDescriptor> fd =
       syscalls::openat(AT_FDCWD, path, O_WRONLY);
   if (!fd.ok()) {
-    state.SkipWithError(
-        absl::StrCat("open ", path, ": ", fd.status().message()));
+    state.SkipWithError(absl::StrCat("open ", path, ": ", fd.status()));
     return;
   }
   for (auto _ : state) {
@@ -320,8 +329,7 @@ void WriteMiB(benchmark::State &state, const Target &t, std::string_view name) {
       absl::StatusOr<size_t> n =
           syscalls::pwrite(**fd, chunk.data(), chunk.size(), off);
       if (!n.ok()) {
-        state.SkipWithError(
-            absl::StrCat("write ", path, ": ", n.status().message()));
+        state.SkipWithError(absl::StrCat("write ", path, ": ", n.status()));
         return;
       }
       if (*n != chunk.size()) {

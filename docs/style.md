@@ -643,6 +643,24 @@ its callers added; of `ReadContents`, `<callee's message>; while reading
 the file contents at offset 4096`. The text recurses readably without
 repeating itself, because each added piece says something new.
 
+**A Status is never dropped from a message** (russ, 2026-10-17: "*ALWAYS*
+include the Status if you have one in the message. Dropping a Status without
+logging or returning it silently suppresses the root cause of errors! Also an
+aside: Status implements AbslStringify. So it should be `StrCat("open ",
+path, ": ", status)`."). A failed `Status` that is not returned is logged or
+put into the message that replaces it, whole: `absl::StrCat(what, ": ",
+status)` or `LOG(...) << status`, for a `StatusOr` its `.status()`. Never
+`status.message()`, which drops the code and the payloads (the errno), and
+never a fixed text (`SkipWithError("open failed")`) where a status was in
+hand. This holds for bench diagnostics, fsck's findings, tests and tools as
+much as for the daemon. Tests assert on a status with `StatusIs(code,
+message_matcher)`, not on `.message()`. Mechanical: the `status_message`
+matcher (`tools/style_matchers/status_message.query`) refuses every call of
+`absl::Status::message()` in `dcfs/`, `tools/` and `bench/`, with no
+allowlist; `status_dropped` reports a failure branch (`if (!s.ok()) return
+false;`) that never mentions the status (report only: some are answers, such
+as a predicate that is false when the probe failed).
+
 **Return a failed status or log it, never both** (1.7).
 
 ### 1.6b No intentional crashes
@@ -972,6 +990,10 @@ failure twice, the inner line with less context. Two exceptions:
 
 A status that is consumed (retried, turned into "unknown", or ignored on
 purpose) is logged where it is consumed, once.
+
+The status goes into the line whole (`LOG(ERROR) << status`, `StrCat(what,
+": ", status)`), never as `status.message()`: 1.6, "A Status is never
+dropped from a message".
 
 ### 1.8 The dcfs invariants as code rules
 

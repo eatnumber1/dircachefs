@@ -299,11 +299,14 @@ std::string InvariantChecker::Where() const {
 }
 
 void InvariantChecker::Fail(const absl::Status &violation) {
+  // ToString, not the stringification: that one adds the source location
+  // trace on lines of its own, and this is one line, which the run's verdict
+  // reads (test/qemu/scripts/run-qemu.sh).
   const std::string what =
       absl::StrCat(violation.code() == absl::StatusCode::kFailedPrecondition
                        ? ""
                        : "invariant-checker: a check could not run: ",
-                   violation.message(), " (", Where(), ")");
+                   violation.ToString(), " (", Where(), ")");
   if (console_fd_ >= 0) {
     const std::string line =
         // A newline first: the console may be part way through a line.
@@ -323,8 +326,7 @@ void InvariantChecker::BackingCall(Context &ctx, std::string_view what,
   Attach(ctx);
   absl::Status status = CheckBackingCall(ctx);
   if (!status.ok()) {
-    Fail(absl::Status(status.code(),
-                      absl::StrCat(status.message(), ", at ", what)));
+    Fail(absl::StatusBuilder(status) << "at " << what);
   }
   if (on_backing_call_) on_backing_call_(site);
 }

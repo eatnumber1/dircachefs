@@ -872,8 +872,7 @@ absl::Status StaleOrUnreadable(Context &ctx, InodeId id,
       if (err == ESTALE || err == ENOENT) continue;  // Its directory is gone.
       if (unchecked == nullptr) {
         unchecked = &named;
-        why =
-            absl::StrCat("opening its directory: ", parent.status().message());
+        why = absl::StrCat("opening its directory: ", parent.status());
       }
       continue;
     }
@@ -886,7 +885,7 @@ absl::Status StaleOrUnreadable(Context &ctx, InodeId id,
     }
     if (!now.ok() && ErrnoOf(now.status()) != ENOENT && unchecked == nullptr) {
       unchecked = &named;
-      why = absl::StrCat("reading its handle: ", now.status().message());
+      why = absl::StrCat("reading its handle: ", now.status());
     }
   }
   if (still == nullptr && unchecked == nullptr && !ask.more) {

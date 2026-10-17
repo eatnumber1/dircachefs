@@ -724,7 +724,8 @@ int UmountHelperMain(int argc, char *argv[]) {
   }
   absl::Status done = UmountAndWait(*args);
   if (done.ok()) return 0;
-  if (!done.message().empty()) LOG(ERROR) << done;
+  // umount(8) said why on the terminal itself: its failure has no message.
+  if (done != NativeMountError(ExitStatusFor(done), "")) LOG(ERROR) << done;
   return ExitStatusFor(done);
 }
 
