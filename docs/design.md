@@ -1612,8 +1612,10 @@ point's place (before the request at the periodic one, after the fsync at
 an `FSYNC`), so it needs no cancellation checkpoint. A reader outside dcfs
 holding a snapshot (an administrator's `sqlite3` shell: `dcfs fsck`
 refuses a database in use) can keep a `PASSIVE` checkpoint from copying,
-and then from fsyncing the WAL; the commits then wait for the reader to
-go. A checkpoint that fails (the cache disk's I/O error) is logged, the
+and then from fsyncing the WAL. Such a checkpoint does not count
+(`Checkpoint` records the data version only when SQLite copied every
+frame), so the next sync point after the reader is gone checkpoints those
+commits; until then they are not bounded. A checkpoint that fails (the cache disk's I/O error) is logged, the
 commits stay unsynced, and the next sync point checkpoints again. SQLite
 answers a `PASSIVE` checkpoint `SQLITE_BUSY` only while another connection
 runs one; dcfs runs the only one, so that answer is a failure like any

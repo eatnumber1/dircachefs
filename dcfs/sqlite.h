@@ -281,15 +281,15 @@ class Connection {
   // SQLite fsyncs the WAL before it copies a frame (sqlite3.c walCheckpoint),
   // so with no other connection reading, every commit so far survives a
   // power loss once this returns OK. A no-op when the database is not in WAL
-  // mode (an in-memory one).
+  // mode (an in-memory one). Only a checkpoint that copied every frame
+  // counts as one for CommittedSinceCheckpoint.
   absl::Status Checkpoint(CheckpointMode mode);
 
-  // Whether a transaction committed since the last Checkpoint() (or since
-  // the connection opened). Read from SQLite's data version
-  // (SQLITE_FCNTL_DATA_VERSION), which every commit moves, kSync or not
-  // (also an empty one, and a kSync commit already made everything durable):
-  // a caller that checkpoints on it never skips a commit, and may checkpoint
-  // with nothing to make durable.
+  // Whether a transaction committed since the last Checkpoint() that copied
+  // every frame (or since the connection opened). Read from SQLite's data
+  // version (SQLITE_FCNTL_DATA_VERSION). Every commit moves the version, a
+  // kSync one included (a checkpoint after it is redundant but harmless); an
+  // empty transaction moves it too.
   absl::StatusOr<bool> CommittedSinceCheckpoint() const;
 
   ::sqlite3 *absl_nullable Get() const;
@@ -326,7 +326,6 @@ class Connection {
   // Transaction() without the durability handling.
   absl::Status RunTransaction(absl::FunctionRef<absl::Status()> body);
 
-  // SQLite's data version of the main database (SQLITE_FCNTL_DATA_VERSION).
   absl::StatusOr<uint32_t> DataVersion() const;
 
   ::sqlite3 *absl_nullable db_ = nullptr;
