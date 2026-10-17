@@ -992,3 +992,44 @@ what a large test depends on is therefore first tested on origin. A
 pre-push run of the large tests a change reaches was proposed and declined
 (russ, 2026-10-17: "No. Until we ship, a red CI is not a problem."): CI is
 where the large tier runs, and its failures are fixed forward.
+
+## 26.36 Load-agnostic tests: CPU budgets, a PMU, and an audit (russ, 2026-10-17)
+
+russ, on 26.34's backing_test CPU budget: "yes. But in general for all our
+tests I'm interested in them being load-agnostic." The first half is the
+rest of 26.34; the second is a rule and an audit.
+
+1. **backing_test's CPU budget (26.34's open item, option 1).** A CPU
+   budget is not held on a run `run-qemu.sh` flags as load-starved (host
+   pressure 20% or more): the number is printed with the reason, as
+   `budget_unheld_reason` does for sanitizer, TCG and coverage runs. Test
+   first: a canned starved run whose CPU exceeds the budget fails today.
+2. **Instructions instead of CPU time (investigate, then decide).** Can a
+   guest see a virtual PMU (KVM, `-cpu host`), here and on CI's runners?
+   If so, measure dcfs's instructions retired (user and kernel,
+   `perf_event_open` in a small testutil reader, or `perf stat`) for the
+   targets in `cpu_budgets.txt`: their spread across quiet and loaded
+   runs (load 20+) against CPU time's. If instructions are steady, propose
+   switching the CPU budgets to them, falling back to unheld where no PMU
+   is visible; the switch itself is a follow-up step. For CI, add a probe
+   that reports whether the PMU is visible (red CI is fine until we ship,
+   russ 2026-10-17), rather than guessing.
+3. **The audit.** Every place a test's verdict depends on wall time or host
+   speed, in `test/qemu/` (guest scripts, `run-qemu.sh`, budgets), `dcfs/`
+   unit tests, `bench/` and `tools/`: `sleep`s, `timeout N`, time bounds
+   asserted (e.g. cancel_test's 2 s KVM / 8 s TCG), time-based budgets,
+   allowances, retries on slowness. Classify each: (a) a hang guard only
+   (generous, scaled by `run-qemu.sh`'s allowance; acceptable), (b) a
+   verdict on time (must become a count of events, or move behind (a)),
+   (c) a sleep standing in for an event (a 1.11 violation; e.g. 26.34's
+   `sleep 3` against `sync_interval_sec=2`). Write the list to
+   `docs/plan/notes/load-agnostic-tests-2026-10-17.md` with a proposed fix
+   per (b) and (c) item; fix the cheap ones here, test first, and brief
+   the rest as numbered follow-ups in this phase.
+4. **The rule.** Add to `docs/style.md` section 2 (Tests), with russ's
+   words: a test's verdict does not depend on host load or speed; it
+   counts events (syscalls, requests, I/O, instructions), waits on
+   events, and uses time only as a hang guard sized by the harness.
+
+Owner: dcfs-investigator. Never widen a budget or tolerance to pass;
+never weaken a test (AGENTS.md).

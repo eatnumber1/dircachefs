@@ -3724,3 +3724,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 2026-10-17, 22.5 briefed and dispatched (lane-2, dcfs-protocol): the
   model gains interrupt arrival and a bound on the backing syscalls a
   request takes after it (russ: "interrupt in a timely manner").
+- 2026-10-17, russ: backing_test's CPU budget goes unheld on load-starved
+  runs, plus a PMU investigation; "in general for all our tests I'm
+  interested in them being load-agnostic." 26.36 briefed (rule, audit,
+  instructions-retired investigation) and dispatched (lane-4).
