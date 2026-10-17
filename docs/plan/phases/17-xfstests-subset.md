@@ -77,7 +77,7 @@ outside-group callers while root and group members retain it; guest
 credentials.sh tests all write-family operations against native filesystem and
 cold cache; generic/683-685 removed from expected failure lists.
 
-## 17.2b Setgid through passthrough, and a non-owner's EPERM (from the 2026-10-16 review of 15.11)
+## 17.2b Setgid through passthrough, and a non-owner's EPERM (from the 2026-10-16 review of 15.11; merged 2026-10-17, 1ed1280)
 
 The review of Gemini's week found two suspected setgid bugs that 17.2's
 tests do not reach. Reproduce each first (test failing on today's code,

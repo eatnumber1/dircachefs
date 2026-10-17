@@ -3634,3 +3634,21 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (not mergeable as first written: the parent check is unsound on NFS, and
   the identity kind was open to every UUID-less filesystem), fixed;
   merged on the orchestrator's read of the fix round.
+
+- 2026-10-17: 17.2b merged (d181ed8, 8e6d268, 1ed1280). Both suspected
+  bugs were real and had one cause: dcfs does not negotiate killpriv, so
+  the kernel's FUSE side removes setid bits with the pre-6.2 rule. A
+  non-owner's write to a setgid file without group execute failed with
+  EPERM (the kernel's empty SETATTR ran as the caller's chown(-1,-1)); an
+  empty SETATTR on a file open for writing is now the write's privilege
+  removal, clearing setgid where the backing's own write by the caller
+  would. Passthrough writes kept setgid on 06666 files; dcfs declines
+  passthrough for exactly that mode (writes there about 3.6x slower).
+  The Opus review found two more: a root writer losing setgid (fixed) and
+  truncate of a 06666 file keeping it (an older bug; RequestedMode now
+  keeps only the setid bits the truncate left). Re-review clean; the
+  unreachable KILL_SUID branch removed. Gaps until the kernel patch are in
+  README and kernel-patches.md row 4. Branch coverage baseline 82.90 to
+  83.25. Leads filed as 17.2c (a round trip per passthrough write) and
+  17.2d (/proc groups for credential-overriding callers; uid 0 without
+  CAP_FSETID).
