@@ -14,24 +14,27 @@
 
 #include "absl/log/log.h"
 #include "absl/status/status.h"
-#include "absl/status/statusor.h"
 #include "dcfs/context.h"
 #include "dcfs/dir_cache_fs.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/protocol_events.h"
-#include "dcfs/ret_check.h"
 #include "fuse_lowlevel.h"
 
 namespace dcfs {
 namespace {
 
+// The DirCacheFS a request is for: libfuse hands back the pointer main.cc gave
+// fuse_session_new.
+DirCacheFS &FsOf(fuse_req_t req) {
+  return *static_cast<DirCacheFS *>(fuse_req_userdata(req));
+}
+
 // Every request handler goes through this, so it is also where the
 // periodic sync point runs: at the start of a request, never in the middle
 // of one (see DirCacheFS::MaybeSyncBacking).
-absl::StatusOr<DirCacheFS *> GetFS(fuse_req_t req) {
-  auto *fs = static_cast<DirCacheFS *>(fuse_req_userdata(req));
-  RET_CHECK_NE(fs, nullptr);
-  fs->MaybeSyncBacking();
+DirCacheFS &GetFS(fuse_req_t req) {
+  DirCacheFS &fs = FsOf(req);
+  fs.MaybeSyncBacking();
   return fs;
 }
 
@@ -65,58 +68,43 @@ void LogRequest(DirCacheFS &fs, const events::Request &request,
 template <typename Handler>
 void Serve(fuse_req_t req, const events::Request &request, Handler handler) {
   FuseRequest fr(req);
-  absl::StatusOr<DirCacheFS *> fs = GetFS(req);
-  if (!fs.ok()) {
-    fr.ReplyFailureAndLogIfNotOk(fs.status());
-    return;
-  }
-  Context &ctx = (*fs)->context();
+  DirCacheFS &fs = GetFS(req);
+  Context &ctx = fs.context();
   const uint64_t backing_before = ctx.backing_calls;
   ctx.first_backing_call = {};
-  ctx.events->CheckRequestBegin(ctx, (*fs)->bookkeeping(), request);
+  ctx.events->CheckRequestBegin(ctx, fs.bookkeeping(), request);
   // The request checkpoints ask about (dcfs/interrupts.h).
   ctx.interrupts->Begin(req);
   {
     events::RequestScope scope(*ctx.events, ctx, request);
-    absl::Status status = scope.Finish(handler(**fs, fr));
-    LogRequest(**fs, request, status, ctx.backing_calls - backing_before);
+    absl::Status status = scope.Finish(handler(fs, fr));
+    LogRequest(fs, request, status, ctx.backing_calls - backing_before);
     fr.ReplyFailureAndLogIfNotOk(status);
     ctx.events->Replied(ctx,
                         fr.replied() ? fr.errno_sent() : events::kNotReplied);
   }
   ctx.interrupts->End();
-  ctx.events->CheckRequestEnd(ctx, (*fs)->bookkeeping(), request);
+  ctx.events->CheckRequestEnd(ctx, fs.bookkeeping(), request);
 }
 
+// `userdata` is the DirCacheFS main.cc gave fuse_session_new, `conn` libfuse's
+// own (do_init).
 void Init(void *userdata, fuse_conn_info *conn) {
-  if (conn == nullptr) {
-    LOG(ERROR) << "Init called with null conn";
-    return;
-  }
-  auto refuse_init = [&] {
-    const uint64_t unoffered = ~conn->capable_ext;
-    if (unoffered == 0u) {
-      LOG(ERROR) << "cannot refuse the INIT: every flag is offered";
-      return;
-    }
-    conn->want_ext |= std::bit_floor(unoffered);
-  };
-  if (userdata == nullptr) {
-    LOG(ERROR) << "Init called with null userdata";
-    refuse_init();
-    return;
-  }
   absl::Status s = static_cast<DirCacheFS *>(userdata)->Init(*conn);
   if (s.ok()) return;
   LOG(ERROR) << s;
-  refuse_init();
+  // libfuse gives init() no way to fail the INIT. A wanted flag not in
+  // capable_ext is what it refuses (do_init's want_flags_valid): EPROTO to
+  // the kernel, the session ended, and SessionLoop::Run returns -EPROTO.
+  // This is the only place dcfs refuses an INIT. capable_ext is libfuse's
+  // translation of the kernel's flags into the FUSE_CAP_* bits it defines,
+  // the highest of which libfuse 3.18.2 defines is bit 31, so whatever the
+  // kernel offers the highest unoffered bit is bit 63: there is always one
+  // to want (InitOfferingEveryFlagIsStillRefused offers every kernel flag).
+  conn->want_ext |= std::bit_floor(~conn->capable_ext);
 }
 
 void Destroy(void *userdata) {
-  if (userdata == nullptr) {
-    LOG(ERROR) << "Destroy called with null userdata";
-    return;
-  }
   auto *fs = static_cast<DirCacheFS *>(userdata);
   absl::Status s = fs->Destroy();
   LOG_IF(ERROR, !s.ok()) << s;
@@ -134,43 +122,29 @@ void Lookup(fuse_req_t req, fuse_ino_t parent, const char *name) {
 // the model has), but they are invariant-check frames like any request.
 void Forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
   FuseRequest fr(req);
-  absl::StatusOr<DirCacheFS *> fs = GetFS(req);
-  if (!fs.ok()) {
-    LOG(ERROR) << "Forget: " << fs.status();
-    (void)fr.ReplyNone();
-    return;
-  }
-  Context &ctx = (*fs)->context();
+  DirCacheFS &fs = GetFS(req);
+  Context &ctx = fs.context();
   const events::Request request{.op = events::Op::kForget, .ino = Ino(ino)};
-  ctx.events->CheckRequestBegin(ctx, (*fs)->bookkeeping(), request);
-  ctx.events->CheckForgetting(ctx, (*fs)->bookkeeping(), ino, nlookup);
-  (*fs)->Forget(fr, ino, nlookup);
-  ctx.events->CheckRequestEnd(ctx, (*fs)->bookkeeping(), request);
+  ctx.events->CheckRequestBegin(ctx, fs.bookkeeping(), request);
+  ctx.events->CheckForgetting(ctx, fs.bookkeeping(), ino, nlookup);
+  fs.Forget(fr, ino, nlookup);
+  ctx.events->CheckRequestEnd(ctx, fs.bookkeeping(), request);
 }
 
+// `forgets` points into the request's buffer (libfuse's do_batch_forget).
 void ForgetMulti(fuse_req_t req, size_t count, fuse_forget_data *forgets) {
   FuseRequest fr(req);
-  if (forgets == nullptr && count > 0) {
-    LOG(ERROR) << "ForgetMulti called with null forgets but count=" << count;
-    (void)fr.ReplyNone();
-    return;
-  }
-  absl::StatusOr<DirCacheFS *> fs = GetFS(req);
-  if (!fs.ok()) {
-    LOG(ERROR) << "ForgetMulti: " << fs.status();
-    (void)fr.ReplyNone();
-    return;
-  }
-  Context &ctx = (*fs)->context();
+  DirCacheFS &fs = GetFS(req);
+  Context &ctx = fs.context();
   const events::Request request{.op = events::Op::kBatchForget,
                                 .ino = count > 0 ? Ino(forgets[0].ino) : 0};
-  ctx.events->CheckRequestBegin(ctx, (*fs)->bookkeeping(), request);
+  ctx.events->CheckRequestBegin(ctx, fs.bookkeeping(), request);
   for (size_t i = 0; i < count; ++i) {
-    ctx.events->CheckForgetting(ctx, (*fs)->bookkeeping(), forgets[i].ino,
+    ctx.events->CheckForgetting(ctx, fs.bookkeeping(), forgets[i].ino,
                                 forgets[i].nlookup);
   }
-  (*fs)->ForgetMulti(fr, std::span<const fuse_forget_data>(forgets, count));
-  ctx.events->CheckRequestEnd(ctx, (*fs)->bookkeeping(), request);
+  fs.ForgetMulti(fr, std::span<const fuse_forget_data>(forgets, count));
+  ctx.events->CheckRequestEnd(ctx, fs.bookkeeping(), request);
 }
 
 void Getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
@@ -250,8 +224,7 @@ void Link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent,
           const char *newname) {
   // The link of an unnamed O_TMPFILE file is, to the new parent, a create
   // (the protocol events' kLinkTmpfile).
-  const auto *fs = static_cast<const DirCacheFS *>(fuse_req_userdata(req));
-  const bool unnamed = fs != nullptr && fs->IsUnnamedTmpfile(ino);
+  const bool unnamed = FsOf(req).IsUnnamedTmpfile(ino);
   Serve(req,
         {.op = unnamed ? events::Op::kLinkTmpfile : events::Op::kLink,
          .ino = Ino(ino),
@@ -262,19 +235,17 @@ void Link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent,
         });
 }
 
+// Each op below that takes a fuse_file_info is given libfuse's own (a local
+// of its do_* handler), never null, unlike Getattr and Setattr above.
 void Open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
   Serve(req, {.op = events::Op::kOpen, .ino = Ino(ino)},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi, nullptr);
-          return fs.Open(fr, ino, *fi);
-        });
+        [&](DirCacheFS &fs, FuseRequest &fr) { return fs.Open(fr, ino, *fi); });
 }
 
 void Read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
           fuse_file_info *fi) {
   Serve(req, {.op = events::Op::kRead, .ino = Ino(ino)},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi, nullptr);
+        [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Read(fr, ino, size, off, *fi);
         });
 }
@@ -282,40 +253,34 @@ void Read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
 void Write(fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size,
            off_t off, fuse_file_info *fi) {
   Serve(req, {.op = events::Op::kWrite, .ino = Ino(ino)},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi, nullptr);
+        [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Write(fr, ino, std::span<const char>(buf, size), off, *fi);
         });
 }
 
 void Flush(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
-  Serve(req, {.op = events::Op::kFlush, .ino = Ino(ino)},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi, nullptr);
-          return fs.Flush(fr, ino, *fi);
-        });
+  Serve(
+      req, {.op = events::Op::kFlush, .ino = Ino(ino)},
+      [&](DirCacheFS &fs, FuseRequest &fr) { return fs.Flush(fr, ino, *fi); });
 }
 
 void Release(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
   Serve(req, {.op = events::Op::kRelease, .ino = Ino(ino)},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi, nullptr);
+        [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Release(fr, ino, *fi);
         });
 }
 
 void Fsync(fuse_req_t req, fuse_ino_t ino, int datasync, fuse_file_info *fi) {
   Serve(req, {.op = events::Op::kFsync, .ino = Ino(ino)},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi, nullptr);
+        [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Fsync(fr, ino, datasync, *fi);
         });
 }
 
 void Opendir(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
   Serve(req, {.op = events::Op::kOpendir, .ino = Ino(ino)},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi, nullptr);
+        [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Opendir(fr, ino, *fi);
         });
 }
@@ -323,8 +288,7 @@ void Opendir(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
 void Readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
              fuse_file_info *fi) {
   Serve(req, {.op = events::Op::kReaddir, .ino = Ino(ino), .offset = off},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi, nullptr);
+        [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Readdir(fr, ino, size, off, *fi);
         });
 }
@@ -332,16 +296,14 @@ void Readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
 void Readdirplus(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
                  fuse_file_info *fi) {
   Serve(req, {.op = events::Op::kReaddirplus, .ino = Ino(ino), .offset = off},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi, nullptr);
+        [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Readdirplus(fr, ino, size, off, *fi);
         });
 }
 
 void Releasedir(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
   Serve(req, {.op = events::Op::kReleasedir, .ino = Ino(ino)},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi, nullptr);
+        [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Releasedir(fr, ino, *fi);
         });
 }
@@ -349,8 +311,7 @@ void Releasedir(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
 void Fsyncdir(fuse_req_t req, fuse_ino_t ino, int datasync,
               fuse_file_info *fi) {
   Serve(req, {.op = events::Op::kFsyncdir, .ino = Ino(ino)},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi, nullptr);
+        [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Fsyncdir(fr, ino, datasync, *fi);
         });
 }
@@ -400,8 +361,7 @@ void Access(fuse_req_t req, fuse_ino_t ino, int mask) {
 void Create(fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode,
             fuse_file_info *fi) {
   Serve(req, {.op = events::Op::kCreate, .ino = Ino(parent), .name = name},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi, nullptr);
+        [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Create(fr, parent, name, mode, *fi);
         });
 }
@@ -409,8 +369,7 @@ void Create(fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode,
 void Fallocate(fuse_req_t req, fuse_ino_t ino, int mode, off_t offset,
                off_t length, fuse_file_info *fi) {
   Serve(req, {.op = events::Op::kFallocate, .ino = Ino(ino)},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi, nullptr);
+        [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Fallocate(fr, ino, mode, offset, length, *fi);
         });
 }
@@ -419,9 +378,7 @@ void CopyFileRange(fuse_req_t req, fuse_ino_t ino_in, off_t off_in,
                    fuse_file_info *fi_in, fuse_ino_t ino_out, off_t off_out,
                    fuse_file_info *fi_out, size_t len, int flags) {
   Serve(req, {.op = events::Op::kCopyFileRange, .ino = Ino(ino_out)},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi_in, nullptr);
-          RET_CHECK_NE(fi_out, nullptr);
+        [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.CopyFileRange(fr, ino_in, off_in, *fi_in, ino_out, off_out,
                                   *fi_out, len, flags);
         });
@@ -450,8 +407,7 @@ void Ioctl(fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
 void Tmpfile(fuse_req_t req, fuse_ino_t parent, mode_t mode,
              fuse_file_info *fi) {
   Serve(req, {.op = events::Op::kTmpfile, .ino = Ino(parent)},
-        [&](DirCacheFS &fs, FuseRequest &fr) -> absl::Status {
-          RET_CHECK_NE(fi, nullptr);
+        [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Tmpfile(fr, parent, mode, *fi);
         });
 }

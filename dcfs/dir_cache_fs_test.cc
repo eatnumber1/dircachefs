@@ -768,10 +768,7 @@ class DirCacheFSTest : public ::testing::Test {
     hdr.pid = static_cast<uint32_t>(syscalls::getpid());
     AppendBytes(buf, hdr);
     buf.append(body);
-    struct fuse_buf fbuf = {};
-    fbuf.mem = buf.data();
-    fbuf.size = buf.size();
-    fuse_session_process_buf(se, &fbuf);
+    ProcessInMemory(se, buf);
     auto it = replies_.find(unique);
     EXPECT_NE(it, replies_.end()) << "no reply to request " << unique;
     if (it == replies_.end()) return Reply{.error = -EIO};
@@ -952,7 +949,8 @@ class DirCacheFSTest : public ::testing::Test {
   }
 
   // A FORGET of `n` of the kernel's lookups of `id` (no reply).
-  void Forget(InodeId id, uint64_t n) {
+  void Forget(InodeId id, uint64_t n) { ForgetOn(se_, id, n); }
+  void ForgetOn(struct fuse_session *se, InodeId id, uint64_t n) {
     struct fuse_forget_in in = {};
     in.nlookup = n;
     std::string body;
@@ -966,14 +964,24 @@ class DirCacheFSTest : public ::testing::Test {
     hdr.nodeid = static_cast<uint64_t>(id);
     AppendBytes(buf, hdr);
     buf.append(body);
-    struct fuse_buf fbuf = {};
-    fbuf.mem = buf.data();
-    fbuf.size = buf.size();
-    fuse_session_process_buf(se_, &fbuf);
+    ProcessInMemory(se, buf);
+  }
+
+  // Hands `buf` to `se` as one message read from the device.
+  static void ProcessInMemory(struct fuse_session *se, std::string &buf) {
+    // No flag: a buffer in memory (fuse_buf_flags has no zero enumerator).
+    struct fuse_buf fbuf = {.size = buf.size(),
+                            .flags = static_cast<fuse_buf_flags>(0),
+                            .mem = buf.data()};
+    fuse_session_process_buf(se, &fbuf);
   }
 
   // A BATCH_FORGET of (id, n) pairs (no reply).
   void BatchForget(const std::vector<std::pair<InodeId, uint64_t>> &forgets) {
+    BatchForgetOn(se_, forgets);
+  }
+  void BatchForgetOn(struct fuse_session *se,
+                     const std::vector<std::pair<InodeId, uint64_t>> &forgets) {
     struct fuse_batch_forget_in in = {};
     in.count = static_cast<uint32_t>(forgets.size());
     std::string body;
@@ -992,10 +1000,7 @@ class DirCacheFSTest : public ::testing::Test {
     hdr.unique = unique;
     AppendBytes(buf, hdr);
     buf.append(body);
-    struct fuse_buf fbuf = {};
-    fbuf.mem = buf.data();
-    fbuf.size = buf.size();
-    fuse_session_process_buf(se_, &fbuf);
+    ProcessInMemory(se, buf);
   }
 
   // A TMPFILE in `parent` with `flags`: the new inode and file handle (0
@@ -1355,12 +1360,15 @@ class DirCacheFSTest : public ::testing::Test {
     return se;
   }
 
-  // Queues the FUSE_INIT the kernel sends when it mounts, offering `flags`.
-  void QueueInit(uint32_t flags = FUSE_POSIX_ACL | FUSE_DONT_MASK) {
+  // Queues the FUSE_INIT the kernel sends when it mounts, offering `flags`
+  // and `flags2` (read only with FUSE_INIT_EXT in `flags`).
+  void QueueInit(uint32_t flags = FUSE_POSIX_ACL | FUSE_DONT_MASK,
+                 uint32_t flags2 = 0) {
     struct fuse_init_in in = {};
     in.major = FUSE_KERNEL_VERSION;
     in.minor = FUSE_KERNEL_MINOR_VERSION;
     in.flags = flags;
+    in.flags2 = flags2;
     std::string msg;
     struct fuse_in_header hdr = {};
     hdr.len = static_cast<uint32_t>(sizeof(hdr) + sizeof(in));
@@ -7138,11 +7146,53 @@ TEST_F(DirCacheFSTest, InitWithoutDontMaskIsRefused) {
       << absl::StrJoin(capture.lines, "\n");
 }
 
+// libfuse builds capable_ext from the FUSE_CAP_* bits it defines alone
+// (do_init), all below bit 32 in 3.18.2, so whatever the kernel offers, the
+// highest unoffered bit, which fuse_ops.cc's Init wants to refuse an INIT, is
+// never offered: a kernel offering every flag is refused all the same.
+TEST_F(DirCacheFSTest, InitOfferingEveryFlagIsStillRefused) {
+  Start();
+  MountFds mounts;
+  Context ctx{.db = db_, .mounts = mounts, .rng = bitgen_};
+  DirCacheFS::Options options = options_;
+  options.mount_options = {"allow_other", "suid"};
+  DirCacheFS other(ctx, options);
+  struct fuse_session *se = NewSession(&other, {});
+  ASSERT_NE(se, nullptr);
+  QueueInit(~uint32_t{0}, ~uint32_t{0});
+  {
+    SessionLoop loop(se);
+    EXPECT_EQ(loop.Run(), -EPROTO);
+  }
+  fuse_session_destroy(se);
+}
+
+// FORGET and BATCH_FORGET reply with fuse_reply_none, once: nothing is
+// written to the device, and nothing is logged.
+TEST_F(DirCacheFSTest, ForgetRepliesOnceAndLogsNothing) {
+  WriteFile(Path("f"));
+  WriteFile(Path("g"));
+  Start();
+  auto [lf, ef] = Lookup(kRootInode, "f");
+  auto [lg, eg] = Lookup(kRootInode, "g");
+  ASSERT_EQ(lf.error, 0);
+  ASSERT_EQ(lg.error, 0);
+  WarningCapture capture;
+  const uint64_t forget = NextUnique();
+  Forget(static_cast<InodeId>(ef.nodeid), 1);
+  const uint64_t batch = NextUnique();
+  BatchForget({{static_cast<InodeId>(eg.nodeid), 1}});
+  EXPECT_EQ(TakeReply(forget).error, -EIO) << "a reply was written";
+  EXPECT_EQ(TakeReply(batch).error, -EIO) << "a reply was written";
+  EXPECT_THAT(capture.lines, ::testing::IsEmpty());
+}
+
 // FuseRequest on live requests: a session of the test's own handlers, each
 // wrapping its request in a FuseRequest.
 struct LiveReplies {
   absl::Status first;
   absl::Status second;
+  DirCacheFS *fs = nullptr;
 };
 LiveReplies &Live() {
   static LiveReplies live;
@@ -7151,8 +7201,9 @@ LiveReplies &Live() {
 
 class FuseRequestLiveTest : public DirCacheFSTest {
  protected:
-  // A session whose GETATTR replies twice and whose STATFS first calls
-  // ReplyFailure with an OK status; it has seen FUSE_INIT.
+  // A session whose GETATTR replies twice, whose STATFS first calls
+  // ReplyFailure with an OK status, and whose FORGET and BATCH_FORGET reply
+  // before handing the request to DirCacheFS; it has seen FUSE_INIT.
   struct fuse_session *LiveSession() {
     ops_ = {};
     ops_.getattr = [](fuse_req_t req, fuse_ino_t, fuse_file_info *) {
@@ -7165,6 +7216,19 @@ class FuseRequestLiveTest : public DirCacheFSTest {
       Live().first = fr.ReplyFailure(absl::OkStatus());
       Live().second = fr.ReplyErrno(EPERM);
     };
+    ops_.forget = [](fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
+      FuseRequest fr(req);
+      fr.ReplyNone();
+      Live().fs->Forget(fr, ino, nlookup);
+    };
+    ops_.forget_multi = [](fuse_req_t req, size_t count,
+                           fuse_forget_data *forgets) {
+      FuseRequest fr(req);
+      fr.ReplyNone();
+      Live().fs->ForgetMulti(fr,
+                             std::span<const fuse_forget_data>(forgets, count));
+    };
+    Live().fs = fs_.get();
     struct fuse_session *se = NewSession(fs_.get(), {});
     if (se == nullptr) return nullptr;
     QueueInit();
@@ -7198,6 +7262,29 @@ TEST_F(FuseRequestLiveTest, ReplyFailureRejectsAnOkStatus) {
   EXPECT_EQ(SendOn(se, FUSE_STATFS, kRootInode, "").error, -EPERM);
   EXPECT_EQ(Live().first.code(), absl::StatusCode::kInternal);
   EXPECT_THAT(Live().second, IsOk());
+  fuse_session_destroy(se);
+}
+
+// A FORGET handed a request already replied to (a bug in its caller): the
+// single-reply invariant keeps a second fuse_reply_none from libfuse's freed
+// request, and DirCacheFS, which has no reply to carry the failure in, logs
+// it once. The same for BATCH_FORGET.
+TEST_F(FuseRequestLiveTest, ForgetOfASpentRequestLogsOnce) {
+  WriteFile(Path("f"));
+  Start();
+  auto [looked_up, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(looked_up.error, 0);
+  auto [again, entry_again] = Lookup(kRootInode, "f");
+  ASSERT_EQ(again.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  struct fuse_session *se = LiveSession();
+  ASSERT_NE(se, nullptr);
+  WarningCapture capture;
+  ForgetOn(se, f, 1);
+  BatchForgetOn(se, {{f, 1}});
+  EXPECT_THAT(capture.lines, ElementsAre(HasSubstr("already replied"),
+                                         HasSubstr("already replied")))
+      << absl::StrJoin(capture.lines, "\n");
   fuse_session_destroy(se);
 }
 

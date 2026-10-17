@@ -275,11 +275,13 @@ absl::Status FuseRequest::ReplyStatfs(const struct statvfs &stbuf) {
   return st;
 }
 
-absl::Status FuseRequest::ReplyNone() {
-  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+void FuseRequest::ReplyNone() {
+  if (!req_.has_value()) {
+    LOG(ERROR) << "FuseRequest already replied: no second fuse_reply_none";
+    return;
+  }
   fuse_reply_none(*req_);
   req_ = std::nullopt;
-  return absl::OkStatus();
 }
 
 }  // namespace dcfs

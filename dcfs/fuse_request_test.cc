@@ -6,11 +6,17 @@
 
 #include <cerrno>
 #include <cstddef>
+#include <string>
 #include <vector>
 
+#include "absl/base/log_severity.h"
+#include "absl/log/log_entry.h"
+#include "absl/log/log_sink.h"
+#include "absl/log/log_sink_registry.h"
 #include "absl/status/status.h"
 #include "dcfs/status.h"
 #include "fuse_lowlevel.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 namespace dcfs {
@@ -113,13 +119,41 @@ TEST(StatusToErrnoTest, PlainCodeStatusUsesFallbackMapping) {
   EXPECT_EQ(StatusToErrno(s), EPERM);
 }
 
-TEST(FuseRequestTest, ReplyNoneTwiceReturnsInternalError) {
-  FuseRequest req(reinterpret_cast<fuse_req_t>(0x1));
-  EXPECT_TRUE(req.ReplyNone().ok());
-  EXPECT_TRUE(absl::IsInternal(req.ReplyNone()));
+// How many times fuse_reply_none was called (the --wrap fake below).
+int &RepliesNone() {
+  static int replies = 0;
+  return replies;
+}
+
+// The text of every ERROR logged while it lives.
+class ErrorCapture : public absl::LogSink {
+ public:
+  ErrorCapture() { absl::AddLogSink(this); }
+  ~ErrorCapture() override { absl::RemoveLogSink(this); }
+  void Send(const absl::LogEntry &entry) override {
+    if (entry.log_severity() >= absl::LogSeverity::kError) {
+      lines.emplace_back(entry.text_message());
+    }
+  }
+  std::vector<std::string> lines;
+};
+
+// FORGET has no reply to carry an error in: a second ReplyNone (a bug) is
+// refused, never reaching libfuse with the request it freed, and logged once.
+TEST(FuseRequestTest, ReplyNoneTwiceRepliesOnceAndLogsOnce) {
+  ErrorCapture errors;
+  const int before = RepliesNone();
+  {
+    FuseRequest req(reinterpret_cast<fuse_req_t>(0x1));
+    req.ReplyNone();
+    req.ReplyNone();
+  }
+  EXPECT_EQ(RepliesNone() - before, 1);
+  EXPECT_THAT(errors.lines,
+              ::testing::ElementsAre(::testing::HasSubstr("already replied")));
 }
 
 }  // namespace
 }  // namespace dcfs
 
-extern "C" void __wrap_fuse_reply_none(fuse_req_t) {}
+extern "C" void __wrap_fuse_reply_none(fuse_req_t) { ++dcfs::RepliesNone(); }

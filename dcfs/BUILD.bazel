@@ -414,6 +414,10 @@ qemu_cc_test(
     deps = [
       ":fuse_request",
       ":status",
+      "@absl//absl/base:log_severity",
+      "@absl//absl/log:log_entry",
+      "@absl//absl/log:log_sink",
+      "@absl//absl/log:log_sink_registry",
       "@absl//absl/status",
       "@googletest//:gtest_main",
       "@libfuse//:libfuse",
@@ -458,12 +462,9 @@ cc_library(
       ":dir_cache_fs",
       ":fuse_request",
       ":escape",
-      ":ret_check",
       "@absl//absl/strings",
       "@absl//absl/log",
-      "@absl//absl/log:check",
       "@absl//absl/status",
-      "@absl//absl/status:statusor",
       "@libfuse//:libfuse",
     ],
 )

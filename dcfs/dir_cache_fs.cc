@@ -1018,7 +1018,7 @@ void DirCacheFS::Forget(FuseRequest &req, fuse_ino_t ino, uint64_t nlookup) {
   NoteLifetime(id, events::LifetimeStep::kForgot, nlookup);
   // forget/forget_multi have no error reply: fuse_reply_none is the only
   // valid one.
-  (void)req.ReplyNone();
+  req.ReplyNone();
 }
 
 void DirCacheFS::ForgetMulti(FuseRequest &req,
@@ -1038,7 +1038,7 @@ void DirCacheFS::ForgetMulti(FuseRequest &req,
     NoteLifetime(static_cast<InodeId>(forget.ino),
                  events::LifetimeStep::kForgotInBatch, forget.nlookup);
   }
-  (void)req.ReplyNone();
+  req.ReplyNone();
 }
 
 absl::Status DirCacheFS::Readlink(FuseRequest &req, fuse_ino_t ino) {

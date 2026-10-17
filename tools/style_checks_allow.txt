@@ -106,9 +106,7 @@ dcfs/dir_cache_fs.cc|XattrsChangedBySetattr|readability-implicit-bool-conversion
 dcfs/dir_cache_fs_test.cc|<file scope>|misc-include-cleaner|2
 dcfs/dir_cache_fs_test.cc|<file scope>|misc-unused-parameters|1
 dcfs/dir_cache_fs_test.cc|BackingAtime|misc-include-cleaner|1
-dcfs/dir_cache_fs_test.cc|BatchForget|bugprone-invalid-enum-default-initialization|1
 dcfs/dir_cache_fs_test.cc|CheckAndRecover|readability-avoid-nested-conditional-operator|1
-dcfs/dir_cache_fs_test.cc|Forget|bugprone-invalid-enum-default-initialization|1
 dcfs/dir_cache_fs_test.cc|INSTANTIATE_TEST_SUITE_P|modernize-type-traits|1
 dcfs/dir_cache_fs_test.cc|ListAll|readability-function-cognitive-complexity|1
 dcfs/dir_cache_fs_test.cc|LiveSession|misc-include-cleaner|1
@@ -127,7 +125,6 @@ dcfs/dir_cache_fs_test.cc|Restart|misc-include-cleaner|1
 dcfs/dir_cache_fs_test.cc|Run|readability-function-cognitive-complexity|1
 dcfs/dir_cache_fs_test.cc|RunRenames|bugprone-unchecked-optional-access|1
 dcfs/dir_cache_fs_test.cc|RunRenames|capturing_mutating_lambda|1
-dcfs/dir_cache_fs_test.cc|SendOn|bugprone-invalid-enum-default-initialization|1
 dcfs/dir_cache_fs_test.cc|SetTimes|misc-include-cleaner|1
 dcfs/dir_cache_fs_test.cc|SetUp|concurrency-mt-unsafe|1
 dcfs/dir_cache_fs_test.cc|Start|misc-include-cleaner|4

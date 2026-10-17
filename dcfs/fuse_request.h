@@ -148,9 +148,10 @@ class FuseRequest {
   // errno, even if StatusToErrno(status) would (incorrectly) map to 0.
   absl::Status ReplyFailure(const absl::Status &status);
 
-  // A reply that carries no result, used by ops (e.g. forget, forget_multi)
-  // that must not send a normal reply at all.
-  absl::Status ReplyNone();
+  // A reply that carries no result, used by ops (forget, forget_multi) that
+  // must not send a normal reply at all. They have no reply to carry an error
+  // in either, so a second reply (a bug) is refused and logged here.
+  void ReplyNone();
 
   // Implementation detail -- helper for the trampolines in fuse_ops.cc: every
   // DirCacheFS::Xxx op method is expected to reply on its own (directly, or
