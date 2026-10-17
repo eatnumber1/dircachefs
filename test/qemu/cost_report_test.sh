@@ -68,21 +68,22 @@ echo "PASS: cost_exec.sh does not run its command if the cgroup cannot be joined
 # --- the I/O of the disks (the counters of /sys/block/<disk>/stat, summed) ---
 
 
-# Fields 1, 3, 5, 7 and 16 of a stat line are the reads and writes completed,
-# the sectors read and written and the flush requests completed (Documentation/
-# admin-guide/iostats.rst); the others (merges, times, in flight, discards) are
-# not counted, and a kernel that has no flush field (before 5.5) is not ours.
-# Two disks: vdb with 92 reads, 764 sectors read, 225 writes, 133080 sectors
-# written and 136 flushes; vdc the rest.
+# Fields 1 and 2 of a stat line are the reads completed and merged, 5 and 6 the
+# writes completed and merged, 3 and 7 the sectors read and written, 16 the
+# flush requests (Documentation/admin-guide/iostats.rst); the times, the I/Os in
+# flight and the discards are not counted, and a kernel with no flush field
+# (before 5.5) is not ours. Two disks: vdb with 92 reads and 2 merged, 764
+# sectors read, 225 writes and 91 merged, 133080 sectors written and 136
+# flushes; vdc the rest.
 got=$(cost_sum_disk_stats <<'EOT'
       92        2      764       21      225       91   133080      437        0      328      702        0        0        0        0      136      242
       40        0      308        6        6        0       16        3        0        3       13        0        0        0        0        6        3
 EOT
 )
-[ "$got" = "132 231 1072 133096 142" ] || fail "cost_sum_disk_stats: '$got', want '132 231 1072 133096 142' (reads writes sectors-read sectors-written flushes)"
+[ "$got" = "134 322 1072 133096 142" ] || fail "cost_sum_disk_stats: '$got', want '134 322 1072 133096 142' (reads writes sectors-read sectors-written flushes)"
 got=$(cost_sum_disk_stats </dev/null)
 [ "$got" = "0 0 0 0 0" ] || fail "cost_sum_disk_stats of no disk: '$got', want zeros"
-echo "PASS: the disks' counters are summed field by field"
+echo "PASS: the disks' counters are summed field by field, merged requests included"
 
 # The test's I/O is the difference of two readings, one line of name=value.
 got=$(cost_disk_delta "10 20 300 4000 5" "13 25 380 4600 9")

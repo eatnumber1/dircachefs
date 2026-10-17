@@ -43,11 +43,14 @@ cost_disks() {
 }
 
 # cost_sum_disk_stats: /sys/block/<disk>/stat lines on stdin, one per disk;
-# "reads writes sectors_read sectors_written flushes" summed over them: fields 1,
-# 5, 3, 7 and 16 (Documentation/admin-guide/iostats.rst; the merges, times, I/Os
-# in flight and discards are not counted).
+# "reads writes sectors_read sectors_written flushes" summed over them: fields 1
+# and 2, 5 and 6, 3, 7 and 16 (Documentation/admin-guide/iostats.rst; the times,
+# the I/Os in flight and the discards are not counted). Reads and writes are the
+# requests issued, completed plus merged: the block layer merges neighbours by
+# the timing of its queue, which moves the completed count and not what the test
+# did. test/qemu/README.md, "Budgets in three parts", has the measurements.
 cost_sum_disk_stats() {
-	awk '{ r += $1; w += $5; sr += $3; sw += $7; f += $16 } END { print r + 0, w + 0, sr + 0, sw + 0, f + 0 }'
+	awk '{ r += $1 + $2; w += $5 + $6; sr += $3; sw += $7; f += $16 } END { print r + 0, w + 0, sr + 0, sw + 0, f + 0 }'
 }
 
 # cost_disk_counts: the disks' counters now, as cost_sum_disk_stats prints them.

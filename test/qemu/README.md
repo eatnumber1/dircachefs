@@ -998,7 +998,7 @@ appended until `ENOSPC`, as root, so ext4's reserved blocks go too).
 | Test | What it injects | What must hold |
 |---|---|---|
 | `enospc_backing_test` (`qemu_test_matrix`: ext4 small, xfs and btrfs medium) | the backing filesystem full before dcfs starts; then through dcfs: creates until one fails, a 64 KiB write past a file's end, a mkdir, a 2000-byte xattr, a rename into the full directory | each that fails fails with `ENOSPC` and is not served as done (served tree and xattr equal the backing filesystem's); on ext4 and xfs every one fails, on btrfs (metadata reserved apart) only the write must; after the fill is removed through dcfs the same operations work, also after a restart |
-| `enospc_cache_test` (ext4, small) | the cache database's filesystem full: before a create (phase 1), while a create and then a rename are held in phase 2 (phase 3), before a periodic sync point | the create fails with `ENOSPC` and never reaches the backing filesystem; the held create is replied as done or `EEXIST` and the kernel never answers "no such file" for it (the bug this step fixed), the held rename is replied as done; reads fail with `ENOSPC` or answer right; the failed sync point keeps the dirty set; after space is freed and a restart, everything served matches the backing filesystem |
+| `enospc_cache_test` (ext4, small) | the cache database's filesystem full: before a create (phase 1), after a file was created and before it is closed (its release cannot record the attributes, so the listing of the directory meets `ENOSPC`), while a create and then a rename are held in phase 2 (phase 3), before a periodic sync point | the create fails with `ENOSPC` and never reaches the backing filesystem; the held create is replied as done or `EEXIST` and the kernel never answers "no such file" for it (the bug this step fixed), the held rename is replied as done; reads fail with `ENOSPC` (a listing is read with `testutil readdir-ino`: busybox `ls` ends a listing at a readdir error without saying so) or answer right; the failed sync point keeps the dirty set; after space is freed and a restart, everything served matches the backing filesystem |
 
 Both boot the checking build in every variant (ext4 small, xfs and btrfs
 medium) with the default guest memory, on image files: they fill their disks
@@ -1284,9 +1284,11 @@ not to narrow the tolerance.
 
 The same `COST` line carries the I/O of the test's disks, summed over the virtio
 disks (the coverage disk apart) and the loop devices that are the RAM disks
-(`guest/cost_lib.sh`): `reads`, `writes`, `sectors_read`, `sectors_written` and
-`flushes` (the flush requests, FLUSH/FUA: what an `fsync` costs the device) from
-`/sys/block/<disk>/stat`, between the start of the test (after the RAM disks
+(`guest/cost_lib.sh`): `reads` and `writes` (the requests issued: completed
+plus merged into another request, see "Reads and writes count requests issued"
+below), `sectors_read`, `sectors_written` and `flushes` (the flush requests,
+FLUSH/FUA: what an `fsync` costs the device) from `/sys/block/<disk>/stat`,
+between the start of the test (after the RAM disks
 are made) and a `sync` after its end; and what the processes that run dcfs's code
 caused on them, `dcfs_reads`, `dcfs_writes`, `dcfs_read_bytes` and
 `dcfs_write_bytes`, from the `io.stat` of the same cgroup. That is
@@ -1308,7 +1310,10 @@ fails if a direct write of 1 MiB does not show in the disks' counters and the
 cgroup's.
 
 Measured over 8 quiet runs, 4 with five other guests beside the test and 3 with
-7 or 8 busy loops and a `dsync` writer (the ext4 targets, 1 vCPU):
+7 or 8 busy loops and a `dsync` writer (the ext4 targets, 1 vCPU). This is step
+26.17's table, when `reads` and `writes` were the requests completed; they were
+measured again as issued in 26.34 (below), so the `writes` movements in it
+include the merging:
 
 | test | runs (quiet/six guests/busy loops) | counts that never varied | what moved (of the 9 counts) | highest rise under load over the quiet maximum |
 |---|---|---|---|---|
@@ -1324,8 +1329,9 @@ Measured over 8 quiet runs, 4 with five other guests beside the test and 3 with
 | `//test/qemu:readdir_boundary_test` | 8/4/3 | 2 | writes 62 to 115, flushes 27 to 39, `dcfs_writes` 764 to 1034 | writes +85% |
 
 The counts that move are the write side, and the movement is the timing of
-writeback: how requests merge, which journal commit or `syncfs` a write lands
-before. Nothing here varies with the page cache, which would move the reads:
+writeback (which journal commit or `syncfs` a write lands before), and in the
+completed `writes` the block layer's merging too (below). Nothing here varies
+with the page cache, which would move the reads:
 the disks' reads are exact in four of the ten tests and within 1% in five (the
 tenth, `readdir_boundary_test`, 6%), and the daemon's reads are exact in most
 and at most one I/O apart in the rest (the tests drop the caches at defined
@@ -1338,6 +1344,27 @@ with its wall time. They are left out of `io_budgets.txt`, with the reason there
 its reads are budgeted. The ACE tests, which unmount and sync constantly on RAM
 disks, did not move more than 2.4% while their wall time went from 20 s to
 52 s.
+
+**Reads and writes count requests issued, merged ones included (26.34).** The
+block layer merges adjacent requests by how fast the disk takes them, and that
+moved the completed `writes` without the test doing anything different.
+`request_counts_test` completed 52 to 59 writes in 58 of 60 runs and 68 and 69
+in the other two (over its budget of 62, a failure under load), with the same
+sectors written and flushes in all of them. With the merge counter of
+`/sys/block/vdb/stat` added, the requests issued were the same in each of 50
+runs (51 completed and 207 merged, or 54 and 204: 258, and 259 in the `COST`
+line, which counts after the guest's final `sync`).
+`fault_backing_test_ext4` completed 331 to 396 writes in 40 runs (over its
+budget of 378 once); on its backing disk, a RAM disk, completed plus merged
+were 6,981 in each of 40 runs, while the cache disk's moved by about 39 (the
+spread of the two disks' 7,132 to 7,171). So `cost_sum_disk_stats` adds the
+merged reads (field 2) and writes (field 6) to the completed ones (fields 1 and
+5), and the `reads` and `writes` lines of `io_budgets.txt` were measured again
+(14 to 20 runs each) as the highest count plus the spread seen. What still
+moves is real: the cache database's writes (`fault_cache_test_ext4`, 254 to 297
+requests issued) follow sqlite's checkpoints, and the lines for them keep their
+slack. `xfstests_1_test_ext4` awaits a whole re-measure (its workload has
+changed since 26.17): its lines are as they were.
 
 ### Wall time: the hang guard
 
@@ -1354,23 +1381,27 @@ the numbers are). 2 ms is a busy disk's average request and 20 ms a flush on one
 that is also writing for someone else, both pessimistic for the RAM disks; the
 factor 3 is the most that wall time stretched against CPU time in the
 measurements above (2.6 times for `fault_ace_b_test` with eight busy loops
-beside it). A target with no budget lines has no floor. This is a refusal when
+beside it). Since 26.34 the reads and writes in the formula are the requests
+issued, merged ones included, which charges a hang guard for the requests the
+block layer folded into others: `fault_backing_test_ext4`'s allowance went from
+12 s to 53 s, and a guard may be generous. A target with no budget lines has no
+floor. This is a refusal when
 the test starts, not when the target is loaded: a Starlark macro cannot read the
 budget files, and the timeouts are Bazel's four classes anyway. The floors of
 the measured tests, against the guest's allowance with their current timeouts:
 
 | test | floor | timeout (the guest gets) |
 |---|---|---|
-| `//dcfs:backing_test` | 7 s | short (60 s, never less) |
-| `//test/qemu:create_test_ext4` | 3 s | moderate (240 s) |
-| `//test/qemu:request_counts_test` | 4 s | moderate (240 s) |
-| `//test/qemu:write_test_ext4` | 12 s | moderate (240 s) |
-| `//test/qemu:fault_backing_test_ext4` | 12 s | moderate (240 s) |
-| `//test/qemu:fault_cache_test_ext4` | 13 s | moderate (240 s) |
-| `//test/qemu:readdir_boundary_test` | 83 s | moderate (240 s) |
-| `//test/qemu:fault_ace_mixed_test_ext4` | 162 s | long (840 s) |
-| `//test/qemu:fault_ace_b_test` | 355 s | long (840 s) |
-| `//test/qemu:fault_ace_a_test` | 694 s | eternal (3540 s) |
+| `//dcfs:backing_test` | 8 s | short (60 s, never less) |
+| `//test/qemu:create_test_ext4` | 4 s | moderate (240 s) |
+| `//test/qemu:request_counts_test` | 5 s | moderate (240 s) |
+| `//test/qemu:write_test_ext4` | 13 s | moderate (240 s) |
+| `//test/qemu:fault_backing_test_ext4` | 53 s | moderate (240 s) |
+| `//test/qemu:fault_cache_test_ext4` | 14 s | moderate (240 s) |
+| `//test/qemu:readdir_boundary_test` | 84 s | moderate (240 s) |
+| `//test/qemu:fault_ace_mixed_test_ext4` | 172 s | long (840 s) |
+| `//test/qemu:fault_ace_b_test` | 388 s | long (840 s) |
+| `//test/qemu:fault_ace_a_test` | 760 s | eternal (3540 s) |
 | `//test/qemu:xfstests_1_test_ext4` | 900 s | eternal (3540 s) |
 
 None is refused; none was changed. `fault_ace_a_test` takes 35 s and waits an

@@ -6,10 +6,14 @@
 #
 #   reads writes sectors_read sectors_written flushes
 #       the disks of the test (the virtio disks, or the loop devices that are the
-#       RAM disks), summed, from /sys/block/<disk>/stat: I/Os completed, 512-byte
-#       sectors, and flush requests (FLUSH/FUA: what an fsync costs the device),
-#       between the start of the test and a sync after its end. Everything on
-#       them counts: the test script's own file writes as much as dcfs's.
+#       RAM disks), summed, from /sys/block/<disk>/stat: reads and writes
+#       issued (completed plus merged into another request: the block layer
+#       merges by the timing of its queue, so the completed count moves while
+#       the issued one does not; README, "Budgets in three parts"), 512-byte
+#       sectors, and flush requests (FLUSH/FUA: what an fsync costs the
+#       device), between the start of the test and a sync after its end.
+#       Everything on them counts: the test script's own file writes as much as
+#       dcfs's.
 #   dcfs_reads dcfs_writes dcfs_read_bytes dcfs_write_bytes
 #       what the processes that run dcfs's code (the daemon, or a unit test's
 #       binary) caused on those disks, from the io controller's io.stat of their
@@ -31,18 +35,26 @@
 # noisy-kernel run (strace_lib.sh, budget_unheld_reason).
 #
 # Each budget is the highest count seen plus the spread seen, over the runs
-# measured for it (8 quiet, 4 beside five other guests, 3 beside 8 busy loops):
-# a count that never varied is exact, one that merging and the timing of
-# writeback move (the writes and flushes of a test that writes) has the slack
-# the runs showed. The comment at the end of a line is the range seen. The
-# first lines are the ten tests measured for this step; a target with no line is
-# reported, not held. test/qemu/README.md, "Budgets in three parts", has the
-# table of what varied.
+# measured for it: a count that never varied is exact, one that moves (the
+# flushes and the daemon's writes of a test that writes, the cache database's
+# requests) has the slack the runs showed. The comment at the end of a line is
+# the range seen. Each section says how many runs measured its lines: the
+# counts other than reads and writes are those of step 26.17 (8 quiet runs, 4
+# beside five other guests, 3 beside 8 busy loops), and reads and writes were
+# measured again in step 26.34, when they came to mean requests issued. A target
+# with no line is reported, not held. test/qemu/README.md, "Budgets in three
+# parts", has the table of what varied.
+#
+# //test/qemu:xfstests_1_test_ext4 awaits a whole re-measure: its workload has
+# changed since 26.17 (now about 2,100 reads, not 18,000), so its lines are
+# stale as a set, and its reads and writes are still the completed counts.
+# Nine runs in 26.34 issued at most 2,130 reads and 19,595 writes, which these
+# lines cover.
 
 
-# //dcfs:backing_test (15 runs)
+# //dcfs:backing_test (15 runs; reads and writes: 20 runs)
 //dcfs:backing_test reads 3   # observed 3..3
-//dcfs:backing_test writes 116   # observed 104..110
+//dcfs:backing_test writes 261   # observed 245..253
 //dcfs:backing_test sectors_read 24   # observed 24..24
 //dcfs:backing_test sectors_written 2520   # observed 2328..2424
 //dcfs:backing_test flushes 50   # observed 40..45
@@ -51,9 +63,9 @@
 //dcfs:backing_test dcfs_read_bytes 12288   # observed 12288..12288
 //dcfs:backing_test dcfs_write_bytes 577536   # observed 577536..577536
 
-# //test/qemu:create_test_ext4 (15 runs)
-//test/qemu:create_test_ext4 reads 83   # observed 83..83
-//test/qemu:create_test_ext4 writes 44   # observed 42..43
+# //test/qemu:create_test_ext4 (15 runs; reads and writes: 20 runs)
+//test/qemu:create_test_ext4 reads 85   # observed 85..85
+//test/qemu:create_test_ext4 writes 71   # observed 69..70
 //test/qemu:create_test_ext4 sectors_read 680   # observed 680..680
 //test/qemu:create_test_ext4 sectors_written 448   # observed 448..448
 //test/qemu:create_test_ext4 flushes 29   # observed 27..28
@@ -62,9 +74,9 @@
 //test/qemu:create_test_ext4 dcfs_read_bytes 0   # observed 0..0
 //test/qemu:create_test_ext4 dcfs_write_bytes 0   # observed 0..0
 
-# //test/qemu:request_counts_test (15 runs)
-//test/qemu:request_counts_test reads 48   # observed 48..48
-//test/qemu:request_counts_test writes 62   # observed 52..57
+# //test/qemu:request_counts_test (15 runs; reads and writes: 20 runs)
+//test/qemu:request_counts_test reads 58   # observed 58..58
+//test/qemu:request_counts_test writes 259   # observed 259..259
 //test/qemu:request_counts_test sectors_read 476   # observed 476..476
 //test/qemu:request_counts_test sectors_written 1960   # observed 1960..1960
 //test/qemu:request_counts_test flushes 27   # observed 27..27
@@ -73,19 +85,22 @@
 //test/qemu:request_counts_test dcfs_read_bytes 73728   # observed 73728..73728
 //test/qemu:request_counts_test dcfs_write_bytes 0   # observed 0..0
 
-# //test/qemu:readdir_boundary_test (15 runs). Its write side is not budgeted: the
-# test runs 19 s alone and up to 40 s beside other work, with ext4 mounted on a
-# host disk, and what it writes depends on how long that is, through the
-# journal's commit every 5 s and the daemon's periodic sync (writes 62 to 115,
-# flushes 27 to 39, dcfs_writes 764 to 1034 over the runs). The reads do not.
-//test/qemu:readdir_boundary_test reads 166   # observed 148..157
+# //test/qemu:readdir_boundary_test (15 runs; reads: 14 runs). Its write side is
+# not budgeted: the test runs 19 s alone and up to 40 s beside other work, with
+# ext4 mounted on a host disk, and what it writes depends on how long that is,
+# through the journal's commit every 5 s and the daemon's periodic sync (the 15
+# runs of 26.17: flushes 27 to 39, dcfs_writes 764 to 1034). The 14 runs of
+# 26.34 all took 24 to 27 s and issued 1669 to 1751 writes (flushes 29 to 31),
+# which says nothing about 19 s or 40 s, so the writes are not budgeted. The
+# reads do not depend on it.
+//test/qemu:readdir_boundary_test reads 210   # observed 186..198
 //test/qemu:readdir_boundary_test sectors_read 1604   # observed 1460..1532
 //test/qemu:readdir_boundary_test dcfs_reads 46   # observed 46..46
 //test/qemu:readdir_boundary_test dcfs_read_bytes 188416   # observed 188416..188416
 
-# //test/qemu:write_test_ext4 (15 runs)
-//test/qemu:write_test_ext4 reads 131   # observed 131..131
-//test/qemu:write_test_ext4 writes 234   # observed 232..233
+# //test/qemu:write_test_ext4 (15 runs; reads and writes: 20 runs)
+//test/qemu:write_test_ext4 reads 134   # observed 132..133
+//test/qemu:write_test_ext4 writes 325   # observed 323..324
 //test/qemu:write_test_ext4 sectors_read 1064   # observed 1064..1064
 //test/qemu:write_test_ext4 sectors_written 133096   # observed 133096..133096
 //test/qemu:write_test_ext4 flushes 145   # observed 143..144
@@ -94,9 +109,9 @@
 //test/qemu:write_test_ext4 dcfs_read_bytes 126976   # observed 118784..122880
 //test/qemu:write_test_ext4 dcfs_write_bytes 4096   # observed 4096..4096
 
-# //test/qemu:fault_backing_test_ext4 (15 runs)
-//test/qemu:fault_backing_test_ext4 reads 266   # observed 264..265
-//test/qemu:fault_backing_test_ext4 writes 378   # observed 338..358
+# //test/qemu:fault_backing_test_ext4 (15 runs; reads and writes: 20 runs)
+//test/qemu:fault_backing_test_ext4 reads 383   # observed 381..382
+//test/qemu:fault_backing_test_ext4 writes 7210   # observed 7132..7171
 //test/qemu:fault_backing_test_ext4 sectors_read 3500   # observed 3484..3492
 //test/qemu:fault_backing_test_ext4 sectors_written 58528   # observed 57760..58144
 //test/qemu:fault_backing_test_ext4 flushes 114   # observed 94..104
@@ -105,9 +120,9 @@
 //test/qemu:fault_backing_test_ext4 dcfs_read_bytes 589824   # observed 581632..585728
 //test/qemu:fault_backing_test_ext4 dcfs_write_bytes 897024   # observed 684032..790528
 
-# //test/qemu:fault_cache_test_ext4 (15 runs)
-//test/qemu:fault_cache_test_ext4 reads 398   # observed 394..396
-//test/qemu:fault_cache_test_ext4 writes 215   # observed 173..194
+# //test/qemu:fault_cache_test_ext4 (15 runs; reads and writes: 20 runs)
+//test/qemu:fault_cache_test_ext4 reads 450   # observed 442..446
+//test/qemu:fault_cache_test_ext4 writes 340   # observed 254..297
 //test/qemu:fault_cache_test_ext4 sectors_read 4640   # observed 4576..4608
 //test/qemu:fault_cache_test_ext4 sectors_written 3720   # observed 2824..3272
 //test/qemu:fault_cache_test_ext4 flushes 145   # observed 109..127
@@ -116,9 +131,9 @@
 //test/qemu:fault_cache_test_ext4 dcfs_read_bytes 958464   # observed 950272..954368
 //test/qemu:fault_cache_test_ext4 dcfs_write_bytes 966656   # observed 745472..856064
 
-# //test/qemu:fault_ace_a_test (14 runs)
-//test/qemu:fault_ace_a_test reads 35944   # observed 35620..35782
-//test/qemu:fault_ace_a_test writes 13989   # observed 13907..13948
+# //test/qemu:fault_ace_a_test (14 runs; reads and writes: 14 runs)
+//test/qemu:fault_ace_a_test reads 36015   # observed 35663..35839
+//test/qemu:fault_ace_a_test writes 24852   # observed 24612..24732
 //test/qemu:fault_ace_a_test sectors_read 386888   # observed 384296..385592
 //test/qemu:fault_ace_a_test sectors_written 324064   # observed 321904..322984
 //test/qemu:fault_ace_a_test flushes 5777   # observed 5689..5733
@@ -127,9 +142,9 @@
 //test/qemu:fault_ace_a_test dcfs_read_bytes 57262080   # observed 57262080..57262080
 //test/qemu:fault_ace_a_test dcfs_write_bytes 81215488   # observed 81215488..81215488
 
-# //test/qemu:fault_ace_b_test (15 runs)
-//test/qemu:fault_ace_b_test reads 17798   # observed 17702..17750
-//test/qemu:fault_ace_b_test writes 7156   # observed 7010..7083
+# //test/qemu:fault_ace_b_test (15 runs; reads and writes: 14 runs)
+//test/qemu:fault_ace_b_test reads 17898   # observed 17704..17801
+//test/qemu:fault_ace_b_test writes 12573   # observed 12463..12518
 //test/qemu:fault_ace_b_test sectors_read 190208   # observed 189440..189824
 //test/qemu:fault_ace_b_test sectors_written 161592   # observed 160728..161160
 //test/qemu:fault_ace_b_test flushes 3020   # observed 2886..2953
@@ -138,9 +153,9 @@
 //test/qemu:fault_ace_b_test dcfs_read_bytes 27639808   # observed 27639808..27639808
 //test/qemu:fault_ace_b_test dcfs_write_bytes 39698432   # observed 39698432..39698432
 
-# //test/qemu:fault_ace_mixed_test_ext4 (15 runs)
-//test/qemu:fault_ace_mixed_test_ext4 reads 5446   # observed 5362..5404
-//test/qemu:fault_ace_mixed_test_ext4 writes 2723   # observed 2659..2691
+# //test/qemu:fault_ace_mixed_test_ext4 (15 runs; reads and writes: 14 runs)
+//test/qemu:fault_ace_mixed_test_ext4 reads 5478   # observed 5398..5438
+//test/qemu:fault_ace_mixed_test_ext4 writes 4487   # observed 4417..4452
 //test/qemu:fault_ace_mixed_test_ext4 sectors_read 72936   # observed 72264..72600
 //test/qemu:fault_ace_mixed_test_ext4 sectors_written 59520   # observed 59024..59272
 //test/qemu:fault_ace_mixed_test_ext4 flushes 1400   # observed 1336..1368
