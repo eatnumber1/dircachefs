@@ -1110,8 +1110,8 @@ change." And: "Is 3600/3600/5 the right defaults? Maybe for
 --sync_interval_sec it should be set to the kernel's writeback time at
 start, or something?"
 
-- `attr_timeout`, `entry_timeout` and `sync_interval` become
-  `ABSL_FLAG(absl::Duration, ...)` (mount options `dcfs.attr_timeout=1h`
+- `sync_interval` becomes `ABSL_FLAG(absl::Duration, ...)` (`attr_timeout`
+  and `entry_timeout` go away in 26.40 instead) (mount options `dcfs.attr_timeout=1h`
   and so on); the `_sec` names go (nothing has shipped). 25.28b's refusals
   (non-positive, NaN, infinite) carry over to what a Duration can say
   (zero, negative, `inf`). README's option table, the man page, the mount
@@ -1247,7 +1247,18 @@ synchronous invalidation before the reply to a deferred one (racy).
   attr timeout), and that write through a mapping after close and stat
   (stale until eviction today); 12.20's model shows both as
   counterexamples before the fix, with a known-bug variant.
-- Then 26.39's attr/entry default can become effectively infinite
-  (dashboard question Q-2026-10-17-09).
+- Then the attr and entry timeouts become effectively infinite (russ,
+  2026-10-17: "I want invalidation to be part of the formal model, but
+  after that you can make attr/entry timeouts effectively infinite"),
+  once 12.20 models the invalidations: (1) the largest value the kernel
+  accepts without overflow (FUSE's `entry_valid`/`attr_valid` are a u64 of
+  seconds plus nanoseconds, turned into jiffies by the kernel; find the
+  real ceiling in fs/fuse and libfuse's double conversion, or use a value
+  above it the kernel clamps, such as INT_MAX), with a test that the reply
+  carries it; (2) `attr_timeout` and `entry_timeout` stop being flags
+  ("we're now doing the Right Thing and don't need to ask the user to
+  figure it out"): removed from main.cc, the mount helper, README and the
+  man page; 26.39 converts only `sync_interval` to a Duration flag. The
+  zero timeout for files open for writing stays.
 
 Owner: dcfs-protocol (kernel cache coherence), after 12.20 or with it.

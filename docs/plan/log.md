@@ -3951,3 +3951,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   one exempt helper); asks why the waitexit test should let a broken
   waitexit slip past. 25.33b queued: the classification sweep and an exact
   waitexit unit test with --wrap fakes.
+- 2026-10-17, russ on the timeouts: invalidation into the formal model
+  first (12.20), then attr/entry effectively infinite at the largest value
+  the kernel takes (or above it, e.g. INT_MAX), and the two flags removed
+  ("we're now doing the Right Thing"). 26.40 and 26.39 updated.
