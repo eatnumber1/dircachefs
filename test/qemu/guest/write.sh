@@ -275,20 +275,10 @@ src_want_md5=$(md5sum /tmp/big_src.bin | cut -d' ' -f1)
 # FUSE_FLUSH that wakes the daemon, so the measuring is done from the parent.
 big_writer() {
 	exec 7>"$MNT/big"
-	: >/tmp/bw.ready
+	echo ready >/tmp/bw.ready
 	read -r _ </tmp/bw.go
 	dd if=/tmp/big_src.bin bs=16M >&7 2>/dev/null
 	echo $? >/tmp/bw.done
-}
-
-# wait_for_file PATH: up to 30s.
-wait_for_file() {
-	w_n=0
-	while [ ! -e "$1" ] && [ "$w_n" -lt 300 ]; do
-		sleep 0.1
-		w_n=$((w_n + 1))
-	done
-	[ -e "$1" ]
 }
 
 rm -f /tmp/bw.ready /tmp/bw.done /tmp/bw.go
@@ -296,7 +286,7 @@ mkfifo /tmp/bw.go
 drop_caches
 big_writer &
 WRITER_PID=$!
-if ! wait_for_file /tmp/bw.ready; then
+if ! "$TESTUTIL" waitline /tmp/bw.ready ready "$WRITER_PID"; then
 	fail write-large-tool "writer never opened $MNT/big"
 fi
 quiesce_daemon "$DAEMON_PID"
@@ -304,7 +294,6 @@ daemon_wakeups "$DAEMON_PID"
 before_wakeups=$WAKEUPS
 before_ticks=$(cpu_ticks "$DAEMON_PID")
 echo go >/tmp/bw.go
-wait_for_file /tmp/bw.done
 # Without passthrough dd can finish while dcfs is still working through the
 # kernel's queued WRITEs (the page cache absorbs them); the writer's close
 # waits for all of them, so the window ends when the writer has exited.

@@ -196,6 +196,70 @@ else
 	fail waitline-process-exits "rc=$RC, want 1 (the process exited without the text)"
 fi
 
+# waitpath: returns when the path exists (any kind of file), at once if it does,
+# and with 1 if the process it watches exits first.
+"$TESTUTIL" waitpath /tmp/wait-path.out &
+WAITER=$!
+: >/tmp/wait-path.out
+if wait "$WAITER"; then
+	pass waitpath-created
+else
+	fail waitpath-created "waitpath did not return 0 for a path created while it waited"
+fi
+if "$TESTUTIL" waitpath /tmp/wait-path.out; then
+	pass waitpath-existing
+else
+	fail waitpath-existing "waitpath did not return 0 for a path that exists"
+fi
+mkfifo /tmp/wait-path.fifo
+sh -c 'read -r _ </tmp/wait-path.fifo' &
+HOLDER=$!
+"$TESTUTIL" waitpath /tmp/wait-path-never.out "$HOLDER" &
+WAITER=$!
+echo go >/tmp/wait-path.fifo
+wait "$HOLDER"
+wait "$WAITER"
+RC=$?
+if [ "$RC" -eq 1 ]; then
+	pass waitpath-process-exits
+else
+	fail waitpath-process-exits "rc=$RC, want 1 (the process exited without the path)"
+fi
+
+# waitexit (guest/lib.sh wait_exit): returns when the process has exited, and
+# not before. The process reads a fifo, so it exits when the test writes to it.
+mkfifo /tmp/wait-exit.fifo
+sh -c 'read -r _ </tmp/wait-exit.fifo' &
+EXITER=$!
+"$TESTUTIL" waitexit "$EXITER" &
+WAITER=$!
+if kill -0 "$WAITER" 2>/dev/null; then
+	pass waitexit-blocks-while-the-process-runs
+else
+	fail waitexit-blocks-while-the-process-runs "waitexit returned while the process was still waiting to be released"
+fi
+echo go >/tmp/wait-exit.fifo
+if wait "$WAITER"; then
+	pass waitexit-returns-when-the-process-exits
+else
+	fail waitexit-returns-when-the-process-exits "waitexit did not return 0 once the process had exited"
+fi
+wait "$EXITER" 2>/dev/null
+# A process that is gone already counts, and so does each of several; a word
+# that is not a pid is the caller's mistake.
+if "$TESTUTIL" waitexit "$EXITER" "$EXITER"; then
+	pass waitexit-gone-process
+else
+	fail waitexit-gone-process "waitexit did not return 0 for a process that had exited"
+fi
+"$TESTUTIL" waitexit not-a-pid 2>/dev/null
+RC=$?
+if [ "$RC" -eq 2 ]; then
+	pass waitexit-not-a-pid
+else
+	fail waitexit-not-a-pid "rc=$RC, want 2"
+fi
+
 # uptime_ms_of reads /proc/uptime's "SECONDS.CC" as decimal: "0.93" must come
 # out as 930, not "0930" (an invalid octal: destroy.sh died with "arithmetic
 # syntax error" when the guest was under a second old at its first reading).

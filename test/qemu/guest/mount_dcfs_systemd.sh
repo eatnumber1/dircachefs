@@ -66,21 +66,6 @@ fs_of() { findmnt -n -o FSTYPE,SOURCE -M "$1" 2>/dev/null | tail -n 1; }
 # mount_count MOUNTPOINT: how many mounts there are exactly at it.
 mount_count() { findmnt -rn -M "$1" -o TARGET 2>/dev/null | wc -l; }
 
-# wait_exit PID...: blocks until each process has exited, on its pidfd
-# (python3 is in the image): an event, not a poll, and no timeout of its own;
-# a hung daemon is bounded by the test's timeout (Bazel's). For what umount.
-# fuse.dcfs cannot wait for: a daemon that failed to start, or was killed.
-wait_exit() {
-	[ "$#" -eq 0 ] && return 0
-	python3 -I -c 'import os, select, sys
-for pid in sys.argv[1:]:
-    try:
-        fd = os.pidfd_open(int(pid))
-    except ProcessLookupError:
-        continue
-    select.select([fd], [], [])' "$@"
-}
-
 # wait_no_daemons: until no dcfs daemon is left (for a test that has none
 # running otherwise).
 wait_no_daemons() { wait_exit $(daemons); }

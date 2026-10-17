@@ -22,6 +22,10 @@ fail() {
 }
 
 mkdir "$WORK/bin" "$WORK/out"
+# The host's own CPU pressure must not decide these verdicts (a run that the
+# load flag marks is not held to its CPU budget): every run reads this file,
+# whose counter does not move, unless a test points DCFS_PRESSURE_FILE elsewhere.
+printf 'some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n' >"$WORK/quiet-psi"
 cat >"$WORK/bin/qemu" <<'E'
 #!/bin/sh
 if [ "${1:-}" = --version ]; then
@@ -80,7 +84,7 @@ run() {
 	shift
 	RC=0
 	rm -f "$WORK/out/serial.log"
-	env -u DCFS_NOISY -u DCFS_FORCE_TCG -u DCFS_PIN_NON_SMT TEST_TARGET="$r_target" "$@" TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
+	env -u DCFS_NOISY -u DCFS_FORCE_TCG -u DCFS_PIN_NON_SMT DCFS_PRESSURE_FILE="$WORK/quiet-psi" TEST_TARGET="$r_target" "$@" TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
 		sh "$RUN_QEMU" --unit --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
 		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
 		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
@@ -152,7 +156,7 @@ grep -q "not held to the budgets: TCG)" "$WORK/stdout" || fail "no reason for th
 # run_flagged WORD: the run with WORD on the kernel command line.
 run_flagged() {
 	RC=0
-	env -u DCFS_NOISY TEST_TARGET=//t:x TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
+	env -u DCFS_NOISY DCFS_PRESSURE_FILE="$WORK/quiet-psi" TEST_TARGET=//t:x TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
 		sh "$RUN_QEMU" --unit --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
 		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
 		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \

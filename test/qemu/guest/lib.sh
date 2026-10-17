@@ -362,6 +362,18 @@ justified_sleep() {
 	sleep "$1"
 }
 
+# wait_exit PID...: blocks until each process has exited, on its pidfd
+# (testutil waitexit; a process that is gone already counts): an event, not a
+# poll, and no timeout of its own: a hung daemon is bounded by the test's
+# timeout (Bazel's, and run-qemu.sh's allowance from it), which says "hung" and
+# never "slow". Works for a process that is not a child, which `wait` cannot:
+# a daemon that failed to start or was killed, which umount.fuse.dcfs cannot
+# wait for.
+wait_exit() {
+	[ "$#" -eq 0 ] && return 0
+	testutil waitexit "$@"
+}
+
 # quiesce_daemon PID: waits (up to 10s) until the daemon has had no wakeup
 # for 0.3s. drop_caches makes the kernel send a FORGET for every cached inode
 # and dentry, asynchronously and in batches, and opening a file makes dcfs

@@ -108,19 +108,11 @@ start() {
 	fd_start "$LOG" --sync_interval_sec=3600 "$@"
 }
 
-# stop NAME: SIGTERM (a clean shutdown: FinishRun's sync point), up to 20 s
-# for the daemon to exit and the mount to go.
+# stop NAME: SIGTERM (a clean shutdown: FinishRun's sync point), then the wait
+# for the daemon to exit (`wait`, an event: a daemon that does not exit hangs
+# the test, and its timeout says so) and the mount to go.
 stop() {
 	kill -TERM "$DAEMON_PID" 2>/dev/null || true
-	st_n=0
-	while kill -0 "$DAEMON_PID" 2>/dev/null && [ "$st_n" -lt 100 ]; do
-		sleep 0.2
-		st_n=$((st_n + 1))
-	done
-	if kill -0 "$DAEMON_PID" 2>/dev/null; then
-		fail "$1-stops" "the daemon did not exit within 20 s of SIGTERM"
-		kill -KILL "$DAEMON_PID" 2>/dev/null || true
-	fi
 	wait "$DAEMON_PID" 2>/dev/null
 	echo "fault_shutdown.sh: $1: the daemon exited with $?"
 	DAEMON_PID=""
@@ -184,22 +176,12 @@ crashed() {
 	fi
 }
 
-# wait_bg NAME: up to 20 s for the background command (BG_PID) to return;
-# sets BG_RC to its exit status (or 255 if it was still running, a FAIL).
+# wait_bg: waits for the background command (BG_PID) to return (`wait`, an
+# event: a held mutation that the crash does not release hangs the test, and its
+# timeout says so); sets BG_RC to its exit status.
 wait_bg() {
-	wb_n=0
-	while kill -0 "$BG_PID" 2>/dev/null && [ "$wb_n" -lt 100 ]; do
-		sleep 0.2
-		wb_n=$((wb_n + 1))
-	done
-	if kill -0 "$BG_PID" 2>/dev/null; then
-		fail "$1" "the held mutation had not returned 20 s after the crash; the daemon is in $(fd_where "$DAEMON_PID"), state $(grep '^State' "/proc/$DAEMON_PID/status" 2>/dev/null)"
-		kill -KILL "$BG_PID" 2>/dev/null || true
-		BG_RC=255
-	else
-		wait "$BG_PID"
-		BG_RC=$?
-	fi
+	wait "$BG_PID"
+	BG_RC=$?
 	BG_PID=""
 }
 
@@ -338,7 +320,7 @@ flavour_run() {
 	settle_crash
 	crashed "$f"
 	fd_thaw cache || fail "$f-thaw-cache" "FITHAW of the cache filesystem failed"
-	wait_bg "$f-held-create-returns"
+	wait_bg
 	if [ "$BG_RC" -ne 0 ]; then
 		pass "$f-held-create-fails"
 	else
@@ -444,7 +426,7 @@ phase2_run() {
 	thawed=$(fd_thaw back 2>&1) || fail phase2-thaw "FITHAW of the crashed backing filesystem: $thawed"
 	settle_crash
 	crashed phase2
-	wait_bg phase2-held-create-returns
+	wait_bg
 	held_rc=$BG_RC
 	if [ "$CRASH_HOW" = ioctl ]; then
 		if [ "$held_rc" -ne 0 ]; then

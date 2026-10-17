@@ -147,12 +147,7 @@ start_writer() {
 	: >/tmp/writer.out
 	"$TESTUTIL" writehold "$1" append "$WRITE_BYTES" >/tmp/writer.out 2>&1 &
 	WRITER_PID=$!
-	sw_n=0
-	while ! grep -q READY /tmp/writer.out && [ "$sw_n" -lt 50 ]; do
-		sleep 0.1
-		sw_n=$((sw_n + 1))
-	done
-	grep -q READY /tmp/writer.out
+	"$TESTUTIL" waitline /tmp/writer.out READY "$WRITER_PID"
 }
 
 # data_write: a write through dcfs to the data file, held open, and an fsync
@@ -355,12 +350,7 @@ pin_inodes() {
 		sh -c 'cd "$1" && exec sleep 100000' pin "$pi_dir" &
 		PIN_PIDS="$PIN_PIDS $!"
 	done
-	pi_n=0
-	while ! grep -q READY /tmp/pin.out && [ "$pi_n" -lt 50 ]; do
-		sleep 0.1
-		pi_n=$((pi_n + 1))
-	done
-	grep -q READY /tmp/pin.out || fail "$MODE-pin" "opath-hold-tree: $(cat /tmp/pin.out)"
+	"$TESTUTIL" waitline /tmp/pin.out READY "${PIN_PIDS%% *}" || fail "$MODE-pin" "opath-hold-tree: $(cat /tmp/pin.out)"
 }
 
 unpin_inodes() {

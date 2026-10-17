@@ -90,24 +90,19 @@ wrapper() {
 # failed.
 refused() { [ "$WRC" -ne 0 ] && [ "$WRC" -ne 127 ]; }
 
-# The pids of the running dcfs daemons.
-daemons() { pidof mount.dcfs 2>/dev/null; }
-
-# wait_gone PID: up to 10 s for the process to exit.
-wait_gone() {
-	i=0
-	while [ "$i" -lt 100 ] && [ -d "/proc/$1" ]; do
-		sleep 0.1
-		i=$((i + 1))
+# The pids of the running dcfs daemons: not a zombie, which has exited and waits
+# for its parent to reap it (wait_exit returns at the exit, before that).
+daemons() {
+	for d_pid in $(pidof mount.dcfs 2>/dev/null); do
+		grep -q '^State:[[:space:]]*Z' "/proc/$d_pid/status" 2>/dev/null || echo "$d_pid"
 	done
-	[ ! -d "/proc/$1" ]
 }
 
 # unmount_check NAME DIR: umount DIR, then the daemon (the pid in DPID) is gone.
 unmount_check() {
 	umount "$2" 2>"$OUT"
 	urc=$?
-	if [ "$urc" -eq 0 ] && wait_gone "$DPID"; then
+	if [ "$urc" -eq 0 ] && wait_exit "$DPID"; then
 		pass "$1"
 	else
 		fail "$1" "umount rc=$urc, dcfs $DPID still running: $(cat "$OUT")"
@@ -124,11 +119,7 @@ only_one_daemon() {
 
 # Nothing of dcfs left: no mount at $1, no daemon.
 nothing_left() {
-	nl_i=0
-	while [ "$nl_i" -lt 50 ] && [ -n "$(daemons)" ]; do
-		sleep 0.1
-		nl_i=$((nl_i + 1))
-	done
+	wait_exit $(daemons)
 	[ "$(mount_count "$1")" -eq 0 ] && [ -z "$(daemons)" ]
 }
 
@@ -147,7 +138,7 @@ echo deep >"$SRC/d1/d2/deep.txt"
 # umount "$SRC"
 
 syslogd -C256
-sleep 0.5 # the socket /dev/log appears
+testutil waitpath /dev/log # syslogd has bound its socket
 
 # --- a non-root caller is refused with the reason (decision 12) ---------------
 
@@ -300,11 +291,7 @@ fi
 : >"$CACHE/locked.db"
 testutil sqlite-lock "$CACHE/locked.db" 25 >/tmp/lock.out 2>&1 &
 LOCKER=$!
-i=0
-while [ "$i" -lt 50 ] && ! grep -q READY /tmp/lock.out; do
-	sleep 0.1
-	i=$((i + 1))
-done
+testutil waitline /tmp/lock.out READY "$LOCKER" || true
 wrapper -o "dcfs.cache_db=$CACHE/locked.db" "$SRC" "$MNT"
 if [ "$WRC" -eq 32 ] && grep -qi 'locked' "$OUT" && nothing_left "$MNT"; then
 	pass daemon-late-failure-reported
@@ -319,11 +306,7 @@ wait "$LOCKER" 2>/dev/null
 "$MOUNT_DCFS" -o "dcfs.foreground,dcfs.stderrthreshold=0,dcfs.cache_db=$CACHE/fg.db" \
 	"$SRC" "$MNT" >"$OUT" 2>&1 &
 FG=$!
-i=0
-while [ "$i" -lt 100 ] && [ "$(mount_count "$MNT")" -eq 0 ] && kill -0 "$FG" 2>/dev/null; do
-	sleep 0.1
-	i=$((i + 1))
-done
+testutil waitmount "$MNT" present "$FG" || true
 if [ "$(mount_count "$MNT")" -eq 1 ] && kill -0 "$FG" 2>/dev/null; then
 	pass foreground-stays
 	if grep -q 'starting' "$OUT"; then

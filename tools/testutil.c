@@ -180,6 +180,29 @@
  *       [pid] it also watches that process through a pidfd and returns 1 when
  *       it has exited without the text having appeared. The file need not
  *       exist yet. Exits 0 when the text is there.
+ *   testutil waitpath <path> [pid]
+ *       Waits, with no timeout and no polling interval, until <path> exists
+ *       (whatever it is: a socket syslogd binds, which waitline cannot read):
+ *       an inotify watch on its directory wakes it at each creation. With
+ *       [pid] it also watches that process through a pidfd and returns 1 when
+ *       it has exited without the path having appeared. Exits 0 when the path
+ *       is there.
+ *   testutil waitexit <pid>...
+ *       Waits, with no timeout and no polling interval, until every <pid> has
+ *       exited, each through its pidfd (a process that is gone already
+ *       counts; the process need not be a child, which the shell's `wait`
+ *       needs). Exits 0 when they have all exited, 2 for an argument that is
+ *       not a pid. guest/lib.sh wait_exit: a daemon that failed to start or
+ *       was killed, which umount.fuse.dcfs cannot wait for.
+ *   testutil pmu
+ *       Reports whether this machine shows a hardware instruction counter
+ *       (perf_event_open of PERF_COUNT_HW_INSTRUCTIONS, user and kernel mode),
+ *       and what a fixed amount of work (a million loop iterations, a thousand
+ *       getppid calls) read on it: one "pmu: visible: ..." or "pmu: not
+ * visible:
+ *       ..." line. Exits 0 either way: guest/pmu.sh and .github/ci/pmu.sh
+ *       report what it says (test/qemu/README.md, "Instructions instead of CPU
+ *       time").
  *   testutil opath-hold <path>
  *       open(2)s <path> O_PATH, prints "READY", and sleeps forever with it
  *       open, until killed: on a dcfs mount the kernel then keeps the
@@ -308,6 +331,7 @@
 #include <libgen.h>
 #include <linux/fiemap.h>
 #include <linux/fs.h>
+#include <linux/perf_event.h>
 #include <poll.h>
 #include <signal.h>
 #include <sqlite3.h>
@@ -794,6 +818,65 @@ static int cmd_waitline(const char *file, const char *text,
     }
     if (n == 2 && (fds[1].revents & POLLIN)) gone = 1;
   }
+}
+
+static int cmd_waitpath(const char *path, const char *pid_str) {
+  char *dir_copy = strdup(path);
+  struct stat st;
+  int ifd, gone, pfd;
+
+  if (dir_copy == NULL) return 2;
+  ifd = inotify_init1(IN_CLOEXEC);
+  if (ifd == -1 || inotify_add_watch(ifd, dirname(dir_copy),
+                                     IN_CREATE | IN_MOVED_TO) == -1) {
+    print_err(errno);
+    return 2;
+  }
+  pfd = watch_pid(pid_str, &gone);
+  for (;;) {
+    struct pollfd fds[2];
+    nfds_t n = 1;
+    char ev[4096];
+
+    /* The watch is in place before the first look, so a creation after this
+     * look wakes the poll below. */
+    if (lstat(path, &st) == 0) return 0;
+    if (gone) return 1;
+    fds[0] = (struct pollfd){.fd = ifd, .events = POLLIN};
+    if (pfd != -1) fds[n++] = (struct pollfd){.fd = pfd, .events = POLLIN};
+    if (poll(fds, n, -1) == -1 && errno != EINTR) {
+      print_err(errno);
+      return 2;
+    }
+    if (fds[0].revents & POLLIN) {
+      if (read(ifd, ev, sizeof(ev)) < 0 && errno != EINTR) return 2;
+    }
+    if (n == 2 && (fds[1].revents & POLLIN)) gone = 1;
+  }
+}
+
+static int cmd_waitexit(char *const pids[], int count) {
+  int k;
+
+  for (k = 0; k < count; k++) {
+    struct pollfd p;
+    int gone, pfd = watch_pid(pids[k], &gone);
+
+    if (gone) continue;
+    if (pfd == -1) {
+      fprintf(stderr, "testutil waitexit: not a pid: %s\n", pids[k]);
+      return 2;
+    }
+    p = (struct pollfd){.fd = pfd, .events = POLLIN};
+    while (poll(&p, 1, -1) == -1) {
+      if (errno != EINTR) {
+        print_err(errno);
+        return 2;
+      }
+    }
+    close(pfd);
+  }
+  return 0;
 }
 
 static int cmd_fsync(const char *path) {
@@ -2843,7 +2926,63 @@ static int cmd_names_random(const char *root, const char *seed_str,
   return nfail != 0;
 }
 
+/* ---- the PMU probe (step 26.36) ---- */
+
+/* perf_event_open(2) of a hardware event counting the calling thread (target
+ * 0, cpu -1), user mode and/or kernel mode, enabled at once. */
+static int perf_open(uint32_t type, uint64_t config, int user, int kernel,
+                     int target, int cpu, unsigned long flags) {
+  struct perf_event_attr a;
+
+  memset(&a, 0, sizeof(a));
+  a.type = type;
+  a.size = sizeof(a);
+  a.config = config;
+  a.exclude_user = !user;
+  a.exclude_kernel = !kernel;
+  a.exclude_hv = 1;
+  return (int)syscall(SYS_perf_event_open, &a, target, cpu, -1, flags);
+}
+
+/* testutil pmu: whether this machine shows a hardware instruction counter, and
+ * what a fixed amount of work reads on it. Always exits 0: it reports. */
+static int cmd_pmu(void) {
+  enum { kLoops = 1000000, kCalls = 1000 };
+  volatile uint64_t sink = 0;
+  uint64_t user = 0, kernel = 0;
+  int i, ok;
+  int ufd =
+      perf_open(PERF_TYPE_HARDWARE, PERF_COUNT_HW_INSTRUCTIONS, 1, 0, 0, -1, 0);
+  int kfd = ufd == -1 ? -1
+                      : perf_open(PERF_TYPE_HARDWARE,
+                                  PERF_COUNT_HW_INSTRUCTIONS, 0, 1, 0, -1, 0);
+
+  if (ufd == -1 || kfd == -1) {
+    const char *name = strerrorname_np(errno);
+
+    printf(
+        "pmu: not visible: perf_event_open of the instructions counter: %s\n",
+        name ? name : "UNKNOWN");
+    return 0;
+  }
+  for (i = 0; i < kLoops; i++) sink += (uint64_t)i;
+  for (i = 0; i < kCalls; i++) (void)syscall(SYS_getppid);
+  /* A counter that cannot be read counts as one that reads nothing. */
+  ok = read(ufd, &user, sizeof(user)) == (ssize_t)sizeof(user) &&
+       read(kfd, &kernel, sizeof(kernel)) == (ssize_t)sizeof(kernel) &&
+       user >= kLoops && kernel >= kCalls;
+  printf(
+      "pmu: visible: %llu user and %llu kernel instructions retired by %d loop"
+      " iterations and %d getppid calls (%s)\n",
+      (unsigned long long)user, (unsigned long long)kernel, (int)kLoops,
+      (int)kCalls,
+      ok ? "counting"
+         : "not counting: a counter that reads less than the work");
+  return 0;
+}
+
 int main(int argc, char *argv[]) {
+  if (argc == 2 && strcmp(argv[1], "pmu") == 0) return cmd_pmu();
   if (argc == 4 && strcmp(argv[1], "truncate") == 0)
     return cmd_truncate(argv[2], argv[3]);
   if (argc == 5 && strcmp(argv[1], "utimens") == 0)
@@ -2886,6 +3025,10 @@ int main(int argc, char *argv[]) {
     return cmd_waitmount(argv[2], argv[3], argc == 5 ? argv[4] : NULL);
   if ((argc == 4 || argc == 5) && strcmp(argv[1], "waitline") == 0)
     return cmd_waitline(argv[2], argv[3], argc == 5 ? argv[4] : NULL);
+  if ((argc == 3 || argc == 4) && strcmp(argv[1], "waitpath") == 0)
+    return cmd_waitpath(argv[2], argc == 4 ? argv[3] : NULL);
+  if (argc >= 3 && strcmp(argv[1], "waitexit") == 0)
+    return cmd_waitexit(argv + 2, argc - 2);
   if (argc == 3 && strcmp(argv[1], "fsync") == 0) return cmd_fsync(argv[2]);
   if (argc == 3 && strcmp(argv[1], "syncfs") == 0) return cmd_syncfs(argv[2]);
   if (argc == 4 && strcmp(argv[1], "fsfreeze") == 0)
@@ -2987,6 +3130,9 @@ int main(int argc, char *argv[]) {
       "       testutil mmapwrite <path> <delay-seconds|usr1>\n"
       "       testutil waitmount <mountpoint> <present|absent> [pid]\n"
       "       testutil waitline <file> <text> [pid]\n"
+      "       testutil waitpath <path> [pid]\n"
+      "       testutil waitexit <pid>...\n"
+      "       testutil pmu\n"
       "       testutil fsync <path>\n"
       "       testutil syncfs <path>\n"
       "       testutil fsfreeze <path> <freeze|thaw>\n"

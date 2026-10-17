@@ -132,12 +132,12 @@ expect_answered() {
 
 # thaw_and_wait LABEL PID...: every PID was held by the freeze, so each must
 # still be running when the thaw happens (one that had already ended was never
-# held: a failure of LABEL), and must end within 10 s after it. Sets TW_ALIVE
-# to those that did not.
+# held: a failure of LABEL), and ends after it: the wait is on each one's exit
+# (lib.sh wait_exit), so a process that stays held hangs the test, and its
+# timeout says so.
 thaw_and_wait() {
 	tw_label=$1
 	shift
-	TW_ALIVE=""
 	for tw_pid in "$@"; do
 		if ! kill -0 "$tw_pid" 2>/dev/null; then
 			fail "$tw_label-held-at-the-thaw" "pid $tw_pid had already ended before the thaw: it was not held by the freeze"
@@ -145,16 +145,8 @@ thaw_and_wait() {
 	done
 	fd_thaw back
 	for tw_pid in "$@"; do
-		tw_n=0
-		while kill -0 "$tw_pid" 2>/dev/null && [ "$tw_n" -lt 100 ]; do
-			sleep 0.1
-			tw_n=$((tw_n + 1))
-		done
-		if kill -0 "$tw_pid" 2>/dev/null; then
-			TW_ALIVE="$TW_ALIVE $tw_pid"
-		else
-			wait "$tw_pid" 2>/dev/null
-		fi
+		wait_exit "$tw_pid"
+		wait "$tw_pid" 2>/dev/null
 	done
 	PENDING=""
 }
@@ -237,11 +229,7 @@ fi
 expect_answered stat-while-a-write-is-held stat "$MNT/d2/c"
 expect_answered readdir-while-a-write-is-held ls "$MNT/d2"
 thaw_and_wait write-through-passthrough "$write_pid"
-if [ -z "$TW_ALIVE" ]; then
-	pass write-completes-after-thaw
-else
-	fail write-completes-after-thaw "still blocked 10 s after the thaw"
-fi
+pass write-completes-after-thaw
 if [ "$(cat "$SRC/d1/a")" = "aaaa
 x" ]; then
 	pass write-landed-on-backing
@@ -311,11 +299,7 @@ check_held() {
 		fail "$ch_name-nothing-served-while-held" "a request the daemon had to serve was answered while it was held in a syscall"
 	fi
 	thaw_and_wait "$ch_name" "$ch_pid" "$ch_read_pid"
-	if [ -z "$TW_ALIVE" ]; then
-		pass "$ch_name-completes-after-thaw"
-	else
-		fail "$ch_name-completes-after-thaw" "still blocked 10 s after the thaw:$TW_ALIVE"
-	fi
+	pass "$ch_name-completes-after-thaw"
 	served_equals_backing "$ch_name-served"
 }
 
@@ -370,18 +354,8 @@ touch "$MNT/d2/t1"
 quiet
 fd_freeze back || fail term-freeze "FIFREEZE failed"
 kill -TERM "$DAEMON_PID"
-term_n=0
-while kill -0 "$DAEMON_PID" 2>/dev/null && [ "$term_n" -lt 50 ]; do
-	sleep 0.1
-	term_n=$((term_n + 1))
-done
-if kill -0 "$DAEMON_PID" 2>/dev/null; then
-	echo "freeze-table: SIGTERM while frozen: the daemon is still alive after 5 s; $(grep '^State:' "/proc/$DAEMON_PID/status" | tr -s '\t ' ' ') $(fd_where "$DAEMON_PID")"
-	fail term-frozen-exits "the daemon did not exit within 5 s of SIGTERM on a frozen backing filesystem"
-else
-	echo "freeze-table: SIGTERM while frozen: the daemon exited within $((term_n * 100)) ms"
-	pass term-frozen-exits
-fi
+wait_exit "$DAEMON_PID"
+pass term-frozen-exits
 wait "$DAEMON_PID" 2>/dev/null
 DAEMON_PID=""
 MOUNTED=0
@@ -419,16 +393,8 @@ else
 	fail term-waits-behind-the-held-mutation "the daemon exited with a mutation held in its syscall"
 fi
 thaw_and_wait term-held-create "$held_pid"
-term_n=0
-while kill -0 "$DAEMON_PID" 2>/dev/null && [ "$term_n" -lt 100 ]; do
-	sleep 0.1
-	term_n=$((term_n + 1))
-done
-if kill -0 "$DAEMON_PID" 2>/dev/null; then
-	fail term-held-exits-after-thaw "the daemon did not exit within 10 s of the thaw"
-else
-	pass term-held-exits-after-thaw
-fi
+wait_exit "$DAEMON_PID"
+pass term-held-exits-after-thaw
 wait "$DAEMON_PID" 2>/dev/null
 DAEMON_PID=""
 MOUNTED=0
