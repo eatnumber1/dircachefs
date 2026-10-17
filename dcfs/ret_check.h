@@ -111,6 +111,9 @@ inline absl::StatusBuilder RetCheckFailStatus(
   case 0:                            \
   default:
 
+// The else has no braces: the caller's `<< msg` streams onto the returned
+// StatusBuilder, which a closing brace would cut off (hence the NOLINTs of
+// readability-inconsistent-ifelse-braces in these macros).
 #define RET_CHECK(expr)                                                      \
   DCFS_RET_CHECK_ELSE_BLOCKER_                                               \
   if (ABSL_PREDICT_TRUE(expr)) {                                             \
