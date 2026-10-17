@@ -230,3 +230,20 @@ without dcfs's libraries.
   what, and where the notices are. Findings that need russ (a licence we
   cannot satisfy, a copied hunk with no provenance) are reported, not
   resolved.
+
+## 7.9 The release binary links libfuse dynamically (russ, 2026-10-17)
+
+russ: shipping a binary is ideally a goal, "but I'm ok with it requiring
+libc and libfuse be installed. Let's keep the static target though for
+people who want to build by hand." Step 4.15 found `//dcfs:main` links glibc
+dynamically but libfuse, libnuma, liburing, SQLite and abseil statically.
+Make the release binary need only the system's glibc and libfuse3: link
+libfuse against its shared library (the sysroot's or a pinned build's
+`libfuse3.so.3`, with the ABI version checked), and either link libnuma the
+same way or keep it out of the release binary. The permissive ones (abseil,
+SQLite, liburing under MIT, libc++ under the LLVM exception) may stay
+static. `//dcfs:main_static` stays as it is, documented as the hand-build
+target whose redistribution carries the LGPL relinking offer. The guest
+tests run the release binary with the guest's own libfuse3, so a mismatch
+fails a test; README says what must be installed; docs/licenses.md's
+linking section is updated. Implementer.

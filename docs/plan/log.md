@@ -3473,10 +3473,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 
 - 2026-10-17: russ on releases: shipping a binary is ideally a goal, and it
   may require glibc and libfuse to be installed (the dynamic `main`); keep
-  the static target for people who build by hand. So the release artifact
-  is dynamically linked against glibc and libfuse, and the LGPL relinking
-  offer applies only to anyone who redistributes the static build;
-  docs/licenses.md records this when 4.15 merges.
+  the static target for people who build by hand. Today's `main` links
+  glibc dynamically but libfuse and libnuma statically (4.15's aquery), so
+  the release binary needs a build change: step 7.9, link libfuse (and
+  libnuma, or drop it from the release) against the system's shared
+  library. The LGPL relinking offer then applies only to anyone who
+  redistributes the static build; docs/licenses.md records this when 4.15
+  merges.
 - 2026-10-17: the dashboard shows every plan step by state, from a Gemini
   3.8 Flash census (read-only, lane-5): 236 steps, 170 done, 6 in progress,
   6 queued, 23 open, 29 parked, 2 dropped. Sampled evidence hashes all
