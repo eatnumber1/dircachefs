@@ -1208,6 +1208,16 @@ Status implements AbslStringify. So it should be `StrCat("open ", path,
 
 Owner: dcfs-implementer; a style review before merge.
 
+As built (2026-10-17, step-25.33): `status_message` (enforced, no allowlist) and
+`status_dropped` (report only, 21 findings: 3 in production, all answers or
+carried statuses; 8 in bench; 10 in tests) in `tools/style_matchers/`. Every
+`.message()` of a Status is gone from `dcfs/`, `bench/` and `tools/`. Bench
+`Start`/`WaitMounted`/`IsMounted`/`RssBytes`/`DropCaches` still return bool or a
+sentinel and are the remaining `status_dropped` bench findings.
+`StrCat(status)` includes the "=== Source Location Trace: ===" lines
+(AbslStringify uses kWithEverything); the invariant checker's one-line console
+text uses `ToString()` for that reason.
+
 ## 25.34 Guest tests in C++: the helpers, the rule, a first port (russ, 2026-10-17)
 
 russ, asked whether we should write shell at all: "I suspect no, since we
