@@ -4013,3 +4013,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   most _useful_ result." docs/style.md 1.12 gains the rule (edited by the
   orchestrator: one paragraph); 22.5 round 2 told to reply a short
   listing on an interrupted readdir.
+- 2026-10-17 ~16:30, quota: Claude week 55% (46% two hours earlier; the
+  three Opus agents burn about 4%/hour). Paused 25.28b (round 3, the
+  FSYNC redesign) and 22.5 (round 2) with TaskStop; their uncommitted work
+  stays in lane-1 and lane-2 and both resume from their transcripts by a
+  message. 17.2e's security fix continues. No other Claude work until the
+  daily budget (about 7%/day to 95% at the Oct 23 reset) allows.
