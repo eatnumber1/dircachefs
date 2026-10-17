@@ -54,14 +54,19 @@ these settings live) adds:
   under `.act/` in the checkout (gitignored; `DCFS_ACT_STATE` overrides), so
   act's downloaded actions, its `actions/cache` store and its uploaded
   artifacts stay in the repository checkout and not in `~/.cache`. Deleting
-  `.act/` is a cold start: no Bazel caches, no actions.
+  `.act/` is a cold start: no Bazel disk cache and no actions.
+- `-v <host Bazel repository cache>:/root/.cache/bazel/_bazel_root/cache/repos:ro`
+  when `~/.cache/bazel/_bazel_<user>/cache/repos` exists on the host (it is
+  left out otherwise). The job reads the host's downloaded external
+  repositories read-only and cannot write to them.
 - `.github/workflows/ci.yml` as the workflow.
 
 The job container runs as root with `network=host` (act's default), copies
 the checkout in (files ignored by `.gitignore`, such as `bazel-*` and
-`user.bazelrc`, stay out) and does not see this machine's `~/.cache`: the
-Bazel disk cache is restored from, and saved to, act's cache server, as on
-GitHub.
+`user.bazelrc`, stay out) and does not see the rest of this machine's
+`~/.cache`: the Bazel disk cache is restored from, and saved to, act's cache
+server, as on GitHub. External repositories come from the read-only host
+cache above when it exists, and are fetched otherwise.
 
 Docker on russ's machine is a production system: act creates only its own
 containers, volumes (`act-toolcache`, left in place between runs: it holds the

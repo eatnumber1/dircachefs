@@ -47,18 +47,19 @@ KVM_GID="$(getent group kvm | cut -d: -f3)"
 # (a global OOM kill on a shared machine picks the biggest process of anyone).
 OPTS="--label dcfs.owner=act --memory ${DCFS_ACT_MEMORY:-6g}"
 HOST_REPO_CACHE="${HOME}/.cache/bazel/_bazel_${USER:-$(id -un)}/cache/repos"
-if [ -d "$HOST_REPO_CACHE" ]; then
-	OPTS="$OPTS -v $HOST_REPO_CACHE:/root/.cache/bazel/_bazel_root/cache/repos:ro"
+if [[ -d "$HOST_REPO_CACHE" ]]; then
+	CONTAINER_REPO_CACHE=/root/.cache/bazel/_bazel_root/cache/repos
+	OPTS="$OPTS -v $HOST_REPO_CACHE:$CONTAINER_REPO_CACHE:ro"
 fi
-if [ -c /dev/kvm ] && [ -z "${DCFS_ACT_NO_KVM:-}" ]; then
+if [[ -c /dev/kvm && -z "${DCFS_ACT_NO_KVM:-}" ]]; then
 	OPTS="$OPTS --device /dev/kvm"
-	[ -n "$KVM_GID" ] && OPTS="$OPTS --group-add $KVM_GID"
+	[[ -n "$KVM_GID" ]] && OPTS="$OPTS --group-add $KVM_GID"
 else
 	echo "act.sh: no /dev/kvm for the job container (none on this host, or DCFS_ACT_NO_KVM set); it will use TCG" >&2
 fi
 
 ENV_ARGS=()
-if [ -n "${DCFS_CI_BAZELRC:-}" ]; then
+if [[ -n "${DCFS_CI_BAZELRC:-}" ]]; then
 	ENV_ARGS+=(--env DCFS_CI_BAZELRC)
 fi
 
