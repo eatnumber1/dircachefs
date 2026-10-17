@@ -3288,3 +3288,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the session scratchpad; lane-1 reset to main. docs/design.md records the decision, the reasons
   and the conditions for a redesign. docs/plan/handoff_claude.md's "next steps" for that refactor
   are void.
+- Gemini's handoff moved to docs/plan/notes/handoff-gemini-to-claude-2026-10-16.md with its
+  refactor sections marked void; its /tmp postmortem on agent liveness moved into
+  docs/plan/notes/ (russ's capture-everything rule). Open for russ: process.md's review step names
+  a `dcfs-code-reviewer` agent that exists only in Gemini's harness (no .claude/agents file);
+  tools/agent_watchdog.py reads Gemini's transcript directory and has no use in this harness.

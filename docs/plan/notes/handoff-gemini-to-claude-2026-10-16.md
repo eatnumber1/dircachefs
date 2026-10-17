@@ -1,3 +1,10 @@
+> **Status (2026-10-16, the regular orchestrator):** sections 3 and 4 (the
+> virtual-Syscalls refactor and its remaining work) are void: russ agreed to
+> revert it (docs/design.md, "Syscall fault injection stays link-time"); the
+> work is on the unpushed `attic/virtual-syscalls` branch in lane-1. The
+> watchdog tool and the /tmp files it names were specific to the temporary
+> orchestrator's harness.
+
 # Handoff to Claude: dcfs Development State & Next Steps
 
 **Date:** 2026-10-16  
