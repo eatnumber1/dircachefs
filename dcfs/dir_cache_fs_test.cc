@@ -3343,9 +3343,9 @@ TEST_F(ClockTest, PeriodicSyncPointFollowsTheInjectedClock) {
   EXPECT_EQ(attr.st.st_size, 5);
 }
 
-// Step 25.28b: the periodic sync point that a mutation's dirty row drives
-// also checkpoints the cache's WAL, so the fills committed since the last
-// one stop depending on SQLite's autocheckpoint to become durable.
+// The periodic sync point that a mutation's dirty row drives also checkpoints
+// the cache's WAL, so the fills committed since the last one stop depending on
+// SQLite's autocheckpoint to become durable.
 TEST_F(ClockTest, PeriodicSyncPointCheckpointsTheWal) {
   Start(absl::StrCat(source_, "_wal.sqlite"));
   auto [mkdir, d] = Mkdir(kRootInode, "d");
@@ -3359,11 +3359,10 @@ TEST_F(ClockTest, PeriodicSyncPointCheckpointsTheWal) {
   EXPECT_EQ(counter_.counts().wal_checkpoints, 1) << "and checkpointed the WAL";
 }
 
-// Step 25.28b: with no dirty row, commits alone (a fill) drive the
-// checkpoint, once an interval has passed since the last sync point, and
-// with no backing syscall; with no commit since the last checkpoint, there
-// is none. A periodic sync point with nothing to do still restarts the
-// interval.
+// With no dirty row, commits alone (a fill) drive the checkpoint, once an
+// interval has passed since the last sync point, and with no backing syscall;
+// with no commit since the last checkpoint, there is none. A periodic sync
+// point with nothing to do still restarts the interval.
 TEST_F(ClockTest, CommitsAloneDriveThePeriodicCheckpoint) {
   ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/x"));
@@ -3409,8 +3408,8 @@ TEST_F(ClockTest, CommitsAloneDriveThePeriodicCheckpoint) {
          "to do";
 }
 
-// Step 25.28b: an FSYNCDIR's sync point checkpoints the WAL too (the same
-// sync point as the periodic one).
+// An FSYNCDIR's sync point checkpoints the WAL too (the same sync point as the
+// periodic one).
 TEST_F(ClockTest, FsyncdirCheckpointsTheWal) {
   Start(absl::StrCat(source_, "_wal.sqlite"));
   auto [mkdir, d] = Mkdir(kRootInode, "d");
@@ -3513,9 +3512,9 @@ class HoldReadAfterSyncClear : public ProtocolEvents {
   sqlite3::Statement held_;
 };
 
-// Step 25.28b: a checkpoint that fails is logged, and the sync point's
-// backing half has still cleared the dirty set; the commits stay for the
-// next sync point's checkpoint.
+// A checkpoint that fails is logged, and the sync point's backing half has
+// still cleared the dirty set; the commits stay for the next sync point's
+// checkpoint.
 TEST_F(ClockTest, FailedCheckpointIsLoggedAndLeftToTheNextSyncPoint) {
   Start(absl::StrCat(source_, "_wal.sqlite"));
   auto [mkdir, d] = Mkdir(kRootInode, "d");

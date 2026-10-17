@@ -151,8 +151,8 @@ TEST(ConnectionTest, CheckpointTruncatesWal) {
   EXPECT_EQ(select->Column<int64_t>(0), 1);
 }
 
-// Step 25.28b: a passive checkpoint (a sync point's) copies the commits into
-// the database file itself and leaves the WAL's size alone.
+// A passive checkpoint (a sync point's) copies the commits into the database
+// file itself and leaves the WAL's size alone.
 TEST(ConnectionTest, CheckpointPassiveCopiesCommitsIntoTheDatabaseFile) {
   std::string path = TestTmpFile("checkpoint_passive.sqlite");
   ASSERT_OK_AND_ASSIGN(Connection conn, ConnectionFactory{.path = path}.Open());
@@ -175,8 +175,8 @@ TEST(ConnectionTest, CheckpointPassiveCopiesCommitsIntoTheDatabaseFile) {
   EXPECT_EQ(after_stat.st_size, before_stat.st_size);
 }
 
-// Step 25.28b: what a sync point asks before it checkpoints. Reads do not
-// count; every commit does, kSync or not, until a checkpoint of either mode.
+// What a sync point asks before it checkpoints. Reads do not count; every
+// commit does, kSync or not, until a checkpoint of either mode.
 TEST(ConnectionTest, CommittedSinceCheckpointCountsCommitsOnly) {
   std::string path = TestTmpFile("committed_since_checkpoint.sqlite");
   ASSERT_OK_AND_ASSIGN(Connection conn, ConnectionFactory{.path = path}.Open());
