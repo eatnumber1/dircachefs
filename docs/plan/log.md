@@ -4035,3 +4035,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   know about it without polling". The hook's code and README must quote
   this approval at the check (docs/style.md 1.11's exception form); it
   reads at most hourly and only when the hook already runs (no loop).
+- 2026-10-17, russ on 17.2e: "what is the behavior when dcfs is not in the
+  loop? I want that behavior." Round 3 plan: no security.capability on the
+  file -> the write's empty SETATTR means the writer lacks CAP_FSETID ->
+  clear (exact, no /proc); with file caps -> remove the xattr always, and
+  read /proc for the bits only there (failed/untrusted -> clear); groups
+  without the namespace stat (no CAP_SYS_PTRACE dependency); kernel patch
+  row 4 makes the corner exact. Also proposed 17.2f: a differential
+  matrix of every operation x caller x file state against native.
