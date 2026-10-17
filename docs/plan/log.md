@@ -4009,3 +4009,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 2026-10-17, russ agrees to rename the cancellation checkpoint:
   CheckInterrupted, "interruption points". 22.6 queued after 22.5 and
   25.28b.
+- 2026-10-17, russ: "When there's ambiguity, you should be choosing the
+  most _useful_ result." docs/style.md 1.12 gains the rule (edited by the
+  orchestrator: one paragraph); 22.5 round 2 told to reply a short
+  listing on an interrupted readdir.
