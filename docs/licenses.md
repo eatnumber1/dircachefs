@@ -5,8 +5,8 @@ dcfs itself is MIT (`LICENSE`: "MIT License, Copyright (c) 2023-2026 Russell
 Harmon"). This file is the inventory of everything else the repository
 fetches, builds, links, runs or copies, with the licence as read in the
 primary source, how we use it, and what that use triggers if dcfs is shipped
-as a binary. It is plan step 4.15, which finishes what step 7.8 started; the gate
-that keeps our own files' headers honest is `tools/repo_shape.py`
+as a binary. It is plan step 4.15, which finishes what step 7.8 started; the
+gate that keeps our own files' headers honest is `tools/repo_shape.py`
 (`spdx_licenses`, with `tools/licenses_allowed.txt` and
 `tools/third_party_files.txt`).
 
@@ -477,12 +477,12 @@ Pending russ's decision.
    for tests and never distributed, but a file with only a 1991 NeXT
    copyright line is not covered by xfstests's GPL-2.0 tree. Keep, replace, or
    accept?
-5. **`third_party/e2fsprogs/mke2fs.conf`** is e2fsprogs's file apart from a header
-   comment of ours and one change; it is test-only data. Keep marking it GPL, or treat the profile as
-   uncopyrightable configuration?
-6. **Alpine's `vde2`** (the origin of `vde2-libs`) states `L: GPL` with no version in the index, so the
-   guest's QEMU closure has a package whose licence cannot be named exactly.
-   Test-only; noted.
+5. **`third_party/e2fsprogs/mke2fs.conf`** is e2fsprogs's file apart from a
+   header comment of ours and one change; it is test-only data. Keep marking
+   it GPL, or treat the profile as uncopyrightable configuration?
+6. **Alpine's `vde2`** (the origin of `vde2-libs`) states `L: GPL` with no
+   version in the index, so the guest's QEMU closure has a package whose
+   licence cannot be named exactly. Test-only; noted.
 7. **Unverified licences** (listed above): five unfetched Bazel modules, the
    toolchain's runtime `.deb`s, 18 Debian rootfs debs, the Debian cloud
    image, the bundled libraries of the TLA+ jars and of the standalone Python,
