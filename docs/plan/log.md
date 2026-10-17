@@ -3448,3 +3448,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   single most expensive Gemini job; at most one more this week. 26.31
   (investigator, lane-6, reading only) verifies every finding before
   anything changes.
+
+- Quota 2026-10-17, day 1 of the window: Claude week 4%, five-hour session
+  8%. russ: "It's the first day of the quota window. Be wise about quota
+  spend please." Today's ceiling about 10% of the week (under the 13%
+  formula, keeping slack for red pushes). No new Claude dispatches until a
+  running lane finishes; effort set per dispatch (medium for reading and
+  verification); reviews go to agy's Claude/GPT pool once it refills (Oct 17
+  19:55 UTC) and fixes from the Gemini sweep to Haiku where mechanical; the
+  orchestrator keeps its turns lean, its own context being the largest
+  consumer.
