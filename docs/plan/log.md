@@ -3989,3 +3989,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Flash-versus-Argon tracing experiment, guard mutation, a signal sweep),
   12.22 (worst cases by exhaustive and guided search, after M1), and
   worst-case families in 26.41.
+- 2026-10-17, russ: the worst-case search (12.22) comes after M3 ("Let's
+  deploy to my machine first"). 12.20 still adds the cost counters.

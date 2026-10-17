@@ -691,14 +691,15 @@ will). Nothing checks the model's guards against the code.
 - **Signal sweep (26.6):** SIGTERM/SIGHUP to the daemon at each backing
   call site in a guest test, alongside the syscall-fault sweep.
 
-## 12.22 Worst cases nobody listed: exhaustive and guided search (russ, 2026-10-17; after M1)
+## 12.22 Worst cases nobody listed: exhaustive and guided search (russ, 2026-10-17: "I want to do it, but put it after M3. Let's deploy to my machine first.")
 
 Prior art: PerfFuzz (Lemieux et al., ISSTA 2018), SlowFuzz (Petsios et
 al., CCS 2017), Singularity (Wei et al., FSE 2018), WISE (Burnim et al.,
 ICSE 2009), Badger (Noller et al., ISSTA 2018); the small scope hypothesis
 and bounded exhaustive testing (Jackson's Alloy; Korat, TestEra).
 
-1. **Model, exhaustive:** 12.20's per-request cost counters; TLC visits
+1. **Model, exhaustive:** 12.20's per-request cost counters (added in
+   12.20; the worst-case search over them waits for this step); TLC visits
    every reachable state within the bounds, so an invariant `cost <=
    f(size)` is proved there or returns the worst state, which becomes a
    named worst-case scenario.
