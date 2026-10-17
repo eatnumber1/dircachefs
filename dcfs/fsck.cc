@@ -41,8 +41,8 @@
 namespace dcfs {
 namespace {
 
-// findmnt(8) (util-linux) is run by this path, as /bin/mount is in the capture;
-// /bin is a symlink to /usr/bin on merged-usr systems.
+// findmnt(8) (util-linux) is run by this path; /bin is a symlink to /usr/bin
+// on merged-usr systems.
 constexpr char kFindmntProgram[] = "/bin/findmnt";
 constexpr char kUsage[] =
     "usage: fsck.dcfs [-apynf] [-C[FD]] [-o OPTIONS] DEVICE";

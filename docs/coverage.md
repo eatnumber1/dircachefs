@@ -33,8 +33,7 @@ under `bazel coverage`).
   failure would be an invalid argument of our own call.
 - **A fork whose child never returns**: `UmountAndWait` forks `umount` and its
   child execs or exits, so the profile artifact of `docs/coverage.md`'s
-  "returns twice" entry cannot occur; like `backing_capture.cc`'s forks, the
-  parent-leg branch of `child == 0` may read 0 although it ran.
+  "returns twice" entry cannot occur; the parent-leg branch of `child == 0` may read 0 although it ran.
 
 ## Known coverage artifacts
 
@@ -90,9 +89,8 @@ Numbers in the report that are not counts of what ran.
   `//test/qemu:coverage_pipeline_test` runs a fixture that forks both ways
   (it must be refused when a function returns twice, and accepted, with every
   count 1, through `ForkSplit`). A new fork that returns in both processes
-  needs the same shape. Not fixed: the forks of `backing_capture.cc` (lines
-  81 and 313) and `bench/process.cc`, whose child never returns (it execs or
-  exits) but whose `fork()` wrapper does: they cannot go negative, and their
+  needs the same shape. Not fixed: the fork of `bench/process.cc`, whose child never returns (it
+  execs or exits) but whose `fork()` wrapper does: it cannot go negative, and their
   parent-leg branch (`child == 0` false) reads 0 although it ran (an undercount
   of two branches).
 - **Line and branch status that depends on scheduling** (FORGET vs

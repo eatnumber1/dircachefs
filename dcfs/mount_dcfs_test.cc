@@ -134,12 +134,6 @@ TEST(SplitHelperOptionsTest, RoIsTheUnderlyingMountsAndDcfsRoIsDcfs) {
                          Field(&HelperOptions::native_options, IsEmpty()))));
 }
 
-TEST(SplitHelperOptionsTest, FstypeIsRejectedAsUnknown) {
-  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.fstype=bind"}),
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("Unknown option dcfs.fstype=bind")));
-}
-
 TEST(SplitHelperOptionsTest, UnknownDcfsOptionNamesItself) {
   EXPECT_THAT(
       SplitHelperOptions(Strings{"noatime", "dcfs.bogus"}),
@@ -282,7 +276,7 @@ TEST(ExitStatusTest, UsageAndPermissionRefusalsExitOne) {
 
 // By origin, not by code: a failed start whose cause is an errno that maps to
 // InvalidArgument, PermissionDenied or Unimplemented (EINVAL from mount(2),
-// EACCES, ENOSYS from open_tree) is still a failed start.
+// EACCES, ENOSYS) is still a failed start.
 TEST(ExitStatusTest, AFailedStartExits32WhateverItsCode) {
   EXPECT_EQ(ExitStatusFor(absl::FailedPreconditionError("x")), 32);
   EXPECT_EQ(ExitStatusFor(absl::InternalError("x")), 32);

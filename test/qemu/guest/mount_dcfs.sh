@@ -4,16 +4,14 @@
 #
 # mount(8) runs `mount.dcfs SOURCE MOUNTPOINT [-sfnv] [-N ns] -o OPTIONS` for
 # a `dcfs` mount. This test runs the wrapper as mount(8) does, on the ext4
-# image vdb, and checks: the capture of the backing filesystem (dcfs.fstype
-# absent or a native type: the tree is served, the FUSE mount's source is
-# the spec as written, no backing mount is left in the caller's namespace,
-# umount stops dcfs, a SIGKILLed dcfs releases the superblock); the option
-# split (ro is the underlying mount's, dcfs.ro dcfs's, remount changes only
-# the dcfs mount, a bogus dcfs. option or a failing native mount mounts
-# nothing and says why); daemonization (the wrapper returns when dcfs
+# image vdb, and checks: the tree is served (the FUSE mount's source is the spec as
+# written, umount stops dcfs, a SIGKILLed dcfs releases the superblock); the
+# option split (native options are refused, dcfs.ro is dcfs's, remount
+# changes only the dcfs mount, a bogus dcfs. option mounts nothing and says
+# why); daemonization (the wrapper returns when dcfs
 # answers FUSE_INIT, a failure after the fork is the wrapper's exit status
 # and message, a daemonized dcfs has no stdio and logs to syslog,
-# dcfs.foreground stays in the foreground); the bind form; a file
+# dcfs.foreground stays in the foreground); a file
 # mounted below the source refused; a non-root caller refused with the
 # reason.
 #
@@ -427,20 +425,13 @@ else
 fi
 [ -n "$DPID" ] && unmount_check relative-paths-umount /tmp/rel_mnt
 
-# --- native options need a native mount (decision 6) ----------------------------
+# --- native options are refused (decision 6) ----------------------------
 
 wrapper -o "ro,dcfs.cache_db=$CACHE/noneopts.db" "$SRC" "$MNT"
 if [ "$WRC" -eq 1 ] && grep -q 'ro' "$OUT" && nothing_left "$MNT"; then
 	pass bind-refuses-native-options
 else
 	fail bind-refuses-native-options "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
-fi
-# dcfs.fstype is no longer an option: unknown option is rejected as unknown.
-wrapper -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/oldname.db" "$SRC" "$MNT"
-if [ "$WRC" -eq 1 ] && grep -q 'Unknown option dcfs.fstype=bind' "$OUT" && nothing_left "$MNT"; then
-	pass fstype-is-rejected-as-unknown
-else
-	fail fstype-is-rejected-as-unknown "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
 fi
 # allow_other is always on (step 15.8): naming it, either way, is a usage
 # error (exit 1) that says so, and nothing is mounted.

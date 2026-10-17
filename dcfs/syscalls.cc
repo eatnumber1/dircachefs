@@ -3,10 +3,8 @@
 
 #include <fcntl.h>
 #include <poll.h>
-#include <sched.h>
 #include <sys/file.h>
 #include <sys/fsuid.h>
-#include <sys/mount.h>
 #include <sys/poll.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
@@ -192,32 +190,6 @@ absl::Status chdir(std::string_view path) {
   return absl::OkStatus();
 }
 
-absl::Status unshare(int flags) {
-  if (::unshare(flags) == -1) {
-    return ErrnoToStatus(errno, absl::StrCat("unshare(", flags, ")"));
-  }
-  return absl::OkStatus();
-}
-
-absl::Status close_range(unsigned int first, unsigned int last, int flags) {
-  if (::close_range(first, last, static_cast<unsigned int>(flags)) == -1) {
-    return ErrnoToStatus(errno,
-                         absl::StrCat("close_range(", first, ", ", last, ")"));
-  }
-  return absl::OkStatus();
-}
-
-absl::StatusOr<FileDescriptor> open_tree(int dirfd, std::string_view path,
-                                         unsigned int flags) {
-  const std::string path_str(path);
-  const int fd = ::open_tree(dirfd, path_str.c_str(), flags);
-  if (fd == -1) {
-    return ErrnoToStatus(
-        errno, absl::StrCat("open_tree(", dirfd, ", ", EscapeBytes(path), ")"));
-  }
-  return FileDescriptor(fd);
-}
-
 absl::StatusOr<std::pair<FileDescriptor, FileDescriptor>> socketpair(
     int domain, int type, int protocol) {
   int fds[2];
@@ -225,19 +197,6 @@ absl::StatusOr<std::pair<FileDescriptor, FileDescriptor>> socketpair(
     return ErrnoToStatus(errno, "socketpair");
   }
   return std::make_pair(FileDescriptor(fds[0]), FileDescriptor(fds[1]));
-}
-
-absl::StatusOr<size_t> sendmsg(int fd, const struct msghdr &message,
-                               int flags) {
-  const ssize_t n = ::sendmsg(fd, &message, flags);
-  if (n == -1) return ErrnoToStatus(errno, absl::StrCat("sendmsg(", fd, ")"));
-  return static_cast<size_t>(n);
-}
-
-absl::StatusOr<size_t> recvmsg(int fd, struct msghdr &message, int flags) {
-  const ssize_t n = ::recvmsg(fd, &message, flags | MSG_CMSG_CLOEXEC);
-  if (n == -1) return ErrnoToStatus(errno, absl::StrCat("recvmsg(", fd, ")"));
-  return static_cast<size_t>(n);
 }
 
 absl::StatusOr<size_t> send(int fd, const void *buf, size_t count, int flags) {

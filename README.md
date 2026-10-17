@@ -395,7 +395,8 @@ UUID=aaaa-aaaa   /srv/raw/media  ext4  defaults                                 
 ### Instances, trees and boundaries
 
 Run one dcfs per backing filesystem: each ext4 or xfs filesystem, each
-btrfs subvolume, each NFS export. One filesystem's cache can then be wiped,
+btrfs subvolume (an NFS export is not supported yet, see the network
+example below). One filesystem's cache can then be wiped,
 or its daemon restarted, without touching the others. There is no recursive
 bind and no instance that serves a second filesystem under its source.
 
@@ -434,9 +435,10 @@ that runs dcfs in the foreground; the daemon forks away from `mount.dcfs`
 and `umount` ends it.
 
 ```text
+# (The two `nas` lines are not supported yet: see "Network backings" below.)
 # SOURCE          MOUNTPOINT     TYPE  OPTIONS                                                                                             DUMP PASS
 UUID=aaaa-aaaa    /srv/raw/data  ext4  defaults                                                                                            0 2
-/srv/raw/data     /data          dcfs  x-systemd.requires-mounts-for=/srv/raw/data,dcfs.cache_db=/var/lib/dcfs/data.db                    0 2
+/srv/raw/data     /data          dcfs  x-systemd.requires-mounts-for=/srv/raw/data,dcfs.cache_db=/var/lib/dcfs/data.db                    0 0
 /srv/raw/sub      /data/sub      dcfs  dcfs.ro,dcfs.cache_db=/var/lib/dcfs/sub.db                                                          0 0
 nas:/export       /srv/raw/nas   nfs   vers=4.2,_netdev,nofail                                                                             0 0
 /srv/raw/nas      /srv/nas       dcfs  _netdev,x-systemd.requires-mounts-for=/srv/raw/nas,dcfs.cache_db=/var/lib/dcfs/nas.db             0 0
@@ -454,14 +456,25 @@ nas:/export       /srv/raw/nas   nfs   vers=4.2,_netdev,nofail                  
   to. `dcfs.ro` makes the dcfs mount read-only.
 - **The sixth field** (the fsck pass): dcfs only checks its cache database;
   it runs no checker on the backing filesystem (there is no device: dcfs serves
-  a directory). Use `0` on the dcfs line, or `2` to check the cache database
-  before mounting. See
+  a directory). **Use `0` on the dcfs line under systemd**: its generator makes
+  `systemd-fsck@` units for device paths only, and a dcfs SOURCE is a
+  directory, so systemd runs no fsck for a dcfs line whatever the field says
+  (checked at boot in the systemd guest, `mount_dcfs_systemd_test`); run
+  `fsck.dcfs` by hand when you want the cache database checked. util-linux
+  `fsck -A` does run `fsck.dcfs` for a dcfs line with a non-zero field, on the
+  directory (it reports that there is no device to check and checks the cache
+  database); `fsck -A -N` lists it (same test). Other init systems are not
+  checked. See
   [Checking a dcfs filesystem](#checking-a-dcfs-filesystem).
 - **A line is a mount**: `mount /data`, `umount /data`, `mount -a` and
   `umount -R /data` work as for any fstab entry, and `mount /data` takes
   the line's options. Write absolute paths in the line.
 
-Network backings need `_netdev`. systemd does not know that a `dcfs` mount
+**Network backings are not supported yet.** dcfs refuses to start on an NFS
+(or other network) backing, because it identifies a backing by its filesystem
+UUID, which network filesystems do not provide; support is planned (plan step
+14.10). The example and paragraph are kept for that step. Network backings
+need `_netdev`: systemd does not know that a `dcfs` mount
 of an NFS export is a network mount: `_netdev` makes it wait for the network
 and keeps it out of local-fs.target. Add `nofail` to a mount the machine can
 boot without, and `noauto` to one that should not mount at boot.
@@ -513,9 +526,8 @@ dcfs trusts what it has cached, so the setup has to keep it true.
   filesystem or source directory.
 - **Mount order and dependencies**: parents before children, the cache's
   filesystem before the instance (above).
-- **Why dcfs runs as root and refuses otherwise**: FUSE passthrough, the
-  private mount namespace, `open_tree` and the filesystem-identity ioctls
-  need `CAP_SYS_ADMIN`, `open_by_handle_at` needs `CAP_DAC_READ_SEARCH`, and
+- **Why dcfs runs as root and refuses otherwise**: FUSE passthrough and the
+  filesystem-identity ioctls need `CAP_SYS_ADMIN`, `open_by_handle_at` needs `CAP_DAC_READ_SEARCH`, and
   serving each caller with that caller's credentials needs `setfsuid`,
   `setfsgid` and `setgroups`. `mount.dcfs` as a normal user exits with
   status 1 and says so; fstab's `user` option cannot work.
@@ -599,9 +611,10 @@ a different source directory; delete it to start with a cold cache.
 
 ### Checking a dcfs filesystem
 
-`fsck.dcfs` is what `fsck(8)` and systemd's `systemd-fsck@.service` run for a
-`dcfs` fstab line with a non-zero sixth field, before the mount (install it
-like the other helpers, [Building](#building)). It checks the cache database:
+`fsck.dcfs` is what `fsck(8)` runs for a `dcfs` fstab line (install it like
+the other helpers, [Building](#building)); `fsck -A` runs it for a non-zero
+sixth field, systemd does not (see [Running under systemd](#running-under-systemd): use
+`0` there and run it by hand). It checks the cache database:
 
 1. **The backing filesystem**: dcfs serves a directory, so there is no device
    to check; it notes that and goes on.

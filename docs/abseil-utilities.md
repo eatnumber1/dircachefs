@@ -323,7 +323,7 @@ files that include the header: prod / tests (counted at `89b917c`). Internal
 | `strings/charset.h` | `absl::CharSet`: a `constexpr` bit set of bytes | 0 / 0 |
 | `strings/charconv.h` | `absl::from_chars` for `float`/`double` (a C++17 polyfill) | 0 / 0 |
 | `strings/resize_and_overwrite.h` | `absl::StringResizeAndOverwrite(str, n, op)` (C++23 `resize_and_overwrite`) | 0 / 0 |
-| `strings/cord.h`, `cord_buffer.h` | `absl::Cord`: a rope of reference-counted chunks, cheap to append, prepend and share, slow for random access. Use for large payloads that are spliced or shared across an API; **not** for ordinary strings (construction overhead). `absl::CopyCordToString`, `Cord::Flatten`, `CordBuffer` for building one in place. dcfs uses it only because `Status::SetPayload` takes a `Cord` (`dcfs/status.cc`, `sqlite.cc`, `backing_capture.cc`) | 4 / 1 |
+| `strings/cord.h`, `cord_buffer.h` | `absl::Cord`: a rope of reference-counted chunks, cheap to append, prepend and share, slow for random access. Use for large payloads that are spliced or shared across an API; **not** for ordinary strings (construction overhead). `absl::CopyCordToString`, `Cord::Flatten`, `CordBuffer` for building one in place. dcfs uses it only because `Status::SetPayload` takes a `Cord` (`dcfs/status.cc`, `sqlite.cc`) | 4 / 1 |
 | `strings/has_absl_stringify.h`, `has_ostream_operator.h` | Detection traits: not for dcfs code | 0 / 0 |
 
 ### synchronization
@@ -452,7 +452,7 @@ xargs grep -nE 'PATTERN' < /tmp/prod.txt     # the pattern is in the row
 | 21 | alias headers still included: `absl/types/optional.h`, `absl/strings/string_view.h` | 2 includes | 0 | `dcfs/file_handle.cc:20` and `dcfs/main.cc:41`: no `absl::optional` or `absl::string_view` is used in the file; delete (style 1.2 says none are left) |
 | 22 | pointers without `absl_nonnull`/`absl_nullable` | 0 annotations in `dcfs/` | - | plan 25.16 |
 | 23 | `fprintf(stderr, ...)` / `std::cout` / `std::cerr` | 13 lines, 6 files | 4 | `bench/` 7 (`fprintf`), `dcfs/fsck.cc:418,458,472`, `dcfs/main.cc:91,630,733`. The `dcfs` ones are the helpers' own output (`--version`, usage, the fsck report), which the caller reads: not log lines, so not a `LOG` candidate. `bench/` diagnostics could be `LOG(ERROR)`; ask before changing |
-| 24 | `memcpy` | 8 lines, 4 files | 25 | `backing_capture.cc`, `dir_cache_fs.cc`, `fuse_ops.cc`, `session_loop.cc`: struct to byte-buffer copies of different sizes (cmsg data, the FUSE header, a partial copy with `std::min`): `std::bit_cast` does not fit; nothing to sweep |
+| 24 | `memcpy` | 5 lines, 3 files | 25 | `dir_cache_fs.cc`, `fuse_ops.cc`, `session_loop.cc`: struct to byte-buffer copies of different sizes (the FUSE header, a partial copy with `std::min`): `std::bit_cast` does not fit; nothing to sweep |
 
 What dcfs already uses from Abseil is the "dcfs uses" column of section 2
 (prod files / test files that include each header). Abseil headers dcfs never

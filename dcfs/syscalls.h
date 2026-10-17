@@ -87,28 +87,16 @@ absl::StatusOr<short> poll(int fd, short events, int timeout_ms);
 
 // --- The mount.dcfs wrapper (phase 15): process, mount and socket calls ----
 
-// getuid(2) (never fails), setsid(2), chdir(2) and unshare(2).
+// getuid(2) (never fails), setsid(2) and chdir(2).
 uid_t getuid();
 absl::StatusOr<pid_t> setsid();
 absl::Status chdir(std::string_view path);
-absl::Status unshare(int flags);
-
-// close_range(2): closes the descriptors first..last.
-absl::Status close_range(unsigned int first, unsigned int last, int flags);
-
-// open_tree(2): a descriptor for `path` (with OPEN_TREE_CLONE, a detached
-// clone of the mount there). O_CLOEXEC is not added: pass OPEN_TREE_CLOEXEC.
-absl::StatusOr<FileDescriptor> open_tree(int dirfd, std::string_view path,
-                                         unsigned int flags);
 
 // socketpair(2) with SOCK_CLOEXEC added to `type`.
 absl::StatusOr<std::pair<FileDescriptor, FileDescriptor>> socketpair(
     int domain, int type, int protocol);
-// sendmsg(2), recvmsg(2) (with MSG_CMSG_CLOEXEC added to `flags`) and send(2):
-// the bytes transferred. An unconnected peer's EPIPE is a status, never
-// SIGPIPE, if `flags` has MSG_NOSIGNAL.
-absl::StatusOr<size_t> sendmsg(int fd, const struct msghdr &message, int flags);
-absl::StatusOr<size_t> recvmsg(int fd, struct msghdr &message, int flags);
+// send(2): the bytes transferred. An unconnected peer's EPIPE is a status,
+// never SIGPIPE, if `flags` has MSG_NOSIGNAL.
 absl::StatusOr<size_t> send(int fd, const void *buf, size_t count, int flags);
 
 // openlog(3) and syslog(3): `message` is logged verbatim (a "%s" format).

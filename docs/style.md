@@ -392,7 +392,7 @@ and `linux_dirent64` is a type (glibc has no `struct linux_dirent64`; the
 layout is from `man 2 getdents`), not a wrapper. The process-control wrappers
 (`fork`, `execv`, `waitpid`, `kill`, `dup2`, `_exit`) are in
 `dcfs/syscalls_process.h`, a separate library for `bench/` and the
-`mount.dcfs` wrapper (its daemon fork and the capture helper's mount(8)),
+`mount.dcfs` wrapper's daemon fork, the umount helper and fsck.dcfs,
 the only one `tools/banned_symbols.txt` lets reference `execv`. Why three
 libraries: `syscalls_backing.h` is its own target so that
 `//tools:syscalls_backing_users_test`'s golden list enforces, in the build
@@ -953,11 +953,7 @@ each.
   sweep and the trace recorder, both hooked at `backing.cc`, complete.
   `mounts_below` is on it for its two `/proc/self/mountinfo` reads (`openat`,
   `read`: procfs, no backing disk). The mount.dcfs wrapper's modules are on
-  it too: `OpenBacking` (`backing_capture.cc`) opens SOURCE for the `bind`
-  form and, in `CaptureBacking`, calls `openat(tree, ".")` for a real
-  directory descriptor on the root of the filesystem it just captured, both
-  once at startup before dcfs serves anything (what `main.cc` did before);
-  `absolute_paths`, `remount` and `startup_channel` read procfs and a
+  it too: `absolute_paths`, `remount` and `startup_channel` read procfs and a
   socket.
   Only the three wrapper files call libc
   directly. `cache::` is pure SQLite: it never sees a descriptor.

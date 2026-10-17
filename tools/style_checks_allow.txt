@@ -256,7 +256,6 @@ dcfs/startup_channel.cc|DescribeWaitStatus|misc-include-cleaner|3
 dcfs/status.cc|StatusCodeToErrno|misc-include-cleaner|1
 dcfs/status_test.cc|TEST|misc-include-cleaner|2
 dcfs/syscalls.cc|clock_gettime|misc-include-cleaner|2
-dcfs/syscalls.cc|close_range|bugprone-narrowing-conversions|1
 dcfs/syscalls.cc|mkdtemp|misc-include-cleaner|1
 dcfs/syscalls.cc|mkstemp|misc-include-cleaner|1
 dcfs/syscalls.cc|nanosleep|misc-include-cleaner|1
@@ -272,9 +271,7 @@ dcfs/syscalls_backing.h|ioctl|google-runtime-int|1
 dcfs/syscalls_process.cc|<file scope>|modernize-deprecated-headers|1
 dcfs/syscalls_process_test.cc|<file scope>|modernize-deprecated-headers|1
 dcfs/syscalls_process_test.cc|TEST|misc-include-cleaner|5
-dcfs/syscalls_test.cc|<file scope>|misc-include-cleaner|1
 dcfs/syscalls_test.cc|SetUp|concurrency-mt-unsafe|1
-dcfs/syscalls_test.cc|TEST|misc-include-cleaner|2
 dcfs/syscalls_test.cc|TEST_F|misc-include-cleaner|2
 dcfs/syscalls_test.cc|TEST_F|readability-math-missing-parentheses|1
 dcfs/testonly/assert_ok_and_assign.h|<file scope>|bugprone-macro-parentheses|2

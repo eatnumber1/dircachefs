@@ -38,7 +38,7 @@ DEV_BTRFS=/dev/vdc
 CACHE=/var/cache/dcfs
 OUT=/tmp/out
 SRC=/srv/live # the bind form's directory
-RAW=/srv/raw  # the bind form's
+RAW=/srv/nested # the nested bind line's SOURCE: a plain directory with no mount below it (dcfs refuses a SOURCE with mounts below)
 MNT=/mnt/m    # for the command-line checks
 MISSING_UUID=0e0e0e0e-dead-4bee-8f00-000000000001
 
@@ -391,19 +391,20 @@ boot1() {
 	mnt -t dcfs -o "ro,dcfs.cache_db=$CACHE/noneopts.db" "$SRC" "$MNT"
 	# A start that failed after the fork leaves its daemon exiting for a moment.
 	wait_no_daemons
-	if [ "$MRC" -eq 1 ] && grep -q 'use dcfs.ro' "$OUT" && [ -z "$(daemons)" ]; then
+	if [ "$MRC" -eq 1 ] && grep -q 'dcfs.ro makes the dcfs mount read-only' "$OUT" && [ -z "$(daemons)" ]; then
 		pass exit-status-bind-refuses-ro
 	else
 		fail exit-status-bind-refuses-ro "rc=$MRC out=$(cat "$OUT")"
 	fi
 
 	# --- fstab, mount -a ---
-	# One line of each kind the guest can host: a native ext4 by UUID (the type
-	# autodetected) with a native option, a bind nested under it, the bind form
-	# with _netdev, an xfs (the type named) and a btrfs (autodetected) by UUID
-	# (the kernel mounts them: the image has no xfsprogs or btrfs-progs), a
-	# nofail mount of a device that is not there, and (noauto) one that fails to
-	# start.
+	# One line of each kind the guest can host: an ext4 by UUID with a native
+	# option and a dcfs line over it, a dcfs line nested under that one, a
+	# dcfs line with _netdev over a local directory (an ordering test: network
+	# backings are not supported yet), an xfs and a btrfs by UUID (the kernel
+	# mounts them: the image has no xfsprogs or btrfs-progs) each with a dcfs
+	# line, a nofail mount of a device that is not there with its dcfs line,
+	# and (noauto) one that fails to start.
 	cat >/etc/fstab <<EOF
 UUID=$UUID /srv/raw/data ext4 noatime 0 2
 /srv/raw/data /data dcfs x-systemd.requires-mounts-for=/srv/raw/data,dcfs.cache_db=$CACHE/data.db,dcfs.stderrthreshold=0 0 2
@@ -466,9 +467,28 @@ EOF
 	else
 		fail fsck-bind-line-is-a-no-op "rc=$rc_none $(cat "$OUT")"
 	fi
+	# fsck -A (what a boot script without systemd runs) with a non-zero passno
+	# on a dcfs bind line runs fsck.dcfs on the directory: it says there is no
+	# device and checks the cache database. -N only lists it.
+	cp /etc/fstab /tmp/fstab.keep
+	echo "/srv/raw/data /data dcfs x-systemd.requires-mounts-for=/srv/raw/data,dcfs.cache_db=$CACHE/data.db 0 2" >/etc/fstab
+	fsck -A -N >"$OUT" 2>&1
+	rc_an=$?
+	if [ "$rc_an" -eq 0 ] && grep -q 'fsck.dcfs /srv/raw/data' "$OUT"; then
+		pass fsck-A-N-lists-fsck-dcfs-for-a-directory-source
+	else
+		fail fsck-A-N-lists-fsck-dcfs-for-a-directory-source "rc=$rc_an $(cat "$OUT")"
+	fi
+	fsck -A >"$OUT" 2>&1
+	rc_a=$?
+	if [ "$rc_a" -eq 0 ] && grep -q 'no device to check' "$OUT" && grep -q 'cache database' "$OUT"; then
+		pass fsck-A-runs-fsck-dcfs-on-a-directory-source
+	else
+		fail fsck-A-runs-fsck-dcfs-on-a-directory-source "rc=$rc_a $(cat "$OUT")"
+	fi
+	cp /tmp/fstab.keep /etc/fstab
 	mnt -a -t dcfs
-	mount_a_rc=$MRC
-	if [ "$MRC" -eq 0 ] && [ "$(findmnt -rn -t fuse.dcfs | wc -l)" -eq 5 ]; then
+	if [ "$MRC" -eq 0 ] && [ "$(findmnt -rn -t fuse.dcfs | wc -l)" -eq 6 ]; then
 		pass mount-a
 	else
 		fail mount-a "rc=$MRC, $(findmnt -rn -t fuse.dcfs | wc -l) dcfs mounts, out=$(cat "$OUT")"
@@ -510,19 +530,13 @@ EOF
 		fail fstab-btrfs-served "type=$1 source=$2 $(ls /mnt/btrfs 2>&1)"
 	fi
 	n=$(daemons | wc -l)
-	dbs=$(ls "$CACHE"/data.db "$CACHE"/sub.db "$CACHE"/live.db "$CACHE"/xfs.db "$CACHE"/btrfs.db 2>/dev/null | wc -l)
-	if [ "$n" -eq 5 ] && [ "$dbs" -eq 5 ]; then
+	dbs=$(ls "$CACHE"/data.db "$CACHE"/sub.db "$CACHE"/live.db "$CACHE"/xfs.db "$CACHE"/btrfs.db "$CACHE"/missing.db 2>/dev/null | wc -l)
+	if [ "$n" -eq 6 ] && [ "$dbs" -eq 6 ]; then
 		pass fstab-one-instance-each
 	else
 		fail fstab-one-instance-each "$n daemons, $dbs cache databases: $(daemons)"
 	fi
-	# Not mounted: the missing device (nofail) -- it was not an error.
-	if [ "$mount_a_rc" -eq 0 ] && [ "$(mount_count /data)" -eq 1 ] && [ "$(mount_count /mnt/missing)" -eq 0 ]; then
-		pass fstab-nofail-missing-skipped
-	else
-		fail fstab-nofail-missing-skipped "mount -a rc=$mount_a_rc, /data mounted ($(mount_count /data)), /mnt/missing mounted ($(mount_count /mnt/missing))"
-	fi
-	umount /data/sub /mnt/live /mnt/xfs /mnt/btrfs /data 2>"$OUT"
+	umount /data/sub /mnt/live /mnt/xfs /mnt/btrfs /mnt/missing /data 2>"$OUT"
 	urc=$?
 	if [ "$urc" -eq 0 ] && [ -z "$(daemons)" ] && [ "$(findmnt -rn -t fuse.dcfs | wc -l)" -eq 0 ]; then
 		pass fstab-umount-leaves-nothing
@@ -532,6 +546,7 @@ EOF
 		cleanup_mount /mnt/live
 		cleanup_mount /mnt/xfs
 		cleanup_mount /mnt/btrfs
+		cleanup_mount /mnt/missing
 		cleanup_mount /data
 	fi
 
@@ -876,18 +891,15 @@ boot2() {
 	else
 		fail reboot-parent-mounted-before-child "data.mount at $parent_at, data-sub.mount at $child_at"
 	fi
-	# The passno-2 line (/data) was checked at boot, before its mount: systemd's
-	# fsck unit for the device ran fsck.dcfs (its output, the cache check's line,
-	# is in the journal under that unit) and finished before data.mount became
-	# active (step 15.5).
+	# The passno-2 dcfs line (/data) is not checked by systemd: its generator
+	# makes systemd-fsck@ units for device paths only, and SOURCE here is a
+	# directory, so no fsck unit for it ran at boot.
 	fsck_unit=$(systemd-escape -p --template=systemd-fsck@.service /srv/raw/data)
 	fsck_done=$(systemctl show -p ExecMainExitTimestampMonotonic --value "$fsck_unit")
-	mount_at=$(systemctl show -p ActiveEnterTimestampMonotonic --value data.mount)
-	if journal_has "fsck.dcfs: cache database $CACHE/data.db: clean" -u "$fsck_unit" &&
-		[ "${fsck_done:-0}" -gt 0 ] && [ "${fsck_done:-0}" -le "${mount_at:-0}" ]; then
-		pass reboot-passno-2-line-checked-before-its-mount
+	if [ "${fsck_done:-0}" -eq 0 ] && ! journal_has "fsck.dcfs" -u "$fsck_unit"; then
+		pass reboot-passno-2-dcfs-line-is-not-fscked-by-systemd
 	else
-		fail reboot-passno-2-line-checked-before-its-mount "$fsck_unit finished at $fsck_done, data.mount active at $mount_at: $(journalctl --no-pager -b -u "$fsck_unit" -o cat 2>&1 | tail -n 8)"
+		fail reboot-passno-2-dcfs-line-is-not-fscked-by-systemd "$fsck_unit finished at $fsck_done"
 	fi
 	# The reboot stopped every daemon of the previous boot cleanly: each
 	# logged "shutdown: clean" and this boot's starts all found it clean. The

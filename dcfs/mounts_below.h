@@ -61,8 +61,7 @@ std::vector<std::string> MountPointsBelow(std::string_view mountinfo,
 bool ForcedReadOnlyIn(std::string_view mountinfo, uint64_t mount_id);
 
 // ForcedReadOnlyIn for the mount `fd` is on, in this process's mount
-// namespace: a clone made by open_tree is in no namespace, so the capture
-// helper (dcfs/backing_capture.h) asks on its staging mount instead.
+// namespace.
 absl::StatusOr<bool> ForcedReadOnly(int fd);
 
 // FailedPrecondition, with the reason and what to do, if ForcedReadOnly says
