@@ -3652,3 +3652,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   83.25. Leads filed as 17.2c (a round trip per passthrough write) and
   17.2d (/proc groups for credential-overriding callers; uid 0 without
   CAP_FSETID).
+
+- 2026-10-17: 17.2c merged (164aa50, 4fb95db): passthrough is engaged (0
+  WRITE requests); each passthrough write costs one GETXATTR round trip,
+  because without HANDLE_KILLPRIV_V2 FUSE clears SB_NOSEC and
+  backing_file_write_iter's file_remove_privs asks for security.capability
+  every time. 140-330 us per write (2026-10-17, load 8.6-10); a V2
+  prototype brought dcfs within 30 us/MiB of the backing. V2 would leave a
+  non-owner's write to a 04666 file keeping setuid (the six new setuid-*
+  credentials cases, which pass today, fail with the prototype). Options in
+  notes/passthrough-write-cost-17.2c.md; negotiating V2 as a protocol step
+  is recommended and waits on russ. New manual target bench_write_test
+  prints request counts. One style review.

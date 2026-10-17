@@ -909,3 +909,23 @@ skipping the commit when nothing changed; the README references
 A test for the JSON writers (fixtures of each job's output line, the
 shields endpoint schema: schemaVersion 1, label, message, color). No
 badge for a number we do not already compute.
+
+## 26.33 names_random.sh has never run past line 118; `sh -n` for guest scripts (from 26.31)
+
+26.31 found that test/qemu/guest/names_random.sh ends direction 2 with
+`exit "$FAILED"` followed by `fi` and a second copy of the mounted
+section: a parse error after the exit, so busybox sh stops there and
+everything after it never ran. Nothing checks guest scripts' syntax.
+
+1. A host-side gate: every `test/qemu/guest/*.sh` (and any other shell the
+   guests run) passes `sh -n` under the guest's shell (busybox ash from the
+   pinned Alpine packages, if it can run on the host through Bazel; else
+   dash or bash --posix, saying why), as a small test. Show it failing on
+   names_random.sh first.
+2. Fix names_random.sh: decide from git history what the script was meant
+   to run (the duplicated section is probably a bad merge), keep one copy,
+   and run names_random_test on ext4, xfs and btrfs. Anything the newly
+   reached code finds is a real result: report it, do not weaken it.
+3. Fix any other script the gate flags.
+
+Implementer.

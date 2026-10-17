@@ -109,7 +109,7 @@ xfstests lists updated only if a listed test changes outcome. No protocol
 change is expected (`BeginAttrChange` already marks the record unknown);
 if one appears, the model changes in the same step. Protocol agent.
 
-## 17.2c Passthrough writes cost a round trip each (lead, from the 2026-10-17 review of 17.2b)
+## 17.2c Passthrough writes cost a round trip each (lead, from the 2026-10-17 review of 17.2b; done 2026-10-17, 4fb95db: V2 recommended, waits on russ)
 
 17.2b's `dcfs_bench` `Write` case measured 9.1 ms per MiB through
 passthrough against 0.14 ms on the backing (ext4 guest, 1 MiB in 64 KiB
