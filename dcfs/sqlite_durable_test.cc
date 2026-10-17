@@ -77,8 +77,7 @@ class MakeDurableTest : public ::testing::Test {
         ".sqlite");
     ASSERT_OK_AND_ASSIGN(conn_, ConnectionFactory{.path = path_}.Open());
     // A NORMAL commit: written to the WAL, not fsynced.
-    ASSERT_THAT(conn_->Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"),
-                IsOk());
+    ASSERT_THAT(conn_->Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
     Fsyncs().clear();
   }
 
