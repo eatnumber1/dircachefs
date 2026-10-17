@@ -3868,3 +3868,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   wrappers, "Yes"; no test/qemu/guest_cc: "Why make a separate directory
   for the C++? The _cc naming will be obsolete as soon as the migration is
   complete". The helpers and ports move to test/qemu/guest/.
+- 2026-10-17, russ considered unprivileged (non-root) dcfs and decided
+  against it. Dealbreaker: open_by_handle_at needs CAP_DAC_READ_SEARCH,
+  so identity (Phase 14) would fall back to path-based reopens that
+  renames race against. Other costs noted: no passthrough (init-ns
+  CAP_SYS_ADMIN), single-user only (no acting as the caller), fusermount3
+  mounts, trusted/security xattrs. AGENTS.md's "Root is required" stands.
+  The io_uring backend still gets an abstraction with a plain-loop
+  fallback (io_uring can be disabled by sysctl or seccomp even for root).
