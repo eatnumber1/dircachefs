@@ -8,8 +8,8 @@ load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 # Phase 4, part c (docs/plan/phases/04-pinned-host-tools.md): the Debian
 # NFS-test rootfs image, built by Bazel from packages rules_distroless
 # resolved and fetched from a pinned snapshot.debian.org timestamp --
-# replacing test/qemu/scripts/mkrootfs-debian.sh's mmdebstrap run. See
-# README.md for the package list (with each package's reason), the pin,
+# replacing the Debian rootfs build's mmdebstrap run. See README.md for the
+# package list (with each package's reason), the pin,
 # and the update procedure.
 
 # @debian is the apt.install dependency_set (MODULE.bazel); :flat is
