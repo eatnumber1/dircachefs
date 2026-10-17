@@ -3885,3 +3885,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   others) need tests and a place in the SibylFS-style client-facing model.
   23.12 queued (inventory, C++ guest tests against native, matching
   xfstests); 12.16's brief gains open's flags.
+- 2026-10-17, russ reverses the cache database permission policy: create
+  0600 (umask), never change or refuse what the administrator set; "you
+  can just delete all the file permissions checking code." 26.38 queued.

@@ -1033,3 +1033,26 @@ rest of 26.34; the second is a rule and an audit.
 
 Owner: dcfs-investigator. Never widen a budget or tolerance to pass;
 never weaken a test (AGENTS.md).
+
+## 26.38 The cache database's permissions are the administrator's (russ, 2026-10-17; queued)
+
+russ, on the Gemini finding that dcfs "tightens" a stricter 0400 database
+up to 0600: "I changed my mind about this. If we create the file, make it
+0600 (via our umask). But if the administrator opens it up, don't step on
+their choice. That should mean that you can just delete all the file
+permissions checking code."
+
+- dcfs creates the cache database (and SQLite its `-wal`/`-shm`) 0600 and
+  its directory 0700, through the umask it sets before creating them.
+- Deleted: the fchmod to 0600 and its WARNING, the refusal of a database
+  (or `-wal`/`-shm`) that grants more than the source's root directory,
+  and the warning for a group- or world-accessible directory, with their
+  tests, README rows (`dcfs.cache_db`, the log table) and design.md text
+  ("OpenHardenedCacheFile").
+- Kept (not permission checks): refusing a symlink or a non-regular file
+  (`O_NOFOLLOW`), and WAL mode.
+- Test first: a database the administrator made 0644 or 0400 is left as it
+  is (fails today: it is changed or refused); a new one is 0600 and its
+  directory 0700.
+
+Owner: dcfs-implementer, effort low.
