@@ -317,3 +317,35 @@ reading. Not for writing code, nor for subtle protocol judgement.
 5. Gemini's findings are treated as leads, not facts: a claim that would
    change the plan is re-verified (12.18 is the precedent: its "not
    usable" verdict was wrong).
+
+## Quota management, Claude and Gemini together (russ, 2026-10-16)
+
+russ: "I'd like you to manage all quota spend, both Gemini and Claude. That
+means Claude quota is more important, and you need to make sure we don't run
+out of Claude before Gemini. Plan ahead!" and "unspent Claude quota is
+wasted money." So both are spent to the end of their weeks, Claude never
+first.
+- **Readings.** Claude: `timeout 90 python3 -I tools/agents/claude_usage.py`
+  (the session and weekly panels of `/usage`, through a pseudo-terminal;
+  approximate: local sessions only). Gemini, and the Claude/GPT pool inside
+  Antigravity: `agy -p "/usage"`. Read both before each dispatch; log a
+  snapshot when a day starts.
+- **The Claude plan is the scarce resource** (the orchestrator runs on it and
+  every coding agent does). Pace it so the week ends near 95%, never empty
+  before its reset: daily budget = (95% - used) / days left; keep 15% back for
+  red pushes and russ's conversations until the last day, then release it.
+  The orchestrator itself is the largest consumer: lean turns, hands-on work
+  delegated, Opus subagents only for protocol, identity, oracle and
+  security-relevant work, Sonnet for routine implementation, Haiku for
+  mechanical batches.
+- **Move every read-only job off the Claude plan when a pool allows it:**
+  reviews, investigations and audits go to agy's Claude/GPT pool first (same
+  models, separate quota), then to Gemini 4 Argon (whole-repository reading),
+  then to Gemini 3.8 Flash (volume reading). Only writing, and judgement the
+  agy models cannot be trusted with, stays on the Claude plan.
+- **Spend Gemini to the end of its week too**: if a day's Claude budget is
+  used up and Gemini quota remains, queue read-only Gemini work (the
+  consistency, duplication, dead-code and spec-tracing sweeps of the
+  Gemini section above) rather than leave it idle. If the Claude plan has
+  headroom near its reset that would otherwise be lost, pull the next
+  writing steps forward.
