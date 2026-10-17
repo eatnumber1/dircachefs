@@ -178,6 +178,12 @@ push; the queue above starts in earnest after the reset.
   the inode-number-plus-generation scheme of Phase 14 and its "open by
   inode number" step, and lifting the ext4/xfs/btrfs restriction to any
   filesystem with stable handles. Track it; no work until it is merged.
+- **The rest of the guest shell, ported to C++** (russ, 2026-10-17: "we
+  can queue the full port as a new phase much later"). 25.34 sets the rule
+  (no new shell), the helpers and the port list; scripts port when a step
+  would change them substantially. The phase that ports the remainder
+  is queued after the trial and the current phases, at the orchestrator's
+  choice of when.
 - Coroutines over io_uring (the coroutine phase in history.md). It owes
   the cancellation gap Phase 22 left open: a backing syscall already
   blocked in the kernel (a disk spinning up, a hung network backing,

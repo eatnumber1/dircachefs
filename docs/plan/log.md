@@ -3765,3 +3765,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   few helper functions just fine ... style [is] better developed in
   C++"). 25.34 briefed (helpers, a first port, the no-new-shell rule and
   its check, the port list) and dispatched (lane-7).
+- 2026-10-17, russ agrees to the shell proposal: no new shell, guest tests
+  in C++, host tools stay Python, shellcheck/shfmt pin (7.6b), port when
+  touched; "we can queue the full port as a new phase much later (your
+  choice as to exactly when)." On the helpers: "I also don't mind a
+  `system("mount a b")` if that makes things significantly simpler. Don't
+  overcomplicate it too much." Passed to 25.34; the full port is in the
+  README's future work.
