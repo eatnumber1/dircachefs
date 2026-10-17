@@ -1049,8 +1049,9 @@ permissions checking code."
   and the warning for a group- or world-accessible directory, with their
   tests, README rows (`dcfs.cache_db`, the log table) and design.md text
   ("OpenHardenedCacheFile").
-- Kept (not permission checks): refusing a symlink or a non-regular file
-  (`O_NOFOLLOW`), and WAL mode.
+- Also deleted (russ: "Gone. The questionable security is not worth the
+  code."): refusing a symlink or a non-regular file (`O_NOFOLLOW`, the
+  regular-file check). WAL mode's check stays (it is correctness).
 - Test first: a database the administrator made 0644 or 0400 is left as it
   is (fails today: it is changed or refused); a new one is 0600 and its
   directory 0700.
