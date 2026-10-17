@@ -761,3 +761,34 @@ py_test(
 
 style_findings_here()
 
+
+# ---- Step 25.32: Abseil Tip of the Week citations -----------------------
+
+py_library(
+    name = "totw_citations_lib",
+    srcs = ["totw_citations.py"],
+    imports = ["."],
+)
+
+# Every TotW number cited in docs/style.md, docs/abseil-utilities.md,
+# docs/design.md and the C++ is a published tip of the pinned archive
+# (third_party/abseil_tips), and the check's unit tests. The tree is read
+# through MODULE.bazel's real path like repo_shape_test, so it is `external`
+# (never cached).
+py_test(
+    name = "totw_citations_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["totw_citations_test.py"],
+    args = [
+        "anchor=$(location //:MODULE.bazel)",
+        "index=$(location //third_party/abseil_tips:index.tsv)",
+    ],
+    data = [
+        "//:MODULE.bazel",
+        "//third_party/abseil_tips:index.tsv",
+    ],
+    tags = ["external"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":totw_citations_lib"],
+)

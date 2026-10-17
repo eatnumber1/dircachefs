@@ -196,6 +196,17 @@ http_archive(
     urls = ["https://github.com/google/styleguide/archive/b2a398d17f5ea890c6965b50e6c0c27a8c178f72.tar.gz"],
 )
 
+# Step 25.32: Abseil's Tips of the Week (Markdown posts), indexed for reviewers
+# (//third_party/abseil_tips:tips). abseil/abseil.github.io at the master tip of
+# 2026-10-17; see third_party/abseil_tips/README.md for the update procedure.
+http_archive(
+    name = "abseil_tips",
+    build_file = "//third_party/abseil_tips:BUILD.abseil_tips",
+    sha256 = "39ef558457e44fa1908194a8f3db432c186779a438dd0a548c7959ceed90a178",
+    strip_prefix = "abseil.github.io-e9e24835cb889fe25251cb9ec6d51b79233e358d",
+    urls = ["https://github.com/abseil/abseil.github.io/archive/e9e24835cb889fe25251cb9ec6d51b79233e358d.tar.gz"],
+)
+
 # Step 15.6: a RELEASED Debian cloud image, the guest that boots systemd as
 # PID 1 (test/qemu:mount_dcfs_systemd_test). The nocloud flavor of the current
 # stable release (Debian 13, trixie), pinned by the SHA512 that cloud.debian.org

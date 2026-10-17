@@ -1162,3 +1162,13 @@ not at all by a reviewer without network. Like 25.29's style guides:
   unit test.
 
 Host-only. Owner: dcfs-implementer; a style review before merge.
+
+As built (2026-10-17): `@abseil_tips` pins abseil/abseil.github.io at
+`e9e24835cb88` (sha256 in `third_party/abseil_tips/README.md`);
+`//third_party/abseil_tips:tips` builds `index.tsv` and `tips.md` (every tip
+under `# TotW #N: title`, in place of one file per tip); `index_test`,
+`make_index_test` and `//tools:totw_citations_test` (unit tests over fixture
+trees plus the real tree) are the checks. The archive has 85 published
+`totw` posts for 83 tips (TotW 3 and 5 are published twice; the later file is
+taken) and TotW 132 unpublished, not 86. The tree cites TotW 42 and 103 only;
+both are published, so the check finds nothing today.

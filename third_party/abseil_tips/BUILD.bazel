@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: MIT
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_test.bzl", "py_test")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
+
+py_binary(
+    name = "make_index",
+    srcs = ["make_index.py"],
+    imports = ["."],
+    visibility = ["//visibility:private"],
+)
+
+# index.tsv: number, title and archive file of every published tip.
+# tips.md: the same tips in one file in number order, each under a
+# `# TotW #N: title` heading, so `grep -n '^# TotW #122'` finds one.
+genrule(
+    name = "index",
+    srcs = ["@abseil_tips//:tips"],
+    outs = [
+        "index.tsv",
+        "tips.md",
+    ],
+    cmd = "$(location :make_index) $(location index.tsv) $(location tips.md) $(SRCS)",
+    tools = [":make_index"],
+    visibility = ["//visibility:public"],
+)
+
+# bazel build //third_party/abseil_tips:tips leaves index.tsv, tips.md and
+# the licence in bazel-bin/third_party/abseil_tips/ (README.md).
+filegroup(
+    name = "tips",
+    srcs = [
+        ":index.tsv",
+        ":tips.md",
+        "@abseil_tips//:LICENSE",
+    ],
+)
+
+py_test(
+    name = "index_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["test_index.py"],
+    args = [
+        "$(location :index.tsv)",
+        "$(location :tips.md)",
+    ],
+    data = [
+        ":index.tsv",
+        ":tips.md",
+    ],
+    main = "test_index.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+py_test(
+    name = "make_index_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["make_index_test.py"],
+    main = "make_index_test.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":make_index"],
+)

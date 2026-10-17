@@ -41,6 +41,7 @@
     "act": {"purl": "pkg:github/nektos/act", "kind": "tool", "version": "url:/download/v([^/]+)/"},
     "pandoc": {"purl": "pkg:github/jgm/pandoc", "kind": "tool", "version": "url:/download/([^/]+)/"},
     "google_styleguide": {"purl": "pkg:github/google/styleguide", "kind": "tool", "version": "url:/archive/([0-9a-f]+)\\.tar"},
+    "abseil_tips": {"purl": "pkg:github/abseil/abseil.github.io", "kind": "tool", "version": "url:/archive/([0-9a-f]+)\\.tar"},
     "debian_cloud_image": {"purl": "pkg:generic/debian-cloud-image-nocloud-amd64", "kind": "tool", "version": "url:/trixie/([^/]+)/"}
   },
   "script": {
