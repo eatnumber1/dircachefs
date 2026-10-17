@@ -929,3 +929,18 @@ everything after it never ran. Nothing checks guest scripts' syntax.
 3. Fix any other script the gate flags.
 
 Implementer.
+
+## 26.34 Load-sensitive tests (triage, from the 2026-10-17 log)
+
+Tests seen failing under host load and passing on rerun, each before the
+change that hit it: fault_backing_test (I/O budget), enospc_cache_test
+(`sync-listing`, flagged load-starved, twice), request_counts_test (disk
+writes 62 to 70 once, then 52, 55, 54), backing_test (CPU budget at 51%
+CPU pressure). For each: reproduce with a targeted `--runs_per_test` under
+competing load, find whether the test measures something load really
+changes (wall time, scheduling) or something it should not (a count that
+depends on writeback timing or a race in the test), and fix the cause:
+count what is deterministic, or make the budget robust by measuring the
+right quantity. Never widen a budget or add a retry to make it pass
+(AGENTS.md; no retry loops). A real dcfs race found this way is a result,
+not a nuisance. Investigator.
