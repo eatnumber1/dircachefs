@@ -1032,6 +1032,29 @@ at a request boundary; keep it off the request path (the sync point's own
 place) so no user request waits on it.
 
 
+
+## 25.28d A failed cache fsync poisons the cache (russ, 2026-10-17; after 25.28b)
+
+Linux can drop pages a failed fsync could not write and report success to
+the next fsync, so after one failed WAL fsync a later commit can look
+durable while an earlier frame is missing, and SQLite's recovery stops at
+that gap. russ: "I care about a simple codebase in addition to all the
+other properties. What we're talking about here should be extraordinarily
+rare. Let's do a blanket poison." No in-process reinitialisation (the
+kernel holds inode numbers that live in the database).
+
+- When the cache's WAL fsync fails (a durable point, or a phase-1
+  synchronous commit), the request gets EIO, dcfs deletes the cache
+  database's files (`-wal`, `-shm`, the database) so the next start cannot
+  recover a gapped WAL, and the daemon ends through 25.9's poisoned path
+  with a non-zero status. The next start creates a fresh database (the
+  first-mount path). A failed unlink is logged; nothing more is tried.
+- Test first: a `--wrap` fault on the WAL's fsync; the EIO, the deleted
+  files, the non-zero exit, and a clean start afterwards.
+- The model: a durable point may fail only by ending the run with the
+  cache discarded (no recovery from it); docs say so.
+
+Owner: dcfs-protocol, small.
 ## 25.28c An idle daemon reaches its sync point: a one-shot timer, modelled (russ, 2026-10-17; after 25.28b)
 
 25.28 built the "periodic" checkpoint as a clock check on request arrival,
