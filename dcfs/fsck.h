@@ -7,8 +7,7 @@
 // via dcfs"). `fsck -A` and systemd's systemd-fsck@.service run
 // `fsck.<type> [FLAGS] DEVICE` before they mount a line whose passno is not
 // 0. It gets only the device and fsck's flags, so the helper finds its fstab
-// line (`findmnt --fstab`, as a child) for
-// the `dcfs.` options, then:
+// line (`findmnt --fstab`, as a child) for the `dcfs.` options, then:
 //  1. the backing filesystem: dcfs serves a directory, so there is no device
 //     to check, and it says so;
 //  2. dcfs's own cache database (CheckCacheDatabase): that no daemon holds

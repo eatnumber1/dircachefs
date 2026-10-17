@@ -2237,8 +2237,7 @@ way any admin would:
 - **Kernel**: `NFSD_LEGACY_CLIENT_TRACKING` needed enabling in
   the kernel build (`third_party/linux`). Without it, nfsd upcalls to a
   userland client-tracking daemon on a client's first `SETCLIENTID`
-  (`NFSD: Unable to initialize
-  client recovery tracking! (-110)`); on this guest, whichever daemon
+  (`NFSD: Unable to initialize client recovery tracking! (-110)`); on this guest, whichever daemon
   serviced that upcall (`nfsdcld`, or `rpc.mountd`'s own legacy handler)
   crashed reproducibly. With it, nfsd manages `/var/lib/nfs/v4recovery`
   itself, in-kernel, with no upcall at all.
