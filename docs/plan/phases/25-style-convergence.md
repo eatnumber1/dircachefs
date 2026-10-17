@@ -402,7 +402,13 @@ as the syscall's real answer, not EINTR, and the daemon then exits
 cleanly. Check whether `SA_RESTART` handlers would still cover a
 reachable window (a signal before the mask is set, a forked child, another
 thread); add them only for a window that exists, named in a comment (style
-1.10a). 25.28c's timerfd shares the loop. Style 1.12 gains: "dcfs's own
+1.10a). 25.28c's timerfd shares the loop. The model already starts a clean
+shutdown only with no request in flight (`BeginShutdown` in dcfs.tla); the
+signalfd makes that true of the code (russ, 2026-10-17, asking whether
+the model covers signal delivery): trace validation refuses a trace in
+which shutdown begins while a request is in flight, and a test sends
+SIGTERM during a slow request and sees the request answered, then a clean
+shutdown. Style 1.12 gains: "dcfs's own
 signals never interrupt a backing syscall; they are read in the session
 loop."
 
