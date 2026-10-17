@@ -3554,3 +3554,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   and build rules only). Also: 9f66af6's subject ("execution: ...") failed
   the CI subject gate; reworded to "process: execution.md: ..." before any
   push (backup branch backup-before-reword).
+
+- 2026-10-17: russ's rulings on 14.10's NFS design: no backing name (identity
+  is f_type plus the root-row check; README requires a unique, fixed fsid
+  per export); soft mounts neither refused nor recommended (a timeout is a
+  backing EIO, which the protocol handles); a sync export not required, the
+  README says to delete the cache database after a server crash with an
+  async export (dcfs cannot see the server's export options, so no log
+  line); phase 14's NFS generation is a digest of the server's handle bytes.
+  Pending: whether "no replica swap while running" stays a documented
+  guarantee.
