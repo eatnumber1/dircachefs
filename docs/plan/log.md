@@ -3969,3 +3969,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   eight noisy failures came from CPU, wall or block-layer budgets. 26.41
   proceeds (russ's condition met); queued for dcfs-implementer, quota
   permitting.
+- 2026-10-17, dashboard SLOC tool merged (bc83a89, Gemini Flash): the Stop
+  hook regenerates ~/.cache/dcfs-dashboard/sloc.json when main's HEAD
+  moves and asks for its upload with lanes.json. Counts match the hand
+  count's method (prod 14,351, test 42,571, model 5,089, tools 21,557 at
+  the merge). Reviewed by the orchestrator; tests rerun.
