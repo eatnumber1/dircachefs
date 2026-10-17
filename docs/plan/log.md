@@ -3562,5 +3562,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   README says to delete the cache database after a server crash with an
   async export (dcfs cannot see the server's export options, so no log
   line); phase 14's NFS generation is a digest of the server's handle bytes.
-  Pending: whether "no replica swap while running" stays a documented
-  guarantee.
+  russ then confirmed the three administrator guarantees: exclusive
+  access; a unique, fixed fsid per export; no replica swap while dcfs runs
+  (delete the cache before failing over). The 14.10 design is final.
