@@ -685,6 +685,19 @@ will). Nothing checks the model's guards against the code.
   of verified findings, citation accuracy, and quota spent per job
   (`agy -p "/usage"` before and after). Results in
   `notes/gemini-sweep-2026-10-17.md`.
+- **The abstraction map, checked (code side; russ, 2026-10-17: "Yes"):**
+  every backing call the code makes (`ProtocolEvents::BackingCall`) must
+  be attributed by trace validation to the model step it belongs to,
+  within that step's declared maximum (a create's `C_probe`: ProbeChild's
+  statx plus one getxattr per xattr; `PopulateRead`: a bounded number of
+  getdents64 calls). A call no step covers, or more calls than a step
+  declares, makes the trace invalid. This is what would have caught 22.5's
+  getdents64 loop and readdir's per-entry refreshes, which the model's
+  granularity hid. The register also lists the model's abstractions
+  ("PopulateRead is one step", "D has no parent", "a reply carries no
+  child attributes") with the code paths each hides; a property stated per
+  step needs a code-level test for each hidden path (as 22.5's harness
+  sweep does for the interrupt bound).
 - **Guard mutation (12.13):** a mutant class that removes or weakens one
   guard at a time; a load-bearing guard must be in the register with its
   enforcement, a guard whose removal breaks nothing is deleted.
