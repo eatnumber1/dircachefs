@@ -3297,3 +3297,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   step. Implemented by widening dcfs-style-reviewer to every step's diff (Sonnet; Opus for
   judgement-heavy reshaping), not a new agent; process.md step 5, CLAUDE.md's table and the agent
   definition updated; the phantom dcfs-code-reviewer reference gone.
+- First per-step style review (the watchdog move): two findings sent back; two questions ruled by
+  the orchestrator into style.md (1.11 has no blanket exemption for host-side tools; Python tests
+  inject environment and clock as parameters).

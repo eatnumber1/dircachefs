@@ -1144,6 +1144,12 @@ no Bazel without KVM, no edits outside the checkout, no background
 polling loops, and no hack that could escape the guest or the lane (a
 timer in a guest script is fine; a script that deletes host directories
 is not, submitted or not).
+- **No blanket exemption for host-side tools** (orchestrator's ruling,
+  2026-10-16, from the first per-step style review): the rule applies to
+  scripts and tools under `tools/` too; a poll there passes the same
+  "cannot signal" test, with the comment saying what cannot signal and what
+  the interval bounds. Example: `tools/agents/gemini_watchdog.py` polls
+  because a stall is the absence of activity, which no event reports.
 
 ### 1.12 No retry loops
 
@@ -1398,6 +1404,10 @@ shfmt), run by `//tools:format_test`; shellcheck is pinned in the same step
 - Tests are `unittest` classes in `<name>_test.py`, built as `py_test` with
   an explicit `size`, data passed as `$(location ...)` arguments
   (`tools/sbom/BUILD.bazel`). They run on the host.
+- **Tests inject the environment and the clock as parameters**
+  (orchestrator's ruling, 2026-10-16): `def f(environ=os.environ)`, a
+  `now` argument; `mock.patch` only for what cannot be injected (the
+  injection rule of AGENTS.md).
 
 ## 6. TLA+
 
