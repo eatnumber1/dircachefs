@@ -761,7 +761,6 @@ py_test(
 
 style_findings_here()
 
-
 # ---- Step 25.32: Abseil Tip of the Week citations -----------------------
 
 py_library(
