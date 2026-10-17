@@ -575,3 +575,29 @@ Linux model diverges from current kernels on a few adhoc cases). The source
 build is the fallback (about 14 archives under a custom repository rule).
 Follow-up: a mechanical check of 12.16's Ideal.tla against the checker
 (bounded TLC behaviours rendered as SibylFS traces). Investigator.
+
+## 12.16 amended: verify against SibylFS, then retire it (russ, 2026-10-16)
+
+russ agreed to the chain (12.18b's differential oracle now; 12.16's
+syscall-level Ideal.tla as the top-level model; a TLA+ model of the
+kernel's FUSE client in the middle, so dcfs's protocol composed with it
+refines Ideal.tla), with one change: "let's mechanically verify it against
+SibylFS, and then once we can prove it completely covers everything in
+SibylFS, let's delete SibylFS. No need to carry around that code when we've
+proven our model covers everything SibylFS does." So 12.16 ends with:
+1. A syscall-trace checker built from Ideal.tla (TLC trace validation, the
+   same shape as Trace.tla, over syscall traces in SibylFS's format or a
+   converted one).
+2. Agreement, checked mechanically in both directions on the operations
+   SibylFS models: every trace in the SibylFS test suite gets the same
+   verdict from both checkers (accepted or rejected, on the same Linux
+   flags), and bounded TLC enumerations of Ideal.tla's behaviours rendered
+   as traces are all accepted by SibylFS, with mutants of each rejected by
+   both. "Covers everything" is defined by that agreement over the whole
+   suite plus the enumeration bound, stated in the step (it is bounded
+   checking, not a proof; the bound is chosen and recorded).
+3. Then the retirement: 12.18b's differential guest test switches to the
+   Ideal.tla checker, and the SibylFS pins (checker binary, test suite
+   archive, wrapper) are deleted in the same change; the SibylFS test suite's
+   scripts may stay as a pinned corpus if they still feed the guest test,
+   without the checker.

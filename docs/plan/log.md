@@ -3369,3 +3369,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   25.9b reverts.
 - Quota snapshot 2026-10-16 evening: Claude session 7%, week 2% (resets Oct 23 01:00 PT); Gemini
   week 98%, Argon week 88% (Oct 24); agy Claude/GPT pool 0% until Oct 17 19:55 UTC.
+- russ agreed to the syscall-level chain (12.18b now; 12.16's Ideal.tla as the top-level model;
+  a model of the kernel's FUSE client between) with one change: verify Ideal.tla against SibylFS
+  mechanically, in both directions over its test suite and bounded enumerations, then delete
+  SibylFS's checker and pins once agreement holds. Phase 12 records it.
