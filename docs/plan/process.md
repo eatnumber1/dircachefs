@@ -341,7 +341,21 @@ reading. Not for writing code, nor for subtle protocol judgement.
    code, one directory's dead code. Never a five-category sweep on
    Flash. Run several such jobs instead of one broad one, and compare
    their answers where they overlap.
-6. Gemini's findings are treated as leads, not facts: a claim that would
+6. Vary the effort knob per job, for Gemini and Claude alike (russ,
+   2026-10-17), and name the choice in the dispatch:
+
+   | Job | Gemini | Claude subagent |
+   |---|---|---|
+   | Listing, census, grep-like survey | Flash low | Haiku low |
+   | One narrow check (a doc against code, one directory) | Flash medium | Sonnet medium |
+   | Verification of findings, an audit | Argon low or Flash high | Sonnet medium |
+   | Review needing judgement | Argon medium | Sonnet high, Opus high |
+   | Protocol, crash safety, a puzzling failure | not Gemini | Opus high or xhigh |
+
+   Start a job one notch lower than seems needed and raise it only when
+   the answer comes back shallow. The orchestrator's own effort is the
+   session's, which russ sets.
+7. Gemini's findings are treated as leads, not facts: a claim that would
    change the plan is re-verified (12.18 is the precedent: its "not
    usable" verdict was wrong).
 
