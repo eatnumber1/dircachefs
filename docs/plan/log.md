@@ -3806,3 +3806,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   durability in time, the 25.28c timer covers idle; no wal_hook. "This is
   the behavior I want." With 25.28b's kSync durable point, the automatic
   checkpoint is the only routine checkpoint (clean shutdown truncates).
+- 2026-10-17, russ agrees to moving the daemon's signals off backing
+  syscalls ("why not both? I agree to doing them"): signalfd in the
+  session loop, SA_RESTART only where a reachable window remains. Added
+  to 25.10's brief.

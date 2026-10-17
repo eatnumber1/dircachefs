@@ -389,6 +389,21 @@ itself. Protocol agent (the model changes), tests first for (2): a reader
 racing a writer sees ERANGE once. No behaviour change for (1) today, since one
 request runs at a time.
 
+**Signals (russ, 2026-10-17, added to 25.10):** dcfs's own signals never
+interrupt a backing syscall. The daemon blocks SIGHUP, SIGINT and SIGTERM
+from the start of `main` (before any thread) and reads them through a
+`signalfd` in `SessionLoop`, so shutdown happens between requests and a
+backing syscall cannot return EINTR because of them; libfuse's
+`fuse_set_signal_handlers` goes. Test first: a SIGTERM during a slow
+backing syscall (an interruptible wait in the guest) reaches the client
+as the syscall's real answer, not EINTR, and the daemon then exits
+cleanly. Check whether `SA_RESTART` handlers would still cover a
+reachable window (a signal before the mask is set, a forked child, another
+thread); add them only for a window that exists, named in a comment (style
+1.10a). 25.28c's timerfd shares the loop. Style 1.12 gains: "dcfs's own
+signals never interrupt a backing syscall; they are read in the session
+loop."
+
 ## 25.12 `absl::FixedArray` for buffers of known size (russ, 2026-10-10; dispatched)
 
 Style 1.2: a buffer sized once from a syscall's answer, a header field
