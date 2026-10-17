@@ -3565,3 +3565,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   russ then confirmed the three administrator guarantees: exclusive
   access; a unique, fixed fsid per export; no replica swap while dcfs runs
   (delete the cache before failing over). The 14.10 design is final.
+
+- 2026-10-17: 25.9b merged (12 commits; Opus review at high effort and a
+  style review, one fix round; fast tier 303 pass). One guard at the backing
+  door on all 43 wrappers, enforced by a clang-query matcher; a poisoned
+  daemon serves nothing further and exits 32 through a tested
+  DaemonOutcome; no global FUSE session; crash symbols banned in the shipped
+  binary (debug-fatal and raw checks included) with data references never
+  hidden by via lines; third-party crash sites approved by russ; lock-file
+  I/O off the door; ForkSplit reverted; FORGET replies once; INIT's
+  every-flag case shown impossible with the pinned libfuse and pinned by a
+  test.
