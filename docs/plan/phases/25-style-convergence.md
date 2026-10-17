@@ -1127,7 +1127,7 @@ NOLINT naming its check with its reason. Show the count of new findings
 before fixing. Implementer, mechanical for a large batch of fixes.
 
 
-## 25.32b Style review fixes for 25.32 (from the post-merge review, 2026-10-17; queued, dcfs-mechanical)
+## 25.32b Style review fixes for 25.32 (from the post-merge review, 2026-10-17; merged 2026-10-17, 212786d, Gemini Flash)
 
 The post-merge style review of 8158196 found no correctness bug. To fix:
 `make_index.py` gets `main(argv)` with argparse and `encoding="utf-8"`;

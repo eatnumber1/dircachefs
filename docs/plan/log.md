@@ -3916,3 +3916,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   CI, 13,644-13,965 locally), read side re-measured. Provisional ruling on
   the dropped lines on the dashboard. Reviewed by the orchestrator;
   a Flash style review follows.
+- 2026-10-17, 25.32b merged (212786d): the first agy write job (Gemini 3.8
+  Flash high, lane-6 after two failed runs in a cold lane-8: agy's
+  30-minute background limit expired on the first cold Bazel build). The
+  25.32 post-merge review's fixes; the orchestrator read the diff and
+  reran the tests (4 of 4 pass).
