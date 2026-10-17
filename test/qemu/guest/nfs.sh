@@ -358,7 +358,7 @@ sleep 1
 NFSD_TIMES="--grace-time 10 --lease-time 30"
 
 # Client recovery tracking: nfsd needs somewhere to persist NFSv4
-# client-recovery state. test/qemu/scripts/build-kernel.sh enables
+# client-recovery state. The kernel build (third_party/linux) enables
 # CONFIG_NFSD_LEGACY_CLIENT_TRACKING for exactly this test, so nfsd
 # manages /var/lib/nfs/v4recovery itself with no upcall to any userland
 # daemon -- see that script's comment for the full story: the upcall

@@ -1686,7 +1686,7 @@ ext4, xfs and btrfs.
   restarting the daemon against the same cache database. Also step 4.8's
   submount-refusal policy (amendment 12), using vdc as a second
   filesystem: dcfs refuses to start at all with vdc already mounted below
-  `--source` (`startup-refuses-submount`), and refuses a boundary that
+  SOURCE (`startup-refuses-submount`), and refuses a boundary that
   appears at runtime instead of caching it (`boundary-*`) -- see the
   README's Limitations.
 - `passthrough_test` (`guest/passthrough.sh`): step 3.3's file contents via
@@ -1705,7 +1705,7 @@ ext4, xfs and btrfs.
   shutdown (exit 0, unmounted, WAL checkpointed), mounting dcfs back over
   its own SOURCE, and restarting against a previously-used cache
   database. All of it through `mount.dcfs -o dcfs.cache_db=...,
-  dcfs.foreground` (step 15.2: the plain `--source` command line is gone).
+  dcfs.foreground` (step 15.2: the plain SOURCE command line is gone).
 - `mount_dcfs_test` (`guest/mount_dcfs.sh`): the `mount.dcfs` wrapper
   (steps 15.1-15.2) on the ext4 image -- the tree is served (the FUSE
   mount's source is the spec as written, `umount` stops dcfs, SIGKILL
@@ -1714,8 +1714,8 @@ ext4, xfs and btrfs.
   `dcfs.` option mounts nothing and says why, `-f`, a file as mount point),
   daemonization (stdio on `/dev/null`, own session, syslog
   through busybox's `syslogd`, a failure after the fork reported by the
-  wrapper, `dcfs.foreground`), a directory opened in place (also over the same path, busy while
-  mounted; `none`, its old name, refused), a file mounted
+  wrapper, `dcfs.foreground`), a directory opened in place (also over the
+  same path, busy while mounted), a file mounted
   below the source refused, and a non-root caller. busybox's `mount` runs
   no helpers, so `mount -t dcfs` is a SKIP here (step 15.6 runs it with
   util-linux). Instance identity (15.3), stubs (15.4), fsck and exports
@@ -1775,9 +1775,9 @@ ext4, xfs and btrfs.
   causes *zero* reads from the backing block device, including after
   killing and restarting the daemon against the same cache database. Also
   step 4.8's runtime submount refusal (amendment 12): mkdir/link against a
-  boundary vdc is mounted onto at runtime fail with EXDEV, exactly as they
-  would across a real device boundary (`mkdir-boundary-refused`,
-  `link-exdev`).
+  boundary vdc is mounted onto at runtime are refused: mkdir fails with
+  EEXIST, and link is refused (`mkdir-boundary-refused`,
+  `link-into-boundary`).
 - `rename_test` (`guest/rename.sh`): step 4.3's remove/rename write-through
   ops -- unlink (plain, of one hard link, and of a file still open, whose
   content stays readable and whose row, and so its handle, lives until the
@@ -1785,8 +1785,9 @@ ext4, xfs and btrfs.
   rename (same dir, across dirs, over an existing file whose old row is
   deleted, `RENAME_NOREPLACE` -> EEXIST, `RENAME_EXCHANGE`, a directory with
   children whose whole cached subtree moves with it, a directory over an
-  empty directory, and EXDEV renaming into a boundary vdc is mounted onto
-  at runtime -- step 4.8's amendment 12 -- via `//tools:testutil rename2`
+  empty directory, and renaming into a boundary vdc is mounted onto at
+  runtime (EOPNOTSUPP, `rename-into-boundary`) -- step 4.8's amendment 12 --
+  via `//tools:testutil rename2`
   since busybox `mv` falls back to copy+delete). Every result is checked on
   `/src` and via `/mnt` after dropping every cache with zero sectors read
   (negative entries and directory completeness are recorded, not re-read),
@@ -1797,7 +1798,7 @@ ext4, xfs and btrfs.
   `SETATTR(size=0)`, a 64 MiB passthrough write low enough in daemon CPU
   time to prove the kernel moved the bytes, and -- step 4.8's amendment
   12 -- a write into a boundary vdc is mounted onto at runtime failing
-  with EXDEV, `write-boundary-refused`); two concurrent opens of one file
+  with ENOTSUP, `write-boundary-refused`); two concurrent opens of one file
   (both readers, and a
   reader held open across a writer's open/write/close) all succeeding,
   which used to EBUSY/EIO before this step because every open got its own
@@ -2019,11 +2020,10 @@ disabled console login and the `nofail` boot, do not depend on the wrapper):
   not hold the boot (the script began while that mount's start job was still
   waiting, with its device timeout set to ten minutes).
 
-`mount_dcfs_test` (busybox, no findmnt) runs `fsck.dcfs -o OPTIONS` against a
-stand-in `fsck.fakefs` that records its arguments and exits with a chosen
-status: the flags and device reach it, its status is relayed and or'ed with the
-cache's (1, 4, 5, 8, 12), a garbage cache is reported by `-n` and deleted by
-`-y`, a database a daemon holds is reported (8) and left, usage errors are 16.
+`mount_dcfs_test` (busybox, no findmnt) runs `fsck.dcfs -o OPTIONS` on the
+cache: a garbage cache is reported by `-n` and deleted by `-y`, a database a
+daemon holds is reported (8) and left, usage errors are 16. No backing
+checker runs, since a source directory has no device to check.
 
 What the real `mount(8)` path showed that the busybox guest could not:
 
@@ -2235,8 +2235,9 @@ step filled in, or real NFS-server administration this test now does the
 way any admin would:
 
 - **Kernel**: `NFSD_LEGACY_CLIENT_TRACKING` needed enabling in
-  `build-kernel.sh`. Without it, nfsd upcalls to a userland client-tracking
-  daemon on a client's first `SETCLIENTID` (`NFSD: Unable to initialize
+  the kernel build (`third_party/linux`). Without it, nfsd upcalls to a
+  userland client-tracking daemon on a client's first `SETCLIENTID`
+  (`NFSD: Unable to initialize
   client recovery tracking! (-110)`); on this guest, whichever daemon
   serviced that upcall (`nfsdcld`, or `rpc.mountd`'s own legacy handler)
   crashed reproducibly. With it, nfsd manages `/var/lib/nfs/v4recovery`

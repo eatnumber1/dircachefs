@@ -933,7 +933,7 @@ each.
   lives in `Context` (`context.h:84`) or in an object the caller owns.
 - **No paths after startup.** Objects are reached by descriptor or file
   handle (`FileHandle::Open`); a child is `openat(dir_fd, name, ...)`, never
-  a joined path. Only startup uses a path (`--source`, the cache database).
+  a joined path. Only startup uses a path (SOURCE, the cache database).
 - **Syscalls that can reach the backing filesystem, i.e. anything given a
   backing fd, file handle or name, are made only in `backing.cc`**, where
   the idle guarantees are reasoned about, and in the lower layers it is

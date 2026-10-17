@@ -67,7 +67,7 @@ CONFIG_VIRTIO_BLK=y
 # nfs_test's loopback networking inside the Debian chroot
 # (test/qemu/guest/nfs.sh) needs a network stack; kept as virtio-net even
 # though nothing today attaches a virtio-net device, matching the existing
-# build-kernel.sh baseline this fragment replaces.
+# kernel baseline this fragment replaces.
 CONFIG_VIRTIO_NET=y
 CONFIG_VIRTIO_CONSOLE=y
 CONFIG_SERIAL_8250=builtin

@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: MIT
--- dcfs schema v4 (see kSchemaVersion in dcfs/migrate.h for the history;
+-- dcfs schema v6 (see kSchemaVersion in dcfs/migrate.h for the history;
 -- Migrate() upgrades older databases in place).
 --
 -- Executed as a script against a fresh database by Migrate() (see
@@ -28,7 +28,7 @@
 --                     upgrade step Migrate() runs.
 --   source_device_id  DeviceId::Serialize() of the source filesystem the
 --                     cache was built for. Written once, at creation;
---                     startup refuses a --source on another filesystem.
+--                     startup refuses SOURCE on another filesystem.
 --   clean_shutdown    1 once a run has shut down cleanly (backing
 --                     filesystems synced, dirty set empty, WAL
 --                     checkpointed: backing::FinishRun), 0 while a run is
@@ -118,7 +118,7 @@ CREATE INDEX inodes_unlinked ON inodes (id) WHERE nlink = 0;
 --            that is about to change it; its inode row was deleted);
 --   refused  the name exists on the backing filesystem but dcfs refuses to
 --            cache what is behind it (a mount point or subvolume boundary
---            below --source; see amendment 12 and README.md's
+--            below SOURCE; see amendment 12 and README.md's
 --            Limitations): it is served as a stub directory (its `stubs`
 --            row) and must never be reported absent (ENOENT).
 -- A name with no row is absent if its directory's children_complete is set,

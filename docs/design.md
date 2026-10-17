@@ -488,12 +488,16 @@ forget the ones that are not. The comment at `LogRefusedBoundary()` in
 
 ## The schema
 
-`dcfs/schema.sql` is the full definition, schema version 4. All tables are
+`dcfs/schema.sql` is the full definition, schema version 6. All tables are
 `STRICT`. `Migrate()` (`dcfs/migrate.cc`) creates a fresh database in one
 transaction, or upgrades an older one (one version step at a time) to
-version 4 in one transaction, and refuses versions it does not understand.
+version 6 in one transaction, and refuses versions it does not understand.
 The step to version 4 adds the `stubs` table; a version 3 cache's refused
-dentries, which have no stub, become unknown and are probed again.
+dentries, which have no stub, become unknown and are probed again. The step
+to version 5 adds `cache_state.last_stub_id` (a stub's nodeid is never handed
+out again) and the partial index `inodes_unlinked`. The step to version 6
+adds `dirty.atime_only`: a row that stands for an access time only and does
+not drive sync points.
 
 ### `cache_state`: one row of cache-wide state
 
@@ -1184,10 +1188,15 @@ not ours: the times a backing filesystem stamps (including `UTIME_NOW` in
 `backing.cc`'s `utimensat`/`futimens` calls) stay the kernel's.
 
 dcfs is single-threaded inside libfuse's blocking loop, which has no idle
-hook, so there is no timer: an idle daemon keeps a non-empty dirty set
-until its next request, fsync or shutdown. That is safe; it only makes the
-re-read after a crash larger. (libfuse 3.18.2 has no `SYNCFS` handler, and
-the kernel only sends `SYNCFS` to fuseblk servers anyway.)
+hook, so sync points have no timer: an idle daemon keeps a non-empty dirty
+set until its next request, fsync or shutdown. That is safe; it only makes
+the re-read after a crash larger. (libfuse 3.18.2 has no `SYNCFS` handler,
+and the kernel only sends `SYNCFS` to fuseblk servers anyway.)
+
+The one timed action is a passive WAL checkpoint, run once per
+`--sync_interval_sec` when no sync point is due (`MaybeCheckpointWal` in
+`dcfs/dir_cache_fs.cc`; russ, 2026-10-12, a permitted exception to the no-timer
+rule). It keeps the WAL from growing during a long read-only workload.
 
 ### Why not `synchronous=FULL` everywhere
 
@@ -1345,8 +1354,8 @@ custom VFS. The code already follows the rules that make that safe:
 - **Credential switches never span a suspension point.** `AsCaller` wraps
   exactly one synchronous syscall, and the switch is per thread (see
   [Caller credentials](#caller-credentials)).
-- **Replies can be deferred.** `FuseRequest` is movable and owns exactly
-  one reply; libfuse allows replying from any thread.
+- **Replies can be deferred.** A `FuseRequest` is neither copied nor moved;
+  it owns exactly one reply, and libfuse allows replying from any thread.
 
 Places still marked `TODO(coroutines)`: `ListCached` retries a
 population a few times when a concurrent mutation keeps it from being
@@ -1869,8 +1878,10 @@ and nfsd take:
   thread), then `setfsuid`; each is read back, since `setfsuid` and
   `setfsgid` report no errors, and a switch that did not take fails with
   `EPERM`;
-- afterwards, back to root; failing to restore is fatal, since carrying on
-  would perform later operations as the wrong user.
+- afterwards, back to root; failing to restore poisons the backing (every
+  later backing syscall fails, see `IsBackingPoisoned` in
+  `dcfs/syscalls_backing.cc`) and ends the session, since carrying on would
+  perform later operations as the wrong user.
 
 Caller identity comes from the FUSE request (`fuse_req_ctx`) and the
 supplementary groups from `fuse_req_getgroups`, which reads
@@ -2055,8 +2066,8 @@ exit status says who is to blame.
 **Opening the backing tree.** dcfs opens SOURCE directly in place in the
 caller's mount namespace (`openat`, the one use of a path) and applies the start
 checks: nothing mounted below it (`RefuseMountsBelow`, naming the mount points)
-and no forced-read-only superblock (`RefuseIfForcedReadOnly`). After opening,
-it turns the descriptor into a real directory descriptor: `open_by_handle_at`
+and no forced-read-only superblock (`RefuseIfForcedReadOnly`). The descriptor
+is a real directory descriptor, not `O_PATH`: `open_by_handle_at`
 resolves its mount descriptor as a regular file, which rejects `O_PATH` (see
 "File descriptors and handles, never paths"). dcfs walks and decodes handles
 through that descriptor; root has `CAP_DAC_READ_SEARCH`, which is what
@@ -2395,7 +2406,7 @@ threshold shows, with an example of a line (the `I20261008 12:00:00.001234
 
 | Level | Meaning | Example |
 |---|---|---|
-| `FATAL` | dcfs cannot continue safely | `F... check.cc] Check failed: fs != nullptr` |
+| `FATAL` | a broken invariant found by the testonly invariant checker (`dcfs/testonly/`); production code never crashes | `F... invariant_checker.cc] invariant violated: <what>` |
 | `ERROR` (default) | the caller got an error dcfs produced, or dcfs refused its job | `E... fuse_request.cc] INTERNAL: RET_CHECK failure: Read on unknown handle 7` |
 | `WARNING` (default) | nothing failed for the caller, state is degraded or surprising | `W... backing.cc] inode 42: out-of-band change on the backing filesystem (unsupported): size 4096 -> 8192; adopting the new attributes` |
 | `INFO` (`--stderrthreshold=0`) | the lifecycle: start, recovery, sync points, shutdown, the first backing access after an idle period | `I... main.cc] dcfs 1.0 starting: source=/srv/media cache_db=/var/lib/dcfs/media.db mountpoint=/mnt/media mount_options=default_permissions attr_timeout_sec=3600 entry_timeout_sec=3600 sync_interval_sec=5 foreground=true` |
@@ -2607,7 +2618,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | Test | What it proves |
 |---|---|
 | `boot_test` | The guest environment works: dcfs and helpers are present, disks mount. |
-| `mount_dcfs_test` | The `mount.dcfs` wrapper, run as mount(8) runs it, on an ext4 disk: the tree is served (the FUSE source is the spec as written, unmount stops dcfs, a SIGKILLed dcfs releases the superblock); the option split (`ro` and `dcfs.ro`, unknown `dcfs.` options mount nothing and say why, native options refused, libmount's own accepted); remount changes only the dcfs mount and ignores native options with a warning; daemonization (returns when dcfs serves, stdio on `/dev/null`, session leader, cwd `/`, syslog follows the threshold, a late failure is the exit status 32, `dcfs.foreground` stays and logs to stderr); a directory opened in place, also over the same path, and `none`, its old name, refused; relative paths; a file mounted below SOURCE refused; non-root refused with the reason; `mount.fuse.dcfs`; `umount.fuse.dcfs` and `umount.fuse` (step 15.6b: unmounts as `umount -i`, waits for the daemon of a dcfs mount whose superblock the unmount ended (fusectl says so), which is made slow to exit with a dm-delay backing device: a mount of the same instance right after it works, a crashed daemon returns at once, one of two bind copies, `umount -r` on a busy mount and a copy in another mount namespace return at once with the daemon alive, the last copy's unmount waits, `-l` detaches without waiting, with fusectl not mounted nothing waits, a busy mount fails with umount's own status, usage errors are 1, a mount that is not dcfs's is just unmounted), and `fsck.dcfs` (step 15.5: the flags and device reach a stand-in checker, its status is relayed and or'ed with the cache's, a garbage cache is reported by `-n` and deleted by `-y`, a held database is reported and left, usage errors). It runs under busybox's `mount`, which runs no `mount.<type>` helpers, so step 15.6 runs the util-linux path. |
+| `mount_dcfs_test` | The `mount.dcfs` wrapper, run as mount(8) runs it, on an ext4 disk: the tree is served (the FUSE source is the spec as written, unmount stops dcfs, a SIGKILLed dcfs releases the superblock); the option split (`ro` and `dcfs.ro`, unknown `dcfs.` options mount nothing and say why, native options refused, libmount's own accepted); remount changes only the dcfs mount and ignores native options with a warning; daemonization (returns when dcfs serves, stdio on `/dev/null`, session leader, cwd `/`, syslog follows the threshold, a late failure is the exit status 32, `dcfs.foreground` stays and logs to stderr); a directory opened in place, also over the same path; relative paths; a file mounted below SOURCE refused; non-root refused with the reason; `mount.fuse.dcfs`; `umount.fuse.dcfs` and `umount.fuse` (step 15.6b: unmounts as `umount -i`, waits for the daemon of a dcfs mount whose superblock the unmount ended (fusectl says so), which is made slow to exit with a dm-delay backing device: a mount of the same instance right after it works, a crashed daemon returns at once, one of two bind copies, `umount -r` on a busy mount and a copy in another mount namespace return at once with the daemon alive, the last copy's unmount waits, `-l` detaches without waiting, with fusectl not mounted nothing waits, a busy mount fails with umount's own status, usage errors are 1, a mount that is not dcfs's is just unmounted), and `fsck.dcfs` (step 15.5: a garbage cache is reported by `-n` and deleted by `-y`, a held database is reported and left, usage errors; a source directory has no device to check, and no backing checker runs). It runs under busybox's `mount`, which runs no `mount.<type>` helpers, so step 15.6 runs the util-linux path. |
 | `readonly_test` | Read-only operations are served from the cache with backing inode numbers; a warm metadata pass reads zero sectors, also after a restart; startup refuses a mount below `SOURCE`, and a boundary that appears at runtime is refused rather than cached (a stub). |
 | `boundary_test` | A mount (every filesystem) and a btrfs subvolume appearing below the source are stub directories: listed, a directory with the boundary root's mode and owner and an inode number at or above 2^63 (`d_ino` agrees), `ENOTSUP` for everything inside (logged once per stub), `EXDEV` for renaming the stub, nothing reaching either side; the same inode numbers after a restart. |
 | `passthrough_test` | File contents go through passthrough: reads match, move the backing read counter, and cost the daemon almost no CPU for 64 MiB; opens do not leak descriptors; all of it survives a restart. |
@@ -2835,8 +2846,8 @@ synchronous `FUSE_DESTROY` opt-in (patch 6) retires the most at once: the
 umount helper, the lock files, the fusectl dependence and the
 mount-after-unmount limitation.
 
-Over-mounting is not FUSE-only machinery and stays: dcfs opens SOURCE with
-`O_PATH` before mounting and never uses a path again, so `mount -t dcfs ...
+Over-mounting is not FUSE-only machinery and stays: dcfs opens SOURCE as a
+directory before mounting and never uses a path again, so `mount -t dcfs ...
 /srv/media /srv/media` hides the backing under dcfs, which is also the hygiene
 property russ values (nothing reaches the backing except through the daemon's
 descriptor). Production mounts the disk by fstab at a raw path and serves it

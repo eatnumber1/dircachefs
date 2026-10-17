@@ -11,7 +11,7 @@
 
 // A standalone startup policy check (see amendment 12 in the plan and the
 // README's Limitations): dcfs requires exactly one backing filesystem below
-// --source, since backing inode numbers (shown to users as st_ino) are only
+// SOURCE, since backing inode numbers (shown to users as st_ino) are only
 // unambiguous within one st_dev. This never touches dcfs's own identity
 // machinery (Context, the cache, MountFds) -- it runs once, before any of
 // that is even opened, purely to decide whether to refuse to start.
@@ -21,7 +21,7 @@ namespace dcfs {
 // mount namespace whose mount point lies strictly below `source_path`
 // (i.e. starts with the canonicalized `source_path` plus "/"). A mount
 // point equal to `source_path` itself -- a bind mount or another
-// filesystem mounted directly onto the source, which is what --source
+// filesystem mounted directly onto the source, which is what SOURCE
 // always names -- is not "below" it and is not reported. Empty (not an
 // error) when nothing is mounted below `source_path`.
 //

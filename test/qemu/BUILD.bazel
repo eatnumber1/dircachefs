@@ -259,7 +259,7 @@ sh_test(
 )
 
 # Step 26.14e: the identity oracle (guest/fault_lib.sh identity_take and
-# identity_check) over a fake fhtest, one injected violation at a time.
+# identity_check) over a fake testutil, one injected violation at a time.
 sh_test(
     name = "identity_oracle_test",
     size = "small",
@@ -882,7 +882,8 @@ qemu_test_matrix(
 # busybox-only initramfs every other test here runs from). Phase 4, part c:
 # this image is now resolved, fetched and assembled by Bazel from a pinned
 # snapshot.debian.org timestamp (see third_party/debian/README.md) instead
-# of test/qemu/scripts/mkrootfs-debian.sh's mmdebstrap run.
+# of the mmdebstrap run the old test/qemu/scripts/ script made (that script
+# is gone).
 qemu_test(
     name = "nfs_test",
     disks = [

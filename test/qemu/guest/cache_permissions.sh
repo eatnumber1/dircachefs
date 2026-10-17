@@ -17,14 +17,14 @@
 #     (and dcfs still starts) -- exercised against /cache itself, created
 #     0755 by guest/init's plain `mkdir -p /cache` with no explicit mode,
 #     exactly the directory every other e2e test already points
-#     --cache_db at directly;
+#     the cache database path at directly;
 #   - a pre-existing database (and -wal) left mode 0644 by a build from
 #     before this check -- but still owned by root -- is tightened to 0600
 #     (with a WARNING), not refused (case 3);
-#   - a --cache_db path that is a symlink is refused outright, and the
+#   - a cache database path that is a symlink is refused outright, and the
 #     link's target is never opened at all, let alone modified (case 4);
 #     and
-#   - a --cache_db path that already exists as a regular file owned by
+#   - a cache database path that already exists as a regular file owned by
 #     some other (unprivileged) user is refused outright, and that file is
 #     never touched (case 5) -- both of these guard against another local
 #     user pre-creating the cache path in a directory dcfs can write to
@@ -133,7 +133,7 @@ check_unreadable() {
 # /cache was created by guest/init's plain `mkdir -p /cache` (no explicit
 # mode), which under the guest's default umask leaves it 0755 -- an
 # existing, group- or world-accessible directory, and also exactly what
-# every other e2e test's --cache_db=/cache/dcfs.db already points at: this
+# every other e2e test's cache database (/cache/dcfs.db) points at: this
 # confirms that case still starts (with a WARNING), not that it is refused.
 
 DB1=/cache/dcfs.db
@@ -255,10 +255,10 @@ else
 	fail case3-mount "daemon did not mount within 10s"
 fi
 
-# --- case 4: --cache_db path is a symlink ---------------------------------
+# --- case 4: the cache database path is a symlink ---------------------------
 #
 # Another local user able to write the cache directory (or who got there
-# first, e.g. a shared /tmp) could leave a symlink at the --cache_db path
+# first, e.g. a shared /tmp) could leave a symlink at the cache database path
 # to have root open (and, via WAL, write through) some unrelated file.
 # dcfs must refuse outright, and must never have opened the link's target
 # at all -- checked by hashing it before and after.
@@ -314,7 +314,7 @@ fi
 
 # --- case 5: --cache_db path already exists, owned by another user -------
 #
-# A file another local user already owns at the --cache_db path could be
+# A file another local user already owns at the cache database path could be
 # one they can read or tamper with once dcfs starts writing the cache
 # through it, or one they crafted to feed dcfs/SQLite bad bytes. dcfs must
 # refuse outright, and must never have touched it (its ownership must stay
@@ -355,7 +355,7 @@ fi
 
 # --- R1: the cache files must grant no access beyond the backing root ----
 #
-# The database, -wal and -shm owner must be root or the owner of --source's
+# The database, -wal and -shm owner must be root or the owner of SOURCE's
 # root directory; group/other read or write only if that directory grants
 # the same to the group (which must be the directory's group) / others.
 # /src's root directory is root:root 0755 after mkfs.

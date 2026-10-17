@@ -20,16 +20,16 @@ inline constexpr std::string_view kAllowOther = "allow_other";
 
 // The mount options dcfs passes to libfuse as one "-o a,b,c".
 struct MountOptions {
-  // default_permissions, allow_other, then --fuse_opt's.
+  // default_permissions, allow_other, then dcfs.fuse_opt's.
   std::vector<std::string> options;
   // A "max_read=N" among them (DirCacheFS::Options::max_read).
   std::optional<unsigned int> max_read;
 };
 
-// Builds dcfs's mount options from --fuse_opt (each element one option:
+// Builds dcfs's mount options from dcfs.fuse_opt (each element one option:
 // Abseil splits the flag at commas). default_permissions and allow_other are
 // always there (step 15.8: the kernel enforces the mode bits, and every user
-// may reach the mount). InvalidArgument for a --fuse_opt element naming
+// may reach the mount). InvalidArgument for a dcfs.fuse_opt element naming
 // either, which dcfs always adds itself.
 absl::StatusOr<MountOptions> BuildMountOptions(
     std::span<const std::string> fuse_opt);

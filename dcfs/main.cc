@@ -112,7 +112,7 @@ absl::StatusOr<std::string> ReadBootId() {
 }
 
 // The cache files must grant no access beyond what the backing root
-// directory (--source's root) grants: the owner must be root or the backing
+// directory (SOURCE's root) grants: the owner must be root or the backing
 // root's owner; group read/write only if the group is the directory's group
 // and the directory grants its group read/write respectively; other
 // read/write only if the directory grants others the same. A violation is
@@ -167,7 +167,7 @@ absl::Status CheckNoMoreAccessThanRoot(const std::string &path,
 // the main file's mode, already fixed up by the time SQLite opens it).
 //
 // Existing files must also pass CheckNoMoreAccessThanRoot against
-// `backing_root` (the --source root directory's stat), else startup is
+// `backing_root` (the SOURCE root directory's stat), else startup is
 // refused.
 //
 // An existing file passing that but not mode 0600 -- a cache
@@ -332,9 +332,9 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   // of directories a reader cannot list -- so its directory must not be
   // readable by anyone but root. Create a missing one 0700; warn (but still
   // start) about an existing one that is group- or world-accessible. Done
-  // with plain path-based calls, like the --cache_db open just below: this
-  // is the one place dcfs still deals in a path for something other than
-  // --source.
+  // with plain path-based calls, like the cache database's open just below:
+  // this is the one place dcfs still deals in a path for something other
+  // than SOURCE.
   {
     size_t slash = cache_db.find_last_of('/');
     if (slash != std::string::npos) {
@@ -425,7 +425,7 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   ASSIGN_OR_RETURN(RootIdentity root, backing::ProbeRoot(ctx, *source_fd));
   RETURN_IF_ERROR(Migrate(db, root));
   // backing::InitRoot() also refuses a cache database built for a different
-  // filesystem, but can't be given a --cache_db path or an actionable
+  // filesystem, but can't be given the cache database's path or an actionable
   // suggestion to put in its error (it only sees fds, not flags); do that
   // check here instead, before InitRoot, so the message names both.
   ASSIGN_OR_RETURN(DeviceId stored_device, GetSourceDeviceId(db));
@@ -437,7 +437,7 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
            << "; delete the database to start a cold cache";
   }
   // Nor one built for another directory on the same filesystem (audit-crash
-  // F4): --source pointed elsewhere, or the source directory replaced while
+  // F4): SOURCE pointed elsewhere, or the source directory replaced while
   // dcfs was down. The root row keeps the backing identity it was created
   // with (Migrate seeds it from ProbeRoot; InitRoot adds the handle), and
   // reusing it would serve the old directory's cached tree -- whose handles

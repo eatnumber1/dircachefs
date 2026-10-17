@@ -440,13 +440,12 @@ TEST(CheckCacheDatabaseTest, ALinkIsNotFollowed) {
 // --- fsck.dcfs as a process: the programs it runs
 // ------------------------------
 //
-// FsckMain runs findmnt, blkid and the backing's fsck by the paths fsck(8)
-// would find them at. The guest has none of them, so each test puts a script
-// there (and takes it away).
+// FsckMain runs findmnt by the path fsck(8) would find it at. The guest has
+// none, so each test puts a script there (and takes it away).
 
-// Programs a test puts at the paths fsck.dcfs runs them from (findmnt, blkid
-// and the backing's fsck, which it finds by fixed paths), and takes away again
-// when the object goes. The test guest has none of them.
+// Programs a test puts at the paths fsck.dcfs runs them from (findmnt, which
+// it finds by a fixed path), and takes away again when the object goes. The
+// test guest has none of them.
 class StandInPrograms {
  public:
   StandInPrograms() = default;

@@ -177,7 +177,7 @@ run_pass() {
 # --- build the backing tree (before dcfs ever sees it) ---------------------
 
 mount /dev/vdb /src
-# "d" is for rename-boundary-refused/rename-exdev below: it must never be
+# "d" is for rename-boundary-refused/rename-into-boundary below: it must never be
 # listed through dcfs before vdc is mounted under it at runtime, and in
 # particular must not be touched by the warm-up run_pass below.
 mkdir -p /src/d

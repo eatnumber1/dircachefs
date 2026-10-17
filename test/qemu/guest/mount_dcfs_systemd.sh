@@ -433,9 +433,9 @@ EOF
 	# --- fsck through fsck(8), as the fstab's sixth field runs it (step 15.5) ---
 	# `fsck /data` runs fsck.dcfs on the device (found by the fstab line: its
 	# type, dcfs, names the checker), which finds the line's options through
-	# findmnt, runs fsck.ext4 on the device (blkid says the type) and checks the
-	# cache database. The statuses are fsck(8)'s. Flags after -- go to the
-	# checker (-p: e2fsck without a mode flag wants a terminal).
+	# findmnt, and checks the cache database. The statuses are fsck(8)'s.
+	# Flags after -- go to the checker (-p: e2fsck without a mode flag wants a
+	# terminal).
 	rm -f "$CACHE/data.db"
 	fsck /data -- -p >"$OUT" 2>&1
 	rc_f=$?

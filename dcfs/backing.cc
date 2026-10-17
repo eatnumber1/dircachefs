@@ -524,7 +524,7 @@ absl::StatusOr<ChildRecord> ProbeObject(int fd, std::string_view name,
 
 // Logs that `name` under `dir` is refused because it is a mount point or
 // subvolume boundary -- see amendment 12 in the plan and the README's
-// Limitations: dcfs requires one backing filesystem below --source, since
+// Limitations: dcfs requires one backing filesystem below SOURCE, since
 // one st_dev is what makes backing inode numbers (st_ino, shown to users
 // unchanged) unambiguous. No de-duplication: once `dir` is fully populated
 // and the refusal is persisted (see PopulateDirectory/cache::SetRefused),
@@ -2094,7 +2094,7 @@ absl::Status StartupPurge(Context &ctx) {
   // it just forgets it, the same way an unmounted or replaced filesystem
   // used to be forgotten. (In the common case there is nothing to do here:
   // the startup check in main.cc already refuses to start at all if a real
-  // mount lies below --source, so a fresh database's filesystems table
+  // mount lies below SOURCE, so a fresh database's filesystems table
   // holds only the source row.) Each purge can cascade to filesystems that
   // were mounted beneath the one just purged, so the list is re-read after
   // every purge.

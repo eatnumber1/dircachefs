@@ -50,7 +50,7 @@ class DirCacheFS : private events::Bookkeeping {
     absl::Duration entry_timeout = absl::Hours(1);
 
     // The value of a "-o max_read=N" mount option, if the caller passed
-    // one via --fuse_opt. libfuse's fuse_apply_conn_info_opts() does not
+    // one via dcfs.fuse_opt. libfuse's fuse_apply_conn_info_opts() does not
     // cover max_read (unlike max_write/max_readahead/etc.), and
     // fuse_session_new() never populates conn.max_read itself -- it stays
     // zero-initialized until Init() sets it. do_init() then requires it to
@@ -367,7 +367,7 @@ class DirCacheFS : private events::Bookkeeping {
   // Once a mutation's backing change has happened (phase 2 succeeded), a
   // failure of its bookkeeping must not be replied as the operation
   // failing (audit-races F7): the caller would believe nothing happened,
-  // and the kernel would keep its old dentries. Logs `status` at WARNING
+  // and the kernel would keep its old dentries. Logs `status` at ERROR
   // if it is an error; what was not recorded stays unknown (phase 1).
   void LogPhase3Failure(std::string_view op, const absl::Status &status);
 
@@ -427,7 +427,7 @@ class DirCacheFS : private events::Bookkeeping {
 
   // Phase 3 for writes made through the shared backing fd `fd` of `id`
   // (Flush/Fsync/Release): backing::RefreshAttrsFromFd. A failure is logged
-  // at WARNING and the attributes are left (re-marked) unknown, never
+  // at ERROR and the attributes are left (re-marked) unknown, never
   // returned: none of those ops may skip its bookkeeping, or fail the
   // caller's close(2)/fsync(2), over a cache refresh. `op` names the caller
   // in the log line.
@@ -435,7 +435,7 @@ class DirCacheFS : private events::Bookkeeping {
 
   // Phase 3 for the side-effect xattrs `names` of a mutation of `id` (see
   // XattrsChangedBySetattr in dir_cache_fs.cc): backing::RefreshXattr of
-  // each, through `fd` if given. A failure is logged at WARNING and leaves
+  // each, through `fd` if given. A failure is logged at ERROR and leaves
   // that name unknown (phase 1's state), never failing the op, whose
   // backing change already happened. `op` names the caller in the log line.
   void ResolveSideEffectXattrs(InodeId id,

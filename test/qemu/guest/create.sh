@@ -139,7 +139,7 @@ run_pass() {
 
 mount /dev/vdb /src
 FSTYPE=$(backing_fstype "$SRC")
-# "d" is for mkdir-boundary-refused/link-exdev below: it must never be
+# "d" is for mkdir-boundary-refused/link-into-boundary below: it must never be
 # listed through dcfs before vdc is mounted under it at runtime.
 mkdir -p /src/d
 # "d2" is for btrfs-subvol-boundary-refused below (btrfs only): same
@@ -293,7 +293,7 @@ else
 	fail link "ln failed"
 fi
 
-# --- mkdir-boundary-refused / link-exdev: create-family ops refused by a --
+# --- mkdir-boundary-refused / link-into-boundary: create-family ops refused --
 # --- mount/subvolume boundary discovered at runtime (amendment 12) --------
 #
 # vdc is mounted below the source (under "d", never listed through dcfs

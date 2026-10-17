@@ -639,7 +639,7 @@ if [ -n "$SYSTEMD_ROOT" ]; then
 fi
 
 # qemu_test's optional rootfs= attribute (test/qemu/qemu_test.bzl) attaches
-# a Debian rootfs image (test/qemu/scripts/mkrootfs-debian.sh) as an extra
+# a Debian rootfs image (third_party/debian/scripts/mkrootfs.py) as an extra
 # virtio-blk disk and names it here. When present, run guest_script chrooted
 # into that Debian tree instead of directly from the initramfs, so it has
 # GNU userspace and nfs-utils (rpc.nfsd/rpc.mountd/exportfs/mount.nfs4)

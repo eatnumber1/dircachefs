@@ -2044,7 +2044,7 @@ absl::Status DirCacheFS::Release(FuseRequest &req, fuse_ino_t ino,
 
   // Row lifetime (see SettleUnlinkedFile): the last dcfs open of a file
   // whose last link is gone takes the row with it. A row whose attributes
-  // are current has nlink > 0 (backing::RecordAttrs never marks nlink 0
+  // are current has nlink > 0 (backing::WriteAttrs never marks nlink 0
   // current), so only an unknown one needs a look: its attributes are
   // refreshed from the still-open fd, and the row deleted if that fresh
   // statx says nlink 0. If the refresh fails the row is kept (a later

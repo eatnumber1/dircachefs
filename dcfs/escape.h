@@ -35,8 +35,8 @@ bool AppendUnescapedBytes(std::string_view escaped, std::string &out);
 
 // Phase 15 plugs in next to these: mountinfo, fstab and exports(5) text use
 // octal escapes ("\040" for a space), which is a different format from the
-// above and gets its own pair of functions here, not a mode of these. They do
-// not exist yet.
+// above and gets its own functions, not a mode of these. The mountinfo
+// unescape is UnescapeMountinfoPath in mounts_below.h.
 
 }  // namespace dcfs
 
