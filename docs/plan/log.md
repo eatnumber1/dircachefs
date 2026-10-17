@@ -3730,3 +3730,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   instructions-retired investigation) and dispatched (lane-4).
 - 2026-10-17, russ adopts HANDLE_KILLPRIV_V2 ("LGTM to adopting
   killpriv_v2"). 17.2e briefed and dispatched (lane-3, dcfs-protocol).
+- 2026-10-17, russ on style question 1 (CHECK_OK vs ASSERT_THAT(..., IsOk())
+  for test setup): "I'll agree with the reviewer that it's a matter of
+  taste. My rule about CHECK_OK for infrastructure was meant to be a
+  rule-of-thumb rather than a firm ruling." To land in docs/style.md 1.6
+  item 6 and 1.6b with the other style answers: CHECK_OK for setup is the
+  rule of thumb; ASSERT_THAT(..., IsOk()) on a setup line is also fine;
+  reviewers do not flag either and nothing is converted for it.
