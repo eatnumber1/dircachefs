@@ -3688,3 +3688,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   clang-tidy never analyses header-only libraries after the first in a
   package (25.31). Style review, two fix rounds; style gate rerun after the
   rebase.
+
+- 2026-10-17: 25.31 merged: style_findings_here deduplicated targets by
+  str(srcs), so every header-only library (srcs = None) after the first in
+  a package was skipped; 11 of 14 were never analysed by clang-tidy,
+  ret_check.h among them. The key is now srcs, or the hdrs for a
+  header-only library. Six new misc-include-cleaner findings, all fixed in
+  the code (no NOLINT, no allowlist line). The newly analysed headers add
+  report-only pointer_without_nullability findings. One style review.
