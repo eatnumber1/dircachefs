@@ -3902,3 +3902,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   invalidation interaction with the kernel needs to be part of the formal
   model." 12.20 queued (the kernel's caches, expiry and invalidations in
   the model, with a property over any timeout).
+- 2026-10-17, kernel-cache inventory done (Flash listed 38, Argon checked
+  them against fs/fuse, spot-checked): 29 handled by the kernel's own FUSE
+  code, 7 out-of-band, 2 real (ctime after FS_IOC_SETFLAGS, stale up to
+  attr_timeout; MAP_SHARED stores after close, stale until eviction).
+  notes/kernel-cache-invalidation-2026-10-17.md; 12.20's input.

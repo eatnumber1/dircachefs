@@ -649,9 +649,11 @@ expires or dcfs invalidates them.
   infinite one, given the invalidations dcfs makes; a change with no
   invalidation is a counterexample whose length shows the staleness it
   causes. A `known_bugs/` variant drops one invalidation.
-- **Input:** the Gemini Flash inventory of such places (2026-10-17,
-  verified by the orchestrator), which also decides 26.39's attr/entry
-  default.
+- **Input:** `notes/kernel-cache-invalidation-2026-10-17.md`: of 38
+  candidate places, the kernel's own FUSE code covers 29, 7 are
+  out-of-band, and 2 are real (ctime after FS_IOC_SETFLAGS; MAP_SHARED
+  stores after close). The model's kernel actions include what the kernel
+  invalidates on its own, so those 29 are not counterexamples.
 
 Owner: dcfs-protocol, after 25.28b and 22.5 (all three touch dcfs.tla).
 
