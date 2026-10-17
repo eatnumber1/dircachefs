@@ -8,6 +8,7 @@ directory, the lanes root, the agent definitions and /proc.
 import io
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 
@@ -37,16 +38,39 @@ class Fixture(unittest.TestCase):
                    "---\nbody\n")
         self.make_lane(1, "step-25.9b")
         self.make_lane(2, "main")
+        self.main_repo = os.path.join(root, "dircachefs")
+        os.makedirs(self.main_repo)
+        subprocess.check_call(
+            ["git", "init", "-q", "-b", "main"], cwd=self.main_repo)
+        subprocess.check_call(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=self.main_repo)
+        subprocess.check_call(
+            ["git", "config", "user.name", "test"], cwd=self.main_repo)
+        self.write(os.path.join(self.main_repo, "README.md"), "hello\n")
+        subprocess.check_call(["git", "add", "."], cwd=self.main_repo)
+        subprocess.check_call(
+            ["git", "commit", "-q", "-m", "init"], cwd=self.main_repo)
         self.env = dashboard_lanes.Env(
             dashboard_dir=self.dash,
             lanes_root=self.lanes,
             agents_dir=self.agents,
             proc_root=self.proc,
+            main_repo=self.main_repo,
         )
 
     def write(self, path, text):
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(text)
+
+    def commit_file(self, relpath, text):
+        full = os.path.join(self.main_repo, relpath)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        self.write(full, text)
+        subprocess.check_call(["git", "add", relpath], cwd=self.main_repo)
+        subprocess.check_call(
+            ["git", "commit", "-q", "-m", "add %s" % relpath],
+            cwd=self.main_repo)
 
     def make_lane(self, n, branch):
         lane = os.path.join(self.lanes, "lane-%d" % n)
@@ -76,8 +100,14 @@ class Fixture(unittest.TestCase):
         return out.getvalue(), err.getvalue()
 
     def rows(self):
-        with open(os.path.join(self.dash, "lanes.json")) as f:
+        with open(os.path.join(self.dash, "lanes.json"),
+                  encoding="utf-8") as f:
             return {r["lane"]: r for r in json.load(f)}
+
+    def sloc_rows(self):
+        with open(os.path.join(self.dash, "sloc.json"),
+                  encoding="utf-8") as f:
+            return json.load(f)
 
     def launch(self, agent_id="a1", status="async_launched", **extra):
         prompt = extra.pop("prompt", "in ~/Sources/dircachefs-lanes/lane-2")
@@ -514,6 +544,243 @@ class EnvFromEnvironTest(unittest.TestCase):
         env = dashboard_lanes.Env.from_environ({"HOME": "/h"})
         self.assertEqual(env.dashboard_dir, "/h/.cache/dcfs-dashboard")
         self.assertEqual(env.lanes_root, "/h/Sources/dircachefs-lanes")
+
+    def test_main_repo_from_environment(self):
+        env = dashboard_lanes.Env.from_environ({"DCFS_MAIN_REPO": "/repo"})
+        self.assertEqual(env.main_repo, "/repo")
+
+
+class CountingRulesTest(unittest.TestCase):
+
+    def count(self, text, lang):
+        return dashboard_lanes.count_sloc(text.splitlines(), lang)
+
+    def test_cpp_counting(self):
+        src = (
+            "// comment only\n"
+            "\n"
+            "/* block comment\n"
+            "   still block\n"
+            "*/\n"
+            "int a = 1;\n"
+            "int b = 2; // inline comment\n"
+            "/* single line block */\n"
+            "int c = 3; /* inline block */\n"
+        )
+        self.assertEqual(self.count(src, "C++"), 3)
+
+    def test_c_counting(self):
+        src = (
+            "/* header block */\n"
+            "#include <stdio.h>\n"
+            "// line comment\n"
+            "int main(void) {\n"
+            "    return 0;\n"
+            "}\n"
+        )
+        self.assertEqual(self.count(src, "C"), 4)
+
+    def test_clang_query_counting(self):
+        src = (
+            "// A matcher\n"
+            "match varDecl().bind(\"v\")\n"
+            "/* block comment */\n"
+        )
+        self.assertEqual(self.count(src, "clang-query"), 1)
+
+    def test_tla_counting(self):
+        src = (
+            "\\* Line comment\n"
+            "(* Boxed comment\n"
+            "   more comment *)\n"
+            "---------------- MODULE test ----------------\n"
+            "EXTENDS Naturals\n"
+            "VARIABLE x\n"
+            "Init == x = 0\n"
+            "=============================================\n"
+        )
+        self.assertEqual(self.count(src, "TLA+"), 5)
+
+    def test_shell_counting(self):
+        src = (
+            "#!/bin/bash\n"
+            "# Comment line\n"
+            "\n"
+            "set -euo pipefail\n"
+            "echo 'hello' # inline comment\n"
+        )
+        self.assertEqual(self.count(src, "shell"), 2)
+
+    def test_python_counting(self):
+        src = (
+            "# License header\n"
+            "import os\n"
+            "\n"
+            "# Function doc\n"
+            "def foo():\n"
+            "    return 1\n"
+        )
+        self.assertEqual(self.count(src, "Python"), 3)
+
+    def test_starlark_counting(self):
+        src = (
+            "# BUILD file\n"
+            "load(\":r.bzl\", \"r\")\n"
+            "\n"
+            "r(name = \"x\")\n"
+        )
+        self.assertEqual(self.count(src, "Starlark"), 2)
+
+
+class AreaRulesTest(unittest.TestCase):
+
+    def classify(self, path):
+        return dashboard_lanes.classify_file(path)
+
+    def test_prod_area(self):
+        self.assertEqual(self.classify("dcfs/main.cc"), ("prod", "C++"))
+        self.assertEqual(self.classify("dcfs/backing.h"), ("prod", "C++"))
+        self.assertEqual(
+            self.classify("dcfs/BUILD.bazel"), ("prod", "Starlark")
+        )
+
+    def test_test_area(self):
+        self.assertEqual(
+            self.classify("dcfs/testonly/fake.cc"), ("test", "C++")
+        )
+        self.assertEqual(self.classify("dcfs/backing_test.cc"), ("test", "C++"))
+        self.assertEqual(
+            self.classify("dcfs/test_helper_test.h"), ("test", "C++")
+        )
+        self.assertEqual(
+            self.classify("dcfs/script_test.py"), ("test", "Python")
+        )
+        self.assertEqual(self.classify("dcfs/guest_test.sh"), ("test", "shell"))
+        self.assertEqual(
+            self.classify("test/qemu/guest/init"), ("test", "shell")
+        )
+        self.assertEqual(self.classify("test/qemu/run.sh"), ("test", "shell"))
+        self.assertEqual(
+            self.classify("test/qemu/BUILD.bazel"), ("test", "Starlark")
+        )
+
+    def test_model_area(self):
+        self.assertEqual(self.classify("formal/dcfs.tla"), ("model", "TLA+"))
+        self.assertEqual(
+            self.classify("formal/BUILD.bazel"), ("model", "Starlark")
+        )
+
+    def test_tools_area(self):
+        self.assertEqual(
+            self.classify("tools/agents/dashboard_lanes.py"),
+            ("tools", "Python"),
+        )
+        self.assertEqual(self.classify("bench/bench.cc"), ("tools", "C++"))
+        self.assertEqual(
+            self.classify("tools/style_matchers/rule.query"),
+            ("tools", "clang-query"),
+        )
+        self.assertEqual(self.classify("tools/testutil.c"), ("tools", "C"))
+
+    def test_skipped_files(self):
+        self.assertEqual(self.classify("README.md"), ("tools", None))
+        self.assertEqual(self.classify("dcfs/doc.txt"), ("prod", None))
+        self.assertEqual(self.classify("MODULE.bazel.lock"), ("tools", None))
+
+
+class HeadChangeTriggerTest(Fixture):
+
+    def test_sloc_regenerated_when_head_changes(self):
+        self.commit_file("dcfs/foo.cc", "int x = 1;\n")
+        self.run_hook("stop", {"stop_hook_active": False})
+        rows1 = self.sloc_rows()
+        prod_row1 = next(
+            r for r in rows1 if r["area"] == "prod" and r["language"] == "C++"
+        )
+        self.assertEqual(prod_row1["sloc"], 1)
+
+        # Stop again without commits: does not regenerate, sloc unchanged.
+        self.run_hook("stop", {"stop_hook_active": False})
+        self.assertEqual(self.sloc_rows(), rows1)
+
+        # Add commit changing main HEAD: stop regenerates with new count.
+        self.commit_file("dcfs/foo.cc", "int x = 1;\nint y = 2;\n")
+        self.run_hook("stop", {"stop_hook_active": False})
+        rows2 = self.sloc_rows()
+        prod_row2 = next(
+            r for r in rows2 if r["area"] == "prod" and r["language"] == "C++"
+        )
+        self.assertEqual(prod_row2["sloc"], 2)
+
+    def test_sloc_rows_order_and_format(self):
+        self.commit_file("dcfs/a.cc", "int a = 1;\nint b = 2;\n")
+        self.commit_file("dcfs/BUILD.bazel", "# comment\ncall()\n")
+        self.commit_file("test/t.sh", "echo 1\necho 2\necho 3\n")
+        self.commit_file("formal/m.tla", "Init == TRUE\n")
+        self.commit_file("tools/s.py", "x = 1\n")
+        self.run_hook("stop", {"stop_hook_active": False})
+        rows = self.sloc_rows()
+        for r in rows:
+            self.assertEqual(set(r.keys()), {"area", "language", "sloc"})
+
+        # The last 4 rows must be the 'all' rows in order.
+        all_rows = rows[-4:]
+        self.assertEqual(
+            [r["area"] for r in all_rows],
+            ["prod", "test", "model", "tools"],
+        )
+        self.assertEqual({r["language"] for r in all_rows}, {"all"})
+
+        # Detail rows grouped by area in order: prod, test, model, tools.
+        detail_rows = rows[:-4]
+        seen_areas = []
+        for r in detail_rows:
+            if not seen_areas or seen_areas[-1] != r["area"]:
+                seen_areas.append(r["area"])
+        self.assertEqual(seen_areas, ["prod", "test", "model", "tools"])
+
+        # In prod, C++ (2) comes before Starlark (1).
+        prod_langs = [
+            r["language"] for r in detail_rows if r["area"] == "prod"
+        ]
+        self.assertEqual(prod_langs, ["C++", "Starlark"])
+
+
+class StopMessageTest(Fixture):
+
+    def test_stop_message_includes_sloc_and_lanes(self):
+        # Initial stop with both lanes and sloc changed.
+        self.commit_file("dcfs/foo.cc", "int x = 1;\n")
+        out, _ = self.run_hook("stop", {"stop_hook_active": False})
+        decision = json.loads(out)
+        self.assertEqual(decision["decision"], "block")
+        reason = decision["reason"]
+        self.assertIn("lanes.json", reason)
+        self.assertIn("sloc.json", reason)
+        self.assertIn("Dashboard lanes and sloc changed: upload", reason)
+
+        # Mark uploaded clears both.
+        self.run_hook("mark-uploaded", {})
+        out, _ = self.run_hook("stop", {"stop_hook_active": False})
+        self.assertEqual(out, "")
+
+        # When only lanes changed (sloc unchanged).
+        self.launch()
+        out, _ = self.run_hook("stop", {"stop_hook_active": False})
+        decision = json.loads(out)
+        self.assertEqual(decision["decision"], "block")
+        self.assertIn("lanes.json", decision["reason"])
+        self.assertNotIn("sloc.json", decision["reason"])
+        self.run_hook("mark-uploaded", {})
+
+        # When only sloc changed (lanes unchanged).
+        self.commit_file("dcfs/foo.cc", "int x = 1;\nint y = 2;\n")
+        out, _ = self.run_hook("stop", {"stop_hook_active": False})
+        decision = json.loads(out)
+        self.assertEqual(decision["decision"], "block")
+        self.assertIn("sloc.json", decision["reason"])
+        self.assertNotIn("lanes.json", decision["reason"])
+        self.assertIn("Dashboard sloc changed: upload", decision["reason"])
 
 
 if __name__ == "__main__":

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Keep the lanes table of the private dashboard current from hooks.
+"""Keep the lanes table and code size panel of the dashboard current.
 
 Claude Code hooks call this tool with the hook's JSON on stdin; it records
-which subagents run on which lane, writes the lanes table to a file, and
-tells the orchestrator when that file differs from the last uploaded copy.
-It is driven by events only: no timers, no polling. See README.md in this
-directory for the hook configuration.
+which subagents run on which lane, computes code size (SLOC) over the main
+checkout, writes the dashboard files, and tells the orchestrator when they
+differ from the last uploaded copies. It is driven by events only: no timers,
+no polling. See README.md in this directory for the hook configuration.
 
     dashboard_lanes.py post-agent      PostToolUse hook, matcher "Agent"
     dashboard_lanes.py post-message    PostToolUse hook, matcher "SendMessage"
@@ -16,8 +16,9 @@ directory for the hook configuration.
     dashboard_lanes.py show            print the lanes file
 
 State lives in $DCFS_DASHBOARD_DIR (default ~/.cache/dcfs-dashboard):
-running.json, finished.json, lanes.json, uploaded.sha256, and an optional
-config.json with "model" and "effort" for the orchestrator row.
+running.json, finished.json, lanes.json, uploaded.sha256, sloc.json,
+sloc.head, sloc.uploaded.sha256, and an optional config.json with "model"
+and "effort" for the orchestrator row.
 """
 
 import dataclasses
@@ -26,6 +27,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 
@@ -33,6 +35,8 @@ LANE_IN_PROMPT = re.compile(r"dircachefs-lanes/lane-(\d+)")
 LANE_DIR = re.compile(r"lane-(\d+)$")
 EFFORT_SUFFIX = re.compile(r"(.+)-(low|medium|high)$")
 FINISHED_KEPT = 50
+TEST_FILE = re.compile(r"_test\.(cc|h|py|sh)$")
+SLOC_AREAS = ["prod", "test", "model", "tools"]
 
 
 @dataclasses.dataclass
@@ -41,6 +45,7 @@ class Env:
     lanes_root: str
     agents_dir: str
     proc_root: str
+    main_repo: str = ""
 
     @classmethod
     def from_environ(cls, environ):
@@ -55,6 +60,13 @@ class Env:
                 environ.get("CLAUDE_PROJECT_DIR", "."), ".claude", "agents"
             ),
             proc_root="/proc",
+            main_repo=environ.get(
+                "DCFS_MAIN_REPO",
+                environ.get(
+                    "DCFS_MAIN_CHECKOUT",
+                    os.path.join(home, "Sources", "dircachefs"),
+                ),
+            ),
         )
 
     def path(self, name):
@@ -62,7 +74,7 @@ class Env:
 
 
 def read_text(path):
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -71,13 +83,168 @@ def write_atomic(path, text):
     os.makedirs(directory, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=directory)
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
+
+
+def classify_file(path):
+    """Returns (area, language) or (area, None) if skipped."""
+    if path.startswith("dcfs/"):
+        if path.startswith("dcfs/testonly/") or TEST_FILE.search(path):
+            area = "test"
+        else:
+            area = "prod"
+    elif path.startswith("test/"):
+        area = "test"
+    elif path.startswith("formal/"):
+        area = "model"
+    else:
+        area = "tools"
+
+    base = os.path.basename(path)
+    if path.endswith((".cc", ".h")):
+        lang = "C++"
+    elif path.endswith(".c"):
+        lang = "C"
+    elif path.endswith(".sh") or path == "test/qemu/guest/init":
+        lang = "shell"
+    elif path.endswith(".py"):
+        lang = "Python"
+    elif (path.endswith(".bzl") or base == "BUILD"
+          or base.startswith("BUILD.") or base == "MODULE.bazel"):
+        lang = "Starlark"
+    elif path.endswith(".tla"):
+        lang = "TLA+"
+    elif path.endswith(".query"):
+        lang = "clang-query"
+    else:
+        lang = None
+
+    return area, lang
+
+
+def count_sloc(lines, lang):
+    """Counts non-blank, non-comment lines for the given language."""
+    if lang in ("C++", "C", "clang-query"):
+        line_comment, block_start, block_end = "//", "/*", "*/"
+    elif lang == "TLA+":
+        line_comment, block_start, block_end = r"\*", "(*", "*)"
+    else:
+        line_comment, block_start, block_end = "#", None, None
+
+    in_block = False
+    count = 0
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+        if in_block:
+            if block_end and block_end in s:
+                in_block = False
+            continue
+        if block_start and s.startswith(block_start):
+            if not block_end or block_end not in s:
+                in_block = True
+            continue
+        if s.startswith(line_comment):
+            continue
+        count += 1
+    return count
+
+
+def main_head(env):
+    """The HEAD commit hex of main_repo, or None."""
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=env.main_repo,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=True,
+        )
+        return res.stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def git_ls_files(repo_dir):
+    res = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=repo_dir,
+        stdout=subprocess.PIPE,
+        check=True,
+    )
+    return [f for f in res.stdout.decode("utf-8").split("\0") if f]
+
+
+def compute_sloc_rows(main_repo):
+    """Computes code size rows {"area", "language", "sloc"}."""
+    counts = {}
+    area_totals = {area: 0 for area in SLOC_AREAS}
+    for path in git_ls_files(main_repo):
+        area, lang = classify_file(path)
+        if not lang:
+            continue
+        full_path = os.path.join(main_repo, path)
+        try:
+            with open(full_path, encoding="utf-8", errors="replace") as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+        c = count_sloc(lines, lang)
+        counts[(area, lang)] = counts.get((area, lang), 0) + c
+        area_totals[area] += c
+
+    rows = []
+    for area in SLOC_AREAS:
+        area_langs = [
+            (lang, c)
+            for (a, lang), c in counts.items()
+            if a == area and c > 0
+        ]
+        area_langs.sort(key=lambda item: (-item[1], item[0]))
+        for lang, c in area_langs:
+            rows.append({"area": area, "language": lang, "sloc": c})
+
+    for area in SLOC_AREAS:
+        rows.append({
+            "area": area,
+            "language": "all",
+            "sloc": area_totals[area],
+        })
+    return rows
+
+
+def regenerate_sloc(env):
+    """Regenerates sloc.json if main HEAD changed. Returns True if changed."""
+    head = main_head(env)
+    recorded_head = None
+    if os.path.exists(env.path("sloc.head")):
+        recorded_head = read_text(env.path("sloc.head")).strip()
+
+    if head is not None and (
+        head != recorded_head or not os.path.exists(env.path("sloc.json"))
+    ):
+        rows = compute_sloc_rows(env.main_repo)
+        text = json.dumps(rows, indent=2) + "\n"
+        write_atomic(env.path("sloc.json"), text)
+        write_atomic(env.path("sloc.head"), head + "\n")
+
+    if not os.path.exists(env.path("sloc.json")):
+        return False
+    current_digest = hashlib.sha256(
+        read_text(env.path("sloc.json")).encode()
+    ).hexdigest()
+    uploaded = None
+    if os.path.exists(env.path("sloc.uploaded.sha256")):
+        uploaded = read_text(env.path("sloc.uploaded.sha256")).strip()
+    return current_digest != uploaded
 
 
 def load_json(path, default):
@@ -291,17 +458,45 @@ def stop(env, event):
     # loop.
     if "agent_id" in event or event.get("stop_hook_active"):
         return ""
-    if not regenerate(env):
+    lanes_changed = regenerate(env)
+    sloc_changed = regenerate_sloc(env)
+    if not lanes_changed and not sloc_changed:
         return ""
-    return json.dumps({"decision": "block", "reason": (
-        "Dashboard lanes changed: upload %s to the dashboard's lanes "
-        "dataset and run dashboard_lanes.py mark-uploaded."
-        % env.path("lanes.json"))})
+
+    if lanes_changed and sloc_changed:
+        reason = (
+            "Dashboard lanes and sloc changed: upload %s and %s and run "
+            "dashboard_lanes.py mark-uploaded."
+            % (env.path("lanes.json"), env.path("sloc.json"))
+        )
+    elif lanes_changed:
+        reason = (
+            "Dashboard lanes changed: upload %s to the dashboard's lanes "
+            "dataset and run dashboard_lanes.py mark-uploaded."
+            % env.path("lanes.json")
+        )
+    else:
+        reason = (
+            "Dashboard sloc changed: upload %s to the dashboard's sloc "
+            "dataset and run dashboard_lanes.py mark-uploaded."
+            % env.path("sloc.json")
+        )
+    return json.dumps({"decision": "block", "reason": reason})
 
 
 def mark_uploaded(env):
-    digest = hashlib.sha256(read_text(env.path("lanes.json")).encode())
-    write_atomic(env.path("uploaded.sha256"), digest.hexdigest() + "\n")
+    lanes_path = env.path("lanes.json")
+    sloc_path = env.path("sloc.json")
+    if not os.path.exists(lanes_path) and not os.path.exists(sloc_path):
+        raise FileNotFoundError("no dashboard files to mark uploaded")
+    if os.path.exists(lanes_path):
+        digest = hashlib.sha256(read_text(lanes_path).encode())
+        write_atomic(env.path("uploaded.sha256"), digest.hexdigest() + "\n")
+    if os.path.exists(sloc_path):
+        digest = hashlib.sha256(read_text(sloc_path).encode())
+        write_atomic(
+            env.path("sloc.uploaded.sha256"), digest.hexdigest() + "\n"
+        )
     return ""
 
 

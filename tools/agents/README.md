@@ -71,10 +71,11 @@ deadline.
 
 ## dashboard_lanes
 
-Keeps the "lanes" table of the private claude.ai dashboard current. Claude
-Code hooks call it with the hook's JSON on stdin; it records which subagents
-run on which lane, writes the table to `lanes.json`, and tells the
-orchestrator when that file differs from the last uploaded copy. It is driven
+Keeps the "lanes" table and "Code size" panel of the private claude.ai
+dashboard current. Claude Code hooks call it with the hook's JSON on stdin;
+it records which subagents run on which lane, computes code size (SLOC) over
+the main checkout, writes `lanes.json` and `sloc.json`, and tells the
+orchestrator when either file differs from the last uploaded copy. It is driven
 by events only: nothing polls and nothing runs on a timer.
 
 Subcommands (all read the hook JSON from stdin, all exit 0):
@@ -96,11 +97,13 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
 - `subagent-stop` (SubagentStop): removes the agent (keeping its record in
   `finished.json`, the most recent 50, so `post-message` can resume it),
   regenerates, prints nothing.
-- `stop` (the main session's Stop): regenerates; if the table changed since
-  the last upload it blocks with a reason naming the file, unless
-  `stop_hook_active` is true (no loops) or the caller is a subagent.
-- `mark-uploaded`: records the current file's sha256 as uploaded. The
-  orchestrator runs it after uploading.
+- `stop` (the main session's Stop): regenerates lanes and, when main's HEAD
+  differs from the last recorded HEAD, regenerates `sloc.json`; if either
+  file changed since the last upload it blocks with a reason naming the files,
+  unless `stop_hook_active` is true (no loops) or the caller is a subagent.
+- `mark-uploaded`: records the current files' sha256 checksums as uploaded
+  (`uploaded.sha256` and `sloc.uploaded.sha256`). The orchestrator runs it
+  after uploading.
 - `show`: prints the table.
 
 The table has an orchestrator row and one row per `lane-N` under
@@ -114,9 +117,26 @@ directory is the lane adds `agy, sandboxed` to those lists, with its `--model`
 (a trailing `-low|-medium|-high` moved to the effort column). A lane with an
 `agy` process and no agent shows just that. Otherwise the lane is `idle`.
 
+The code size panel counts non-blank, non-comment lines over `git ls-files`
+of the main checkout (`$DCFS_MAIN_REPO` or `~/Sources/dircachefs`), outputting
+`{"area", "language", "sloc"}` rows to `sloc.json`:
+- Areas: `prod` (`dcfs/` except `dcfs/testonly/` and `*_test.*`), `test`
+  (those exceptions plus `test/`), `model` (`formal/`), and `tools`
+  (everything else).
+- Languages by extension: `.cc`/`.h` (C++), `.c` (C), `.sh` and
+  `test/qemu/guest/init` (shell), `.py` (Python), `.bzl` and
+  `BUILD`/`BUILD.*`/`MODULE.bazel` (Starlark), `.tla` (TLA+), `.query`
+  (clang-query); other files are skipped.
+- Comments: `//` and `/* ... */` blocks for C, C++ and clang-query; `\*`
+  and `(* ... *)` blocks for TLA+; `#` for the rest.
+- Output order: areas `prod`, `test`, `model`, `tools`, each with languages
+  ordered by size descending, followed by four `all` summary rows for the
+  areas.
+
 State is in `$DCFS_DASHBOARD_DIR` (default `~/.cache/dcfs-dashboard/`):
-`running.json`, `finished.json`, `lanes.json`, `uploaded.sha256`, and an
-optional `config.json` (`{"model": ..., "effort": ...}`) for the orchestrator row.
+`running.json`, `finished.json`, `lanes.json`, `uploaded.sha256`, `sloc.json`,
+`sloc.head`, `sloc.uploaded.sha256`, and an optional `config.json`
+(`{"model": ..., "effort": ...}`) for the orchestrator row.
 A malformed input or an unreadable state file prints one line to stderr and
 exits 0, because a failing hook can wedge the session.
 
