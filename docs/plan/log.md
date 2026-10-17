@@ -4000,3 +4000,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   so we start getting data"). docs/plan/dispatch-ledger.tsv started,
   backfilled with today's 23 jobs; the hook and `ledger` command are on
   Gemini (lane-6).
+- 2026-10-17, dispatch-ledger hook merged (Gemini Flash): Agent
+  dispatches append a ledger row (model, effort), completions fill tokens
+  and duration, `dashboard_lanes.py ledger add|set` for agy jobs and the
+  outcome fields at merge. Two unpushed plan subjects ("26.41, 12.23:",
+  "12.21, 12.22:") failed the subject gate and were reworded before any
+  push (filter-branch over origin/main..main).
