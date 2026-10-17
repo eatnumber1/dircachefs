@@ -3492,3 +3492,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   man tests pass). Comment-only in code files. Left for implementer steps:
   the NativeMountError rename, the fsck test's stand-in programs, and the
   stale fail() strings in cache_permissions.sh.
+
+- 2026-10-17: 4.15 merged: docs/licenses.md is the licence inventory for
+  everything we use (8 components linked into dcfs; Bazel modules, other
+  downloads, 78 Alpine and 149 Debian packages, CI inputs), with licence
+  markings fixed (xfstests patch GPL-2.0-only, SPDX on four overlays, UAPI
+  copies marked GPL-2.0 WITH Linux-syscall-note) and README's licence now
+  MIT. One style review round. Open questions for russ are listed in the
+  doc; russ settled the first (a release binary needing system glibc and
+  libfuse; 7.9, parked late). The SPDX gate does not read BUILD overlays
+  or .patch files yet (noted in the doc).
