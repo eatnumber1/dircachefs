@@ -3728,3 +3728,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   runs, plus a PMU investigation; "in general for all our tests I'm
   interested in them being load-agnostic." 26.36 briefed (rule, audit,
   instructions-retired investigation) and dispatched (lane-4).
+- 2026-10-17, russ adopts HANDLE_KILLPRIV_V2 ("LGTM to adopting
+  killpriv_v2"). 17.2e briefed and dispatched (lane-3, dcfs-protocol).

@@ -109,7 +109,7 @@ xfstests lists updated only if a listed test changes outcome. No protocol
 change is expected (`BeginAttrChange` already marks the record unknown);
 if one appears, the model changes in the same step. Protocol agent.
 
-## 17.2c Passthrough writes cost a round trip each (lead, from the 2026-10-17 review of 17.2b; done 2026-10-17, 4fb95db: V2 recommended, waits on russ)
+## 17.2c Passthrough writes cost a round trip each (lead, from the 2026-10-17 review of 17.2b; done 2026-10-17, 4fb95db: V2 recommended, adopted as 17.2e)
 
 17.2b's `dcfs_bench` `Write` case measured 9.1 ms per MiB through
 passthrough against 0.14 ms on the backing (ext4 guest, 1 MiB in 64 KiB
@@ -134,6 +134,41 @@ NFS-exported in earnest. The same root cause, the request not carrying
 the caller's full credentials, leaves one 17.2b edge: a uid 0 caller
 without CAP_FSETID writing a setgid file outside its group keeps setgid
 through dcfs where the backing clears it. dcfs-protocol.
+
+## 17.2e Negotiate HANDLE_KILLPRIV_V2 (russ, 2026-10-17: "LGTM to adopting killpriv_v2")
+
+17.2c's option A (`docs/plan/notes/passthrough-write-cost-17.2c.md`,
+section 4A, which is the brief's detail). dcfs sets
+`FUSE_CAP_HANDLE_KILLPRIV_V2` in `DirCacheFS::Init` and takes over
+privilege removal: the kernel then keeps `SB_NOSEC` and stops sending a
+`GETXATTR security.capability` before every passthrough write.
+
+- **Failing first:** the six `setuid-*` cases in `guest/credentials.sh`
+  pass today and fail with V2 alone (a non-owner's passthrough write keeps
+  setuid). Show that, then fix.
+- **The rule:** the empty SETATTR (and `FATTR_KILL_SUIDGID`, which libfuse
+  hands over as `FUSE_SET_ATTR_KILL_SUID`) clears setuid as well as setgid
+  wherever a write by the caller would: any caller without `CAP_FSETID`
+  (`DirCacheFS::Setattr`, `backing::SetAttrFd`, `WriteClearsSetgid`
+  generalised). Handle `FUSE_WRITE_KILL_SUIDGID` on non-passthrough writes
+  and `FUSE_OPEN_KILL_SUIDGID` on an `O_TRUNC` open, each with a test.
+  The uid-0-without-CAP_FSETID limitation stays 17.2d's.
+- **Retire what V2 makes dead,** each removal shown by the tests still
+  passing: the 06666 passthrough decline in `PassthroughFor`, and
+  `RequestedMode`'s truncate bullet if the truncate now arrives as
+  `FATTR_KILL_SUIDGID`. Also `security.capability` must go on a write as
+  the kernel would drop it; test it.
+- **No V2, no passthrough:** V2 is protocol 7.33, passthrough 7.40, so
+  require V2 wherever dcfs takes passthrough and keep one path; say what
+  happens on a kernel without it (and test the refusal or fallback).
+- **Measure:** `//test/qemu:bench_write_test` request counts (GETXATTR per
+  write gone) and `dcfs_bench` `Write`/`SetidWrite` before and after; the
+  README performance table updated.
+- **Docs:** `docs/design.md` "Caller credentials", README,
+  `docs/plan/notes/kernel-patches.md` row 4. No model change is expected
+  (a setattr's phases do not change); say so in the report if that holds.
+
+Owner: dcfs-protocol, then an Opus review (identity and permissions).
 
 ## 17.3 Performance finding (done 2026-10-11, 313bff6)
 
