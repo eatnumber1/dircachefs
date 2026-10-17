@@ -389,7 +389,9 @@ itself. Protocol agent (the model changes), tests first for (2): a reader
 racing a writer sees ERANGE once. No behaviour change for (1) today, since one
 request runs at a time.
 
-**Signals (russ, 2026-10-17, added to 25.10):** dcfs's own signals never
+**Signals (russ, 2026-10-17, added to 25.10):** first confirm in the code
+what happens today to an EINTR a backing syscall returns (reported to the
+client? which handlers?). Then: dcfs's own signals never
 interrupt a backing syscall. The daemon blocks SIGHUP, SIGINT and SIGTERM
 from the start of `main` (before any thread) and reads them through a
 `signalfd` in `SessionLoop`, so shutdown happens between requests and a
