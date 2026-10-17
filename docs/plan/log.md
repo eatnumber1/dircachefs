@@ -3353,3 +3353,19 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the sync interval bound the cache's own durability lag, folded into the sync point, with the
   model's durability abstraction gaining the bound and a power-cut test. Order of the protocol
   queue: 15.11c (running, Sonnet), then 25.9b, then 25.28b, then 17.2b, then 14.10.
+- Gemini 4 Argon's read-only review of Gemini's other merges (sandboxed, lane-6; spent ~3% of
+  Argon's week) found: the coverage baseline 96.50/81.24 may no longer hold, since 8.5 moved the
+  newly covered formatting code from fuse_ops.cc into protocol_events.h, which the gate's *.cc
+  filter excludes (CI run 39000396656 will show it); ForkSplit's void-parent branch is test-only
+  code in production (25.9b removes it); the act README is stale after the cache mount; nfs.sh
+  keeps a `timeout 1 sleep 5` check whose purpose went with the removed timeouts; nothing sets
+  DCFS_PIN_NON_SMT=1 although the docs say the cost jobs do; style 1.9's examples come from another
+  codebase and use non-ASCII marks; 05-ci.md's 5.5 cites "open_tree namespace capture" as a 6.9
+  requirement; `sg kvm` forms remain in docs/conformance.md and formal/README.md; and Gemini's
+  568072c deleted the `7.2/7.4 merged` log entry (restored below). 26.29 (Haiku, lane-2) takes the
+  small fixes, plus the Claude usage reader into tools/agents/.
+- Restored (deleted by Gemini's 568072c): 7.2/7.4 merged: coverage builds with sanitizers active
+  (`coverage:asan`/`coverage:ubsan` configs); the commit also patched dcfs/fork_split.h, which
+  25.9b reverts.
+- Quota snapshot 2026-10-16 evening: Claude session 7%, week 2% (resets Oct 23 01:00 PT); Gemini
+  week 98%, Argon week 88% (Oct 24); agy Claude/GPT pool 0% until Oct 17 19:55 UTC.
