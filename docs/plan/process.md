@@ -107,12 +107,11 @@ process (its waves and file ownership table) is in `history.md`.
    `N4:` and a `12.5 review:` subject before this line existed). Then, in
    `~/Sources/dircachefs`: `git fetch
    ~/Sources/dircachefs-lanes/lane-K step-N.M` and `git merge --ff-only
-   FETCH_HEAD`. Update the status table, `log.md` and the top-level
-   `STATUS.md` (the public progress page: Now, Next, Waiting on the
-   maintainer, Recently landed; no quota or agent details) and commit
-   them. Then refresh russ's private dashboard, "dcfs Mission Control"
+   FETCH_HEAD`. Update the status table and `log.md` and commit them.
+   Then refresh russ's private dashboard, "dcfs Mission Control"
    (https://claude.ai/artifact/EVypNNcogbNcxzRjBYp8rK): rewrite its three
-   snapshot files (the steps in order as in `STATUS.md`, the quota
+   snapshot files (the steps in flight and queued, in the Queue's order,
+   the quota
    readings from "Quota management" below, `gh run list --limit 12`),
    upload each as an asset and point its dataset at the new file with a
    fresh `updated` time. Its datasets go stale after a day or two and

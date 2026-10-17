@@ -3400,3 +3400,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   96.50/81.24. mutation-changed failed only because its range starts at
   d215c09, a commit the force-push removed. 26.30 (investigator, lane-2)
   triages; the baseline is not lowered.
+
+- 2026-10-16: STATUS.md deleted (russ: "I meant delete STATUS.md entirely"),
+  with its rule in process.md step 6. The private dashboard stays and is
+  refreshed at every merge from the Queue.
