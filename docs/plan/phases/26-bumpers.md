@@ -1082,6 +1082,15 @@ start, or something?"
   dcfs already reads `vm.dirtytime_expire_seconds` for access times; the
   flag overrides it. A sync point then never forces the backing's
   writeback (syncfs) much sooner than the kernel would have.
+- **Following the sysctls while running** (russ, 2026-10-17: "Yes"): an
+  inotify watch on `/proc/sys/vm/dirty_expire_centisecs` and
+  `/proc/sys/vm/dirtytime_expire_seconds`, in the session loop beside
+  25.10's signalfd and 25.28c's timerfd; on `IN_MODIFY` dcfs rereads the
+  value and uses it from then on (unless the flag set the interval
+  explicitly). First, the failing-first guest test verifies the premise:
+  `sysctl -w` (a `write(2)` through `vfs_write`) raises `IN_MODIFY` on
+  procfs. If it does not, report it and keep the startup reading only.
+  A watch that cannot be added is logged once at INFO, not an error.
 - Test first: `--attr_timeout=90m` parses and reaches the FUSE replies;
   the old names are refused as unknown; the default sync interval follows
   a changed `vm.dirty_expire_centisecs` in the guest.
