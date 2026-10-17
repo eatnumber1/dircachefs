@@ -170,6 +170,32 @@ privilege removal: the kernel then keeps `SB_NOSEC` and stops sending a
 
 Owner: dcfs-protocol, then an Opus review (identity and permissions).
 
+## 17.2f Setuid and setgid, every case, against native (russ, 2026-10-17: "Yes"; after 17.2e)
+
+russ asked whether 17.2e's review showed completeness, not only
+soundness. It did not: credentials.sh is a hand-picked 233 checks. This
+step makes the space explicit and checks all of it differentially.
+
+- **The cross product:** operations (passthrough write, fallback write,
+  fallocate, copy_file_range, truncate, O_TRUNC open, chown/chgrp
+  including -1,-1, a shared-mapping write) x callers (owner, non-owner in
+  and out of the group, root with and without CAP_FSETID, a user-
+  namespaced root) x file states (setuid, setgid with and without group
+  execute, both, neither; with and without security.capability) x (held
+  open for writing or not) x (cache warm or cold), on ext4, xfs and btrfs.
+- **Native is the oracle:** each case runs on the backing directly and
+  through dcfs; mode, owner and xattrs must match. No hand-written
+  expectations.
+- **Known divergences are a table** (case pattern, reason, russ's
+  approval where it is a price); any other difference fails.
+- **The callers that need setup** (nfsd exporting the mount, overlayfs
+  over it, an io_uring writer) are small dedicated sets in the same
+  framework.
+- In C++ on 25.34's helpers (the no-new-shell rule), replacing
+  credentials.sh, every one of its current checks kept.
+
+Owner: dcfs-implementer (medium), then a review against the kernel's rules.
+
 ## 17.3 Performance finding (done 2026-10-11, 313bff6)
 
 29 metadata-heavy tests run 20-50x slower through dcfs (4-37 s natively,
