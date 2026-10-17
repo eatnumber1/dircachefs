@@ -988,9 +988,7 @@ and the xfstests shards are `large`/`enormous` (159 of the 597 tests are),
 which only `bazel test //...` in CI's `full` job runs after the push;
 `--config=presubmit` (the merge gate) is small and medium. The coverage gate
 runs in presubmit's tier but only in CI (`coverage.sh`). A merge that touches
-what a large test depends on is therefore first tested on origin. Guard to
-decide (not built here): a script, run by the orchestrator before a merge,
-that lists the large and enormous tests reachable from the branch's changed
-files (`bazel query 'attr(size, "large|enormous", rdeps(//..., <files>))'`
-filtered to `tests(...)`) and runs them, and the candidate-commit script of
-process.md's push points.
+what a large test depends on is therefore first tested on origin. A
+pre-push run of the large tests a change reaches was proposed and declined
+(russ, 2026-10-17: "No. Until we ship, a red CI is not a problem."): CI is
+where the large tier runs, and its failures are fixed forward.
