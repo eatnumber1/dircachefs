@@ -3939,3 +3939,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 2026-10-17, 26.37b merged (d0c51c8, Gemini Flash): the 26.37 review's fixes
   (a cost test that fails on the old budget file, a matcher, history out
   of comments). Reviewed by the orchestrator.
+- 2026-10-17, russ refines 25.33: "there's three types of messages: 1. I
+  succeeded in doing the thing 2. I failed in doing the thing 3. The
+  infrastructure underneath me failed ... It's really 3 where the full
+  debugging payload for a Status comes into play. ... finding a corrupt
+  database is fsck working, not failing. So `.ToString()` or even
+  `.message()` is appropriate (assuming Status is warranted at all)."
+  The provisional ToString() ruling is replaced; a follow-up classifies
+  25.33's changed lines (dashboard Q-2026-10-17-14 for the mechanism).
