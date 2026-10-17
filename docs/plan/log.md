@@ -3741,3 +3741,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   comments): B. To land in docs/style.md 1.9 / section 2: "A test comment
   does not start with its step number; the test name states the behavior
   and the commit names the step." Existing prefixes go when touched.
+- 2026-10-17, russ on style question 3: always include the Status, whole
+  (AbslStringify), never `.message()`; dropping one suppresses the root
+  cause. 25.33 briefed (rule, sweep of 19 production `.message()` uses, a
+  mechanical check, a dropped-status matcher) and dispatched (lane-5).

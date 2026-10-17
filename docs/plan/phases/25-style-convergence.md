@@ -1066,3 +1066,35 @@ every header-only library's headers are analysed. The findings it then
 surfaces cannot go on the allowlist (25.30): each is fixed, or becomes a
 NOLINT naming its check with its reason. Show the count of new findings
 before fixing. Implementer, mechanical for a large batch of fixes.
+
+## 25.33 A Status is never dropped from a message (russ, 2026-10-17)
+
+russ, on style question 3 (bench diagnostics): "*ALWAYS* include the Status
+if you have one in the message. Dropping a Status without logging or
+returning it silently suppresses the root cause of errors! Also an aside:
+Status implements AbslStringify. So it should be `StrCat("open ", path,
+": ", status)`."
+
+- **The rule, in `docs/style.md` 1.6/1.7:** a failed `Status` that is not
+  returned is logged or put into the message that replaces it, whole:
+  `StrCat(what, ": ", status)` or `LOG(...) << status`, never
+  `status.message()`, which drops the code and the errno payload. Bench
+  diagnostics (`SkipWithError`), fsck findings, test helpers and tools
+  included.
+- **The sweep:** every `.message()` of a `Status` in `dcfs/`, `bench/` and
+  `tools/` (19 in production files on 2026-10-17: `bench/dcfs_bench.cc`,
+  `dcfs/backing.cc`, `dcfs/fsck.cc`, `dcfs/testonly/invariant_checker.cc`)
+  and in tests. Where a user-facing line changes (fsck's usage and
+  findings now print the code), update its tests and README text, and list
+  every changed line in the report for russ.
+- **Mechanical check:** `tools/repo_shape.py` (or a clang-query matcher in
+  `tools/style_matchers/`, whichever is exact) refuses `.message()` on an
+  `absl::Status`/`StatusOr` in those directories, with no allowlist unless
+  russ approves an entry. With its unit test.
+- **Dropped statuses:** investigate a matcher for a `Status` whose failure
+  branch neither returns, logs nor stringifies it (e.g. `if (!s.ok())
+  return false;`, `SkipWithError("failed")`). Build it if it is exact
+  enough to run with no allowlist; otherwise list what it finds, fix those
+  sites, and report the design.
+
+Owner: dcfs-implementer; a style review before merge.
