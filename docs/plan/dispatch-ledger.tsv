@@ -22,3 +22,4 @@ bf-g-inval	2026-10-17	26.39	investigation	agy	gemini-3.8-flash	medium								use
 bf-g-inval-verify	2026-10-17	26.39	review	agy	gemini-4-argon	medium								useful	classified 38; citations spot-checked correct
 bf-g-budgets	2026-10-17	26.41	investigation	agy	gemini-3.8-flash	high								useful	hashes real; GitHub links invented
 bf-agy-opus-25.34	2026-10-17	25.34	review	agy	claude-opus-5-5	high								failed	quota exhausted before any output (56% of agy's Claude week)
+bf-22.5-rev	2026-10-17	22.5	review	dcfs-reviewer	claude-opus-5-5	high	136018	493		1	4	5		useful	found B1 (bound blind to 6 of 7 checkpoints) and a third code finding (readdir refreshes); high was enough
