@@ -1003,3 +1003,30 @@ Connection::Checkpoint go, and its test-only out-parameters and unused
 modes with them. Cancellation: the flush is a backing-free step but sits
 at a request boundary; keep it off the request path (the sync point's own
 place) so no user request waits on it.
+
+## 25.29 A pinned local copy of Google's style guides for reviewers (russ, 2026-10-17)
+
+`docs/style.md` extends Google's C++, Python, Shell and Markdown guides but
+only links them online: the style reviewer's definition never mentions them,
+and Gemini's sandbox has no network. russ chose a pin over a live fetch: the
+guide changes slowly, a bump shows its changes as a diff, and reviews stay
+reproducible and offline.
+
+1. Fetch github.com/google/styleguide at a commit with `http_archive` and a
+   sha256 (third_party/google_styleguide/: BUILD overlay, README with the
+   update procedure and the licence: CC-BY-3.0, verify from the archive).
+2. Render cppguide.html, pyguide.md, shellguide.md and docguide/style.md to
+   Markdown with the pinned pandoc as Bazel targets, plus one target that
+   puts them in a stable place reviewers can read
+   (`bazel build //third_party/google_styleguide:guides`, outputs listed in
+   the README).
+3. A small test that the rendered guides contain a few known section
+   headings, so a bad render or an upstream move fails loudly.
+4. docs/style.md cites the local copies next to the links; the style
+   reviewer, reviewer, implementer and protocol agent definitions say where
+   the local copy is and to read the relevant section rather than rely on
+   memory; process.md's Gemini prompts point at it.
+5. docs/licenses.md gets the row. The pin is bumped with the other pins
+   (no timer), and a bump's diff of the guides is read for new rules.
+
+Implementer, medium effort.
