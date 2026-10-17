@@ -3293,3 +3293,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   docs/plan/notes/ (russ's capture-everything rule). Open for russ: process.md's review step names
   a `dcfs-code-reviewer` agent that exists only in Gemini's harness (no .claude/agents file);
   tools/agent_watchdog.py reads Gemini's transcript directory and has no use in this harness.
+- russ: the 2026-10-12 pre-commit reviewer was meant to catch comment and style problems on every
+  step. Implemented by widening dcfs-style-reviewer to every step's diff (Sonnet; Opus for
+  judgement-heavy reshaping), not a new agent; process.md step 5, CLAUDE.md's table and the agent
+  definition updated; the phantom dcfs-code-reviewer reference gone.

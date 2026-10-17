@@ -56,10 +56,12 @@ process (its waves and file ownership table) is in `history.md`.
 4. **Report.** The agent ends with: a diff summary, the test commands it
    ran with results (including the failing-first run), coverage of the
    code it added (from Phase 7), and any deviation from the plan.
-5. **Review** (dedicated reviewer subagent `dcfs-code-reviewer` plus
-   orchestrator, in the lane): before any code is committed, the full diff
-   is reviewed by the dedicated Code Reviewer subagent (`dcfs-code-reviewer`),
-   which enforces `AGENTS.md`, `docs/style.md` (including section 1.9's
+5. **Review** (the `dcfs-style-reviewer` subagent plus the orchestrator,
+   in the lane; and the Opus `dcfs-reviewer` too for protocol, identity
+   and oracle steps): before a step merges, its full diff is reviewed by
+   `dcfs-style-reviewer` (russ, 2026-10-16: the per-step review he asked
+   for on 2026-10-12; `dcfs-code-reviewer` existed only in the temporary
+   orchestrator's harness), which enforces `AGENTS.md`, `docs/style.md` (including section 1.9's
    Comments & Documentation Standards), Abseil Tips of the Week, and the
    project invariants before giving an APPROVAL. The orchestrator runs the
    step's tests and the tier russ expects for the phase (see "Running tests").
