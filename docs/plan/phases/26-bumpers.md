@@ -1073,7 +1073,8 @@ start, or something?"
   (zero, negative, `inf`). README's option table, the man page, the mount
   helper's pass-through, the guest scripts and fstab fixtures that set the
   old names, and their tests.
-- Defaults, provisional (the dashboard's questions table): attr and entry
+- Defaults: `sync_interval` from the kernel, approved (russ: "Do it.").
+  Attr and entry, pending an inventory (the dashboard's questions table):
   stay 1h (all changes go through the mount, so the kernel's caches stay
   right; shorter only costs round trips). `sync_interval` defaults to the
   kernel's `vm.dirty_expire_centisecs` read at start (30 s on a stock

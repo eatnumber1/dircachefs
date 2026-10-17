@@ -3892,3 +3892,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (`--attr_timeout=1h`), and asks whether 3600/3600/5 are the right
   defaults. 26.39 queued after 25.28b; provisional defaults (1h, 1h, the
   kernel's vm.dirty_expire_centisecs at start) on the dashboard.
+- 2026-10-17, russ approves the sync interval default from the kernel's
+  vm.dirty_expire_centisecs ("Do it."); 26.39 carries it. The attr/entry
+  default is open: no kernel default exists; an inventory of changes dcfs
+  makes behind the kernel's back (and whether it invalidates) is proposed
+  before choosing between an effectively infinite timeout and a bound.
