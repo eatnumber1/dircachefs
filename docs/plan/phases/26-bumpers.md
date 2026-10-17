@@ -930,7 +930,7 @@ everything after it never ran. Nothing checks guest scripts' syntax.
 
 Implementer.
 
-## 26.34 Load-sensitive tests (triage, from the 2026-10-17 log)
+## 26.34 Load-sensitive tests (triage, from the 2026-10-17 log) (merged 2026-10-17, 6aa8df5)
 
 Tests seen failing under host load and passing on rerun, each before the
 change that hit it: fault_backing_test (I/O budget), enospc_cache_test
@@ -944,6 +944,17 @@ count what is deterministic, or make the budget robust by measuring the
 right quantity. Never widen a budget or add a retry to make it pass
 (AGENTS.md; no retry loops). A real dcfs race found this way is a result,
 not a nuisance. Investigator.
+
+Outcome: enospc_cache lists with `testutil readdir-ino` (busybox `ls`
+hid a getdents ENOSPC as an empty listing); `reads` and `writes` in
+`io_budgets.txt` count requests issued (completed plus merged), and the
+re-measured counts no longer move with load. Follow-ups:
+- xfstests_1_test_ext4's budget lines await a whole re-measure; its
+  `reads` and `writes` are still completed counts.
+- backing_test's CPU budget is not trustworthy on a load-starved host
+  (100 runs: 0.26 to 1.0 s against 1.02 s). Options are with russ: do not
+  hold CPU budgets on runs `run-qemu.sh` flags as starved (recommended),
+  or calibrate in the guest.
 
 ## 26.35 CI run 39000396656 (58a1f17): causes, and the mutation job's missing base (merged 2026-10-17, 8b46484)
 

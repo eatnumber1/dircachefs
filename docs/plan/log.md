@@ -3705,3 +3705,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the base is not a commit of the checkout, and says so on stderr.
   Presubmit never runs the large tier, so these first ran on origin; a
   pre-push run of the large tests the change reaches is put to russ.
+- 2026-10-17, 26.34 merged (01e2c4b, 6aa8df5): three of four
+  load-sensitive tests fixed. enospc_cache's sync-listing read busybox
+  `ls`'s silent rc 0 on a getdents ENOSPC as a wrong listing (now
+  `testutil readdir-ino`; section 1b fails first). request_counts and
+  fault_backing counted completed disk requests, which merging makes
+  load-dependent; `cost_sum_disk_stats` adds the merged counts, and 10
+  targets' reads/writes were re-measured (xfstests_1 left whole for a
+  later re-measure). 40/40 and 60/60 runs pass. backing_test's CPU budget
+  is a decision for russ. One style review, one fix round.
