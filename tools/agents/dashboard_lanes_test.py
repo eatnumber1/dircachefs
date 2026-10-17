@@ -101,7 +101,7 @@ class PostAgentTest(Fixture):
         self.assertEqual(row["agent"], "dcfs-implementer")
         self.assertEqual(row["model"], "sonnet")
         self.assertEqual(row["effort"], "medium")
-        self.assertEqual(row["step"], "do thing")  # branch main has no step
+        self.assertEqual(row["step"], "main")  # any branch names the step
         out, _ = self.run_hook("subagent-stop", {"agent_id": "a1"})
         self.assertEqual(out, "")
         row = self.rows()["lane-2"]
@@ -197,6 +197,36 @@ class AgyTest(Fixture):
         self.assertEqual(rows["lane-1"]["state"], "running")
         self.assertEqual(rows["lane-2"]["model"], "gemini-y")
 
+    def test_effort_suffix_moves_to_the_effort_column(self):
+        self.make_agy(42, "lane-1", ["--model", "gemini-3.8-flash-high"])
+        self.make_agy(43, "lane-2", ["--model=gemini-4-argon-medium"])
+        self.launch(prompt="none")
+        rows = self.rows()
+        self.assertEqual(
+            (rows["lane-1"]["model"], rows["lane-1"]["effort"]),
+            ("gemini-3.8-flash", "high"))
+        self.assertEqual(
+            (rows["lane-2"]["model"], rows["lane-2"]["effort"]),
+            ("gemini-4-argon", "medium"))
+
+    def test_model_without_effort_suffix_keeps_empty_effort(self):
+        self.make_agy(42, "lane-1", ["--model", "gemini-x"])
+        self.launch(prompt="none")
+        self.assertEqual(self.rows()["lane-1"]["effort"], "")
+
+    def test_agy_row_step_is_the_branch(self):
+        self.make_agy(42, "lane-1", ["--model", "gemini-x"])
+        self.make_agy(43, "lane-2", [])
+        self.launch(prompt="none")
+        self.assertEqual(self.rows()["lane-1"]["step"], "25.9b")
+        self.assertEqual(self.rows()["lane-2"]["step"], "main")
+
+    def test_agy_row_on_detached_head_has_no_step(self):
+        self.write(os.path.join(self.lanes, "gitdir-1", "HEAD"), "abc123\n")
+        self.make_agy(42, "lane-1", [])
+        self.launch(prompt="none")
+        self.assertEqual(self.rows()["lane-1"]["step"], "")
+
     def test_other_processes_and_missing_model(self):
         d = os.path.join(self.proc, "7")
         os.makedirs(d)
@@ -225,6 +255,11 @@ class AgyTest(Fixture):
 
 class BranchTest(Fixture):
 
+    def test_non_step_branch_is_the_step(self):
+        self.make_lane(3, "sweep-gemini")
+        self.launch(prompt="dircachefs-lanes/lane-3")
+        self.assertEqual(self.rows()["lane-3"]["step"], "sweep-gemini")
+
     def test_relative_gitdir_resolves_against_the_lane(self):
         self.write(os.path.join(self.lanes, "lane-1", ".git"),
                    "gitdir: ../gitdir-1\n")
@@ -241,6 +276,73 @@ class BranchTest(Fixture):
         self.launch(prompt="dircachefs-lanes/lane-3")
         self.assertEqual(self.rows()["lane-3"]["state"], "idle")
         self.assertEqual(self.rows()["lane-1"]["state"], "idle")
+
+
+class PostMessageTest(Fixture):
+
+    def message(self, to, **extra):
+        return self.run_hook("post-message", {
+            "tool_name": "SendMessage",
+            "tool_input": dict({"to": to, "message": "go on"}, **extra),
+        })
+
+    def test_resumed_agent_runs_again(self):
+        self.launch()
+        self.run_hook("subagent-stop", {"agent_id": "a1"})
+        self.run_hook("mark-uploaded", {})
+        self.assertEqual(self.rows()["lane-2"]["state"], "idle")
+        out, err = self.message("a1")
+        self.assertEqual(err, "")
+        context = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(context["hookEventName"], "PostToolUse")
+        self.assertIn("lanes.json", context["additionalContext"])
+        row = self.rows()["lane-2"]
+        self.assertEqual(row["state"], "running")
+        self.assertEqual(row["agent"], "dcfs-implementer")
+
+    def test_resumed_agent_stops_again(self):
+        self.launch()
+        self.run_hook("subagent-stop", {"agent_id": "a1"})
+        self.message("a1")
+        self.run_hook("subagent-stop", {"agent_id": "a1"})
+        self.assertEqual(self.rows()["lane-2"]["state"], "idle")
+        self.assertIn("additionalContext", self.message("a1")[0])
+
+    def test_unknown_or_running_target_prints_nothing(self):
+        self.launch()
+        self.run_hook("mark-uploaded", {})
+        self.assertEqual(self.message("nobody"), ("", ""))
+        self.assertEqual(self.message("a1"), ("", ""))  # still running
+
+    def test_unchanged_table_prints_nothing(self):
+        self.launch(prompt="no lane here")
+        self.run_hook("subagent-stop", {"agent_id": "a1"})
+        self.run_hook("mark-uploaded", {})
+        self.assertEqual(self.message("a1"), ("", ""))
+
+    def test_subagent_originated_call_is_ignored(self):
+        self.launch()
+        self.run_hook("subagent-stop", {"agent_id": "a1"})
+        out, err = self.run_hook("post-message", {
+            "agent_id": "parent", "tool_input": {"to": "a1"}})
+        self.assertEqual((out, err), ("", ""))
+        self.assertEqual(self.rows()["lane-2"]["state"], "idle")
+
+    def test_finished_is_capped_to_the_most_recent_50(self):
+        for i in range(60):
+            self.launch(agent_id="a%d" % i)
+            self.run_hook("subagent-stop", {"agent_id": "a%d" % i})
+        with open(os.path.join(self.dash, "finished.json")) as f:
+            finished = json.load(f)
+        self.assertEqual(len(finished), 50)
+        self.assertNotIn("a9", finished)
+        self.assertIn("a10", finished)
+        self.assertIn("a59", finished)
+
+    def test_malformed_message_event(self):
+        out, err = self.run_hook("post-message", {"tool_input": {}})
+        self.assertEqual(out, "")
+        self.assertEqual(len(err.splitlines()), 0)
 
 
 class WriteAtomicTest(unittest.TestCase):

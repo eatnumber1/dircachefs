@@ -87,8 +87,14 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
   subagent (the input has `agent_id`) are ignored. If the table changed since
   the last upload it prints `additionalContext` telling the orchestrator to
   upload the file.
-- `subagent-stop` (SubagentStop): removes the agent, regenerates, prints
-  nothing.
+- `post-message` (PostToolUse, matcher `SendMessage`): when `tool_input.to`
+  names a finished agent, moves it back to running (the orchestrator resumed
+  it), regenerates and prints the same `additionalContext` as `post-agent` if
+  the table changed; any other target prints nothing. Calls made by a
+  subagent are ignored.
+- `subagent-stop` (SubagentStop): removes the agent (keeping its record in
+  `finished.json`, the most recent 50, so `post-message` can resume it),
+  regenerates, prints nothing.
 - `stop` (the main session's Stop): regenerates; if the table changed since
   the last upload it blocks with a reason naming the file, unless
   `stop_hook_active` is true (no loops) or the caller is a subagent.
@@ -98,13 +104,15 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
 
 The table has an orchestrator row and one row per `lane-N` under
 `~/Sources/dircachefs-lanes/`. A lane with a recorded agent shows the step
-(from its branch `step-X`, else the agent's description), agent type, model
-and effort as `running`; a lane with no agent but an `agy` process whose
-working directory is the lane shows `agy, sandboxed` and its `--model`;
+(the branch name minus a leading `step-`; the agent's description on a
+detached HEAD), agent type, model and effort as `running`; a lane with no
+agent but an `agy` process whose working directory is the lane shows
+`agy, sandboxed`, the branch as the step, and its `--model` with a trailing
+`-low|-medium|-high` moved to the effort column;
 otherwise it is `idle`.
 
 State is in `$DCFS_DASHBOARD_DIR` (default `~/.cache/dcfs-dashboard/`):
-`running.json`, `lanes.json`, `uploaded.sha256`, and an optional
+`running.json`, `finished.json`, `lanes.json`, `uploaded.sha256`, and an optional
 `config.json` (`{"model": ..., "effort": ...}`) for the orchestrator row.
 A malformed input or an unreadable state file prints one line to stderr and
 exits 0, because a failing hook can wedge the session.
@@ -114,7 +122,8 @@ orchestrator):
 
 ```json
 {"hooks": {
-  "PostToolUse": [{"matcher": "Agent", "hooks": [{"type": "command", "command": "python3 -I \"$CLAUDE_PROJECT_DIR\"/tools/agents/dashboard_lanes.py post-agent", "timeout": 10}]}],
+  "PostToolUse": [{"matcher": "Agent", "hooks": [{"type": "command", "command": "python3 -I \"$CLAUDE_PROJECT_DIR\"/tools/agents/dashboard_lanes.py post-agent", "timeout": 10}]},
+    {"matcher": "SendMessage", "hooks": [{"type": "command", "command": "python3 -I \"$CLAUDE_PROJECT_DIR\"/tools/agents/dashboard_lanes.py post-message", "timeout": 10}]}],
   "SubagentStop": [{"hooks": [{"type": "command", "command": "python3 -I \"$CLAUDE_PROJECT_DIR\"/tools/agents/dashboard_lanes.py subagent-stop", "timeout": 10}]}],
   "Stop": [{"hooks": [{"type": "command", "command": "python3 -I \"$CLAUDE_PROJECT_DIR\"/tools/agents/dashboard_lanes.py stop", "timeout": 10}]}]
 }}

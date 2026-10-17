@@ -9,13 +9,14 @@ It is driven by events only: no timers, no polling. See README.md in this
 directory for the hook configuration.
 
     dashboard_lanes.py post-agent      PostToolUse hook, matcher "Agent"
+    dashboard_lanes.py post-message    PostToolUse hook, matcher "SendMessage"
     dashboard_lanes.py subagent-stop   SubagentStop hook
     dashboard_lanes.py stop            the main session's Stop hook
     dashboard_lanes.py mark-uploaded   record the current file as uploaded
     dashboard_lanes.py show            print the lanes file
 
 State lives in $DCFS_DASHBOARD_DIR (default ~/.cache/dcfs-dashboard):
-running.json, lanes.json, uploaded.sha256, and an optional config.json with
+running.json, finished.json, lanes.json, uploaded.sha256, and an optional config.json with
 "model" and "effort" for the orchestrator row.
 """
 
@@ -30,7 +31,8 @@ import tempfile
 
 LANE_IN_PROMPT = re.compile(r"dircachefs-lanes/lane-(\d+)")
 LANE_DIR = re.compile(r"lane-(\d+)$")
-STEP_BRANCH = re.compile(r"step-(.+)$")
+EFFORT_SUFFIX = re.compile(r"(.+)-(low|medium|high)$")
+FINISHED_KEPT = 50
 
 
 @dataclasses.dataclass
@@ -124,7 +126,7 @@ def record_agent(env, event):
 def lane_branch(lane_dir):
     """The branch checked out in a lane (a linked worktree).
 
-    A detached HEAD returns the commit hash, which matches no step branch.
+    A detached HEAD returns None.
     """
     dot_git = os.path.join(lane_dir, ".git")
     git_dir = dot_git
@@ -132,7 +134,13 @@ def lane_branch(lane_dir):
         gitdir = read_text(dot_git).partition(":")[2].strip()
         git_dir = os.path.join(lane_dir, gitdir)  # may be relative
     head = read_text(os.path.join(git_dir, "HEAD")).strip()
+    if not head.startswith("ref: refs/heads/"):
+        return None
     return head.removeprefix("ref: refs/heads/")
+
+
+def step_of(branch):
+    return branch.removeprefix("step-")
 
 
 def agy_processes(env):
@@ -192,18 +200,21 @@ def build_rows(env):
         if name in by_lane:
             # A recorded agent wins over an agy process in the same lane.
             record = by_lane[name]
-            step = STEP_BRANCH.match(branch)
             row.update(
-                step=step.group(1) if step else record["description"],
+                step=step_of(branch) if branch else record["description"],
                 agent=record["subagent_type"],
                 model=record["model"],
                 effort=record["effort"],
                 state="running",
             )
         elif os.path.realpath(lane_dir) in agy:
+            model = agy[os.path.realpath(lane_dir)]
+            effort = EFFORT_SUFFIX.match(model)
             row.update(
+                step=step_of(branch) if branch else "",
                 agent="agy, sandboxed",
-                model=agy[os.path.realpath(lane_dir)],
+                model=effort.group(1) if effort else model,
+                effort=effort.group(2) if effort else "",
                 state="running",
             )
         rows.append(row)
@@ -220,12 +231,8 @@ def regenerate(env):
     return hashlib.sha256(text.encode()).hexdigest() != uploaded
 
 
-def post_agent(env, event):
-    # An agent_id means a subagent made this call: its launches are not
-    # lanes of the orchestrator.
-    if "agent_id" in event:
-        return ""
-    record_agent(env, event)
+def upload_context(env):
+    """The PostToolUse output asking for an upload, or "" if unchanged."""
     if not regenerate(env):
         return ""
     path = env.path("lanes.json")
@@ -237,12 +244,43 @@ def post_agent(env, event):
     }})
 
 
+def post_agent(env, event):
+    # An agent_id means a subagent made this call: its launches are not
+    # lanes of the orchestrator.
+    if "agent_id" in event:
+        return ""
+    record_agent(env, event)
+    return upload_context(env)
+
+
+def post_message(env, event):
+    # SendMessage resumes a finished agent: SubagentStop dropped its
+    # record, so bring it back from the finished map.
+    if "agent_id" in event:
+        return ""
+    target = event["tool_input"].get("to")
+    finished = load_json(env.path("finished.json"), {})
+    if target not in finished:
+        return ""
+    running = load_json(env.path("running.json"), {})
+    running[target] = finished.pop(target)
+    write_atomic(env.path("running.json"), json.dumps(running, indent=2))
+    write_atomic(env.path("finished.json"), json.dumps(finished, indent=2))
+    return upload_context(env)
+
+
 def subagent_stop(env, event):
     running = load_json(env.path("running.json"), {})
     # Agents we never recorded stop too: foreground agents, subagents'
     # own launches, and agents launched before the hooks were installed.
-    running.pop(event["agent_id"], None)
+    record = running.pop(event["agent_id"], None)
     write_atomic(env.path("running.json"), json.dumps(running, indent=2))
+    if record is not None:
+        finished = load_json(env.path("finished.json"), {})
+        finished.pop(event["agent_id"], None)
+        finished[event["agent_id"]] = record  # the most recent last
+        kept = dict(list(finished.items())[-FINISHED_KEPT:])
+        write_atomic(env.path("finished.json"), json.dumps(kept, indent=2))
     regenerate(env)
     return ""
 
@@ -285,8 +323,8 @@ def lock(env):
 
 
 # Hook commands take the hook's JSON event.
-HOOKS = {"post-agent": post_agent, "subagent-stop": subagent_stop,
-         "stop": stop}
+HOOKS = {"post-agent": post_agent, "post-message": post_message,
+         "subagent-stop": subagent_stop, "stop": stop}
 # The others are run by hand and read no stdin.
 MANUAL = {"mark-uploaded": mark_uploaded, "show": show}
 
