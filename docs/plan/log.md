@@ -4029,3 +4029,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   a day while Gemini carries the rest. Today: 17.2e's review, then 25.28b
   resumes. Sunday: 22.5 round 2, the 25.28b review, 17.2e's fixes if any,
   25.10 started. Questions for russ are batched for evenings on weekdays.
+- 2026-10-17, russ on the hourly quota reading in the dashboard hook:
+  "this violates the no-timers rule. however I approve this exception
+  *because* I'm sometimes spending credits out-of-band, meaning you can't
+  know about it without polling". The hook's code and README must quote
+  this approval at the check (docs/style.md 1.11's exception form); it
+  reads at most hourly and only when the hook already runs (no loop).
