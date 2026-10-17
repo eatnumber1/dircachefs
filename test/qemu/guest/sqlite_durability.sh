@@ -22,26 +22,36 @@
 # runs a scripted sequence of mutations whose durability is known: creates,
 # unlinks, a rename, a mkdir and rmdir, a write, a chmod, a setxattr (each
 # phase 1 synced unless the inodes are durably dirty already: the fast path,
-# normal), and a writeback of the WAL by the filesystem alone (an fsync of
-# the -wal from outside, as periodic writeback would). No sync point: since
-# step 25.28b each one checkpoints the WAL, and the next commit restarts
-# it, which the one WAL generation this test judges leaves out (the
-# reference states are the final database with its WAL cut); the sync
-# point's checkpoint is checked by fault_power_test's lag scenario. After each
-# one a STATFS through dcfs (served only after every request queued before
-# it) orders what follows, and the test records the WAL's commits so far
-# (crash_states wal-info: what SQLite's recovery would accept of the -wal as
-# the page cache has it), the cost counter's transactions and synced
-# transactions (the SqliteTransaction event: dcfs's intent, from
-# $DCFS_COUNTERS_FILE), and puts a mark in the log. The daemon runs under
-# strace, which gives every write and fsync of the -wal: each fsync names
-# the commit it made durable (the one whose last frame it follows), and each
-# operation's synced transactions must be as many WAL fsyncs. At the end a
-# copy of the database and its WAL is the reference: the state after commit
-# k is the reference database with the WAL cut after its k-th commit
-# (crash_states wal-truncate), as SQLite recovers it. Then the daemon is
-# killed and the cache unmounted, which writes back what was still cached
-# (the end of the log).
+# normal), a sync point (an fsync of a directory through dcfs, after which
+# the next phase 1 is synced again), and a writeback of the WAL by the
+# filesystem alone (an fsync of the -wal from outside, as periodic writeback
+# would). After each one a STATFS through dcfs (served only after every
+# request queued before it) orders what follows, and the test records the
+# WAL's commits so far (crash_states wal-info: what SQLite's recovery would
+# accept of the -wal as the page cache has it), the cost counter's
+# transactions and synced transactions (the SqliteTransaction event: dcfs's
+# intent, from $DCFS_COUNTERS_FILE), and puts a mark in the log. The daemon
+# runs under strace, which gives every write and fsync of the -wal: each
+# fsync names the commit it made durable (the one whose last frame it
+# follows), and each operation's synced transactions must be as many WAL
+# fsyncs.
+#
+# Two WAL generations. The sync point ends, after its reply, with a passive
+# checkpoint (step 25.28b): SQLite fsyncs the WAL, copies every frame into
+# the database file and fsyncs that; the next commit restarts the WAL (a
+# new salt, frames from the start again, its header fsynced first). So the
+# script's commits are numbered across both: generation 1 from the warm-up's
+# restart to the checkpoint, generation 2 after it. The reference states:
+# the state after commit k of generation 1 is the database file as the
+# warm-up left it (copied then) with generation 1's WAL (copied at the sync
+# point, before the restart) cut after its k-th commit (crash_states
+# wal-truncate), as SQLite recovers it; the state after commit k of
+# generation 2 is the checkpointed database file (copied at the end) with
+# the final WAL cut likewise. The checkpoint's WAL fsync is the bound of
+# every state after the sync point's mark (it made generation 1 durable),
+# and the strace tells it from a synced commit's: the database file's
+# writes follow it. Then the daemon is killed and the cache unmounted,
+# which writes back what was still cached (the end of the log).
 #
 # The crash states, CrashMonkey's method (Mohan et al., OSDI 2018) on the
 # log: everything before a FLUSH is durable after it; writes after it may
@@ -251,6 +261,8 @@ record() {
 	fi
 	r_commits=$(wal_field commits)
 	r_salt=$(wal_field salt)
+	# Generation 2's commits are numbered after generation 1's.
+	[ "$r_salt" = "$FIRST_SALT" ] || r_commits=$((r_commits + GEN1_COMMITS))
 	OPN=$((OPN + 1))
 	set -- "$1" $r_c1
 	echo "$OPN $1 $LAST_COMMITS $r_commits $2 $3 $r_salt" >>"$OPS"
@@ -274,6 +286,27 @@ op() {
 		fail "op-$o_name" "$* failed: $(cat "$WORK/op.err")"
 	record "$o_name"
 	echo "$OPN $o_kind" >>"$WORK/expect"
+}
+
+# sync_point_op DIR: the operation "sync-point", an fsync of DIR through dcfs
+# (FSYNCDIR; its RELEASEDIR commits nothing). Its sync point clears the
+# dirty set (a normal commit) and checkpoints the WAL after the reply, before
+# record's STATFS is read. Generation 1's WAL is copied right after (the
+# next commit restarts it), and the database file's checksums before and
+# after say the checkpoint changed it.
+GEN1_COMMITS=0
+sync_point_op() {
+	SP_DB_BEFORE=$(md5sum "$DB" | cut -d' ' -f1)
+	op sync-point normal "$TESTUTIL" fsync "$1"
+	cp "$DB-wal" "$WORK/ref1/dcfs.db-wal"
+	SP_DB_AFTER=$(md5sum "$DB" | cut -d' ' -f1)
+	GEN1_OP=$OPN
+	GEN1_COMMITS=$LAST_COMMITS
+	sp_copy=$("$CS" wal-info "$WORK/ref1/dcfs.db-wal")
+	case "$sp_copy" in
+	*"commits=$GEN1_COMMITS "*"salt=$FIRST_SALT"*) pass gen1-wal-copied ;;
+	*) fail gen1-wal-copied "the copy ($sp_copy) is not generation 1 (salt $FIRST_SALT) after its $GEN1_COMMITS commits" ;;
+	esac
 }
 
 creates() {
@@ -317,14 +350,14 @@ script_full() {
 	op rename-d1-b-c normal mv "$MNT/d1/b" "$MNT/d1/c"
 	op wal-writeback - "$TESTUTIL" fsync "$DB-wal"
 	op create-d3-g1-g2 normal creates "$MNT/d3" g1 g2
-	op create-d3-g3 normal creates "$MNT/d3" g3
+	sync_point_op "$MNT/d3"
+	op create-d3-g3 synced creates "$MNT/d3" g3
 	op write-d4-w synced write_file "$MNT/d4/w"
 	op chmod-d4-keep synced chmod 600 "$MNT/d4/keep"
 	op setxattr-d4-keep normal "$TESTUTIL" setxattr "$MNT/d4/keep" user.k v
-	# x is born dirty by mkdir's phase 3, a normal commit, which the synced
-	# commits since have made durable, as d2's row: with no sync point
-	# since, the rmdir's phase 1 takes the fast path.
-	op rmdir-d2-x normal rmdir "$MNT/d2/x"
+	# x is born dirty by mkdir's phase 3, a normal commit; no phase 1 named
+	# it, so it is not durably dirty and the rmdir's phase 1 is synced.
+	op rmdir-d2-x synced rmdir "$MNT/d2/x"
 	op create-d5-t1-t6 synced creates "$MNT/d5" t1 t2 t3 t4 t5 t6
 	op unlink-d5-t1 normal rm "$MNT/d5/t1"
 	op cache-flush - cache_flush
@@ -335,6 +368,7 @@ script_short() {
 	op create-d1-a synced creates "$MNT/d1" a
 	op create-d1-b normal creates "$MNT/d1" b
 	op unlink-d1-a normal rm "$MNT/d1/a"
+	sync_point_op "$MNT/d1"
 	op create-d3-t1-t3 synced creates "$MNT/d3" t1 t2 t3
 	op unlink-d3-t1 normal rm "$MNT/d3/t1"
 	op cache-flush - cache_flush
@@ -354,8 +388,14 @@ fingerprint() {
 ref_state() {
 	rm -rf "$2"
 	mkdir -p "$2"
-	cp "$WORK/ref/dcfs.db" "$2/dcfs.db"
-	"$CS" wal-truncate "$WORK/ref/dcfs.db-wal" "$1" "$2/dcfs.db-wal"
+	if [ "$1" -le "$GEN1_COMMITS" ]; then
+		cp "$WORK/ref1/dcfs.db" "$2/dcfs.db"
+		"$CS" wal-truncate "$WORK/ref1/dcfs.db-wal" "$1" "$2/dcfs.db-wal"
+	else
+		cp "$WORK/ref/dcfs.db" "$2/dcfs.db"
+		"$CS" wal-truncate "$WORK/ref/dcfs.db-wal" $(($1 - GEN1_COMMITS)) \
+			"$2/dcfs.db-wal"
+	fi
 }
 
 # oracle FINGERPRINT LOWER: "ok K J", K the last and J the first commit
@@ -384,58 +424,84 @@ flags_have() { case "|$1|" in *"|$2|"*) return 0 ;; esac; return 1; }
 # mark_index NAME: the log index of the mark NAME.
 mark_index() { awk -v m="$1" '$4 ~ /MARK/ && $5 == m { print $1; exit }' "$ENTRIES"; }
 
-# synced_commits: from the daemon's strace and the reference WAL's commits,
-# one line per fsync of the -wal since the WAL's last restart (its last
-# header write, at offset 0), "<commit> <exact|partial|header>": the last
-# commit whose frames were all written before it ("exact": the fsync came
-# right after that commit's last frame; "header": nothing but the WAL's
-# 32-byte header was written, which SQLite syncs whatever the synchronous
-# level when it starts a WAL, before the first frame). SQLite writes each
-# frame with pwrite64 at its offset, and a synced commit's fsync follows
-# its commit frame. A line "split <n>" is a syscall on the -wal that strace
-# printed in two halves (two threads at once), which would hide an offset.
+# synced_commits: from the daemon's strace and the two generations' commits
+# ($WORK/commits1, $WORK/commits), one line per fsync of the -wal in the
+# last two WAL generations (each begins with a header write at offset 0),
+# "<commit> <exact|partial|header|checkpoint>", the commit numbered across
+# both: the last commit whose frames were all written before it ("exact":
+# the fsync came right after that commit's last frame; "header": nothing but
+# the WAL's 32-byte header was written, which SQLite syncs whatever the
+# synchronous level when it starts a WAL, before the first frame;
+# "checkpoint": the database file's writes follow it, before any other write
+# of the -wal, so it is a checkpoint's). SQLite writes each frame with
+# pwrite64 at its offset, and a synced commit's fsync follows its commit
+# frame. A line "split <n>" is a syscall on the -wal that strace printed in
+# two halves (two threads at once), which would hide an offset.
 synced_commits() {
-	awk '
-		FNR == NR { end[$1] = $2; n = $1; next }
+	awk -v base="$GEN1_COMMITS" '
+		FILENAME == ARGV[1] { end[1, $1] = $2; n[1] = $1; next }
+		FILENAME == ARGV[2] { end[2, $1] = $2; n[2] = $1; next }
 		/dcfs\.db-wal>/ && /unfinished/ { print "split", FNR; next }
 		/dcfs\.db-wal>/ && /^[0-9]+ +pwrite64\(/ {
 			if (match($0, /, [0-9]+\) += [0-9]+$/)) {
 				split(substr($0, RSTART + 2), f, /[^0-9]+/)
-				if (f[1] == 0) { maxend = 0; m = 0 }
+				if (f[1] == 0) { gen++; maxend = 0; m[gen] = 0 }
 				if (f[1] + f[2] > maxend) maxend = f[1] + f[2]
 			}
+			synced = 0
+			next
+		}
+		/dcfs\.db>/ && /^[0-9]+ +pwrite64\(/ {
+			if (synced) ckpt[gen, m[gen]] = 1
+			synced = 0
 			next
 		}
 		/dcfs\.db-wal>/ && /^[0-9]+ +f(data)?sync\(/ && / = 0$/ {
-			c = 0
-			for (k = 1; k <= n; k++) if (end[k] <= maxend) c = k
-			if (c == 0 && maxend == 32) line[++m] = "0 header"
-			else line[++m] = c " " (c > 0 && end[c] == maxend ? "exact" : "partial")
+			mx[gen, ++m[gen]] = maxend
+			synced = 1
 		}
-		END { for (i = 1; i <= m; i++) print line[i] }' "$WORK/commits" "$WORK/strace.out"
+		END {
+			for (g = 1; g <= 2; g++) {
+				s = gen - 2 + g
+				for (i = 1; i <= m[s]; i++) {
+					x = mx[s, i]
+					c = 0
+					for (k = 1; k <= n[g]; k++) if (end[g, k] <= x) c = k
+					b = g == 1 ? 0 : base
+					if ((s, i) in ckpt) print b + c, "checkpoint"
+					else if (c == 0 && x == 32) print b, "header"
+					else print b + c, (c > 0 && end[g, c] == x ? "exact" : "partial")
+				}
+			}
+		}' "$WORK/commits1" "$WORK/commits" "$WORK/strace.out"
 }
 
 # bounds INDEX NEXT: "<lower> <acknowledged> <upper>" for the states of the
 # epoch from the log entry INDEX (a FLUSH) to NEXT (the next FLUSH, or the
-# end). <lower> is the commit every such state must have: the last synced
-# commit of the operations whose marks are logged before INDEX (each
-# acknowledged before its operation's mark, so before any crash at or after
-# INDEX). <acknowledged> is the last commit of those operations. <upper> is
-# the last commit such a state can hold: that of the first operation whose
-# mark is logged after NEXT (the operations after it began after NEXT
-# completed, so wrote nothing of the epoch's), or the last commit.
+# end). <lower> is the commit every such state must have: the last commit
+# made durable (synced, or checkpointed: $WORK/durable) by the operations
+# whose marks are logged before INDEX (each acknowledged before its
+# operation's mark, so before any crash at or after INDEX; the sync point's
+# checkpoint runs before record's STATFS). <acknowledged> is the last commit
+# of those operations. <upper> is the last commit such a state can hold:
+# that of the first operation whose mark is logged after NEXT (the
+# operations after it began after NEXT completed, so wrote nothing of the
+# epoch's), or the last commit.
 bounds() {
 	awk -v at="$1" -v next_="$2" -v last="$REF_COMMITS" '
 		FILENAME == ARGV[1] { if ($4 ~ /MARK/) mark[$5] = $1; next }
-		FILENAME == ARGV[2] { synced_op[$1] = 1; synced[$1] = $2; next }
+		FILENAME == ARGV[2] {
+			if (!($1 in durable) || $2 > durable[$1]) durable[$1] = $2
+			next
+		}
 		{ m = $1 == 0 ? "dcfs-up" : "op" $1 }
 		m in mark && mark[m] < at {
-			if ($1 in synced_op && synced[$1] > lo) lo = synced[$1]
+			if ($1 in durable && durable[$1] > lo) lo = durable[$1]
 			if ($4 > acked) acked = $4
 		}
 		upper == "" && m in mark && mark[m] > next_ { upper = $4 }
 		END { print lo + 0, acked + 0, (upper == "" ? last : upper) }' \
-		"$ENTRIES" "$WORK/synced" "$OPS"
+		"$ENTRIES" "$WORK/durable" "$OPS"
 }
 
 STATES=0
@@ -612,6 +678,9 @@ else
 fi
 LAST_COMMITS=$(wal_field commits)
 DB_MD5=$(md5sum "$DB" | cut -d' ' -f1)
+# Generation 1's database file, unchanged until the sync point's checkpoint.
+mkdir -p "$WORK/ref1"
+cp "$DB" "$WORK/ref1/dcfs.db"
 echo "SQLITE-DURABILITY warm-up: $w creates, salt $OLD_SALT then $FIRST_SALT, $LAST_COMMITS commits since, WAL $(stat -c %s "$DB-wal") bytes"
 set -- $(counters)
 echo "0 start 0 $LAST_COMMITS $1 $2 $FIRST_SALT" >"$OPS"
@@ -624,24 +693,30 @@ T0=$(cut -d' ' -f1 /proc/uptime)
 echo "SQLITE-DURABILITY ops: n name commits-before commits-after transactions synced-transactions salt"
 sed 's/^/SQLITE-DURABILITY op: /' "$OPS"
 
-# The reference: the database and its WAL as dcfs left them (the page cache's
-# view: every commit, synced or not).
+# The reference: generation 1 (ref1, above) and generation 2, the database
+# and its WAL as dcfs left them (the page cache's view: every commit, synced
+# or not).
 mkdir -p "$WORK/ref"
 cp "$DB" "$DB-wal" "$WORK/ref/"
-REF_COMMITS=$("$CS" wal-info "$WORK/ref/dcfs.db-wal" | sed 's/.*commits=\([0-9]*\).*/\1/')
+GEN2_COMMITS=$("$CS" wal-info "$WORK/ref/dcfs.db-wal" | sed 's/.*commits=\([0-9]*\).*/\1/')
+REF_COMMITS=$((GEN1_COMMITS + GEN2_COMMITS))
 REF_FRAMES=$("$CS" wal-info "$WORK/ref/dcfs.db-wal" | sed 's/frames=\([0-9]*\).*/\1/')
-if [ "$REF_COMMITS" = "$LAST_COMMITS" ] && [ "$REF_COMMITS" -gt 0 ]; then
+if [ "$REF_COMMITS" = "$LAST_COMMITS" ] && [ "$GEN2_COMMITS" -gt 0 ]; then
 	pass reference-has-every-commit
 else
-	fail reference-has-every-commit "the reference WAL has $REF_COMMITS commits, the last operation left $LAST_COMMITS"
+	fail reference-has-every-commit "the reference WALs have $GEN1_COMMITS and $GEN2_COMMITS commits, the last operation left $LAST_COMMITS"
 fi
-# No checkpoint ran after the restart (it would have rewritten the database
-# file under the reference): one salt since, and the database file as it was.
-if [ "$(awk '{ print $7 }' "$OPS" | sort -u | wc -l)" = 1 ] &&
-	[ "$(md5sum "$WORK/ref/dcfs.db" | cut -d' ' -f1)" = "$DB_MD5" ]; then
-	pass no-checkpoint
+# Exactly the sync point's checkpoint rewrote the database file under the
+# references: unchanged from the warm-up to it, changed by it, unchanged
+# since; and one salt up to the sync point, another after it.
+gen_salts=$(awk -v g1="$GEN1_OP" '{ print ($1 <= g1 ? "1" : "2"), $7 }' "$OPS" | sort -u | tr '\n' ' ')
+if [ "$SP_DB_BEFORE" = "$DB_MD5" ] && [ "$SP_DB_AFTER" != "$DB_MD5" ] &&
+	[ "$(md5sum "$WORK/ref/dcfs.db" | cut -d' ' -f1)" = "$SP_DB_AFTER" ] &&
+	[ "$(echo "$gen_salts" | wc -w)" = 4 ] &&
+	[ "$(echo "$gen_salts" | cut -d' ' -f1-2)" = "1 $FIRST_SALT" ]; then
+	pass one-checkpoint-at-the-sync-point
 else
-	fail no-checkpoint "salts $(awk '{ print $7 }' "$OPS" | sort -u | tr '\n' ' '), the database file changed: $(md5sum "$WORK/ref/dcfs.db")"
+	fail one-checkpoint-at-the-sync-point "operation, salt: $gen_salts; database file at the warm-up $DB_MD5, before the sync point $SP_DB_BEFORE, after it $SP_DB_AFTER, at the end $(md5sum "$WORK/ref/dcfs.db" | cut -d' ' -f1)"
 fi
 # Both durability levels exercised: an operation that made a synced commit
 # and one that made commits, all normal (dcfs's intent, the cost counter).
@@ -690,19 +765,38 @@ wait "$STRACE_CAT"
 # Which commits were synced, from the strace: each fsync of the -wal, against
 # the operation whose commits it follows. dcfs's intent (the cost counter's
 # synced transactions of each operation) must be what SQLite did.
+"$CS" wal-commits "$WORK/ref1/dcfs.db-wal" >"$WORK/commits1"
 "$CS" wal-commits "$WORK/ref/dcfs.db-wal" >"$WORK/commits"
 synced_commits >"$WORK/fsyncs"
-awk '
-	FNR == NR { if ($2 == "exact" || $2 == "partial") c[++n] = $1; next }
+# $WORK/synced: per operation, its last synced commit; $WORK/durable: the
+# same and the commit its checkpoint made durable (the bounds').
+: >"$WORK/durable"
+awk -v durable="$WORK/durable" '
+	FNR == NR {
+		if ($2 == "exact" || $2 == "partial") c[++n] = $1
+		if ($2 == "checkpoint") ck[++nk] = $1
+		next
+	}
 	{
 		k = 0
 		for (i = 1; i <= n; i++) if (c[i] > $3 && c[i] <= $4) { k++; last = c[i] }
-		if (k) print $1, last
+		if (k) { print $1, last; print $1, last >durable }
+		for (i = 1; i <= nk; i++) if (ck[i] > $3 && ck[i] <= $4) print $1, ck[i] >durable
 		printf "%s %s %d\n", $1, $6 - prev, k >"/dev/stderr"
 		prev = $6
 	}' "$WORK/fsyncs" "$OPS" >"$WORK/synced" 2>"$WORK/synced.counts"
 echo "SQLITE-DURABILITY fsyncs of the WAL (commit, after its last frame or not): $(tr '\n' ' ' <"$WORK/fsyncs")"
 echo "SQLITE-DURABILITY synced: op, its last synced commit: $(tr '\n' ' ' <"$WORK/synced")"
+echo "SQLITE-DURABILITY durable: op, the last commit it made durable: $(tr '\n' ' ' <"$WORK/durable")"
+# The sync point's checkpoint fsynced the WAL, generation 1's every commit
+# written, before it wrote the database file, and it is the only checkpoint.
+if [ "$(grep -c checkpoint "$WORK/fsyncs")" = 1 ] &&
+	grep -q "^$GEN1_COMMITS checkpoint\$" "$WORK/fsyncs" &&
+	grep -q "^$GEN1_OP $GEN1_COMMITS\$" "$WORK/durable"; then
+	pass checkpoint-fsyncs-the-wal-first
+else
+	fail checkpoint-fsyncs-the-wal-first "want one checkpoint fsync after commit $GEN1_COMMITS (operation $GEN1_OP); fsyncs: $(tr '\n' ' ' <"$WORK/fsyncs")"
+fi
 if grep -q "split\|partial" "$WORK/fsyncs" || [ ! -s "$WORK/fsyncs" ]; then
 	fail wal-fsyncs-follow-commits "an fsync of the WAL did not follow a commit's last frame, or a write was split: $(tr '\n' ' ' <"$WORK/fsyncs")"
 else
@@ -727,15 +821,18 @@ SC_OP=$1
 SC_SYNCED=$2
 set -- $NORMAL_OP
 # The commits j to lose (j + 1, kept, a normal commit): those of that
-# operation first, then every other. A forgery whose database fails
+# operation first, then every other, in generation 2 (the final WAL, whose
+# k-th commit is commit GEN1_COMMITS + k). A forgery whose database fails
 # integrity_check (a table page from one commit, an index page from
 # another) proves nothing about the oracle, so the next j is tried until
 # one opens.
-SC_CANDIDATES=$(awk -v first=$(($3 + 1)) -v last="$4" -v n="$REF_COMMITS" '
+SC_CANDIDATES=$(awk -v first=$(($3 + 1)) -v last="$4" -v n="$REF_COMMITS" \
+	-v g1="$GEN1_COMMITS" '
 	FNR == NR { if ($2 == "exact") synced[$1] = 1; next }
 	END {
-		for (j = first; j < last; j++) if (!((j + 1) in synced)) print j
-		for (j = 1; j < n; j++)
+		for (j = first; j < last; j++)
+			if (j > g1 && !((j + 1) in synced)) print j
+		for (j = g1 + 1; j < n; j++)
 			if ((j < first || j >= last) && !((j + 1) in synced)) print j
 	}' "$WORK/fsyncs" /dev/null)
 sc_fp=""
@@ -744,7 +841,8 @@ for sc_j in $SC_CANDIDATES; do
 	rm -rf "$WORK/forged"
 	mkdir -p "$WORK/forged"
 	cp "$WORK/ref/dcfs.db" "$WORK/forged/"
-	if "$CS" wal-skip "$WORK/ref/dcfs.db-wal" "$sc_j" "$WORK/forged/dcfs.db-wal" >"$WORK/skip.out" 2>&1; then
+	if "$CS" wal-skip "$WORK/ref/dcfs.db-wal" $((sc_j - GEN1_COMMITS)) \
+		"$WORK/forged/dcfs.db-wal" >"$WORK/skip.out" 2>&1; then
 		sc_fp=$(fingerprint "$WORK/forged" 2>/dev/null)
 		[ -n "$sc_fp" ] || sc_tried="$sc_tried $sc_j(corrupt)"
 	else
@@ -775,6 +873,28 @@ if [ "${1:-}" = ok ] && [ "$2" -ge "$SC_SYNCED" ] && [ "$3" -le "$SC_SYNCED" ]; 
 	pass oracle-accepts-an-allowed-state
 else
 	fail oracle-accepts-an-allowed-state "the state after synced commit $SC_SYNCED: the oracle said '$*'"
+fi
+# What a checkpoint that copied frames before the WAL's fsync could leave:
+# the checkpointed database file under generation 1's WAL cut short. Some
+# such state must match no reference state (a cut after j whose later
+# commits wrote only pages the first j wrote too recovers to j exactly, so
+# the first j that does not is taken).
+sc_ck=""
+j=1
+while [ "$j" -lt "$GEN1_COMMITS" ] && [ -z "$sc_ck" ]; do
+	rm -rf "$WORK/forged"
+	mkdir -p "$WORK/forged"
+	cp "$WORK/ref/dcfs.db" "$WORK/forged/dcfs.db"
+	"$CS" wal-truncate "$WORK/ref1/dcfs.db-wal" "$j" "$WORK/forged/dcfs.db-wal"
+	sc_fp=$(fingerprint "$WORK/forged" 2>/dev/null)
+	[ -n "$sc_fp" ] && [ "$(oracle "$sc_fp" 0)" = none ] && sc_ck=$j
+	j=$((j + 1))
+done
+if [ -n "$sc_ck" ]; then
+	pass oracle-refuses-a-checkpoint-before-the-wal-fsync
+	echo "SQLITE-DURABILITY forged: the checkpointed database under generation 1's WAL cut after commit $sc_ck"
+else
+	fail oracle-refuses-a-checkpoint-before-the-wal-fsync "every checkpointed database under a shorter generation 1 WAL opened as a reference state or not at all"
 fi
 
 umount "$CACHE_DIR"
@@ -876,6 +996,13 @@ echo "SQLITE-DURABILITY reach: $REACH_BEYOND states with this generation's frame
 [ -n "$REACH_EXAMPLE" ] && echo "SQLITE-DURABILITY reach example: $REACH_EXAMPLE"
 if [ "$VIOLATIONS" = 0 ]; then
 	pass crash-states-allowed-by-the-model
+fi
+# Both generations judged: some state recovered to a commit of each.
+if awk -v g1="$GEN1_COMMITS" '$2 != "none" && $2 <= g1 { a = 1 }
+	$2 != "none" && $2 > g1 { b = 1 } END { exit !(a && b) }' "$WORK/recovered"; then
+	pass states-in-both-generations
+else
+	fail states-in-both-generations "no judged state recovered to a commit of generation $( [ -n "$(awk -v g1="$GEN1_COMMITS" '$2 != "none" && $2 <= g1' "$WORK/recovered")" ] && echo 2 || echo 1) (generation 1: commits 1 to $GEN1_COMMITS)"
 fi
 # What "no commit survives an earlier lost one" needs to mean something: a
 # judged state of the script's epochs (where synced commits are written,
