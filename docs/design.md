@@ -1835,6 +1835,31 @@ syscall that puts the old name back: `CacheNeverWrong`; the same before
 the syscall without the kernel's lock: `TriState`; an interrupted mutation
 that never Ends: `GuardsBalanced`).
 
+**How soon, counted in work** (step 22.5; `formal/README.md`, "Timely
+interrupts"). The model makes acting on an interrupt an obligation: the
+interrupt arrives at any moment of a request (`InterruptArrives`), and at a
+checkpoint an interrupted request can only reply `EINTR`. It then proves
+that after the arrival a request takes at most two more backing syscalls
+before it replies (`InterruptBound`): the longest run with no checkpoint
+between is a create's, whose syscall was done: the probe of its new name,
+then, after phase 3, the refresh of the parent's attributes; every other
+run is at most one (a mutation's refresh after its phase 3, a getattr's or
+readdirplus's statx of an unknown directory). And that an interrupted
+request eventually replies, `EINTR` if it reaches a checkpoint, provided no
+request is postponed forever by the others (`InterruptedReplies`,
+`InterruptActedOn`). The count is of the model's steps, each a short fixed
+sequence of syscalls on one object; it leaves out work with no backing
+syscall (cache queries and commits) and the syscall a request is blocked
+in when the interrupt comes (below). Two places in the code have fewer
+checkpoints than the model, both inside a population, one step of the
+model: the listing's getdents64 calls (one per 64 KiB of entries) have
+none between them, so an interrupt that arrives while dcfs reads a large
+directory's names waits for the rest of them; and a readdir's population
+(not a lookup's) has none before its reads, and an empty directory's
+none at all. Trace validation holds the code to the obligation where the
+code sees the interrupt: a mutation's checkpoint that saw it and then took
+the syscall would be rejected (`trace_fault_checkpoint_ignored_test`).
+
 **What cannot be interrupted yet**: a backing syscall already blocked in
 the kernel: the first I/O to a disk spinning up (seconds), a hung network
 mount, `syncfs` or `fsync` of much dirty data, DESTROY's reconciliation

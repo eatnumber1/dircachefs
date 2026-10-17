@@ -179,6 +179,48 @@ Owner: dcfs-protocol. Docs: `formal/README.md` (actions and properties
 tables), `docs/design.md` "Cancellation", README's EINTR paragraph if
 the guarantee is user-visible.
 
+### As built (2026-10-17, step-22.5, pending review)
+
+- `InterruptArrives(p)` sets the slot's `intr` at any step of a request in
+  flight; at a checkpoint pc (`InterruptPcs`) `At` requires `Proceeds(p)`,
+  so `Interrupt` is the only step there. "Queued before dispatch" is the
+  same as arriving right after the first step (no D request's first step
+  makes a backing syscall but a sync point's syncfs, which the model takes
+  in its first step and the code checkpoints before).
+- K = 2: `InterruptBound == \A p \in Procs : ps[p].nsys <= 2` (the ghost
+  `nsys` counted in `AfterSyscall`/`MutSyscall`). The run: a create's
+  `C_probe` then `C_stat`; every other run is at most 1 (`C_stat` after
+  `C_rec`, `U_stat`, `R_stat`, `A_stat`, `GA_stat`, `RDP_stat`).
+- Liveness under `FairSpec` (`RequestFairness == \A p :
+  WF_vars(RequestStep(p))`): `InterruptedReplies` (`intr ~> idle`) and `InterruptActedOn` (at a
+  checkpoint: `~>` idle with an `EINTR` reply, or the daemon down).
+- Known bugs: `interrupt_checkpoint_removed` (the create's, C_sys:
+  `InterruptBound`, 3 syscalls), `interrupt_ignored` (`Sees <-
+  SeesNothing`: `InterruptActedOn`), `interrupt_not_replied`
+  (`InterruptedReplies`). Deviation: the brief's "checkpoint ignores the
+  arrival must violate liveness" holds only for `InterruptActedOn`; a
+  request that ignores its interrupt still replies, so plain `intr ~>
+  idle` cannot see it, hence the second variant. Removing a checkpoint in
+  readdir's probe loop or a rename's second name does not exceed K (their
+  runs stay within 2), so the bound's variant removes the create's.
+- Configs: `MC_interrupt` 1,134,929 (was 280,869), `MC_interrupt_muts2`
+  3,908,815 (892,708), `MC_interrupt_nolock` 4,207,066 (1,036,982), new
+  `MC_interrupt_liveness` 64,111 (medium) and `_slots` 126,731 (large).
+  Timeouts raised (interrupt_test long, muts2 and nolock eternal: 26 min
+  each at load 30).
+- Trace validation: the recorder writes `interrupt_arrives` where a
+  mutation's checkpoint sees the interrupt (its `interrupt` line waits for
+  `End`); `T_InterruptArrives`. `trace_fault_checkpoint_ignored_test`
+  (a `--wrap` of `Checkpoint` that ignores its EINTR) is rejected at the
+  unlink's syscall line; before the recorder change it was valid. Three
+  `trace_tests/interrupt_*.log`.
+- Findings for russ (code, not changed): the getdents64 loop in
+  `ReadDirNames` has no checkpoint (unbounded in directory size); a
+  readdir's population (`ListCached` -> `PopulateDirectory`) has no
+  checkpoint before its reads, and an empty directory's none at all.
+- The mechanical check is proposed (formal/README.md, "Timely
+  interrupts"), not built.
+
 ## 22.6 Interruption points: the cancellation checkpoint renamed (russ, 2026-10-17; merged 2026-10-17, b838960, Gemini Flash)
 
 "Checkpoint" meant both a SQLite WAL checkpoint and Phase 22's place where
