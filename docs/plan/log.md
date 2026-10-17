@@ -3404,3 +3404,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 2026-10-16: STATUS.md deleted (russ: "I meant delete STATUS.md entirely"),
   with its rule in process.md step 6. The private dashboard stays and is
   refreshed at every merge from the Queue.
+
+- 2026-10-16: lanes 3-6 had sat idle while protocol steps ran one at a time;
+  the Claude week is at 2% with a week to its reset, so independent work is
+  pulled forward. Dispatched: 12.18b (investigator, lane-3), 14.10's design
+  half only, no C++ changes while 25.9b reworks error handling (protocol,
+  lane-4; the implementation becomes 14.10b), and a read-only Gemini 4 Argon
+  consistency sweep (lane-6, sandboxed, plan mode; Gemini week 99%, Argon
+  88%). 25.28b and 17.2b stay behind 25.9b: they touch the same code.
