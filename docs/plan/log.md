@@ -3429,3 +3429,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Claude spend: extra Claude goes to non-building work (Opus reviews of
   the protocol steps, formal-model and design work); Argon gets no new job
   until the sweep's cost is known; Flash takes the volume reading.
+
+- 2026-10-17: the dashboard_lanes tool merged (27e0e75; one style review
+  round: lost updates between concurrent hooks, crashes on unrecorded agents
+  and wrong-type state files, fixed; 38 tests). Its hooks are installed in
+  `.claude/settings.local.json` (PostToolUse on Agent, SubagentStop, Stop)
+  and seeded with the five agents launched before them. Unverified until the
+  first background finish: whether SubagentStop fires for background agents
+  (the docs are silent). Provisional style calls the reviewer raised for
+  russ: hooks dispatch on a table, not argparse (argparse's usage errors exit
+  2); host-side Python carries no type annotations.

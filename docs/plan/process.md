@@ -113,7 +113,11 @@ process (its waves and file ownership table) is in `history.md`.
    Then refresh russ's private dashboard, "dcfs Mission Control"
    (https://claude.ai/artifact/EVypNNcogbNcxzRjBYp8rK): rewrite its four
    snapshot files (the steps in flight and queued, in the Queue's order;
-   each lane's step, agent type, model and effort; the quota readings
+   each lane's step, agent type, model and effort, which the
+   `dashboard_lanes` hooks write to `~/.cache/dcfs-dashboard/lanes.json`
+   on every agent launch and finish (`tools/agents/README.md`; after an
+   upload, `mark-uploaded`, or the Stop hook holds the turn open); the
+   quota readings
    from "Quota management" below; `gh run list --limit 12`),
    upload each as an asset and point its dataset at the new file with a
    fresh `updated` time, all datasets in one batch write. At most one
