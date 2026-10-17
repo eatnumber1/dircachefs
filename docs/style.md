@@ -497,10 +497,14 @@ uses): they return a `kInternal` `StatusBuilder` and take `<<` context. Use
 `RET_CHECK` where a `Status` can be returned. Where it cannot (a libfuse
 callback, startup), a crash is still not the answer: the no-intentional-
 crashes rule applies (1.6b; `CHECK`, `LOG(FATAL)`, `abort`
-are out of production code, each existing one needs russ's case-by-case
-approval), so the 23 `CHECK_NE(ptr, nullptr)` in `fuse_ops.cc` and the
-`CHECK` in `RestoreRoot` (`backing.cc`) are on plan step 25.9's list, not
-a pattern to copy. Never `assert`.
+are out of production code, each needs russ's case-by-case approval). A
+value its source guarantees gets no check at all (1.10a): `fuse_ops.cc`
+dereferences the `fuse_file_info` and userdata libfuse hands it, with a
+comment saying where each comes from (25.9 had turned its 23
+`CHECK_NE(ptr, nullptr)` into unreachable `RET_CHECK`s; 25.9b deleted
+them). A failure a callback cannot return is handled in place, once:
+`FuseRequest::ReplyNone` (FORGET has no reply to carry an error) refuses a
+second reply and logs it. Never `assert`.
 
 **Build a status one of three ways (russ: StatusBuilder, not `StrCat`).**
 
@@ -648,11 +652,12 @@ until 2026-10-10; this section is it.)
   returning `StatusOr` (TotW #42, and the Google style guide's "Doing Work
   in Constructors").
 - **Every remaining crash site is one russ approved**, listed in the
-  repo-shape allowlist with his approval date and the reason the process
-  could not continue correctly; nothing else. Today's sites (the 23
-  `CHECK_NE(ptr, nullptr)` in `fuse_ops.cc`, `RestoreRoot`'s `CHECK` in
-  `backing.cc`, `fuse_request.cc`'s double-reply `CHECK`, `fork_split.h`'s
-  `abort()`, one `assert`) await his ruling in 25.9.
+  allowlist of the check that finds it with his approval date and the
+  reason the process could not continue correctly; nothing else. There are
+  none (25.9, 25.9b): `fuse_ops.cc`'s null checks were deleted (1.10a),
+  `RestoreRoot` poisons the backing door (below), `FuseRequest::ReplyNone`
+  refuses and logs a second reply, and `ForkSplit`'s parent returns the
+  exit status that `ForkSplit` `_exit`s with.
 - **Tests may crash on what is not under test, and must not ASSERT it**
   (russ, 2026-10-09): "crashes are permitted in tests when invariants
   fail that aren't under test ... The inverse applies too. Don't
@@ -672,20 +677,33 @@ until 2026-10-10; this section is it.)
   have to crash outright and can just make the 'fs interaction' subsystem
   be broken."). A failure a caller must not be able to ignore is not
   conveyed in a `Status` the caller inspects; the subsystem whose state is
-  poisoned records that itself, begins the orderly shutdown
-  (`fuse_session_exit`), and every entry point of that subsystem refuses
-  from then on. For the backing filesystem that door exists already: every
-  backing syscall passes through `backing.cc`'s syscalls_backing layer,
-  which the build graph enforces; a credential switch that cannot be undone
-  poisons it there. Whether that door becomes an injected object (a
-  `Backing` class, with a fake for tests, which the fakes-not-mocks rule
-  favours) is a design question russ left open.
-- **Mechanically** (25.9): `tools/banned_symbols.txt` bans `abort`,
-  `__assert_fail` and Abseil's fatal-log internals in the shipped
-  binaries; `tools/style_matchers/check_in_production.query` (25.21)
-  reports a `CHECK`, `QCHECK`, `DCHECK`, `LOG(FATAL)`, `assert` or `abort`
-  in any file that is not `*_test.cc` or under `testonly/`; the sites that
-  existed are in the shrinking `tools/style_checks_allow.txt`.
+  poisoned records that itself, every entry point of that subsystem refuses
+  from then on, and whatever runs the subsystem asks it at its own door
+  and begins the orderly shutdown. For the backing filesystem
+  (`dcfs/backing_door.h`): every backing syscall is made by a wrapper of
+  `syscalls_backing.h` (the build graph enforces that only `backing.cc` and
+  its lower layers reach them), and each wrapper's first line is the one
+  guard, `RETURN_IF_ERROR(BackingDoor())`; a credential switch that cannot
+  be undone calls `PoisonBacking()` (`RestoreRoot`), every wrapper then
+  refuses with `EIO`, and `SessionLoop::Run` checks the door before each
+  message, serves nothing more and returns the refusal, so the daemon
+  unmounts, keeps its dirty set and exits non-zero. No global session
+  pointer: the loop that owns the session ends it. The poisoned flag is
+  the one global of the daemon (1.8). The door stays free functions, not
+  an injected `Backing` object (1.6, "Decision, no `Backing` class").
+  `SyscallsBackingTest.EveryWrapperRefusesOnceTheDoorIsPoisoned` walks
+  every wrapper; a new wrapper joins its list.
+- **Mechanically** (25.9b): `tools/banned_symbols.txt` bans `abort`,
+  `exit`, `__assert_fail`, `std::terminate` and Abseil's fatal log messages
+  (`CHECK*`, `LOG(FATAL)`) in the shipped binary; Abseil's headers put
+  `__assert_fail` and the compiler's `__clang_call_terminate` puts
+  `std::terminate` into every object, so those allow lines name the
+  functions they cover (`via`), and a function of ours that references
+  either is still a violation. `tools/style_matchers/check_in_production.query`
+  (25.21) reports a `CHECK`, `QCHECK`, `DCHECK`, `LOG(FATAL)`, `assert`,
+  `abort`, `std::terminate`, `exit` or `quick_exit` (not a forked child's
+  `_exit`) in any file that is not `*_test.cc` or under `testonly/`; its
+  allowlist has no such site.
 
 ### 1.6a Shape of a function that does several things
 
@@ -934,8 +952,10 @@ each.
   to only read, `cache::BeginFill`). Backing helpers that touch only a
   descriptor take none (`backing::ReadFile(int fd, ...)`). Exception: the
   protocol-event scopes take the recorder first (`protocol_events.h:381`).
-- **No globals, singletons or `thread_local`** (0 of each). Shared state
-  lives in `Context` (`context.h:84`) or in an object the caller owns.
+- **No globals, singletons or `thread_local`** (0 of each, but the backing
+  door's poisoned flag, `backing_door.cc`: russ, 2026-10-11, 1.6b). Shared
+  state lives in `Context` (`context.h:84`) or in an object the caller
+  owns.
 - **No paths after startup.** Objects are reached by descriptor or file
   handle (`FileHandle::Open`); a child is `openat(dir_fd, name, ...)`, never
   a joined path. Only startup uses a path (SOURCE, the cache database).

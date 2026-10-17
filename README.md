@@ -732,6 +732,7 @@ dcfs itself failed at; warnings are what it noticed or survived.
 | WARNING `cache database directory ... is group- or world-accessible` / `... was mode 0644; tightened to 0600` | The cache holds metadata as sensitive as the source. `chmod 700` the directory; the file is fixed by dcfs. |
 | WARNING `a remount of dcfs changes only the dcfs mount (dcfs.ro); ignoring the underlying mount's options ...` | A remount named native options; they were ignored. See [Remounting](#remounting). |
 | WARNING `pid N: supplementary groups unreadable ...; using none` | A request came from a process whose groups dcfs could not read; it was checked without them and may have got `EACCES`. At most once a minute. |
+| ERROR `cannot restore root's filesystem credentials after a request, poisoning the backing filesystem: ...`, then `The backing filesystem is poisoned: ...` | After acting as a caller, dcfs could not switch back to root (the kernel could not allocate the group list: memory is short). It touches the backing filesystem no more, fails the request in progress with `EIO`, serves nothing else, unmounts and exits with a non-zero status; the next start recovers the entries that request left dirty. Look at the kernel log for memory pressure, then mount again. |
 
 A start that fails prints its reason on the standard error of `mount`, with
 exit status 32 (or 1 for a usage mistake). The

@@ -1416,9 +1416,16 @@ I/O) an interrupted `ls` of an unlisted 20,000-entry directory returns
 Owning the loop also means owning its end. libfuse refuses an `INIT` it
 cannot accept (a `max_read` the kernel did not offer, an old protocol
 version) by ending the session, and keeps the error in a private field;
-its own loop returns it, and `SessionLoop::Run` returns `-EPROTO` when the
-message it just processed was `INIT` and the session has ended, so the
-daemon exits non-zero instead of reporting a clean unmount.
+its own loop returns it, and `SessionLoop::Run` returns an `EPROTO` status
+when the message it just processed was `INIT` and the session has ended, so
+the daemon exits non-zero instead of reporting a clean unmount. dcfs's own
+refusal of an `INIT` (`DirCacheFS::Init` failing, e.g. without
+`default_permissions`) is a wanted capability bit libfuse did not offer,
+which libfuse refuses that way; one always exists, since libfuse 3.18.2
+offers only the `FUSE_CAP_*` bits it defines, all below bit 32. The loop
+also checks the backing door before each message: once a request has
+poisoned it ([Caller credentials](#caller-credentials)), the loop serves
+nothing more and returns the door's refusal, and the daemon exits non-zero.
 
 **The tri-state rule holds through it** (`formal/dcfs.tla`'s `Interrupt`,
 with `GuardsBalanced`; `formal/README.md`): an interrupted fill commits
@@ -1878,10 +1885,17 @@ and nfsd take:
   thread), then `setfsuid`; each is read back, since `setfsuid` and
   `setfsgid` report no errors, and a switch that did not take fails with
   `EPERM`;
-- afterwards, back to root; failing to restore poisons the backing (every
-  later backing syscall fails, see `IsBackingPoisoned` in
-  `dcfs/syscalls_backing.cc`) and ends the session, since carrying on would
-  perform later operations as the wrong user.
+- afterwards, back to root, each of the three even if another failed. A
+  restore that fails (`setgroups` can fail with `ENOMEM`) poisons the
+  backing filesystem's door (`dcfs/backing_door.h`, style 1.6b): every
+  wrapper of `syscalls_backing.h` passes it before its syscall and refuses
+  with `EIO` from then on, so nothing reaches the backing filesystem as the
+  wrong user whatever a caller does with a `Status`; `SessionLoop` serves no
+  further request and returns the refusal, and the daemon shuts down in
+  order (unmount, then a final sync that fails at the door, so the dirty
+  set is kept for the next start's recovery) and exits non-zero. What the
+  request had made unknown stays unknown and dirty: the tri-state rule
+  holds. The flag is the process's one global (russ, 2026-10-11).
 
 Caller identity comes from the FUSE request (`fuse_req_ctx`) and the
 supplementary groups from `fuse_req_getgroups`, which reads
