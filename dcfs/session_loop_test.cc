@@ -23,10 +23,15 @@
 #include <utility>
 #include <vector>
 
+#include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
+#include "dcfs/backing_door.h"
 #include "dcfs/fd.h"
 #include "dcfs/session_loop.h"
+#include "dcfs/status.h"
 #include "dcfs/syscalls_backing.h"
+#include "dcfs/syscalls_process.h"
+#include "dcfs/testonly/assert_ok_and_assign.h"
 #include "fuse_kernel.h"
 #include "fuse_lowlevel.h"
 #include "gmock/gmock.h"
@@ -94,8 +99,17 @@ std::string InitRequest() {
   return out;
 }
 
+// What has happened when Run starts.
+struct BeforeRun {
+  // fuse_session_exit, as a SIGTERM's handler calls it.
+  bool exited = false;
+  // The backing door poisoned, as a request's failed credential restore does.
+  bool poisoned = false;
+};
+
 // Runs a SessionLoop over `script`; returns Run()'s result.
-int RunLoop(Script &script, bool set_callback = true) {
+absl::Status RunLoop(Script &script, bool set_callback = true,
+                     BeforeRun before = {}) {
   struct fuse_lowlevel_ops ops = {};
   ops.init = FakeInit;
   char arg0[] = "session_loop_test";
@@ -112,22 +126,24 @@ int RunLoop(Script &script, bool set_callback = true) {
   EXPECT_EQ(
       fuse_session_custom_io(se, &io, sizeof(io), std::move(*dummy).Release()),
       0);
-  int rc;
+  if (before.exited) fuse_session_exit(se);
+  if (before.poisoned) PoisonBacking();
+  absl::Status served;
   {
     SessionLoop loop(se);
     if (set_callback) {
       loop.SetOnInit([&script] { script.events.emplace_back("on_init"); });
     }
-    rc = loop.Run();
+    served = loop.Run();
   }
   fuse_session_destroy(se);
-  return rc;
+  return served;
 }
 
 TEST(SessionLoopOnInitTest, RunsOnceAfterTheInitReplyWasWritten) {
   Script script;
   script.requests = {InitRequest()};
-  EXPECT_EQ(RunLoop(script), 0);
+  EXPECT_THAT(RunLoop(script), absl_testing::IsOk());
   EXPECT_THAT(script.events, ElementsAre("init", "write", "on_init"));
 }
 
@@ -135,14 +151,15 @@ TEST(SessionLoopOnInitTest, NeverRunsForARefusedInit) {
   Script script;
   script.refuse_init = true;
   script.requests = {InitRequest()};
-  EXPECT_EQ(RunLoop(script), -EPROTO);
+  EXPECT_THAT(GetErrnoFromStatus(RunLoop(script)),
+              absl_testing::IsOkAndHolds(EPROTO));
   EXPECT_THAT(script.events, ElementsAre("init", "write"));
 }
 
 TEST(SessionLoopOnInitTest, RunsAtMostOnce) {
   Script script;
   script.requests = {InitRequest(), InitRequest()};
-  RunLoop(script);
+  RunLoop(script).IgnoreError();
   int calls = 0;
   for (const std::string &event : script.events) calls += event == "on_init";
   EXPECT_EQ(calls, 1);
@@ -151,7 +168,39 @@ TEST(SessionLoopOnInitTest, RunsAtMostOnce) {
 TEST(SessionLoopOnInitTest, NoCallbackIsFine) {
   Script script;
   script.requests = {InitRequest()};
-  EXPECT_EQ(RunLoop(script, /*set_callback=*/false), 0);
+  EXPECT_THAT(RunLoop(script, /*set_callback=*/false), absl_testing::IsOk());
+}
+
+// The control for the next test: an exited session ends the loop, OK.
+TEST(SessionLoopPoisonTest, AnExitedSessionEndsTheLoop) {
+  Script script;
+  script.requests = {InitRequest()};
+  EXPECT_THAT(RunLoop(script, /*set_callback=*/true, {.exited = true}),
+              absl_testing::IsOk());
+  EXPECT_THAT(script.events, ::testing::IsEmpty());
+}
+
+// Runs the loop over an exited session with the backing door poisoned, and
+// exits 0 if the loop returned the door's refusal and served nothing.
+[[noreturn]] void RunPoisonedOverAnExitedSession() {
+  Script script;
+  script.requests = {InitRequest()};
+  const absl::Status served = RunLoop(script, /*set_callback=*/true,
+                                      {.exited = true, .poisoned = true});
+  syscalls::_exit(served == BackingDoor() && script.events.empty() ? 0 : 1);
+}
+
+// A poisoned backing door ends the loop with its refusal, even when the
+// session has exited meanwhile (a SIGTERM during the request that poisoned
+// it): the daemon must not report a clean end. In a child: the door stays
+// poisoned. (dir_cache_fs_poisoned_test poisons it through a request.)
+TEST(SessionLoopPoisonTest, APoisonedDoorEndsTheLoopWithItsRefusal) {
+  ASSERT_OK_AND_ASSIGN(pid_t child, syscalls::fork());
+  if (child == 0) RunPoisonedOverAnExitedSession();
+  int wait_status = -1;
+  ASSERT_THAT(syscalls::waitpid(child, &wait_status, 0),
+              absl_testing::IsOkAndHolds(child));
+  EXPECT_EQ(wait_status, 0);
 }
 
 }  // namespace

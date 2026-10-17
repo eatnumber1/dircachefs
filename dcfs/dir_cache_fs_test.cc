@@ -96,11 +96,13 @@
 #include "absl/time/simulated_clock.h"
 #include "absl/time/time.h"
 #include "dcfs/backing.h"
+#include "dcfs/backing_door.h"
 #include "dcfs/context.h"
 #include "dcfs/fd.h"
 #include "dcfs/fuse_ops.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/migrate.h"
+#include "dcfs/mount_dcfs.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/mount_options.h"
 #include "dcfs/protocol_events.h"
@@ -471,6 +473,43 @@ int __wrap_openat64(int dirfd, const char *path, int flags, ...) {
   return __real_openat64(dirfd, path, flags, mode);
 }
 }  // extern "C"
+
+// Step 25.9b: the credential switch's setgroups, dcfs::syscalls::setgroups
+// wrapped at link time (DIR_CACHE_FS_TEST_WRAPS; the mangled name is
+// libc++'s std::span).
+namespace dcfs {
+namespace {
+
+// The `fail_at`-th call from when it was set, counted from 1, fails with
+// `err`; 0 fails none.
+struct SetgroupsFault {
+  int fail_at = 0;
+  int err = 0;
+  int calls = 0;
+};
+
+SetgroupsFault &Setgroups() {
+  static auto *fault = new SetgroupsFault();
+  return *fault;
+}
+
+}  // namespace
+
+absl::Status RealSetgroups(std::span<const gid_t> groups) asm(
+    "__real__ZN4dcfs8syscalls9setgroupsENSt3__14spanIKjLm18446744073709551615EE"
+    "E");
+// External linkage is the point: the linker resolves the wrapped calls to it.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+absl::Status WrapSetgroups(std::span<const gid_t> groups) asm(
+    "__wrap__ZN4dcfs8syscalls9setgroupsENSt3__14spanIKjLm18446744073709551615EE"
+    "E");
+absl::Status WrapSetgroups(std::span<const gid_t> groups) {
+  SetgroupsFault &fault = Setgroups();
+  if (++fault.calls != fault.fail_at) return RealSetgroups(groups);
+  return ErrnoToStatus(fault.err, "setgroups");
+}
+
+}  // namespace dcfs
 
 namespace dcfs {
 namespace {
@@ -6643,6 +6682,88 @@ TEST_F(DirCacheFSTest, CopyFileRangeByCallerOutsideGroupClearsSetgid) {
   EXPECT_EQ(Release(src, in_fh).error, 0);
 }
 
+// The thread's supplementary groups.
+std::vector<gid_t> ThreadGroups() {
+  std::vector<gid_t> groups(64);
+  const absl::StatusOr<int> n =
+      syscalls::getgroups(static_cast<int>(groups.size()), groups.data());
+  CHECK_OK(n);
+  groups.resize(static_cast<size_t>(*n));
+  return groups;
+}
+
+// A FUSE_MKDIR body for a 0755 directory `name`.
+std::string MkdirBody(std::string_view name) {
+  struct fuse_mkdir_in in = {};
+  in.mode = 0755;
+  std::string body;
+  AppendBytes(body, in);
+  body.append(name);
+  body.push_back('\0');
+  return body;
+}
+
+// Step 25.9b: the credential switch's setgroups fails (EPERM, as in a user
+// namespace whose setgroups is denied). The request fails with it before any
+// syscall as the caller, the thread is root again (fsgid, set before the
+// groups, too), and the backing door stays open: the next switch works.
+TEST_F(DirCacheFSTest, SwitchWhoseSetgroupsFailsFailsTheRequestAsRoot) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("pub"), 0777), IsOk());
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("pub"), 0777, 0), IsOk());
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId pub, Id("pub"));
+  const std::vector<gid_t> groups = ThreadGroups();
+
+  Setgroups() = {.fail_at = 1, .err = EPERM};
+  const Reply refused = Send(FUSE_MKDIR, pub, MkdirBody("d"), 1000, 1000);
+  Setgroups() = {};
+  EXPECT_EQ(refused.error, -EPERM);
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("pub/d")).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_EQ(syscalls::fsuid(), 0u);
+  EXPECT_EQ(syscalls::fsgid(), 0u);
+  EXPECT_EQ(ThreadGroups(), groups);
+  EXPECT_THAT(BackingDoor(), IsOk());
+
+  EXPECT_EQ(Send(FUSE_MKDIR, pub, MkdirBody("d"), 1000, 1000).error, 0);
+  ASSERT_OK_AND_ASSIGN(struct stat st,
+                       syscalls::fstatat(AT_FDCWD, Path("pub/d")));
+  EXPECT_EQ(st.st_uid, 1000u);
+}
+
+// Step 25.9b: a switch's restore that cannot put root's groups back
+// (setgroups ENOMEM: the kernel could not allocate the list) poisons the
+// backing door. The request that did it fails with the door's EIO, what its
+// mutation made unknown stays unknown and dirty, and SessionLoop serves
+// nothing more: it returns the refusal, which RunDaemon returns, so the
+// daemon exits non-zero. Its own target (dir_cache_fs_poisoned_test), since
+// the door stays poisoned for the rest of the process.
+class PoisonedBackingTest : public DirCacheFSTest {};
+
+TEST_F(PoisonedBackingTest, RestoreFailurePoisonsTheDoorAndEndsTheLoop) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("pub"), 0777), IsOk());
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId pub, Id("pub"));
+  ASSERT_THAT(List(pub, false), IsOk());
+  struct fuse_getattr_in getattr_in = {};
+  std::string getattr_body;
+  AppendBytes(getattr_body, getattr_in);
+  const uint64_t mkdir = QueueRequest(FUSE_MKDIR, pub, MkdirBody("d"));
+  QueueRequest(FUSE_GETATTR, kRootInode, getattr_body);
+  SessionLoop loop(se_);
+
+  // The mkdirat's switch is the first setgroups, its restore the second.
+  Setgroups() = {.fail_at = 2, .err = ENOMEM};
+  const absl::Status served = loop.Run();
+  EXPECT_EQ(KernelReadsLeft(), 1u) << "a request was served after poisoning";
+  EXPECT_EQ(TakeReply(mkdir).error, -EIO);
+  EXPECT_THAT(BackingDoor(), Not(IsOk()));
+  EXPECT_EQ(served, BackingDoor());
+  EXPECT_NE(ExitStatusFor(served), 0);
+  EXPECT_EQ(Cached(pub, "d").first, LookupResult::Kind::kUnknown);
+  EXPECT_THAT(Dirty(), Contains(pub));
+}
+
 // A RELEASE says whether the open it ends could write (the lifetime model's
 // argument of kReleased): 1 for a writable open, 0 for a read-only one, both
 // when other opens remain and when it is the file's last.
@@ -7078,7 +7199,7 @@ TEST_F(DirCacheFSTest, RefusedInitEndsTheLoopWithEproto) {
   QueueInit();
   {
     SessionLoop loop(se);
-    EXPECT_EQ(loop.Run(), -EPROTO);
+    EXPECT_EQ(ErrnoOf(loop.Run()), EPROTO);
   }
   fuse_session_destroy(se);
 }
@@ -7099,7 +7220,7 @@ TEST_F(DirCacheFSTest, MountWithoutDefaultPermissionsIsRefused) {
   QueueInit();
   {
     SessionLoop loop(se);
-    EXPECT_EQ(loop.Run(), -EPROTO);
+    EXPECT_EQ(ErrnoOf(loop.Run()), EPROTO);
   }
   fuse_session_destroy(se);
   EXPECT_THAT(capture.lines, Contains(HasSubstr("default_permissions")))
@@ -7119,7 +7240,7 @@ TEST_F(DirCacheFSTest, DefaultOptionsAreRefused) {
   QueueInit();
   {
     SessionLoop loop(se);
-    EXPECT_EQ(loop.Run(), -EPROTO);
+    EXPECT_EQ(ErrnoOf(loop.Run()), EPROTO);
   }
   fuse_session_destroy(se);
 }
@@ -7138,7 +7259,7 @@ TEST_F(DirCacheFSTest, InitWithoutDontMaskIsRefused) {
   QueueInit(FUSE_POSIX_ACL);
   {
     SessionLoop loop(se);
-    EXPECT_EQ(loop.Run(), -EPROTO);
+    EXPECT_EQ(ErrnoOf(loop.Run()), EPROTO);
   }
   fuse_session_destroy(se);
   EXPECT_THAT(capture.lines, Contains(AllOf(HasSubstr("FAILED_PRECONDITION"),
@@ -7162,7 +7283,7 @@ TEST_F(DirCacheFSTest, InitOfferingEveryFlagIsStillRefused) {
   QueueInit(~uint32_t{0}, ~uint32_t{0});
   {
     SessionLoop loop(se);
-    EXPECT_EQ(loop.Run(), -EPROTO);
+    EXPECT_EQ(ErrnoOf(loop.Run()), EPROTO);
   }
   fuse_session_destroy(se);
 }
@@ -7233,7 +7354,8 @@ class FuseRequestLiveTest : public DirCacheFSTest {
     if (se == nullptr) return nullptr;
     QueueInit();
     SessionLoop loop(se);
-    EXPECT_EQ(loop.Run(), -EAGAIN);  // INIT served, nothing more queued
+    // INIT served, nothing more queued.
+    EXPECT_EQ(ErrnoOf(loop.Run()), EAGAIN);
     return se;
   }
 };
@@ -7369,7 +7491,7 @@ TEST_F(DirCacheFSTest, DrainedRequestIsServedAfterTheInterruptedOne) {
   EXPECT_EQ(KernelReadsLeft(), 1u);
   EXPECT_EQ(TakeReply(first).error, -EIO);  // not served yet
   // The loop serves the queued GETATTR, then reads the next one.
-  EXPECT_EQ(loop.Run(), -EAGAIN);  // nothing more to read
+  EXPECT_EQ(ErrnoOf(loop.Run()), EAGAIN);  // nothing more to read
   EXPECT_EQ(TakeReply(first).error, 0);
   EXPECT_EQ(TakeReply(second).error, 0);
   ctx_.interrupts = &NoInterrupts();

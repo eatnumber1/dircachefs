@@ -28,6 +28,8 @@
 #include <vector>
 
 #include "absl/functional/any_invocable.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "dcfs/interrupts.h"
 #include "fuse_lowlevel.h"
 
@@ -40,10 +42,12 @@ class SessionLoop final : public Interrupts {
   ~SessionLoop() override;
 
   // fuse_session_loop: serves requests until the session exits or the
-  // device is gone; 0, -EPROTO after a refused FUSE_INIT (what libfuse's
-  // private se->error says then), or a negative errno from reading the
-  // device.
-  int Run();
+  // device is gone (OK), or until something stops it: a refused FUSE_INIT
+  // (an EPROTO status, what libfuse's private se->error says then), a
+  // failed read of the device (its errno), or a request that poisoned the
+  // backing door (dcfs/backing_door.h; BackingDoor()'s status), after which
+  // it serves nothing more.
+  absl::Status Run();
 
   // Called once, from Run, after the kernel's FUSE_INIT was answered and the
   // session is still going: dcfs is serving. mount.dcfs's wrapper, waiting
@@ -59,6 +63,10 @@ class SessionLoop final : public Interrupts {
   bool Interrupted() override;
 
  private:
+  // Serves the next message, a queued one or else one read into `fbuf`:
+  // whether the device is still there, or why the loop must stop (a refused
+  // FUSE_INIT, a failed read).
+  absl::StatusOr<bool> ServeNext(struct fuse_buf &fbuf);
   void Drain();
 
   struct fuse_session *se_;

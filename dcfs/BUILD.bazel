@@ -850,9 +850,14 @@ qemu_cc_test(
     timeout = "short",
     srcs = ["session_loop_test.cc"],
     deps = [
+      ":backing_door",
       ":session_loop",
+      ":status",
       ":syscalls",
       ":syscalls_backing",
+      ":syscalls_process",
+      "//dcfs/testonly:assert_ok_and_assign",
+      "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",
       "@libfuse//:libfuse",
@@ -1031,6 +1036,7 @@ cc_library(
 # else.
 DIR_CACHE_FS_TEST_DEPS = [
     ":backing",
+    ":backing_door",
     ":context",
     ":dir_cache_fs",
     ":fuse_ops",
@@ -1038,6 +1044,7 @@ DIR_CACHE_FS_TEST_DEPS = [
     ":session_loop",
     ":metadata_cache",
     ":migrate",
+    ":mount_dcfs",
     ":mount_fds",
     ":mount_options",
     ":protocol_events",
@@ -1075,6 +1082,9 @@ DIR_CACHE_FS_TEST_DEPS = [
     "@sqlite//:sqlite3",
 ]
 
+# dcfs::syscalls::setgroups(std::span<const gid_t>), mangled with libc++.
+SETGROUPS = "_ZN4dcfs8syscalls9setgroupsENSt3__14spanIKjLm18446744073709551615EEE"
+
 DIR_CACHE_FS_TEST_WRAPS = [
     "-Wl,--wrap=name_to_handle_at",
     "-Wl,--wrap=open_by_handle_at",
@@ -1083,6 +1093,8 @@ DIR_CACHE_FS_TEST_WRAPS = [
     # Step 8.2c: the harness's fake kernel passthrough.
     "-Wl,--wrap=fuse_passthrough_open",
     "-Wl,--wrap=fuse_passthrough_close",
+    # Step 25.9b: the credential switch's setgroups (SetgroupsFault).
+    "-Wl,--wrap=" + SETGROUPS,
 ] + [
     # Step 26.2: the backstop under the invariant checks' hooks (see
     # NoTransactionAt in dir_cache_fs_test.cc).
@@ -1133,9 +1145,24 @@ qemu_cc_test(
     # "Guest memory").
     asan_mem = 1088,
     srcs = ["dir_cache_fs_test.cc"],
-    # The fault sweep has its target (dir_cache_fs_fault_sites_test).
-    args = ["--gtest_filter=-FaultSitesTest.*:SlopeTest.*"],
+    # The fault sweep, the slope tests and the poisoned backing have targets
+    # of their own.
+    args = ["--gtest_filter=-FaultSitesTest.*:SlopeTest.*:PoisonedBackingTest.*"],
     disks = [("vdb", "ext4", "32M")],  # InitRoot needs FS_IOC_GETFSUUID
+    linkopts = DIR_CACHE_FS_TEST_WRAPS,
+    deps = DIR_CACHE_FS_TEST_DEPS,
+)
+
+# Step 25.9b: a credential switch that cannot be undone poisons the backing
+# door (PoisonedBackingTest in dir_cache_fs_test.cc), which stays poisoned for
+# the rest of the process: a guest of its own.
+qemu_cc_test(
+    name = "dir_cache_fs_poisoned_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["dir_cache_fs_test.cc"],
+    args = ["--gtest_filter=PoisonedBackingTest.*"],
+    disks = [("vdb", "ext4", "32M")],
     linkopts = DIR_CACHE_FS_TEST_WRAPS,
     deps = DIR_CACHE_FS_TEST_DEPS,
 )
@@ -1225,9 +1252,10 @@ TRACE_GROUP_B = [
 TRACE_GROUP_FILTERS = {
     "a": ":".join(TRACE_GROUP_A),
     "b": ":".join(TRACE_GROUP_B),
-    # Not the fault sweep and the slope tests either: they record no trace
-    # and have targets of their own (as in dir_cache_fs_test's filter).
-    "c": "*-" + ":".join(TRACE_GROUP_A + TRACE_GROUP_B + ["FaultSitesTest.*", "SlopeTest.*"]),
+    # Not the fault sweep, the slope tests and the poisoned backing either:
+    # they record no trace and have targets of their own (as in
+    # dir_cache_fs_test's filter).
+    "c": "*-" + ":".join(TRACE_GROUP_A + TRACE_GROUP_B + ["FaultSitesTest.*", "SlopeTest.*", "PoisonedBackingTest.*"]),
 }
 
 [
@@ -1567,10 +1595,15 @@ cc_library(
     srcs = ["session_loop.cc"],
     hdrs = ["session_loop.h"],
     deps = [
+      ":backing_door",
       ":interrupts",
+      ":status",
       ":syscalls",
+      "@absl//absl/cleanup",
       "@absl//absl/functional:any_invocable",
       "@absl//absl/log",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
       "@libfuse//:libfuse",
     ],

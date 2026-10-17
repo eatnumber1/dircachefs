@@ -52,15 +52,9 @@
 // relative to an fd on their directory. Filesystem identity always comes
 // from GetDeviceId (dcfs requires a kernel with FS_IOC_GETFSUUID and runs
 // as root; see the project's root/kernel design decision).
-struct fuse_session;
-
 namespace dcfs::backing {
 
 using cache::InodeId;
-
-// Registers the active FUSE session so that RestoreRoot can ask it to exit
-// if restoring root credentials fails.
-void RegisterFuseSession(struct fuse_session *se);
 
 // What RecordNewChild learns about (and records for) a freshly created
 // child: its nodeid, the fuse_gen of the row it now has (0 if it already

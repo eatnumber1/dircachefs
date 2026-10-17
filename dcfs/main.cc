@@ -513,10 +513,6 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   if (session == nullptr) {
     return InternalErrorBuilder() << "fuse_session_new failed";
   }
-  backing::RegisterFuseSession(session);
-  absl::Cleanup unregister_session = [] {
-    backing::RegisterFuseSession(nullptr);
-  };
 
   if (fuse_set_signal_handlers(session) != 0) {
     fuse_session_destroy(session);
@@ -563,7 +559,7 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
     request.reporter.Ready();
   });
   ctx.interrupts = &loop;
-  int rc = loop.Run();
+  const absl::Status served = loop.Run();
   ctx.interrupts = &NoInterrupts();
 
   // Shutdown order matters: unmount first, so the kernel stops sending new
@@ -594,17 +590,16 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   }
   RemoveDaemonLockFile(*daemon_lock);
 
-  // SessionLoop::Run() returns 0 when the kernel connection was closed
-  // (e.g. the mount was unmounted externally) or a signal handler stopped
-  // the loop, or a negative -errno on an actual error -- only the last of
-  // those is a failure.
-  if (rc == -EPROTO && last_error.has_value() && !last_error->text.empty()) {
+  // SessionLoop::Run() is OK when the kernel connection was closed (e.g. the
+  // mount was unmounted externally) or a signal handler stopped the loop; a
+  // failure (a refused INIT, a device that could not be read, a poisoned
+  // backing door) is the daemon's, and a non-zero exit.
+  if (GetErrnoFromStatus(served).value_or(0) == EPROTO &&
+      last_error.has_value() && !last_error->text.empty()) {
     return InternalErrorBuilder()
            << "dcfs refused the kernel's FUSE_INIT: " << last_error->text;
   }
-  if (rc < 0) {
-    return InternalErrorBuilder() << "fuse_session_loop: " << rc;
-  }
+  RETURN_IF_ERROR(served) << "while serving the mount";
   return EXIT_SUCCESS;
 }
 

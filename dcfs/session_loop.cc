@@ -10,9 +10,14 @@
 #include <cstring>
 #include <utility>
 
+#include "absl/cleanup/cleanup.h"
 #include "absl/log/log.h"
+#include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
+#include "dcfs/backing_door.h"
 #include "dcfs/interrupts.h"
+#include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "fuse_kernel.h"
 #include "fuse_lowlevel.h"
@@ -39,35 +44,42 @@ SessionLoop::~SessionLoop() {
   for (struct fuse_buf &buf : queued_) std::free(buf.mem);
 }
 
-int SessionLoop::Run() {
-  int res = 0;
+absl::Status SessionLoop::Run() {
   struct fuse_buf fbuf = {};
-  while (fuse_session_exited(se_) == 0) {
-    if (!queued_.empty()) {
-      struct fuse_buf next = queued_.front();
-      queued_.pop_front();
-      fuse_session_process_buf(se_, &next);
-      std::free(next.mem);
-      continue;
-    }
-    res = fuse_session_receive_buf(se_, &fbuf);
-    if (res == -EINTR) continue;
-    if (res <= 0) break;
-    const uint32_t opcode = OpcodeOf(fbuf);
-    fuse_session_process_buf(se_, &fbuf);
-    // A refused FUSE_INIT ends the session (libfuse's do_init sets its
-    // private se->error to -EPROTO, which fuse_session_loop returns): the
-    // only way an INIT ends it.
-    if (opcode == FUSE_INIT && fuse_session_exited(se_) != 0) {
-      std::free(fbuf.mem);
-      return -EPROTO;
-    }
-    if (opcode == FUSE_INIT && on_init_) {
-      std::exchange(on_init_, nullptr)();
-    }
+  absl::Cleanup free_fbuf = [&fbuf] { std::free(fbuf.mem); };
+  while (true) {
+    // The request just served may have poisoned the backing door: then no
+    // other is served, even if the session has exited meanwhile.
+    RETURN_IF_ERROR(BackingDoor());
+    if (fuse_session_exited(se_) != 0) return absl::OkStatus();
+    ASSIGN_OR_RETURN(const bool device_open, ServeNext(fbuf));
+    if (!device_open) return absl::OkStatus();
   }
-  std::free(fbuf.mem);
-  return res > 0 ? 0 : res;
+}
+
+absl::StatusOr<bool> SessionLoop::ServeNext(struct fuse_buf &fbuf) {
+  if (!queued_.empty()) {
+    struct fuse_buf next = queued_.front();
+    queued_.pop_front();
+    fuse_session_process_buf(se_, &next);
+    std::free(next.mem);
+    return true;
+  }
+  const int res = fuse_session_receive_buf(se_, &fbuf);
+  if (res == -EINTR) return true;
+  if (res == 0) return false;
+  if (res < 0) return ErrnoToStatus(-res, "fuse_session_receive_buf");
+  const uint32_t opcode = OpcodeOf(fbuf);
+  fuse_session_process_buf(se_, &fbuf);
+  if (opcode != FUSE_INIT) return true;
+  // A refused FUSE_INIT ends the session (libfuse's do_init sets its private
+  // se->error to -EPROTO, which fuse_session_loop returns): the only way an
+  // INIT ends it.
+  if (fuse_session_exited(se_) != 0) {
+    return ProducedErrnoToStatus(EPROTO, "The kernel's FUSE_INIT was refused");
+  }
+  if (on_init_) std::exchange(on_init_, nullptr)();
+  return true;
 }
 
 void SessionLoop::Begin(fuse_req *req) { serving_.push_back(req); }

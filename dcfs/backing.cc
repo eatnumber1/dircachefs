@@ -65,8 +65,6 @@
 namespace dcfs::backing {
 namespace {
 
-struct fuse_session *g_fuse_session = nullptr;
-
 // Everything the cache stores about an inode's attributes.
 constexpr unsigned int kAttrMask = STATX_BASIC_STATS | STATX_BTIME;
 // Both are requested because a kernel that predates STATX_MNT_ID_UNIQUE
@@ -272,23 +270,24 @@ absl::Status FutimensOPath(int fd, const struct timespec times[2]) {
 // The thread's supplementary groups before a switch, to restore after it.
 using SavedGroups = std::vector<gid_t>;
 
-// Puts the thread's credentials back after a switch. Cannot fail for a
-// process whose effective uid is root; if it somehow did, carrying on
-// would perform every later backing operation as the wrong user, so that
-// poisons backing and exits the FUSE session.
+// One step of RestoreRoot. A step that failed (setgroups: ENOMEM) leaves the
+// thread with some of the caller's credentials, and every later backing
+// syscall would run with them: the backing door is poisoned (backing_door.h),
+// which no caller can ignore, and the session loop ends the daemon.
+void PoisonIfNotRestored(const absl::Status &restored) {
+  if (restored.ok()) return;
+  LOG(ERROR) << "cannot restore root's filesystem credentials after a "
+                "request, poisoning the backing filesystem: "
+             << restored;
+  PoisonBacking();
+}
+
+// Puts the thread's credentials back after a switch, each of the three even
+// if another failed.
 void RestoreRoot(const SavedGroups &groups) {
-  absl::Status uid = syscalls::setfsuid(0);
-  absl::Status status = syscalls::setgroups(groups);
-  absl::Status gid = syscalls::setfsgid(0);
-  if (!uid.ok() || !status.ok() || !gid.ok()) {
-    LOG(ERROR) << "cannot restore root filesystem credentials: setfsuid " << uid
-               << ", setgroups " << status << ", setfsgid " << gid << " (fsuid "
-               << syscalls::fsuid() << ", fsgid " << syscalls::fsgid() << ")";
-    PoisonBacking();
-    if (g_fuse_session != nullptr) {
-      fuse_session_exit(g_fuse_session);
-    }
-  }
+  PoisonIfNotRestored(syscalls::setfsuid(0));
+  PoisonIfNotRestored(syscalls::setgroups(groups));
+  PoisonIfNotRestored(syscalls::setfsgid(0));
 }
 
 // Switches to `caller`. fsgid and groups go before fsuid so the thread is
@@ -622,8 +621,6 @@ absl::StatusOr<RootProbe> Probe(Context &ctx, int source_fd) {
 }
 
 }  // namespace
-
-void RegisterFuseSession(struct fuse_session *se) { g_fuse_session = se; }
 
 absl::StatusOr<RootIdentity> ProbeRoot(Context &ctx, int source_fd) {
   ASSIGN_OR_RETURN(RootProbe probe, Probe(ctx, source_fd));
