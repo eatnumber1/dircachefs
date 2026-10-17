@@ -754,29 +754,5 @@ py_test(
     deps = [":style_fix_lib"],
 )
 
-py_library(
-    name = "agent_watchdog_lib",
-    srcs = ["agent_watchdog.py"],
-    imports = ["."],
-    target_compatible_with = HOST_ONLY_COMPATIBLE,
-)
-
-py_binary(
-    name = "agent_watchdog",
-    srcs = ["agent_watchdog.py"],
-    main = "agent_watchdog.py",
-    target_compatible_with = HOST_ONLY_COMPATIBLE,
-    deps = [":agent_watchdog_lib"],
-)
-
-py_test(
-    name = "agent_watchdog_test",
-    size = "small",
-    timeout = "short",
-    srcs = ["agent_watchdog_test.py"],
-    target_compatible_with = HOST_ONLY_COMPATIBLE,
-    deps = [":agent_watchdog_lib"],
-)
-
 style_findings_here()
 

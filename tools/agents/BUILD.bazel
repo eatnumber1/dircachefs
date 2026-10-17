@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: MIT
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
+
+# Harness tool for the Gemini (Antigravity) orchestrator, not part of dcfs.
+# See README.md in this directory.
+py_library(
+    name = "gemini_watchdog_lib",
+    srcs = ["gemini_watchdog.py"],
+    imports = ["."],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+py_binary(
+    name = "gemini_watchdog",
+    srcs = ["gemini_watchdog.py"],
+    main = "gemini_watchdog.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":gemini_watchdog_lib"],
+)
+
+py_test(
+    name = "gemini_watchdog_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["gemini_watchdog_test.py"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":gemini_watchdog_lib"],
+)

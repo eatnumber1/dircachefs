@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
-"""Mechanical agent liveness watchdog and dashboard generator.
+"""Mechanical liveness watchdog for Gemini (Antigravity) subagents.
 
-Monitors active subagents in the Antigravity workspace, tracks transcript
-updates, detects stalls/failures, and continuously updates the maintainer's
-status dashboard without generating periodic turn noise in the agent session.
+Harness tool, not part of dcfs; see tools/agents/README.md. Monitors
+active subagents in the Antigravity workspace, tracks transcript updates,
+detects stalls and failures, and keeps the maintainer's status dashboard
+current without generating periodic turn noise in the agent session.
 """
 
 import argparse
@@ -14,6 +15,12 @@ import re
 import sys
 import tempfile
 import time
+
+
+def default_status_file():
+  """Returns $XDG_RUNTIME_DIR/dcfs_agent_status.md, or the tmp dir if unset."""
+  runtime_dir = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+  return os.path.join(runtime_dir, "dcfs_agent_status.md")
 
 
 def parse_iso_time(iso_str):
@@ -263,7 +270,7 @@ def format_dashboard(parent_id, agents_status, now=None):
       "",
       "> [!NOTE]",
       "> This dashboard is maintained mechanically by "
-      "`tools/agent_watchdog.py`.",
+      "`tools/agents/gemini_watchdog.py`.",
       "> It monitors transcript activity without generating turn cycles.",
       "",
   ])
@@ -307,6 +314,7 @@ def run_watchdog(brain_dir, parent_id, status_file,
             f"updated {status_file}")
       break
 
+    # Exception to docs/style.md 1.11 (developer tool); see README.md.
     time.sleep(interval_sec)
   return 0
 
@@ -320,7 +328,7 @@ def main(argv):
                       help="Conversation ID of parent orchestrator")
   parser.add_argument("--active-ids", default="",
                       help="Comma-separated IDs of active subagents to monitor")
-  parser.add_argument("--status-file", default="/tmp/dcfs_status.md",
+  parser.add_argument("--status-file", default=default_status_file(),
                       help="Destination status markdown file")
   parser.add_argument("--interval", type=int, default=5,
                       help="Polling interval in seconds (daemon mode)")

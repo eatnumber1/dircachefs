@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: MIT
-"""Unit tests for tools.agent_watchdog (mechanical agent monitor)."""
+"""Unit tests for gemini_watchdog (Gemini subagent liveness monitor)."""
 
 import json
 import os
 import tempfile
 import time
 import unittest
+from unittest import mock
 
-from tools import agent_watchdog
+import gemini_watchdog
 
 
 class AgentWatchdogTest(unittest.TestCase):
@@ -49,7 +50,7 @@ class AgentWatchdogTest(unittest.TestCase):
     with open(parent_log, "w", encoding="utf-8") as f:
       f.write(json.dumps(entry) + "\n")
 
-    agents = agent_watchdog.discover_subagents(self.brain_dir, self.parent_id)
+    agents = gemini_watchdog.discover_subagents(self.brain_dir, self.parent_id)
     self.assertEqual(len(agents), 1)
     self.assertEqual(agents[0]["id"], subagent_id)
     self.assertEqual(agents[0]["role"], "Implementer")
@@ -75,7 +76,7 @@ class AgentWatchdogTest(unittest.TestCase):
     with open(subagent_log, "w", encoding="utf-8") as f:
       f.write(json.dumps(entry) + "\n")
 
-    status = agent_watchdog.inspect_subagent(self.brain_dir, subagent_id,
+    status = gemini_watchdog.inspect_subagent(self.brain_dir, subagent_id,
                                              now=time.time())
     self.assertEqual(status["state"], "running")
     self.assertEqual(status["step_index"], 5)
@@ -104,7 +105,7 @@ class AgentWatchdogTest(unittest.TestCase):
 
     # Current time is 1 hour later -> stall
     now_epoch = 1791810000.0  # arbitrary future timestamp
-    status = agent_watchdog.inspect_subagent(
+    status = gemini_watchdog.inspect_subagent(
         self.brain_dir, subagent_id, now=now_epoch, stall_threshold_sec=300
     )
     self.assertEqual(status["state"], "stalled")
@@ -127,7 +128,7 @@ class AgentWatchdogTest(unittest.TestCase):
       f.write(json.dumps(entry) + "\n")
 
     now_epoch = 1791810000.0
-    status = agent_watchdog.inspect_subagent(
+    status = gemini_watchdog.inspect_subagent(
         self.brain_dir, subagent_id, now=now_epoch, stall_threshold_sec=300
     )
     self.assertEqual(status["state"], "idle")
@@ -159,7 +160,7 @@ class AgentWatchdogTest(unittest.TestCase):
 
     # Inspect with now close to task file mtime
     task_mtime = os.stat(task_log).st_mtime
-    status = agent_watchdog.inspect_subagent(
+    status = gemini_watchdog.inspect_subagent(
         self.brain_dir, subagent_id, now=task_mtime + 5, stall_threshold_sec=300
     )
     self.assertEqual(status["state"], "running")
@@ -167,11 +168,23 @@ class AgentWatchdogTest(unittest.TestCase):
     self.assertEqual(status["elapsed_sec"], 5)
 
   def test_discover_subagents_with_active_ids(self):
-    agents = agent_watchdog.discover_subagents(
+    agents = gemini_watchdog.discover_subagents(
         self.brain_dir, self.parent_id, active_ids=["agent-1", "agent-2"]
     )
     self.assertEqual(len(agents), 2)
     self.assertEqual({a["id"] for a in agents}, {"agent-1", "agent-2"})
+
+  def test_default_status_file_uses_xdg_runtime_dir(self):
+    with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/run/user/1000"},
+                         clear=True):
+      self.assertEqual(gemini_watchdog.default_status_file(),
+                       "/run/user/1000/dcfs_agent_status.md")
+
+  def test_default_status_file_falls_back_to_tmp_dir(self):
+    with mock.patch.dict(os.environ, {}, clear=True):
+      self.assertEqual(
+          gemini_watchdog.default_status_file(),
+          os.path.join(tempfile.gettempdir(), "dcfs_agent_status.md"))
 
 
 if __name__ == "__main__":
