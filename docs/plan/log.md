@@ -3787,3 +3787,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   citation check (tools/totw_citations.py) finds nothing today (only TotW
   42 and 103 are cited). No style review: host tooling (russ, 2026-10-17);
   reviewed by the orchestrator.
+- 2026-10-17, russ on 25.28b: the idle wall-clock limitations config is
+  agreed. A checkpoint held back by an outside reader gets no warning: "I
+  don't think simply having a sqlite3 shell open will cause this ... and
+  what behavior would you want to have should it happen anyway? Logging
+  'hey the admin has a shell open' isn't a useful log message." Moot for
+  durability once the periodic sync point's durable point is a kSync
+  commit; passed to round 2.
