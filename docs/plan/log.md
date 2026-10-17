@@ -3620,3 +3620,17 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   memory allowance that ran out of memory under ASan on every target (now
   mem 320 / asan_mem 1152, measured). russ's licence rulings are in
   third_party/sibylfs/README.md.
+
+- 2026-10-17: 14.10 (design half) merged, 11 commits: docs/design.md's
+  "Backings without a filesystem UUID" (identity is f_type plus the root-row
+  check, for NFS only; other UUID-less filesystems stay refused), the
+  identity model extended with network backings, outages and transient
+  ESTALE (208 formal tests; known bug ident_net_unconfirmed_estale is
+  today's depth-two parent check), nfs_backing_test (37 measured checks),
+  and the 14.10b implementation brief with russ's rulings and the README's
+  requirements: exclusive access; an fsid unique across every server the
+  database is used with; handles that change when an inode number is
+  reused; no_root_squash; NFS failover not recommended. One Opus review
+  (not mergeable as first written: the parent check is unsound on NFS, and
+  the identity kind was open to every UUID-less filesystem), fixed;
+  merged on the orchestrator's read of the fix round.
