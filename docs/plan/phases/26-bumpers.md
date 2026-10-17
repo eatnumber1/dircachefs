@@ -1311,3 +1311,12 @@ on instruction budgets, disk I/O drift and the xfstests write lines.
 
 Owner: the investigation by Gemini (whole-history reading), verified by
 the orchestrator; the change by dcfs-implementer (medium).
+
+**Investigation result (2026-10-17,
+`notes/performance-budgets-history-2026-10-17.md`): it pans out.** Eight
+real regressions or findings, every one caught by an exact count (syscall
+and SQL budgets, FUSE request counts), a slope test, or a cost comparison
+against native; none caught only by a block-layer I/O or CPU-time
+budget. Eight budget failures were noise (load, block-layer merging, the
+journal timer, timed tests, a missing sanitizer flag), all from CPU-time,
+wall-time or block-layer budgets. So the proposal proceeds as russ agreed.

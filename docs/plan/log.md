@@ -3963,3 +3963,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   wall-clock benchmark, dropping per-test block-layer I/O and CPU budgets.
   russ: "Investigate, then if it pans out, I agree with your proposal."
   26.41 briefed; the history investigation started on Gemini.
+- 2026-10-17, 26.41's investigation: no regression in dcfs's history was
+  caught only by a block-layer I/O or CPU-time budget; all eight real
+  findings came from exact counts, slope tests or a cost comparison; all
+  eight noisy failures came from CPU, wall or block-layer budgets. 26.41
+  proceeds (russ's condition met); queued for dcfs-implementer, quota
+  permitting.
