@@ -425,6 +425,16 @@ for allow in dcfs.allow_other dcfs.allow_other=0 allow_other; do
 		fail "refuses-$allow" "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
 	fi
 done
+# The sync interval must be positive (step 25.28b): it is the cadence of the
+# sync points, so none of 0, a negative or NaN means anything.
+for interval in 0 -1 nan; do
+	wrapper -o "dcfs.sync_interval_sec=$interval,dcfs.cache_db=$CACHE/si.db" "$SRC" "$MNT"
+	if [ "$WRC" -eq 1 ] && grep -q 'sync_interval_sec must be positive' "$OUT" && nothing_left "$MNT"; then
+		pass "refuses-sync-interval-$interval"
+	else
+		fail "refuses-sync-interval-$interval" "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
+	fi
+done
 # A mount does reach other users: a world-readable file reads as nobody.
 wrapper -o "dcfs.cache_db=$CACHE/ao2.db" "$SRC" "$MNT"
 only_one_daemon

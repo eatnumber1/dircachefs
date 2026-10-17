@@ -305,6 +305,13 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
                           << "dcfs.cache_db is required (the cache "
                              "database's path)");
   }
+  // The cadence of the sync points (DirCacheFS::MaybeSyncNow): 0 would run
+  // one at every request, and a negative or NaN interval means nothing.
+  if (!(absl::GetFlag(FLAGS_sync_interval_sec) > 0)) {
+    return MarkUsageError(InvalidArgumentErrorBuilder()
+                          << "dcfs.sync_interval_sec must be positive, not "
+                          << absl::GetFlag(FLAGS_sync_interval_sec));
+  }
   const std::string cache_db = *options.cache_db;
   const char *mountpoint = args.mountpoint.c_str();
   absl::StatusOr<MountOptions> mount_opts =
