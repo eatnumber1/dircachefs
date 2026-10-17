@@ -290,6 +290,23 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
 - When russ is away, keep going with whatever does not need russ, and
   collect what does.
 
+## Questions for russ, and rulings (russ, 2026-10-17)
+
+russ: "you can make rulings on cases that are very obvious, and also you
+can make provisional rulings on non-obvious ones so work can proceed.
+Maybe for the future, questions for me go somewhere that I don't have to
+scroll way up in our conversation to see? Maybe on the dashboard?"
+- The orchestrator rules on an obvious case itself (the guides or an
+  earlier ruling settle it) and records it where the rule lives.
+- A non-obvious case gets a provisional ruling, applied at once so the
+  step proceeds, and goes on the dashboard's "Questions for you" table
+  (dataset `questions`: status open, provisional or answered, the
+  recommendation, the ruling) for russ to confirm or change; a change is
+  then carried into the code. Reviewers propose the ruling with the
+  question instead of blocking on it.
+- The table is the place russ looks; a reply still names what is new on
+  it in one line.
+
 ## Using Gemini through `agy` (2026-10-16)
 
 russ is on Google AI Pro: the Antigravity quota is part of a paid

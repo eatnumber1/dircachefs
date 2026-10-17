@@ -3855,3 +3855,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   free to use it. But check its work and keep an eye on it." process.md
   rule 4 now allows agy write work under a Claude subagent's rules, with
   every diff reviewed and its checks rerun by the orchestrator.
+- 2026-10-17, russ: obvious rulings by the orchestrator, provisional
+  rulings for non-obvious ones so work proceeds, and questions on the
+  dashboard rather than in the conversation; also SLOC counts on the
+  dashboard. process.md gains "Questions for russ, and rulings"; the
+  dashboard gains "Questions for you" (dataset questions) and "Code size"
+  (dataset sloc: prod 14,334, test 42,471, model 5,089, tools 21,319
+  non-blank non-comment lines at 74f45bf); the stale steps, CI and quota
+  panels were refreshed. 25.34's two questions are on it with provisional
+  rulings (guest_cc under the raw-syscall scan; its location).
