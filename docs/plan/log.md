@@ -3439,3 +3439,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (the docs are silent). Provisional style calls the reviewer raised for
   russ: hooks dispatch on a table, not argparse (argparse's usage errors exit
   2); host-side Python carries no type annotations.
+
+- 2026-10-17: the dashboard hooks fire in this session: the Stop hook
+  blocked once when lane-6's agy process ended, and PostToolUse on Agent
+  reported 26.31's launch. The Gemini 4 Argon consistency sweep finished: 35
+  findings, cost about 43 points of Argon's week (88% to 45% remaining) and
+  under 1 point of the general pool, so a whole-tree Argon read is the
+  single most expensive Gemini job; at most one more this week. 26.31
+  (investigator, lane-6, reading only) verifies every finding before
+  anything changes.
