@@ -129,11 +129,36 @@ def referrers_by_symbol(objdump, path):
     return functions
 
 
+# llvm-objdump -r: the section the relocations below it apply to.
+SECTION_RE = re.compile(r"^RELOCATION RECORDS FOR \[(?P<section>[^\]]+)\]:$")
+
+
+@functools.cache
+def data_referrers_by_symbol(objdump, path):
+    """{symbol: the sections of the object at `path` other than code
+    (.text*) with a relocation against it}: a function pointer in data."""
+    out = subprocess.run([objdump, "-r", path], check=True,
+                         capture_output=True, text=True).stdout
+    sections = collections.defaultdict(set)
+    section = None
+    for line in out.splitlines():
+        header = SECTION_RE.match(line)
+        if header:
+            section = header.group("section")
+            continue
+        relocation = RELOCATION_RE.search(line)
+        if relocation and not section.startswith(".text"):
+            sections[relocation.group("symbol")].add(section)
+    return sections
+
+
 def uncovered(objdump, allows, origin, path, symbol, used):
     """Where the object `origin` references `symbol` without an allow line
-    covering it: [] when covered, otherwise " in FUNCTION" per function, or
-    one "" for the object as a whole. The functions are looked up only when
-    lines with `via` are all that match."""
+    covering it: [] when covered, otherwise " in FUNCTION" per function and
+    " from data (SECTION)" per data section, or one "" for the object as a
+    whole. The functions and sections are looked up only when lines with
+    `via` are all that match; no `via` covers a reference from data, which
+    no function makes."""
     lines = covering(allows, origin, symbol)
     whole = [entry for entry in lines if entry[2] is None]
     record(used, whole)
@@ -141,11 +166,9 @@ def uncovered(objdump, allows, origin, path, symbol, used):
         return []
     if not lines:
         return [""]
+    left = [" from data (%s)" % section for section in sorted(
+        data_referrers_by_symbol(objdump, path).get(symbol, set()))]
     functions = referrers_by_symbol(objdump, path).get(symbol, set())
-    if not functions:
-        # A reference from data (a function pointer): no function to match.
-        return [" outside any function's code"]
-    left = []
     for function in sorted(functions):
         hits = [entry for entry in lines
                 if fnmatch.fnmatchcase(function, entry[2])]

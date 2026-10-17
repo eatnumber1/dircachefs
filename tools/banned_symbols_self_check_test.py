@@ -91,8 +91,17 @@ class BannedSymbolsSelfCheckTest(unittest.TestCase):
             deny_text() + "allow %s usleep via * | test\n" % fixture_origin())
         self.assertTrue(
             [p for p in allowed
-             if "usleep" in p and "outside any function's code" in p],
+             if "symbol usleep " in p and " from data (" in p],
             allowed)
+
+    def test_via_line_does_not_silence_data_beside_code(self):
+        # main calls alarm, and a variable refers to it too: the line covers
+        # main's call, not the variable.
+        allowed = run_check(
+            deny_text() + "allow %s alarm via main | test\n" % fixture_origin())
+        problems = [p for p in allowed if "symbol alarm " in p]
+        self.assertTrue([p for p in problems if " from data (" in p], allowed)
+        self.assertFalse([p for p in problems if " in main:" in p], allowed)
 
     def test_malformed_lines_are_rejected(self):
         for bad in ("ban realpath\n", "allow realpath | why\n", "x | y\n",
