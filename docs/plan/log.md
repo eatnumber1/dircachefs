@@ -3664,3 +3664,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   notes/passthrough-write-cost-17.2c.md; negotiating V2 as a protocol step
   is recommended and waits on russ. New manual target bench_write_test
   prints request counts. One style review.
+
+- 2026-10-17: 26.33 merged (cd62cc2, 33e90ba): //test/qemu:guest_syntax_test
+  runs the pinned busybox ash's `sh -n` over every shell script the guests
+  run (guest/init, guest/*.sh, the kernel-bug reproducers; the initramfs
+  now takes the same list). It failed on names_random.sh (line 119), whose
+  duplicated section after a stray exit/fi dated from its first commit
+  (step 9). The newly reached check found a test bug: the reference tree
+  had RANDOM_COUNT names against PER_DIRECTION through dcfs; fixed, exact
+  comparison kept. names_random passes on ext4, xfs and btrfs. One style
+  review, fixed.

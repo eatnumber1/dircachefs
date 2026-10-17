@@ -910,7 +910,7 @@ A test for the JSON writers (fixtures of each job's output line, the
 shields endpoint schema: schemaVersion 1, label, message, color). No
 badge for a number we do not already compute.
 
-## 26.33 names_random.sh has never run past line 118; `sh -n` for guest scripts (from 26.31)
+## 26.33 names_random.sh has never run past line 118; `sh -n` for guest scripts (from 26.31) (merged 2026-10-17, 33e90ba)
 
 26.31 found that test/qemu/guest/names_random.sh ends direction 2 with
 `exit "$FAILED"` followed by `fi` and a second copy of the mounted
