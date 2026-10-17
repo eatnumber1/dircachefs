@@ -201,29 +201,6 @@ TEST(ConnectionTest, CommittedSinceCheckpointCountsCommitsOnly) {
       << "after a truncating checkpoint";
 }
 
-// A passive checkpoint that a reader's older snapshot keeps from copying
-// every frame (and so, perhaps, from fsyncing the WAL) leaves the commits
-// counted as not checkpointed, until a checkpoint after the reader ends.
-TEST(ConnectionTest, CheckpointHeldBackByAReaderLeavesTheCommitsCounted) {
-  std::string path = TestTmpFile("checkpoint_reader_starved.sqlite");
-  ASSERT_OK_AND_ASSIGN(Connection conn, ConnectionFactory{.path = path}.Open());
-  ASSERT_THAT(conn.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
-  ASSERT_THAT(conn.Checkpoint(Connection::CheckpointMode::kPassive), IsOk());
-  ASSERT_OK_AND_ASSIGN(Connection reader,
-                       ConnectionFactory{.path = path}.Open());
-  ASSERT_THAT(reader.Exec("BEGIN"), IsOk());
-  ASSERT_THAT(reader.Exec("SELECT count(*) FROM t"), IsOk());
-
-  ASSERT_THAT(conn.Exec("INSERT INTO t VALUES (1)"), IsOk());
-  ASSERT_THAT(conn.Checkpoint(Connection::CheckpointMode::kPassive), IsOk());
-  EXPECT_THAT(conn.CommittedSinceCheckpoint(), IsOkAndHolds(true))
-      << "the reader's snapshot kept the insert from being copied";
-
-  ASSERT_THAT(reader.Exec("ROLLBACK"), IsOk());
-  ASSERT_THAT(conn.Checkpoint(Connection::CheckpointMode::kPassive), IsOk());
-  EXPECT_THAT(conn.CommittedSinceCheckpoint(), IsOkAndHolds(false));
-}
-
 // The same for an in-memory database (the harness's), whose checkpoint has
 // nothing to copy.
 TEST(ConnectionTest, CommittedSinceCheckpointInMemory) {

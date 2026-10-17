@@ -329,16 +329,11 @@ absl::Status Connection::Close() {
 }
 
 absl::Status Connection::Checkpoint(CheckpointMode mode) {
-  int log_frames = 0;
-  int copied_frames = 0;
   if (sqlite3_wal_checkpoint_v2(db_, /*zDb=*/nullptr, static_cast<int>(mode),
-                                &log_frames, &copied_frames) != SQLITE_OK) {
+                                /*pnLog=*/nullptr,
+                                /*pnCkpt=*/nullptr) != SQLITE_OK) {
     return LastErrorStatus();
   }
-  // A reader of an older snapshot (outside dcfs: an administrator's sqlite3
-  // shell) kept frames from being copied, and perhaps the WAL from being
-  // fsynced: the commits stay counted for the next checkpoint.
-  if (copied_frames != log_frames) return absl::OkStatus();
   ASSIGN_OR_RETURN(checkpointed_version_, DataVersion());
   return absl::OkStatus();
 }
