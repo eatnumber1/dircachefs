@@ -3761,3 +3761,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   7 is two spaces per the guide (tab files convert, shfmt in 7.6b);
   9 and 10 re-asked. docs/style.md gains 1-4 and a sentence that pure
   style in host tooling is neither reviewed nor asked about.
+- 2026-10-17, russ: guest tests in C++ ("we can do it in C++ with only a
+  few helper functions just fine ... style [is] better developed in
+  C++"). 25.34 briefed (helpers, a first port, the no-new-shell rule and
+  its check, the port list) and dispatched (lane-7).

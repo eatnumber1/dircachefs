@@ -1098,3 +1098,44 @@ Status implements AbslStringify. So it should be `StrCat("open ", path,
   sites, and report the design.
 
 Owner: dcfs-implementer; a style review before merge.
+
+## 25.34 Guest tests in C++: the helpers, the rule, a first port (russ, 2026-10-17)
+
+russ, asked whether we should write shell at all: "I suspect no, since we
+have very little tooling (e.g. no clang-tidy) and less developed style
+guides around it"; on shell being natural for "mount, run this as uid
+1000, crash, remount, compare": "perhaps, but we can do it in C++ with only
+a few helper functions just fine. ... and harder-to-measure things like
+style are better developed in C++". About 21,700 lines of guest shell
+(`test/qemu/guest/`) exist today; `qemu_cc_test` already runs C++ tests in
+the guest.
+
+- **The helpers** (`testonly`, beside `dcfs/testonly/`): the few
+  functions a guest scenario needs, each returning `Status`/`StatusOr`
+  per style 1.6: mount and unmount dcfs (options as the mount helper takes
+  them), run a function as a uid/gid/groups (fork, `setresuid`, wait,
+  carry its result back), crash the daemon (SIGKILL) and a power cut
+  where the harness supports one, remount, list and compare a tree
+  (names as bytes, attributes, the backing against the mount), and the
+  shared assertions the shell `lib.sh` gives today (a check's name, the
+  wanted and actual values, the backing's answer). Derive the set from
+  what `lib.sh`, `fault_lib.sh` and two or three scripts actually use;
+  nothing speculative.
+- **A first port:** one medium guest script (not `credentials.sh`, which
+  17.2e is changing, nor ones 26.36 is editing), ported to a
+  `qemu_cc_test` with the same checks and the same names, shown equivalent
+  (the C++ test fails where the script fails: break the behaviour once
+  and show both fail), the script deleted. Report lines before and after.
+- **The rule:** `docs/style.md` section 4 and `AGENTS.md`: no new shell.
+  New guest tests are C++ (`qemu_cc_test` with the helpers); shell is
+  allowed only as thin glue (the guest `init`, Bazel wrappers, a few
+  lines that `exec` a binary). A mechanical check (`tools/repo_shape.py`)
+  refuses a new `*.sh` under `test/qemu/guest/` and `test/qemu/` outside
+  a list of the existing files, which only shrinks.
+- **The rest of the port** is listed, not done: each remaining script with
+  its size and what it needs from the helpers, in order of value (most
+  edited, most fragile first), as numbered follow-ups. Existing scripts
+  port when a step would otherwise change them substantially.
+
+Owner: dcfs-implementer; an Opus review of the helper API before the
+port is merged, since every future guest test is written against it.
