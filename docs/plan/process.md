@@ -364,7 +364,11 @@ reading. Not for writing code, nor for subtle protocol judgement.
    account, so write jobs run with `--dangerously-skip-permissions` in their
    own lane checkout, without `--sandbox` (russ, 2026-10-17: "Maybe run it
    without a sandbox, like the opus models"; the sandbox kept Bazel from
-   fetching, and a job hung on its first test run). Read-only jobs still use
+   fetching, and a job hung on its first test run). agy ends a session after
+   30 minutes of waiting on its background commands, so a write prompt
+   says: no baseline Bazel run before the change, commands in the
+   foreground, and the lane is one whose Bazel cache is warm (a fresh
+   clone's first build outlasts the limit). Read-only jobs still use
    `--mode plan` and write to the orchestrator's scratchpad. No protocol,
    crash-safety or identity work (rule 6's table).
 5. Narrow jobs, several of them (russ, 2026-10-17: "The long context is
