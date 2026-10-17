@@ -631,6 +631,9 @@ TEST_F(TraceRecorderTest, FileRequestsBecomeLinesOfItsTrace) {
 // and its EINTR reply a "reply" line, not a cut: a lookup interrupted
 // before its population, and a mkdir interrupted between its phase 1 and its
 // syscall, whose line comes with its End (the model's Interrupt Ends it).
+// The mkdir's interrupt is visible from the interruption point on, an
+// "interrupt_arrives" line there (step 22.5), so that a syscall it took
+// instead of ending would be rejected (the model's InterruptArrives).
 TEST_F(TraceRecorderTest, InterruptedRequestsReplyEintr) {
   ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
   StartTrace();
@@ -662,15 +665,17 @@ TEST_F(TraceRecorderTest, InterruptedRequestsReplyEintr) {
     const size_t at = line.find(R"("ev":")");
     evs.push_back(line.substr(at + 6, line.find('"', at + 6) - at - 6));
   }
-  EXPECT_THAT(evs,
-              ::testing::ElementsAre("begin", "lookup", "interrupt", "reply",
-                                     "phase1", "interrupt", "reply"));
-  // The mkdir's interrupt line is written after its End: no mutation in
-  // flight.
-  EXPECT_THAT(lines[5], HasSubstr("\"inflight\":0"));
+  // (ASSERT: the lines below are indexed.)
+  ASSERT_THAT(evs, ::testing::ElementsAre(
+                       "begin", "lookup", "interrupt", "reply", "phase1",
+                       "interrupt_arrives", "interrupt", "reply"));
+  // The mkdir's interrupt_arrives line is written at the checkpoint, its
+  // interrupt line after its End: no mutation in flight then.
+  EXPECT_THAT(lines[5], HasSubstr("\"c\":\"Interrupted\""));
+  EXPECT_THAT(lines[6], HasSubstr("\"inflight\":0"));
   // Each reply line carries the request's EINTR (step 12.7b).
   EXPECT_THAT(lines[3], HasSubstr("\"ev\":\"reply\",\"p\":\"p1\",\"errno\":4"));
-  EXPECT_THAT(lines[6], HasSubstr("\"ev\":\"reply\",\"p\":\"p1\",\"errno\":4"));
+  EXPECT_THAT(lines[7], HasSubstr("\"ev\":\"reply\",\"p\":\"p1\",\"errno\":4"));
 }
 
 // A reply line carries the errno its frame returned, for formal/Trace.tla's

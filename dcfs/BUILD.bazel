@@ -1336,6 +1336,8 @@ test_suite(
 #       phase 1, inside a readdir's population of the same directory.
 #   swallow_syscall_error: an unlink's syscall reports an error the model
 #       does not have, which the request ignores, replying OK.
+#   checkpoint_ignored: a checkpoint sees the request's interrupt, and its
+#       caller (an unlink's) carries on to its syscall (step 22.5).
 # Mangled with libc++ (std::__1::basic_string_view): the toolchain's standard
 # library. `llvm-nm` on the object shows the names to wrap.
 BEGIN_REMOVE = "_ZN4dcfs5cache11BeginRemoveERNS_7ContextElNSt3__117basic_string_viewIcNS3_11char_traitsIcEEEElNS0_12FillSnapshotE"
@@ -1345,6 +1347,8 @@ BEGIN_SYNC = "_ZN4dcfs5cache9BeginSyncERNS_7ContextE"
 BEGIN_CREATE = "_ZN4dcfs5cache11BeginCreateERNS_7ContextElNSt3__117basic_string_viewIcNS3_11char_traitsIcEEEE"
 
 UNLINK_AT = "_ZN4dcfs7backing8UnlinkAtERNS_7ContextERKNS_11CredentialsElNSt3__117basic_string_viewIcNS6_11char_traitsIcEEEEi"
+
+CHECKPOINT = "_ZN4dcfs10CheckpointERNS_7ContextENSt3__117basic_string_viewIcNS2_11char_traitsIcEEEE"
 
 DIR_CACHE_FS_FAULTS = {
     "skip_mark_unknown": dict(
@@ -1387,6 +1391,14 @@ DIR_CACHE_FS_FAULTS = {
         test = "TraceScenarioUnlink",
         # The reply: OK, after a syscall error the model does not have.
         event = "\"c\":\"RequestEnd\",\"ev\":\"unexplained\",\"why\":\"a syscall error the model does not have: .*EBUSY.*, and its request replied OK\"",
+    ),
+    "checkpoint_ignored": dict(
+        wraps = [CHECKPOINT],
+        test = "TraceScenarioInterruptedUnlink",
+        # The unlinkat, after the checkpoint saw the interrupt (its
+        # interrupt_arrives line): at a checkpoint the model's interrupted
+        # request may only take Interrupt.
+        event = "\"c\":\"MutationSyscall\",\"ev\":\"syscall\"",
     ),
 }
 

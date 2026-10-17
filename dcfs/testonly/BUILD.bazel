@@ -294,6 +294,17 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "checkpoint_ignored",
+    srcs = ["checkpoint_ignored.cc"],
+    alwayslink = True,
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        "//dcfs:context",
+        "@absl//absl/status",
+    ],
+)
+
 # The C++ sources, for //tools:raw_syscalls_test.
 filegroup(
     name = "cxx_sources",

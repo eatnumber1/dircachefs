@@ -7474,6 +7474,22 @@ TEST_F(DirCacheFSTest, MutationInterruptedAfterItsSyscallCompletes) {
   ctx_.interrupts = &NoInterrupts();
 }
 
+// An unlink interrupted at the checkpoint before its syscall, traced
+// (as MutationInterruptedBeforeItsSyscallLeavesItUnknown, without its
+// expectations: //dcfs:trace_fault_checkpoint_ignored_test runs it with a
+// caller that ignores the checkpoint's EINTR, step 22.5).
+TEST_F(DirCacheFSTest, TraceScenarioInterruptedUnlink) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_THAT(List(kRootInode, false), IsOk());  // f cached, no lookup.
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  StartTrace();
+  interrupts.at = 1;
+  Unlink(kRootInode, "f");
+  ctx_.interrupts = &NoInterrupts();
+}
+
 // End to end: the kernel's FUSE_INTERRUPT for the request being served,
 // read from the device by SessionLoop at an interruption point (as the
 // daemon's loop does), stops a population.
