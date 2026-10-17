@@ -6855,6 +6855,45 @@ TEST_F(DirCacheFSTest, TruncateWithAModeKeepsWhatTheTruncateCleared) {
   EXPECT_EQ(st.st_mode & 07777, 02666u);
 }
 
+// Step 17.2b: when the mode cannot be read back after the truncate of a
+// size-and-mode SETATTR, the error is replied, the truncate stays done, no
+// mode is applied, and the attributes are read again.
+TEST_F(DirCacheFSTest, TruncateWithAModeWhoseReadBackFailsRepliesTheError) {
+  WriteFile(Path("f"), "data");
+  CHECK_OK(syscalls::fchmodat(AT_FDCWD, Path("f"), 06666, 0));
+  auto restore_groups = WithThreadGroups({1000});
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  // The first statx after the truncate is the read-back's.
+  auto fail_after_truncate = std::make_shared<absl::AnyInvocable<void()>>();
+  *fail_after_truncate = [this, fail_after_truncate] {
+    absl::StatusOr<struct stat> now = syscalls::fstatat(AT_FDCWD, Path("f"));
+    if (now.ok() && now->st_size == 2) {
+      StatxFailure() = EIO;
+      return;
+    }
+    StatxHook() = [fail_after_truncate] { (*fail_after_truncate)(); };
+  };
+  StatxHook() = [fail_after_truncate] { (*fail_after_truncate)(); };
+  struct fuse_setattr_in in = {};
+  in.valid = FATTR_SIZE | FATTR_MODE;
+  in.size = 2;
+  in.mode = S_IFREG | 02666;
+  std::string body;
+  AppendBytes(body, in);
+  EXPECT_EQ(
+      Send(FUSE_SETATTR, static_cast<uint64_t>(f), body, 1000, 1000).error,
+      -EIO);
+  StatxHook() = {};
+  ASSERT_OK_AND_ASSIGN(struct stat st, syscalls::fstatat(AT_FDCWD, Path("f")));
+  EXPECT_EQ(st.st_size, 2);
+  EXPECT_EQ(st.st_mode & 07777, 0666u);  // The truncate's, no mode after it.
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr cached, cache::GetAttr(ctx_, f));
+  EXPECT_TRUE(cached.valid);
+  EXPECT_EQ(cached.st.st_size, 2);
+  EXPECT_EQ(cached.st.st_mode & 07777, 0666u);
+}
+
 // Step 17.2b: a file with setuid and setgid but not group execute gets no
 // passthrough, from any open (one registration serves every open of an
 // inode, and the kernel refuses a non-passthrough open of an inode that has

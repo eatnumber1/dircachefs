@@ -2364,7 +2364,7 @@ absl::Status FinishRun(Context &ctx) {
 namespace {
 
 // Bits SetAttr's mode-related branches (an explicit FUSE_SET_ATTR_MODE, or
-// a KILL_SUID/KILL_SGID-only clear) share: reopening `opath_fd` as a real
+// a KILL_SGID-only clear) share: reopening `opath_fd` as a real
 // fd when the node is a regular file or directory (fchmod rejects O_PATH),
 // else FchmodOPath -- except a symlink, which cannot be chmod'd at all on
 // Linux (no lchmod).
@@ -2476,20 +2476,13 @@ absl::Status SetAttrFd(const Credentials &caller, int fd,
   if (to_set & FUSE_SET_ATTR_MODE) {
     ASSIGN_OR_RETURN(mode_t mode, RequestedMode(fd, attr, to_set));
     RETURN_IF_ERROR(ApplyMode(fd, type, mode));
-  } else if ((to_set & (FUSE_SET_ATTR_KILL_SUID | FUSE_SET_ATTR_KILL_SGID)) &&
-             !S_ISLNK(type)) {
-    // KILL_SUID/KILL_SGID sent without MODE: the kernel wants the
-    // setuid/setgid bits cleared from whatever the node's mode already
-    // is (e.g. after a write), not set to any particular new mode; setgid
-    // only where the backing filesystem's own write by the caller would
-    // clear it. Nothing to do for a symlink, which has no meaningful mode
-    // bits.
+  } else if ((to_set & FUSE_SET_ATTR_KILL_SGID) != 0) {
+    // A write's privilege removal on a file open for writing, so never a
+    // symlink (the kernel itself sends no KILL_* bit: dcfs negotiates no
+    // killpriv): setgid cleared from the current mode where a write by the
+    // caller would clear it.
     mode_t current_mode = stx.stx_mode & 07777;
-    if (to_set & FUSE_SET_ATTR_KILL_SUID) current_mode &= ~S_ISUID;
-    if ((to_set & FUSE_SET_ATTR_KILL_SGID) &&
-        WriteClearsSetgid(caller, stx.stx_gid)) {
-      current_mode &= ~S_ISGID;
-    }
+    if (WriteClearsSetgid(caller, stx.stx_gid)) current_mode &= ~S_ISGID;
     RETURN_IF_ERROR(ApplyMode(fd, type, current_mode));
   }
 

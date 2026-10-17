@@ -618,11 +618,11 @@ absl::Status FinishRun(Context &ctx);
 // those for a real fd could block or have a side effect); a symlink's
 // mode cannot be changed at all on Linux (there is no lchmod) and this
 // fails with EOPNOTSUPP. With FUSE_SET_ATTR_SIZE too, the mode keeps
-// S_ISUID/S_ISGID only where the truncate left them. FUSE_SET_ATTR_KILL_SUID/
-// KILL_SGID without FUSE_SET_ATTR_MODE clears S_ISUID/S_ISGID from the
-// node's *current* mode instead, S_ISGID only where a write by `caller`
-// would clear it (docs/design.md, "Caller credentials"); it is a no-op on a
-// symlink, which has no meaningful mode bits to clear.
+// S_ISUID/S_ISGID only where the truncate left them. FUSE_SET_ATTR_KILL_SGID
+// without FUSE_SET_ATTR_MODE, a write's privilege removal on a file open for
+// writing, clears S_ISGID from the node's *current* mode where a write by
+// `caller` would clear it (docs/design.md, "Caller credentials"); the kernel
+// sends no FUSE_SET_ATTR_KILL_* bit itself (dcfs negotiates no killpriv).
 // Owner and times use the same regular/dir-vs-other-types split as mode,
 // except that both are unremarkable on a symlink (unlike mode); size is
 // only ever valid for a regular file -- EISDIR/EINVAL otherwise, as the

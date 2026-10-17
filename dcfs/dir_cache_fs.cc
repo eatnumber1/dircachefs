@@ -74,7 +74,7 @@ void NoteBestEffort(std::string_view what, const absl::Status &status) {
 //  - system.posix_acl_access: any chmod of a file with an access ACL
 //    rewrites the ACL to match the new mode (posix_acl_chmod: ext4, xfs,
 //    btrfs). dcfs chmods for FUSE_SET_ATTR_MODE and also for
-//    KILL_SUID/KILL_SGID (backing::SetAttr). system.posix_acl_default is
+//    KILL_SGID (backing::SetAttr). system.posix_acl_default is
 //    never touched by a chmod.
 //  - security.capability: removed by chown/chgrp (even chown(-1, -1)) and
 //    truncate (ATTR_KILL_PRIV, fs/open.c, fs/attr.c) and by any write or
@@ -93,8 +93,7 @@ constexpr std::string_view kXattrsChangedByWrite[] = {kCapabilityXattr};
 // The side-effect xattrs of a Setattr with `to_set`.
 std::vector<std::string_view> XattrsChangedBySetattr(int to_set) {
   std::vector<std::string_view> names;
-  if (to_set & (FUSE_SET_ATTR_MODE | FUSE_SET_ATTR_KILL_SUID |
-                FUSE_SET_ATTR_KILL_SGID)) {
+  if (to_set & (FUSE_SET_ATTR_MODE | FUSE_SET_ATTR_KILL_SGID)) {
     names.push_back(kAclAccessXattr);
   }
   // An otherwise empty setattr is a chown(path, -1, -1) (see

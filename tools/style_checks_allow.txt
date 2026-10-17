@@ -45,7 +45,7 @@ dcfs/backing.cc|RecordNewChild|capturing_mutating_lambda|1
 dcfs/backing.cc|RecordTmpfile|capturing_mutating_lambda|1
 dcfs/backing.cc|ResolveName|capturing_mutating_lambda|1
 dcfs/backing.cc|SetAttrFd|readability-function-cognitive-complexity|1
-dcfs/backing.cc|SetAttrFd|readability-implicit-bool-conversion|13
+dcfs/backing.cc|SetAttrFd|readability-implicit-bool-conversion|10
 dcfs/backing.cc|StaleOrUnreadable|misc-no-recursion|1
 dcfs/backing.cc|StaleOrUnreadable|readability-function-cognitive-complexity|1
 dcfs/backing.cc|VerifyBackingIdentity|google-runtime-int|1
