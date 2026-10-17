@@ -3343,3 +3343,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Argon for medium-difficulty read-only work (reviews, investigations), about ten such jobs a
   week; Gemini 3.8 Flash for volume (censuses, surveys, mechanical reading). Check `/usage` before
   each agy dispatch.
+- russ agreed: network backings get a real identity design (14.10, protocol agent, after the
+  current queue); README marks them unsupported until then (added to the running 15.11c).

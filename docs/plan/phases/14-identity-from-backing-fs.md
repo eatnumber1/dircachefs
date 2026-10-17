@@ -230,3 +230,28 @@ small prototype on a branch (the derivation in `cache::SetRefused`, the
 existing stub tests, the identity oracle after a crash) and a written
 comparison with the counter before any decision; the decision is
 russ's.
+
+## 14.10 Identity for backing filesystems without a UUID (network filesystems first) (russ, 2026-10-16)
+
+The review of 15.11 found that NFS has never worked as a backing:
+`GetDeviceId` (dcfs/device_id.cc) refuses any filesystem whose
+FS_IOC_GETFSUUID answers ENOTTY, and NFS never sets a superblock UUID. russ
+wants network backings supported for administrators who can guarantee
+exclusive access, so this is a design step, protocol agent, after the
+current queue. Questions to settle, with the identity model (12.5) updated
+in the same change: what identifies the backing across mounts and reboots
+when the kernel offers no UUID (for NFS: the server, the export path and
+the filesystem id NFS reports in statfs/fsid and in its file handles; for
+SMB/CIFS: server and share; an administrator-supplied identity in the
+mount options as the general fallback, with the cache refusing a mismatch);
+whether file handles (`name_to_handle_at`) are stable enough on the network
+filesystem to key rows by (NFS handles are; check what the client returns
+and whether open_by_handle_at works on an NFS client mount); what happens
+when the server restarts or the export moves (stale handles: ESTALE
+handling and the identity oracle); what the generation-0 rules give where
+the filesystem reports no generation. Deliverables: the design in
+docs/design.md, the identity model change and its known-bug variants, a
+QEMU guest test with an in-guest NFS server as the backing (the nfs test
+already runs knfsd), README's network-backing example restored as
+supported, and the systemd guest's `_netdev` line backed by a real NFS
+mount. Until then README marks network backings unsupported (15.11c).
