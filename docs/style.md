@@ -1499,6 +1499,20 @@ spaces."). A tab-indented file is converted, in one commit, by
   goes to russ wherever the code lives.
   Correctness rules apply as always: a Claude Code hook always exits 0,
   for instance.
+- **Reviewer decisions from step 25.32:**
+  - **`tempfile.TemporaryDirectory` with cleanup** replaces `mkdtemp`: a test
+    creates scratch trees with `tempfile.TemporaryDirectory()` and registers
+    cleanup with `self.addCleanup(d.cleanup)`.
+  - **`encoding="utf-8"` in every `open()`**: text file I/O states the encoding
+    explicitly, for both reading and writing.
+  - **`<name>_test.py`**: test filenames end with `_test.py`, never
+    `test_<name>.py`.
+  - **Prose scans read whole files**: tools scanning text or prose for
+    citations or patterns read each file whole (`f.read()`) and compute line
+    numbers with `text.count("\n", 0, m.start()) + 1`, so citations wrapped
+    across a line break are checked.
+  - **One `TotW #N` per cited tip**: citations of Abseil Tips of the Week use
+    the canonical `TotW #N` form (bare `tips/N` is not accepted).
 
 ## 6. TLA+
 
