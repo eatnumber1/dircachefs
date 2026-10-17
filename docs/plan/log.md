@@ -3273,3 +3273,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   and liveness, atomically maintaining /tmp/dcfs_status.md. Fully covered by //tools:agent_watchdog_test.
 
 
+- 2026-10-16, the regular orchestrator resumes (now on Opus 5.5). Gemini's handoff is
+  docs/plan/handoff_claude.md (f85d49f); its watchdog was shut down by russ. russ: treat Gemini's
+  work as mildly suspect and review everything that went in without the required review.
+  Dispatched: an Opus review of 25.9, 25.28, 17.2 and 15.11 (the protocol- and security-relevant
+  merges; lane-5 for any test run), and an independent verification of 12.18's SibylFS verdict
+  (investigator, lane-3 scratch only). Queued after them: a lighter review of the rest (8.5,
+  7.2/7.4, 26.17's pinning change, 5.2's act cache mount, the nfs.sh timeout removal, the notes
+  move, the watchdog tool, and the process/style commit 5cc30a5 with the dcfs-code-reviewer agent
+  and style 1.9's comment standards). Lane-1 holds Gemini's uncommitted virtual-Syscalls refactor;
+  recommendation to russ below.
