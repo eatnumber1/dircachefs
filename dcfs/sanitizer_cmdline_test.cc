@@ -9,14 +9,16 @@
 #include <string_view>
 #include <vector>
 
-#include "absl/algorithm/container.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_split.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "dcfs/testonly/files.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 namespace {
+
+using ::testing::Contains;
 
 #if __has_feature(address_sanitizer)
 constexpr std::string_view kBuiltWith = "dcfs_sanitizer=asan";
@@ -31,7 +33,7 @@ TEST(SanitizerCmdlineTest, TheGuestNamesTheSanitizerTheBinaryWasBuiltWith) {
                        dcfs::testonly::ReadFileToString("/proc/cmdline"));
   const std::vector<std::string_view> words =
       absl::StrSplit(absl::StripAsciiWhitespace(cmdline), ' ');
-  EXPECT_TRUE(absl::c_linear_search(words, kBuiltWith)) << cmdline;
+  EXPECT_THAT(words, Contains(kBuiltWith)) << cmdline;
 }
 
 }  // namespace

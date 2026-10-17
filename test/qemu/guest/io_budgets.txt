@@ -169,9 +169,10 @@
 //test/qemu:fault_ace_mixed_test_ext4 dcfs_read_bytes 17993728   # observed 17969152..17981440
 //test/qemu:fault_ace_mixed_test_ext4 dcfs_write_bytes 15790080   # observed 15732736..15761408
 
-# //test/qemu:xfstests_1_test_ext4 (4 runs: 3 here, loaded, and 1 on CI, quiet;
-# the workload is 123 tests of which 25 run, since 26.30)
+# //test/qemu:xfstests_1_test_ext4 (4 runs; the workload is 123 tests of
+# which 25 run)
 //test/qemu:xfstests_1_test_ext4 reads 2190   # observed 2116..2153
 //test/qemu:xfstests_1_test_ext4 sectors_read 1006126   # observed 952942..979534
 //test/qemu:xfstests_1_test_ext4 dcfs_reads 26   # observed 10..18
 //test/qemu:xfstests_1_test_ext4 dcfs_read_bytes 106496   # observed 40960..73728
+

@@ -403,27 +403,46 @@ if command -v taskset >/dev/null 2>&1; then
 fi
 echo "PASS: non-SMT pinning is off by default, enabled by DCFS_PIN_NON_SMT=1"
 
-# --- a shard whose work includes a duration, against the checked-in budgets ----
+# --- a shard whose work includes a duration, against the checked-in budgets ---
 #
 # xfstests_1_test_ext4 runs generic/364, which loops direct writes and fsyncs
 # for 10 s (`timeout 10s`): the requests it issues are a rate, not work. The
-# same shard issued 853 to 1,060 writes of that test at a load average of 36
-# (85% host CPU pressure, 3 runs) and 45,012 on CI's quiet runner (run
-# 39046531637, 14,404 of its 15,620 flushes), so the shard's writes, flushes
-# and the daemon's writes moved by a factor of 4 between hosts for the same
-# code. Both hosts' COST lines are held to the real budgets: a line that
-# counts what such a loop does fails one of them. (The 3540 s is what the
-# target's `eternal` timeout leaves the guest.)
-XFSTESTS_QUIET="COST cpu_us=8269532 reads=2153 writes=57097 sectors_read=963214 sectors_written=4546248 flushes=15620 dcfs_reads=18 dcfs_writes=14896 dcfs_read_bytes=73728 dcfs_write_bytes=24764416"
-XFSTESTS_LOADED="COST cpu_us=19163765 reads=2121 writes=13965 sectors_read=952942 sectors_written=4483072 flushes=1878 dcfs_reads=14 dcfs_writes=2435 dcfs_read_bytes=57344 dcfs_write_bytes=19111936"
+# shard issues thousands more writes on a quiet host than under host pressure,
+# so the write-side lines are absent and both quiet and loaded COST lines are
+# held to the remaining budgets. (The 3540 s is what the target's `eternal`
+# timeout leaves the guest.)
+XFSTESTS_QUIET="COST cpu_us=8269532 reads=2153 writes=57097"
+XFSTESTS_QUIET="$XFSTESTS_QUIET sectors_read=963214 sectors_written=4546248"
+XFSTESTS_QUIET="$XFSTESTS_QUIET flushes=15620 dcfs_reads=18 dcfs_writes=14896"
+XFSTESTS_QUIET="$XFSTESTS_QUIET dcfs_read_bytes=73728"
+XFSTESTS_QUIET="$XFSTESTS_QUIET dcfs_write_bytes=24764416"
+XFSTESTS_LOADED="COST cpu_us=19163765 reads=2121 writes=13965"
+XFSTESTS_LOADED="$XFSTESTS_LOADED sectors_read=952942 sectors_written=4483072"
+XFSTESTS_LOADED="$XFSTESTS_LOADED flushes=1878 dcfs_reads=14 dcfs_writes=2435"
+XFSTESTS_LOADED="$XFSTESTS_LOADED dcfs_read_bytes=57344"
+XFSTESTS_LOADED="$XFSTESTS_LOADED dcfs_write_bytes=19111936"
 CPU_FILE=$REAL_CPU_BUDGETS
 IO_FILE=$REAL_IO_BUDGETS
+awk '
+	/^#/ || /^$/ { next }
+	$1 == "//test/qemu:xfstests_1_test_ext4" &&
+	$2 ~ /^(writes|sectors_written|flushes|dcfs_writes|dcfs_write_bytes)$/ {
+		print FILENAME ":" FNR ": " $1 " has write-side budget line: " $0
+		bad = 1
+	}
+	END { exit bad }' "$REAL_IO_BUDGETS" ||
+	fail "xfstests_1_test_ext4 must not have write-side lines in io_budgets.txt"
+echo "PASS: xfstests_1_test_ext4 has no write-side lines in io_budgets.txt"
 for line in "$XFSTESTS_QUIET" "$XFSTESTS_LOADED"; do
 	canned "$line"
 	run //test/qemu:xfstests_1_test_ext4 TIMEOUT=3540
-	[ "$RC" -eq 0 ] || fail "xfstests_1_test_ext4 over the checked-in budgets at \"$line\": $(cat "$WORK/stdout")"
+	if [ "$RC" -ne 0 ]; then
+		fail "xfstests_1_test_ext4 over budgets: $(cat "$WORK/stdout")"
+	fi
 done
-echo "PASS: xfstests_1_test_ext4 is within its budgets on a quiet host and on a loaded one"
+echo "PASS: xfstests_1_test_ext4 is within budgets on quiet and loaded hosts"
+
+
 
 # The checked-in budgets: every line is OP KIND MAX with a number, the kind a
 # COST field, and no target twice (a second line would be ignored by the awk

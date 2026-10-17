@@ -32,15 +32,12 @@ load("//test/qemu:modules.bzl", "modules_cpio", "test_modules")
 # //test/qemu:asan_build and :ubsan_build; the UBSan runtime is a smaller
 # version of the same, so it shares ASan's number).
 #
-# The ASan initramfs also has a floor of its own (step 26.37): the kernel
-# unpacks the archives into a tmpfs that holds at most half of the RAM left
-# once the compressed archives are taken out, so the unpacked size U and the
-# compressed size G need 2 * U + G + the kernel's reservation before the guest
-# has run a command (README.md, "Guest memory"). The shared initramfs and a
-# btrfs modules archive unpacked to 138,000 kB before the SibylFS binaries and
-# suite (step 12.18b) and to 147,400 after, and 384's cap is 145,800; the
-# largest modules set (xfs, btrfs and ext4) makes it 155,700, against 512's cap
-# of 209,400.
+# The ASan initramfs has a floor of its own (step 26.37): the kernel unpacks
+# the archives into a tmpfs that holds at most half of the RAM left once the
+# compressed archives are taken out, so the unpacked size U and the compressed
+# size G need 2 * U + G + the kernel's reservation before the guest has run a
+# command (README.md, "Guest memory"). The largest modules set (xfs, btrfs and
+# ext4) unpacks to 155,700 kB, requiring at least 512 MiB (a 209,400 kB cap).
 E2E_MEM = 256
 E2E_ASAN_MEM = 512
 

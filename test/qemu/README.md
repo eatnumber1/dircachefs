@@ -501,15 +501,12 @@ command, where `U` is the unpacked size of the e2e initramfs and of the test's
 modules archive (and its mkfs and RAM disk archives) and `G` their compressed
 size. A guest short of it says `Initramfs unpacking failed: write error`, then
 `No space left on device` for every file the init script writes, and its
-`peak_shmem` stops just under the cap. Under ASan the e2e initramfs is 134 MiB unpacked and
-55 MiB compressed (the checking build's 136 and 56) and the modules archives
-add 0.6 to 16.3 MiB (xfs, btrfs and ext4 together) unpacked; at 384 the cap
-was 145,800 kB and the btrfs variant of a small test needed 147,400, so every
-default-sized ASan guest failed (CI run 39046531637: 55 guests in the three
-shards; the SibylFS binaries and suite of step 12.18b had taken that variant
-from 138,000 kB to 147,400). At 512 the cap is 209,400 kB against 155,700 for
-the largest set. Raise `E2E_ASAN_MEM` (`qemu_test.bzl`), not one
-test's `asan_mem`, when the shared initramfs grows again: all of them share it.
+`peak_shmem` stops just under the cap. Under ASan the e2e initramfs is 134 MiB
+unpacked and 55 MiB compressed (the checking build's 136 and 56) and the
+modules archives add 0.6 to 16.3 MiB (xfs, btrfs and ext4 together) unpacked;
+at 512 the cap is 209,400 kB against 155,700 for the largest set (step 26.37).
+Raise `E2E_ASAN_MEM` (`qemu_test.bzl`), not one test's `asan_mem`, when the
+shared initramfs grows again: all of them share it.
 
 Measured peaks (`peak_used`, MiB; KVM, 2026-10-07; ranges are across the
 ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
@@ -723,7 +720,7 @@ gate is disabled.
 | banned symbols in `//dcfs:main_static` (26.8; the crash symbols since 25.9b) | `//tools:banned_symbols_self_check_test` (the real checker and deny list over a program that calls `realpath`; an allow line's `via` silences only the functions it names, and never a reference from data) |
 | the ASan build reports and dies (C++ runtime linked, 7.1) | `//dcfs:asan_runtime_test` (only under `--config=asan`: alloc-dealloc-mismatch must kill the process) |
 | the UBSan build reports and dies (7.4) | `//dcfs:ubsan_runtime_test` (only under `--config=ubsan`: a signed overflow, a misaligned load and a vptr misuse must each kill the process; the vptr one failed to die until `-fsanitize=vptr` was named) |
-| a sanitizer build's guest says so on its command line, which leaves the run out of the budgets (26.37: unit tests did not, and `backing_test` was held to the plain build's CPU budget under ASan) | `//dcfs:sanitizer_cmdline_test` (only under `--config=asan` and `--config=ubsan`: `/proc/cmdline` has the `dcfs_sanitizer=` word of the sanitizer the binary was built with) |
+| a sanitizer build's guest says so on its command line, which leaves the run out of the budgets (26.37) | `//dcfs:sanitizer_cmdline_test` (only under `--config=asan` and `--config=ubsan`: `/proc/cmdline` has the `dcfs_sanitizer=` word of the sanitizer the binary was built with) |
 | the fault-injection harness injects (11.1) | `//test/qemu:fault_selftest_test` (each mode of `guest/fault_lib.sh` on a filesystem over the wrapped disk; with `fault_table` answering `healthy` for every mode, 6 of its checks and the checks of all three failure tests below fail) |
 | a power cut's first boot has a verdict (11.2) | `//test/qemu:run_qemu_verdict_test` (fake QEMUs: no marker, the marker only inside another line, a failed check, an oops on the console, a `KERNEL-OOPS:` or `MEM-OOM:` line (the guest prints the kernel log's failures and OOM-killer lines itself before the marker, from `guest/lib.sh`, whose patterns the test checks are `guest/init`'s), an invariant violation, a QEMU that ended on its own: each fails; QEMU must die of our SIGKILL, status 137) |
 | the kill-mode cut keeps what was synced and loses the rest (11.2) | `//test/qemu:fault_power_kill_test_ext4` and its xfs and btrfs variants (the `before` scenario: a file synced before the cut must survive it and a file written after must not) |
@@ -1541,7 +1538,7 @@ the measured tests, against the guest's allowance with their current timeouts:
 | `//test/qemu:fault_ace_mixed_test_ext4` | 172 s | long (840 s) |
 | `//test/qemu:fault_ace_b_test` | 388 s | long (840 s) |
 | `//test/qemu:fault_ace_a_test` | 760 s | eternal (3540 s) |
-| `//test/qemu:xfstests_1_test_ext4` | 138 s (900 s before its write-side lines went) | eternal (3540 s) |
+| `//test/qemu:xfstests_1_test_ext4` | 138 s | eternal (3540 s) |
 
 None is refused; none was changed. `fault_ace_a_test` takes 35 s and waits an
 hour to call a hang, which `long` (840 s) would still cover with 150 s to spare;
