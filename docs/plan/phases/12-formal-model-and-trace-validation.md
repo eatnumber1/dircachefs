@@ -655,5 +655,10 @@ expires or dcfs invalidates them.
   stores after close). The model's kernel actions include what the kernel
   invalidates on its own, so those 29 are not counterexamples.
 
+- **Cost invariants:** per-request counters of the model's backing calls
+  and commits, with invariants bounding them (a lookup makes at most one
+  backing call; no request iterates the whole dirty set), checked by TLC
+  in the model's configurations.
+
 Owner: dcfs-protocol, after 25.28b and 22.5 (all three touch dcfs.tla).
 

@@ -1294,6 +1294,16 @@ proposal"):
    largest size is the stated limit.
 3. CPU work is instructions retired (user and kernel, 26.36's PMU
    findings) in a few dedicated benchmark scenarios, unheld without a PMU.
+3a. Internal work, exactly (russ, 2026-10-17: "Agreed to adding (1) and
+   (2), with the adjustments you mentioned for deterministic execution"):
+   (1) the slope scenarios also run under the coverage build and record
+   per-function execution counts (`-fprofile-instr-generate`), held to the
+   same exact collinearity at each size, so work done and discarded shows
+   up in the function that did it; (2) SQLite's `sqlite3_stmt_status`
+   counters per statement (VM steps, full-scan steps, sorts, automatic
+   indexes), held the same way. Both depend on one request at a time
+   (the daemon is single-threaded); the io_uring phase keeps that possible
+   with a deterministic test executor (README future work).
 4. Wall-clock speed is an A/B benchmark: main and the candidate
    interleaved on the same host, compared as a ratio; on demand or
    nightly.

@@ -3974,3 +3974,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   moves and asks for its upload with lanes.json. Counts match the hand
   count's method (prod 14,351, test 42,571, model 5,089, tools 21,557 at
   the merge). Reviewed by the orchestrator; tests rerun.
+- 2026-10-17, russ agrees to exact internal-work counts in 26.41 (coverage
+  build per-function counts, SQLite stmt_status) with the deterministic
+  execution caveat; 12.20 gains the TLA+ cost invariants.
