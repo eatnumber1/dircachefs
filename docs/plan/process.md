@@ -301,9 +301,14 @@ reading. Not for writing code, nor for subtle protocol judgement.
 2. Gemini 3.8 Flash for volume (censuses, surveys, mechanical reading);
    Gemini 4 Argon for medium work (reviews, investigations), about ten jobs
    a week, stopping at 10% of its limit; the general pool down to 5%.
-3. No Claude or GPT models through agy: the pool is small, slow to refill,
-   and the orchestrator's Claude subagents are the Claude budget. Never
-   enable or spend AI credits: that is money, russ's call each time.
+3. Claude and GPT models through agy are fine, and worth using since that
+   pool is separate and unspent quota is wasted (russ, 2026-10-16: "Feel
+   free to use Claude or GPT models, especially if it's a separate pool.
+   Unspent credits are wasted money. Just be cognizant of the limits."):
+   its Claude Opus/Sonnet are the same models as our subagents, so it
+   takes read-only reviews that would otherwise spend the Claude plan;
+   stop at 10% of that pool. Paid top-ups ("AI credits") are still not
+   enabled without russ.
 4. Safety: agy is a weaker model with shell access. Only read-only work,
    `--sandbox --mode plan`, in a lane checkout with nothing unmerged,
    output to the orchestrator's scratchpad; the orchestrator verifies
