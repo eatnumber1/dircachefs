@@ -137,10 +137,11 @@ http_file(
 )
 
 # SibylFS (step 12.18b): the 2015 executable POSIX file-system specification
-# (github.com/sibylfs), for the guest tests of test/qemu/guest/sibylfs_lib.sh.
-# The prebuilt x86_64 checker and trace runner (release 2015-10-05 of
-# sibylfs_binaries), pinned by hash and fetched by Bazel, not vendored: the
-# repository has no licence file (the source is ISC).
+# (github.com/sibylfs), used as a differential second oracle by
+# test/qemu/guest/sibylfs.sh. The prebuilt x86_64 checker and trace runner
+# (release 2015-10-05 of sibylfs_binaries) and the generated test suite
+# (sibylfs_test_suite at 14f8150), both pinned by hash and fetched by Bazel,
+# not vendored: neither repository has a licence file (the source is ISC).
 # See third_party/sibylfs/README.md.
 http_archive(
     name = "sibylfs_checker",
@@ -148,6 +149,13 @@ http_archive(
     sha256 = "080c5bced08bbb34dedde43cdbd4f8fd3e1c5d678c60dff7067cc6f189208879",
     strip_prefix = "sibylfs",
     url = "https://github.com/sibylfs/sibylfs_binaries/releases/download/2015-10-05/sibylfs_linux_amd64.tar.gz",
+)
+
+http_file(
+    name = "sibylfs_test_suite",
+    downloaded_file_path = "sibylfs_test_suite.tar.gz",
+    sha256 = "39205e0803f7773f9e86751b7e030cdfe24fcf23a29be098b735645b2400813d",
+    urls = ["https://github.com/sibylfs/sibylfs_test_suite/archive/14f81504ca2d497e8b945133cd6fe0159e163079.tar.gz"],
 )
 
 java_toolchains = use_extension("@rules_java//java:extensions.bzl", "toolchains")

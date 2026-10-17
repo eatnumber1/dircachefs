@@ -21,7 +21,8 @@
 #       (step 11.1) do dmsetup's, "alpine_dmsetup/root/". xfstests' fsstress,
 #       fsx and replay-log and //test/qemu:crash_states go to /bin.
 #       Step 12.18b: SibylFS's fs_test_posix and fs_test_check (with their
-#       glibc) go to /sibylfs/bin.
+#       glibc) go to /sibylfs/bin and its test suite tarball to
+#       /sibylfs/test-suite.tar.gz.
 #
 #   mkinitramfs.sh --unit <out.cpio.gz> <busybox> <init> <cost-lib> \
 #       <test-binary> <disk0-device-or-'-'> <args> [name:path...]
@@ -283,6 +284,12 @@ else
 			chmod +x "$ROOT/sibylfs/bin/$(basename "$f")"
 			copy_deps "$ROOT/sibylfs/bin/$(basename "$f")"
 			;;
+		*sibylfs_test_suite/file/*)
+			# step 12.18b: the suite's scripts, as the tarball the pin
+			# fetches (88 MB unpacked; guest/sibylfs.sh unpacks what it runs).
+			mkdir -p "$ROOT/sibylfs"
+			cp "$f" "$ROOT/sibylfs/test-suite.tar.gz"
+			;;
 		*/tests/*)
 			rel=${f#*/tests/}
 			dest="$ROOT/pjdfstest/tests/$rel"
@@ -303,6 +310,11 @@ else
 			;;
 		*/pjdfstest.*_failures)
 			cp "$f" "$ROOT/pjdfstest/$(basename "$f")"
+			;;
+		*/sibylfs.*_divergences)
+			# step 12.18b: guest/sibylfs.sh's baselines, one per file system.
+			mkdir -p "$ROOT/sibylfs"
+			cp "$f" "$ROOT/sibylfs/$(basename "$f")"
 			;;
 		*.sh) cp "$f" "$ROOT/tests/$(basename "$f")" ;;
 		*/syscall_budgets.txt | */request_budgets.txt | */fault_ace_mixed.expected_failures)

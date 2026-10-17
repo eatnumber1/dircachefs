@@ -1,0 +1,2 @@
+# SibylFS scripts the model allows on xfs and rejects through dcfs (guest/sibylfs.sh), one per line,
+# each with the reason above it. None yet.

@@ -378,3 +378,65 @@ bazel test //test/qemu:pjdfstest_test_btrfs
 
 Serial logs:
 `bazel-testlogs/test/qemu/pjdfstest_test_<fstype>/test.outputs/serial.log`.
+
+## SibylFS, a second oracle (step 12.18b)
+
+pjdfstest checks single calls against expected results. SibylFS
+(`third_party/sibylfs/README.md`, the 2015 executable specification of POSIX
+file systems) checks whole sequences of calls against a model of the file
+system's state, with several processes and users, so it is a second view of
+the same behaviour. dcfs runs it as a *differential* oracle
+(`test/qemu/guest/sibylfs.sh`): each script of the suite runs in a new
+directory of the dcfs mount and in a new directory of the backing file system,
+`fs_test_check -arch linux --root` judges both traces, and the test fails only
+for a script the model allows on the backing file system and rejects through
+dcfs and that `test/qemu/guest/sibylfs.<fstype>.expected_divergences` does not
+list. Where the model rejects the backing file system too, the 2015 model and
+today's kernel disagree (the suite's own "wontfix" cases among them) and dcfs is
+not blamed.
+
+```bash
+bazel test //test/qemu:sibylfs_test_ext4       # the 51 hand-written scripts (also _xfs, _btrfs)
+bazel test //test/qemu:sibylfs_sample_test     # 1/40 of the generated scripts, ext4
+bazel test //test/qemu:sibylfs_full_test       # every generated script, 16 guests (manual)
+bazel test //test/qemu:sibylfs_selftest_test   # the wrapper and the gates, no dcfs
+```
+
+Measured on 2026-10-17 (KVM, a host with load far above its cores, so wall
+times are inflated; host CPU per script is about 0.26 s). The model rejects
+18% of the generated scripts on ext4 itself (3,840 of 21,018): in the shards'
+own counts the largest class, about 40%, is `EINVAL` where the model allows
+only `ENOENT`, `ENOTDIR` or `EISDIR` (not examined further: probably the 2015
+model against a newer kernel's checks of `open` flags), and the next, about
+14%, `EINVAL` where it allows a success. Through dcfs every script gets the
+same verdict as on the backing file system, bar the one listed below:
+
+| Run | Scripts | Allowed on the backing fs | Allowed through dcfs | Rejected only through dcfs |
+|---|---|---|---|---|
+| hand-written, ext4 | 51 | 42 | 41 | 1 (listed below) |
+| hand-written, xfs | 51 | 41 | 41 | 0 |
+| hand-written, btrfs | 51 | 33 | 33 | 0 |
+| 1/20 of the generated plus hand-written, ext4 | 1,102 | 901 | 900 | 1 (the same) |
+| 1/40 of the generated, ext4 | 526 | 430 | 430 | 0 |
+| every generated script, ext4 (`sibylfs_full_test`, 16 guests of 11 to 28 minutes each) | 21,018 | 17,178 | 17,178 | 0 |
+
+The checker's tooling needs a few things the busybox guest lacks, which
+`guest/sibylfs_lib.sh` supplies: `useradd`, `userdel`, `groupadd` and `groupdel`
+(`fs_test_posix` runs them for the users and groups a script's `User_id` and
+`Group_id` name; the guest has busybox's `adduser` and relatives), and a
+directory that does not exist yet for every run (`-r`; it refuses one that
+does, with the message "does not exist"). A script that dies halfway leaves its
+users, which `sibylfs_forget_accounts` removes.
+
+### What it found
+
+- `file_descriptors/adhoc_lseek_tests-int.trace` on ext4: `lseek(dirfd, 0,
+  SEEK_END)` and `lseek(dirfd, -2000, SEEK_END)` on a directory answer
+  `EOVERFLOW` on ext4 (`ext4_dir_llseek`, `fs/ext4/dir.c`, takes the end of a
+  hashed directory to be its largest hash offset), which the model expects;
+  through dcfs they answer 4096 and 2096, the directory's `st_size`, because a
+  FUSE directory's `llseek` is `generic_file_llseek` (`fs/fuse/dir.c`) and the
+  kernel answers it without a request to dcfs. It is the kernel's FUSE client
+  against ext4's own behaviour, not something dcfs can change; xfs and btrfs
+  answer as FUSE does and the model rejects them too. Listed in
+  `sibylfs.ext4.expected_divergences`.

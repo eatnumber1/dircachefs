@@ -114,9 +114,10 @@ config_setting(
         "@alpine_dmsetup//:root",  # step 11.1: /sbin/dmsetup and libdevmapper
         "//third_party/sibylfs:fs_test_check",  # step 12.18b
         "//third_party/sibylfs:fs_test_posix",
+        "//third_party/sibylfs:test_suite",
         "//tools/kernel_bugs:guest_files",  # step 26.15: /kernel_bugs/
         "guest/init",
-    ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]) + [
+    ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]) + glob(["guest/sibylfs.*_divergences"]) + [
         "guest/fault_ace_mixed.expected_failures",  # step 26.14e
         "guest/request_budgets.txt",
         "guest/syscall_budgets.txt",
@@ -941,6 +942,55 @@ PJDFSTEST_SHARDS = ["rename", "chown", "rest"]
 test_suite(
     name = "pjdfstest_test",
     tests = [":pjdfstest_test_ext4"],
+)
+
+# Step 12.18b: SibylFS (third_party/sibylfs) as a differential second oracle
+# (guest/sibylfs.sh): its test suite's scripts run on a dcfs mount and on the
+# backing file system, and a script the model allows on the backing file system
+# and rejects through dcfs fails the test. dcfs_sibylfs= names the scripts
+# (sibylfs_scripts in guest/sibylfs_lib.sh). The 51 hand-written scripts are
+# 12 s on a quiet host; the whole suite, 21,069 scripts, is about 0.3 s of host
+# CPU each (2026-10-17), so the generated scripts are in 16 manual shards.
+qemu_test_matrix(
+    name = "sibylfs_test",
+    cmdline = "dcfs_sibylfs=adhoc",
+    disks = [("vdb", "ext4", "512M")],
+    guest_script = "guest/sibylfs.sh",
+    mem = 512,
+    size = "medium",
+    other_size = "large",
+    timeout = "long",
+)
+
+# A 1/40 sample of the generated scripts, every directory of the suite in it.
+qemu_test(
+    name = "sibylfs_sample_test",
+    cmdline = "dcfs_sibylfs=0/40",
+    disks = [("vdb", "ext4", "512M")],
+    guest_script = "guest/sibylfs.sh",
+    mem = 512,
+    size = "large",
+    timeout = "eternal",
+)
+
+# Every generated script, in 16 shards of about 1,300 scripts: manual (run by
+# name, `bazel test //test/qemu:sibylfs_full_test`), for a change to dcfs that
+# the sample may not reach.
+[qemu_test(
+    name = "sibylfs_full_%d_test" % shard,
+    cmdline = "dcfs_sibylfs=%d/16" % shard,
+    disks = [("vdb", "ext4", "512M")],
+    guest_script = "guest/sibylfs.sh",
+    mem = 512,
+    size = "enormous",
+    tags = ["manual"],
+    timeout = "eternal",
+) for shard in range(16)]
+
+test_suite(
+    name = "sibylfs_full_test",
+    tags = ["manual"],
+    tests = [":sibylfs_full_%d_test" % shard for shard in range(16)],
 )
 
 # The checks of the wrapper and the gates, with the real tools and no dcfs.

@@ -1,0 +1,12 @@
+# SibylFS scripts the model allows on ext4 and rejects through dcfs
+# (guest/sibylfs.sh), one per line, each with the reason above it.
+#
+# lseek(dirfd, 0, SEEK_END) and lseek(dirfd, -2000, SEEK_END) on a directory:
+# ext4's directory llseek (ext4_dir_llseek, fs/ext4/dir.c) takes the end of a
+# hashed directory to be its largest hash offset, and answers EOVERFLOW, which
+# is what the model says. A FUSE directory uses generic_file_llseek
+# (fs/fuse/dir.c), whose end is the directory's st_size: the kernel answers
+# 4096 and 2096 without a request to dcfs. No file system under dcfs can
+# change that; xfs and btrfs answer as FUSE does (their lists are empty: the
+# model rejects the backing file system there too).
+file_descriptors/adhoc_lseek_tests-int.trace
