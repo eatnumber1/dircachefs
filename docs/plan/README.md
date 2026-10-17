@@ -178,4 +178,15 @@ push; the queue above starts in earnest after the reset.
   the inode-number-plus-generation scheme of Phase 14 and its "open by
   inode number" step, and lifting the ext4/xfs/btrfs restriction to any
   filesystem with stable handles. Track it; no work until it is merged.
-- Coroutines over io_uring (the coroutine phase in history.md).
+- Coroutines over io_uring (the coroutine phase in history.md). It owes
+  the cancellation gap Phase 22 left open: a backing syscall already
+  blocked in the kernel (a disk spinning up, a hung network backing,
+  `syncfs`) cannot be interrupted today, so a FUSE_INTERRUPT waits for it.
+  The plan is in `phases/22-cancellation.md` ("Coroutines + io_uring"):
+  a per-request token checked at every await, `IORING_OP_ASYNC_CANCEL`
+  for in-flight backing I/O. To check then: not every case becomes
+  cancellable (there is no io_uring `syncfs`, and work an io-wq worker
+  runs in uninterruptible sleep is not cancelled), so the phase lists
+  which kernel-blocked calls stay uninterruptible, with a test for each
+  that does become cancellable (russ, 2026-10-17: "Make sure it's
+  written down to work on later").

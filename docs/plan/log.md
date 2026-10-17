@@ -3717,3 +3717,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 2026-10-17, russ declines a pre-push run of the large tests (from
   26.35): "No. Until we ship, a red CI is not a problem." The large tier
   stays CI's; a red run on main is fixed forward.
+- 2026-10-17, russ asks that the cancellation gap be written down for
+  later: the README's future-work entry for coroutines over io_uring now
+  names it (kernel-blocked backing syscalls cannot be interrupted) and
+  what that phase must check.
