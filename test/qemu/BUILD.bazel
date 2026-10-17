@@ -422,6 +422,7 @@ qemu_test_matrix(
         "atime",
         "born",
         "lag",
+        "lagclean",
     ],
     size = "medium",
     other_size = "large",

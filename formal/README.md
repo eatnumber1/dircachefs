@@ -354,7 +354,7 @@ prints. A request's first step runs inside `Arrive`.
 | `RenameStat`, `RenameFill`, `RenameFailed`, `RenameFailed2` | As for create (a failure re-resolves both names) | | `RefreshAfterRename`, `ReresolveAfterFailure` |
 | (sync, first step) | Snapshot of the fill guards' clock, then syncfs: every backing write so far is durable (`SyncBarrier`; an FSYNCDIR's or FSYNC's own fsync comes first and adds nothing). A `fsync` request (step 12.8: the kernel's FSYNC of the file a name holds) is the same sync point | Sync points | `backing::SyncBacking`, `cache::BeginSync` |
 | `SyncClearDirty` | Clear D's dirty row (normal durability) unless a mutation of D began or ended since the snapshot or is in flight; forget `dirty.durable` | Sync points | `cache::ClearDirty` |
-| `WalCheckpoint` | Step 25.28b: a sync point's checkpoint of the cache's WAL: every commit so far is durable (`dbOpts` becomes `{dbCur}`). At any moment no request is between two syscalls, which covers where the code runs it: after a sync point's `ClearDirty` (the periodic one, an FSYNC's or FSYNCDIR's), and alone at the periodic one when only cache commits are pending | Sync points (the sync point's checkpoint) | `DirCacheFS::CheckpointCache`, `sqlite3::Connection::Checkpoint` |
+| `WalCheckpoint` | Step 25.28b: a sync point's checkpoint of the cache's WAL: every commit so far is durable (`dbOpts` becomes `{dbCur}`). At any moment no request is between two syscalls, which covers where the code runs it: after the reply of a request whose sync point ran (the periodic one, an FSYNC's or FSYNCDIR's), before the next request is read | Sync points (the sync point's checkpoint) | `DirCacheFS::CheckpointCache`, `sqlite3::Connection::Checkpoint` |
 | (write, first step), `WriteSyscall`, `WriteReply` | Step 12.8: a write of new contents to the file a name holds, through its writable open (passthrough; `ENOENT` if the name holds none), then the reply. It changes the file's data only, which no record of D's covers (the open's phase 1 and release are the file's, not modelled); it gives the crash regimes data to reorder | | `fuse_ops.cc` WRITE through passthrough |
 | `InterruptArrives` | With `Interrupts` (step 22.5): the kernel's FUSE_INTERRUPT for a request in flight arrives, at any step, once (in the safety configurations, only where its next step reads it: `CanArriveWhereItMatters`). Nothing changes but the request's `intr`; it goes on to its next interruption point | Cancellation | libfuse's `do_interrupt` (`SessionLoop::Drain`) |
 | `Interrupt` | An interruption point, just before a backing syscall (`RN_probe`, `PD_read`, `PD_commit`: the population's reads abandoned, `PD_commit` standing for the checks between probe batches only; `GA_stat`: the refresh not taken; `C_sys`, `U_sys`, `R_sys`, `A_sys`; F's `FC_sys`, `FS_sys`, `FG_stat`, `FG_rstat`, a write's `W_sys`), finds the request's interrupt arrived: the request replies `EINTR`; a mutation past phase 1 `End`s (D's, or F's for F's setattr) without phase 3, its names and attributes left unknown and dirty, the backing unchanged. An obligation (step 22.5): at an interruption point an interrupted request has no other step (`Proceeds`, in `At`). Never between a syscall and its phase 3 | Cancellation | `CheckInterrupted` (`dcfs/interruption_point.h`), `SessionLoop` |
@@ -729,9 +729,9 @@ why it cannot hide a violation) took small from 1,479,307 to 1,869,733,
 recovery from 39,635 to 42,479, liveness from 146,504 to 244,552,
 interrupt from 280,869 to 388,382, interrupt_muts2 from 892,708 to
 1,325,533 and interrupt_nolock from 1,036,982 to 1,500,767. The counts
-and times below for the configurations that have it are from the runs of
-2026-10-17 (load 7-12); `MC_large.cfg`'s and `MC_nolock.cfg`'s are
-unchanged by it.
+and times below for the configurations that have it, and
+`MC_durability.cfg`'s, are from the runs of 2026-10-17 (load 7-12);
+`MC_large.cfg`'s and `MC_nolock.cfg`'s are unchanged by it.
 
 `LongNames` (step 12.24) is the set of names longer than the backing's
 `f_namelen` (`Context::name_max`). A lookup of one never reads the cache:
@@ -757,7 +757,7 @@ populated. Every configuration but `MC_long_names.cfg` sets it to `{}`.
 | `MC_borndirty.cfg`, `_ext4`; `MC_borndirty_nolock.cfg`, `_nolock_ext4`; `MC_borndirty_recovery.cfg` | `borndirty_*_test` (medium) | step 23.11 ([Born-dirty create](#born-dirty-create-step-2311)) | 275,962; 382,710; 89,998; 108,724; 3,054 | 39 s; 2.2 min; 33 s; 46 s; 7 s (by hand, load 14, 2026-10-09) |
 | `MC_crash_ext4.cfg`, `MC_crash_metaprefix.cfg` | `crash_ext4_test`, `crash_metaprefix_test` (medium) | step 12.8: the two weaker backing regimes; 2 names, 1 slot, 3 mutations, 1 crash, lookups, getattrs, creates, unlinks, renames, attribute changes of D and syncs (the litmus configurations have the writes and FSYNCs); all invariants, `CrashRefines`, the effect-point properties and `ReplyObservable` | 356,954 (ext4), 292,044 (metaprefix) | ~3 min, ~1.5 min |
 | `MC_litmus_*.cfg` | `litmus_*_test` (small) | step 12.8: the litmus tests that must hold (`MClitmus.tla`; [the table](#the-backing-filesystems-crash-consistency)); 1 slot, 1-2 names, a fixed program of 2-3 mutations and a sync point, 1 crash; every invariant and property besides | 679-1,475 each | seconds |
-| `MC_durability.cfg` | `durability_test` (small) | step 25.28b: [The durability model](#the-durability-model) | 46 | seconds |
+| `MC_durability.cfg` | `durability_test` (small) | step 25.28b: [The durability model](#the-durability-model) | 456 | seconds |
 
 `small_coverage_test` and `nolock_small_coverage_test` (large, step
 12.12a) run `MC_small.cfg` and `MC_nolock_small.cfg` with TLC's
@@ -2782,52 +2782,62 @@ keeps only what the question needs:
 | `since` | ticks since the last sync point | `DirCacheFS::last_sync_` |
 | `oldest` | ticks since the first commit a power loss may lose (`None`: nothing to lose) | the WAL frames since its last fsync |
 | `dirty` | the dirty set may be non-empty | `DirCacheFS::SyncDue` |
-| `started` | the last step was a request's start | (checking only) |
+| `busy`, `due` | a request is being served; its sync point's checkpoint is due | `DirCacheFS::checkpoint_due_` |
+| `failed` | the last sync point's checkpoint failed | its WARNING |
+| `owed`, `ended` | the request started with a losable commit an interval old; the last step ended a request | (checking only) |
 
 | Action | What it does | dcfs |
 |---|---|---|
 | `Commit` | A normal commit (a fill, a phase 3) | every transaction at `Durability::kNormal` |
 | `Phase1` | A kSync commit that marks a row dirty: everything so far durable | `cache::BeginMutation` |
 | `AutoCheckpoint` | SQLite's own checkpoint, every 1000 pages | SQLite |
-| `Start` | A request starts: the periodic sync point first, once `Interval` ticks have passed since the last | `DirCacheFS::MaybeSyncNow` |
-| `Fsync` | An FSYNC's or FSYNCDIR's sync point | `DirCacheFS::Fsync`, `Fsyncdir` |
+| `Start` | A request starts: the periodic sync point's backing half first, once `Interval` ticks have passed since the last (`SyncNow`) | `DirCacheFS::MaybeSyncNow` |
+| `Fsync` | An FSYNC's or FSYNCDIR's sync point, inside its request | `DirCacheFS::Fsync`, `Fsyncdir` |
+| `Finish` | The request ends: its reply, then the checkpoint if one is due | `DirCacheFS::FinishSyncPoint` |
+| `CheckpointFails` | The same with a checkpoint that fails (an I/O error of the cache disk) | its WARNING |
 | `Tick` | One tick of time passes (saturating at `Interval`) | the clock |
 | `PowerLossAndRestart` | The commits a power loss may lose are lost; the next process's clock starts | `backing::StartRun` |
 
-The sync point (`SyncPoint`, `DirCacheFS::SyncNow`) resets the clock,
-clears the dirty set (`ClearDirty`, a normal commit) if it may be
-non-empty, and checkpoints. Commits may come at any moment, not only
-inside requests, in any number between two request starts: a request may
-run for many intervals on a slow backing, and under coroutines several
-overlap. That only adds behaviors. A checkpoint that fails is left out:
-it is the cache disk failing, after which nothing is durable anyway.
+`SyncNow` resets the clock, clears the dirty set (`ClearDirty`, a normal
+commit) if it may be non-empty, and leaves the checkpoint due, which the
+request's end runs. Commits may come at any moment, not only inside
+requests, in any number: a request may run for many intervals on a slow
+backing. That only adds behaviors. Requests do not overlap: dcfs serves
+one at a time, and the checkpoint comes before it reads the next.
 
-Properties: `AtRequestStart`, the bound, says that when a request starts
-every commit a power loss may lose is younger than one sync interval
-(`oldest < Interval`); `LostOnlySinceSync`, the reason, says that every
+Properties: `BoundAtRequestEnd`, the bound, says that a request that
+starts while a commit a power loss may lose is an interval old (`owed`)
+ends with every commit durable (`oldest = None`), unless its checkpoint
+failed; `LostOnlySinceSync`, the reason, says that between requests every
 commit a power loss may lose came after the last sync point (`oldest <=
-since`). The bound is at requests, not at every moment: with no timer
-(docs/style.md, "No timers") an idle daemon runs nothing, so its last
-interval's commits wait for its next request. `MC_durability.cfg` checks
-both at an interval of three ticks (46 states).
+since`), with the same exception. The bound is at requests, not at every
+moment: with no timer (docs/style.md, "No timers") an idle daemon runs
+nothing, so its last interval's commits wait for its next request.
+`MC_durability.cfg` checks both at an interval of three ticks (456
+distinct states). `limitations/durability_checkpoint_fails.cfg` checks the
+bound without its exception, `BoundIgnoringFailures`, and expects it
+violated (a failed checkpoint leaves its commits to the next sync point).
 
 Known bugs, each the code before this step (`Bug*` constants, FALSE in
 the real configuration; small tests):
 
 | Variant | Bug | Expected | The counterexample |
 |---|---|---|---|
-| `durability_never_checkpoint` | before step 25.28: no sync point checkpointed | `AtRequestStart` | a fill, three ticks, a request starts with the fill still losable |
-| `durability_sync_point_skips_checkpoint` | step 25.28: a sync point that clears a dirty set resets the clock without a checkpoint (its `MaybeCheckpointWal` ran only when no sync point was due) | `AtRequestStart` | a phase 1, a tick, a phase 3, three ticks; the request's sync point clears the dirty set and leaves phase 3's commit losable |
+| `durability_never_checkpoint` | before step 25.28: no sync point checkpointed | `BoundAtRequestEnd` | a fill, three ticks, a request starts and ends with the fill still losable |
+| `durability_sync_point_skips_checkpoint` | step 25.28: a sync point that clears a dirty set resets the clock without a checkpoint (its `MaybeCheckpointWal` ran only when no sync point was due) | `BoundAtRequestEnd` | a phase 1, a phase 3, three ticks; the request whose sync point clears the dirty set ends with phase 3's commit losable |
 
 `premise_lost_only_since_sync_test` checks `LostOnlySinceSync` alone on
-the second. Its link to the code: `WalCheckpoint` is the sync point's
-checkpoint in `dcfs.tla` and its traces (the `WalCheckpointed` event), and
-`fault_power_test`'s `lag` scenario cuts the power on real disks with a
-fill on each side of a periodic sync point: the one before survives, the
-one after does not.
+the second. Its links to the code: `WalCheckpoint` is the sync point's
+checkpoint in `dcfs.tla` and its traces (the `WalCheckpointed` event);
+`fault_power_test`'s `lag` and `lagclean` scenarios cut the power on real
+disks with a fill on each side of a periodic sync point, with a dirty set
+and without: the one before survives, the one after does not; and
+`sqlite_durability_test` judges the crash states of a sync point's
+checkpoint, across the two WAL generations it makes.
 
 ```sh
 bazel test //formal:durability_test //formal:known_bug_durability_never_checkpoint_test \
            //formal:known_bug_durability_sync_point_skips_checkpoint_test \
-           //formal:premise_lost_only_since_sync_test
+           //formal:premise_lost_only_since_sync_test \
+           //formal:limitation_durability_checkpoint_fails_test
 ```

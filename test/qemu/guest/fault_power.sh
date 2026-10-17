@@ -41,6 +41,8 @@
 #              with a dirty set: the one older than the interval survives the
 #              cut (the sync point checkpointed the cache's WAL), the one after
 #              it does not
+#   lagclean   (step 25.28b) the same with nothing dirty: the periodic sync
+#              point is the checkpoint alone
 #
 # After each, the invariant: every entry dcfs serves matches the backing
 # filesystem exactly (type, size, mode, and the listing of every directory),
@@ -585,52 +587,66 @@ check_syncpoint() {
 # d9's listing: a fill, a normal commit. The clock is moved one interval on
 # (no sleep: the daemon reads the real-time clock), and the next request's
 # periodic sync point syncs the backing filesystem, clears the dirty set and
-# checkpoints the cache's WAL; then d10's listing, a fill after it. After
-# the cut the cache has d9's listing, older than the interval, and not d10's,
-# younger than the sync point: the witness that the cut loses an unsynced
-# commit, without which d9's would prove nothing. (Before 25.28b a sync point
-# that cleared a dirty set did not checkpoint, and d9's listing was lost.)
+# checkpoints the cache's WAL after that request's reply; then d10's listing,
+# a fill after it. After the cut the cache has d9's listing, older than the
+# interval, and not d10's, younger than the sync point: the witness that the
+# cut loses an unsynced commit, without which d9's would prove nothing.
+# lagclean: the same with nothing dirty (no create): the sync point is the
+# checkpoint alone.
 LAG_INTERVAL=60
-setup_lag() {
+# lag_setup NAME [create]: the scenario NAME, with the create in d8 if asked.
+lag_setup() {
 	fd_crash
 	rm -f "$DB" "$DB-wal" "$DB-shm"
-	if start --sync_interval_sec="$LAG_INTERVAL"; then pass lag-mount; else
-		fail lag-mount "daemon did not mount within 10s"
+	if start --sync_interval_sec="$LAG_INTERVAL"; then pass "$1-mount"; else
+		fail "$1-mount" "daemon did not mount within 10s"
 		exit "$FAILED"
 	fi
 	LAG_WRITEBACK=$(cat /proc/sys/vm/dirty_writeback_centisecs)
 	echo 0 >/proc/sys/vm/dirty_writeback_centisecs
 	mount -o remount,commit=600 "$CACHE_DIR" ||
-		fail lag-remount "remounting the cache filesystem with commit=600 failed"
-	touch "$MNT/d8/lag"
+		fail "$1-remount" "could not remount the cache with commit=600"
+	[ "${2:-}" = create ] && touch "$MNT/d8/lag"
 	ls "$MNT/d9" >/dev/null
 	date -s "@$(($(date +%s) + LAG_INTERVAL + 1))" >/dev/null
 	ls "$MNT" >/dev/null
 	ls "$MNT/d10" >/dev/null
 }
-cut_lag() {
+setup_lag() { lag_setup lag create; }
+setup_lagclean() { lag_setup lagclean; }
+lag_cut() {
 	power_cut
 	echo "$LAG_WRITEBACK" >/proc/sys/vm/dirty_writeback_centisecs
 }
+cut_lag() { lag_cut; }
+cut_lagclean() { lag_cut; }
 # lag_listed DIR: 1 if the cache has DIR's whole listing, else 0 or nothing.
 lag_listed() {
-	"$TESTUTIL" sql "$DB" "SELECT children_complete FROM directories WHERE inode = (SELECT id FROM inodes WHERE backing_ino = $(stat -c %i "$SRC/$1"))"
+	ll_ino=$(stat -c %i "$SRC/$1")
+	ll_sql="SELECT children_complete FROM directories WHERE inode ="
+	ll_sql="$ll_sql (SELECT id FROM inodes WHERE backing_ino = $ll_ino)"
+	"$TESTUTIL" sql "$DB" "$ll_sql"
 }
-check_lag() {
+# lag_check NAME (in kill mode a second boot, so the name is passed again).
+lag_check() {
 	ll_old=$(lag_listed d9)
 	if [ "$ll_old" = 1 ]; then
-		pass lag-older-fill-kept
+		pass "$1-older-fill-kept"
 	else
-		fail lag-older-fill-kept "d9's listing, committed more than an interval before the cut, is not in the cache ('$ll_old')"
+		ll_why="d9's listing, committed over an interval before the cut"
+		fail "$1-older-fill-kept" "$ll_why, is not cached ('$ll_old')"
 	fi
 	ll_young=$(lag_listed d10)
 	if [ "$ll_young" != 1 ]; then
-		pass lag-younger-fill-lost
+		pass "$1-younger-fill-lost"
 	else
-		fail lag-younger-fill-lost "d10's listing, committed after the last sync point and never synced, survived the cut"
+		ll_why="d10's listing, committed after the last sync point"
+		fail "$1-younger-fill-lost" "$ll_why and never synced, survived"
 	fi
-	served_equals_backing lag-served
+	served_equals_backing "$1-served"
 }
+check_lag() { lag_check lag; }
+check_lagclean() { lag_check lagclean; }
 
 # The flags dcfs runs the scenario with.
 flags_for() {
@@ -714,10 +730,12 @@ cut_syncpoint
 after_cut syncpoint
 check_syncpoint
 
-setup_lag
-cut_lag
-after_cut lag
-check_lag
+for scenario in lag lagclean; do
+	"setup_$scenario"
+	"cut_$scenario"
+	after_cut "$scenario"
+	"check_$scenario"
+done
 
 # Self-check of the comparison: what it does not see, every check above passes
 # for the wrong reason. After dcfs listed and stat'ed d1, each of these changes

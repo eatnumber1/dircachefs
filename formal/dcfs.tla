@@ -1165,11 +1165,12 @@ S2(p) ==
 
 \* The sync point's checkpoint of the cache's WAL (step 25.28b,
 \* DirCacheFS::CheckpointCache): every commit so far is durable. In the
-\* code it follows a sync point's ClearDirty (the periodic one, an FSYNC's,
-\* an FSYNCDIR's), and runs alone at the periodic one when only cache
-\* commits are pending; here it may run at any moment no request is between
-\* two syscalls, which covers both. When it runs, and the bound on what a
-\* power loss loses that this gives, is durability.tla's subject.
+\* code it runs after the reply of a request whose sync point ran (the
+\* periodic one, an FSYNC's, an FSYNCDIR's), before the next request is
+\* read (DirCacheFS::FinishSyncPoint); here it may run at any moment no
+\* request is between two syscalls, which covers that. When it runs, and
+\* the bound on what a power loss loses that this gives, is
+\* durability.tla's subject.
 WalCheckpoint ==
     /\ mode = "up" /\ running = None
     /\ dbOpts' = {dbCur}

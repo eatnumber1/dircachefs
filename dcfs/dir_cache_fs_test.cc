@@ -3425,9 +3425,7 @@ TEST_F(ClockTest, FsyncdirCheckpointsTheWal) {
 class ReplyAndCheckpointOrder : public ProtocolEvents {
  public:
   void Replied(Context &, int) override { order.emplace_back("reply"); }
-  void WalCheckpointed(Context &) override {
-    order.emplace_back("checkpoint");
-  }
+  void WalCheckpointed(Context &) override { order.emplace_back("checkpoint"); }
   std::vector<std::string> order;
 };
 
