@@ -537,6 +537,10 @@ Order after 12.12's audit, which may reorder them with the approved
   writing actions. Owner: dcfs-protocol; Fable review of the mapping's
   design is warranted (the one place judgement, not labour, is the
   bottleneck).
+  Its operation set includes open's flags as a client observes them
+  (russ, 2026-10-17): each flag dcfs passes through (23.12's inventory:
+  `O_NOATIME`'s owner rule and access-time effect, `O_APPEND`, `O_TRUNC`,
+  `O_EXCL`, `O_NOFOLLOW`...) gets its allowed outcomes in the ideal spec.
 - 12.18 SibylFS's trace checker as a second oracle (spike; russ,
   2026-10-10). Done 2026-10-11, merged 849f372. Report in `docs/plan/notes/sibylfs-checker-12.18.md`.
   Findings: source compilation is intractable under Bazel (ancient Lem/OCaml 4.02);

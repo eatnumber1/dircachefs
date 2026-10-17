@@ -707,3 +707,29 @@ narrower ParentOf rule after 26.4b measures), 26.4b's create slope on
 the new cost, 12.14's large targets rerun on this tree, the
 `enospc_cache_test` flake (busybox ls dropping a READDIR ENOSPC).
 
+
+## 23.12 Open flags dcfs passes through, tested against native (russ, 2026-10-17; queued)
+
+russ, on `O_NOATIME`: "This is the kind of stuff that we should have tests
+for (maybe via xfstests?) and should also make it into our
+SibylFS-inspired client-facing formal model." dcfs sets none of these
+itself; the kernel forwards the open's flags to the backing file (through
+passthrough or dcfs's own open as the caller), so each flag's effect and
+its permission rule must come out as they do natively.
+
+- **Inventory:** every open flag the kernel forwards to a FUSE server or a
+  passthrough backing file (`O_NOATIME`, `O_APPEND`, `O_DIRECT`,
+  `O_SYNC`/`O_DSYNC`, `O_TRUNC`, `O_EXCL`, `O_NOFOLLOW`, `O_PATH`,
+  `O_TMPFILE`, `O_LARGEFILE`, `O_CLOEXEC`...), and which xfstests or
+  pjdfstest cases already cover each through dcfs (`O_NOATIME`'s effect
+  is in `atime_test`; its owner rule is not).
+- **Tests** (C++ guest tests, 25.34's helpers), for each flag not covered:
+  the effect and the error cases compared with the backing directly, e.g.
+  `O_NOATIME` by a non-owner without `CAP_FOWNER` is EPERM through dcfs as
+  natively, and by the owner leaves the access time unchanged. Enable the
+  matching xfstests where one exists rather than duplicating it.
+- **The model:** each flag's observable outcome is part of 12.16's ideal
+  spec (cited to its SibylFS definition where SibylFS has one), noted in
+  12.16's brief.
+
+Owner: dcfs-implementer, after 25.34 merges.

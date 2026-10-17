@@ -3881,3 +3881,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   available." The coroutine/io_uring phase requires io_uring (startup
   refuses with a clear error where it is disabled); the entry above about
   an abstraction with a fallback is withdrawn.
+- 2026-10-17, russ: pass-through open flags (O_NOATIME's owner rule and
+  others) need tests and a place in the SibylFS-style client-facing model.
+  23.12 queued (inventory, C++ guest tests against native, matching
+  xfstests); 12.16's brief gains open's flags.
