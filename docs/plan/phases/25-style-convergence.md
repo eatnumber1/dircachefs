@@ -1044,12 +1044,15 @@ rare. Let's do a blanket poison." No in-process reinitialisation (the
 kernel holds inode numbers that live in the database).
 
 - When the cache's WAL fsync fails (a durable point, or a phase-1
-  synchronous commit), the request gets EIO, dcfs deletes the cache
-  database's files (`-wal`, `-shm`, the database) so the next start cannot
-  recover a gapped WAL, and the daemon ends through 25.9's poisoned path
-  with a non-zero status. The next start creates a fresh database (the
-  first-mount path). A failed unlink is logged; nothing more is tried.
-- Test first: a `--wrap` fault on the WAL's fsync; the EIO, the deleted
+  synchronous commit), the request gets EIO, dcfs renames the cache
+  database's files aside (`dcfs.db` -> `dcfs.db.poisoned`, and its
+  `-wal`/`-shm` likewise; russ: "Maybe rename it to a .poisoned file for
+  forensics at a later time"; an older `.poisoned` set is replaced) so the
+  next start cannot recover a gapped WAL, and the daemon ends through
+  25.9's poisoned path with a non-zero status, logging where the files
+  went. The next start creates a fresh database (the first-mount path). A
+  failed rename is logged; nothing more is tried.
+- Test first: a `--wrap` fault on the WAL's fsync; the EIO, the renamed
   files, the non-zero exit, and a clean start afterwards.
 - The model: a durable point may fail only by ending the run with the
   cache discarded (no recovery from it); docs say so.
