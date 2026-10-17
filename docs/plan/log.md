@@ -3576,3 +3576,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   I/O off the door; ForkSplit reverted; FORGET replies once; INIT's
   every-flag case shown impossible with the pinned libfuse and pinned by a
   test.
+
+- 2026-10-17: 14.10's design half done (lane-4, step-14.10 at 6c7e077,
+  rebased on 933c302, unreviewed): nfs_backing_test (large) passes 37
+  checks and confirms every prediction the design relies on (the client
+  handle wraps knfsd's handle with the server's inode and generation;
+  handles identical across a server restart and an export move; ESTALE for
+  a recycled inode and a changed fsid; one fsid on two filesystems gives
+  identical root handles). The model's 207 tests pass. Its Opus review
+  joins 12.18b's in the queue for agy's Claude pool (refills 19:55 UTC).
+  A third load-sensitive budget test: request_counts_test's disk writes
+  rose from 62 to 70 once, then passed 3 of 3 (52, 55, 54). The flaky-budget
+  triage covers it with fault_backing_test and enospc_cache_test.
