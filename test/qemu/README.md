@@ -1707,15 +1707,15 @@ ext4, xfs and btrfs.
   database. All of it through `mount.dcfs -o dcfs.cache_db=...,
   dcfs.foreground` (step 15.2: the plain `--source` command line is gone).
 - `mount_dcfs_test` (`guest/mount_dcfs.sh`): the `mount.dcfs` wrapper
-  (steps 15.1-15.2) on the ext4 image -- the capture of the backing
-  filesystem (the FUSE mount's
-  source is the spec, no backing mount in the caller's namespace, `umount`
-  stops dcfs, SIGKILL releases the superblock), the option split (`ro` vs
-  `dcfs.ro`, `remount` touching only the dcfs mount, an unknown `dcfs.`
-  option and a failing native mount mount nothing and say why, `-f`, a file
-  as mount point), daemonization (stdio on `/dev/null`, own session, syslog
+  (steps 15.1-15.2) on the ext4 image -- the tree is served (the FUSE
+  mount's source is the spec as written, `umount` stops dcfs, SIGKILL
+  releases the superblock), the option split (native options such as `ro`
+  refused, `dcfs.ro`, `remount` touching only the dcfs mount, an unknown
+  `dcfs.` option mounts nothing and says why, `-f`, a file as mount point),
+  daemonization (stdio on `/dev/null`, own session, syslog
   through busybox's `syslogd`, a failure after the fork reported by the
-  wrapper, `dcfs.foreground`), the `bind` form (a directory opened in place: also over the same path, busy while mounted; `none`, its old name, refused), a file mounted
+  wrapper, `dcfs.foreground`), a directory opened in place (also over the same path, busy while
+  mounted; `none`, its old name, refused), a file mounted
   below the source refused, and a non-root caller. busybox's `mount` runs
   no helpers, so `mount -t dcfs` is a SKIP here (step 15.6 runs it with
   util-linux). Instance identity (15.3), stubs (15.4), fsck and exports
@@ -1981,25 +1981,30 @@ disabled console login and the `nofail` boot, do not depend on the wrapper):
   (cache database locked), a native failure its own (`mount -t bogusfs`, a
   missing device), each with dcfs's one `E...` ERROR line on mount's stderr
   and nothing mounted;
-- fstab: a native ext4 by `UUID=` (type autodetected, `noatime` passed to the
-  native mount), an xfs and a btrfs (autodetected) by
-  `UUID=` (the kernel mounts them; the image has no xfsprogs or btrfs-progs,
-  `run-qemu.sh` made the filesystems), a nested bind form (`dcfs.ro`), the
-  `bind` form with `_netdev` and a `nofail` mount of a device that is not there,
-  mounted by `mount -a` and then by the units systemd generates from them
+- fstab: an ext4 by `UUID=` (`noatime` passed to its own mount) with a dcfs
+  line over it, an xfs and a btrfs by `UUID=` each with a dcfs line (the
+  kernel mounts them; the image has no xfsprogs or btrfs-progs, `run-qemu.sh`
+  made the filesystems), a dcfs line nested under the first (`dcfs.ro`), a
+  dcfs line over a local directory with `_netdev` (an ordering test: network
+  backings are not supported yet) and a `nofail` mount of a device that is
+  not there with its dcfs line (under `mount -a -t dcfs` that line mounts
+  over a plain directory; `nofail` on the missing device is covered at boot
+  by the units), mounted by `mount -a -t dcfs` and then by the units
+  systemd generates from them
   (`systemctl start`, `status`, `findmnt`), with one daemon and one cache
   database each (not hosted: NFS, the image has no NFS client
   and the guest no network; `nfs_test` covers NFS on the other side); a child
   requires its parent; stopping the child leaves the parent and stopping the
   parent stops the child; a start that fails marks the unit failed with
   dcfs's message in the journal;
-- fsck (step 15.5): `fsck /data` (fstab passno 2) runs `fsck.dcfs`, which
-  finds the line through `findmnt --fstab`, runs `fsck.ext4` (type by `blkid`)
-  and checks the cache; `fsck /data -- -n` reports a corrupt cache (status 4),
-  `-- -y` deletes it (status 1), a `bind` line has no device (status 0), a
-  type with no checker is 8; and after the reboot systemd's
-  `systemd-fsck@...` unit for the passno-2 line ran `fsck.dcfs` (its line is
-  in the journal) and finished before `data.mount` became active;
+- fsck (step 15.5): `fsck /data` runs `fsck.dcfs`, which finds the line
+  through `findmnt --fstab`, notes that a directory has no device to check and
+  checks the cache; `fsck /data -- -n` reports a corrupt cache (status 4),
+  `-- -y` deletes it (status 1), `fsck /mnt/live` says there is no device
+  (status 0); `fsck -A -N` lists `fsck.dcfs` for a passno-2 dcfs line and
+  `fsck -A` runs it; and after the reboot systemd ran no `systemd-fsck@`
+  unit for that passno-2 dcfs line (its generator makes them for devices
+  only), while it did run one for the ext4 device's line;
 - the journal: the daemon's syslog lines are attributed to its mount unit
   (`journalctl -u data.mount`, `_SYSTEMD_UNIT=`) at the threshold the
   options set (`dcfs.stderrthreshold=0` shows the INFO narrative; the

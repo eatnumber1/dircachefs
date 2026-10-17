@@ -32,8 +32,9 @@ under `bazel coverage`).
   ours and is never reaped by anything else, so `ECHILD` cannot happen; a
   failure would be an invalid argument of our own call.
 - **A fork whose child never returns**: `UmountAndWait` forks `umount` and its
-  child execs or exits, so the profile artifact of `docs/coverage.md`'s
-  "returns twice" entry cannot occur; the parent-leg branch of `child == 0` may read 0 although it ran.
+  child execs or exits, so the profile artifact of `docs/coverage.md`'s "returns
+  twice" entry cannot occur; the parent-leg branch of `child == 0` may read 0
+  although it ran.
 
 ## Known coverage artifacts
 
@@ -64,35 +65,34 @@ Numbers in the report that are not counts of what ran.
   `dcfs/startup_channel.cc` 110 and 111 in CI run 37973594236, counts such as
   4294967562 and 8589934575). The same artifact as the one above, one per test
   that ran the wrapper: each test's lcov holds 2^32-1 or 2^32-n, and Bazel's
-  combined report adds the tests' counts (2^32-21 + 21 + 266...). The cause
-  is a function that returns in two processes: `ForkDaemon` forked, and the
-  parent and the child both returned through it and through `MountHelperMain`.
-  In continuous mode (`%c`, what the guests need so that a daemon killed
-  while it exits still leaves a complete profile) the two processes share the
-  profile's counters. A function entered once and left twice breaks the flow
-  conservation llvm-cov assumes when it derives a region's count from the
-  others (`false = condition - true`): a branch after the fork gets a negative
-  count, a line `2^64-1`. Measured in `notes/coverage-fork-artifacts-2026-10-09.md`:
-  22 forks in `mount_dcfs_test` gave -21 to -27 on seven branches; the same
-  test with `%m.profraw` (no continuous mode: the child works on a private
-  copy of the counters) gave none; a 25-line program with this shape shows it
-  with one fork. Not a lost update (atomic counters do not help), not the
-  helper that execs mount(8) (it is not instrumented), not a truncated profile.
-  Fix: no function returns in both processes. `dcfs/fork_split.h`'s
-  `ForkSplit(child, parent)` runs the child's side in the child and returns
-  its value there, and runs the parent's side, which exits, in the parent;
-  `ForkDaemon` returns the daemon's reporter in the child only and the wrapper
-  exits inside it. `ForkSplit` is not instrumented (it is the one function
-  that returns twice). Guards: `scripts/cov-lcov.sh` fails a test whose lcov
-  has a count of 2^31 or more and names the lines (so `bazel coverage` of the
-  one test shows it, not only the combined report), and
-  `//test/qemu:coverage_pipeline_test` runs a fixture that forks both ways
-  (it must be refused when a function returns twice, and accepted, with every
-  count 1, through `ForkSplit`). A new fork that returns in both processes
-  needs the same shape. Not fixed: the fork of `bench/process.cc`, whose child never returns (it
-  execs or exits) but whose `fork()` wrapper does: it cannot go negative, and their
-  parent-leg branch (`child == 0` false) reads 0 although it ran (an undercount
-  of two branches).
+  combined report adds the tests' counts (2^32-21 + 21 + 266...). The cause is a
+  function that returns in two processes: `ForkDaemon` forked, and the parent
+  and the child both returned through it and through `MountHelperMain`. In
+  continuous mode (`%c`, what the guests need so that a daemon killed while it
+  exits still leaves a complete profile) the two processes share the profile's
+  counters. A function entered once and left twice breaks the flow conservation
+  llvm-cov assumes when it derives a region's count from the others (`false =
+  condition - true`): a branch after the fork gets a negative count, a line
+  `2^64-1`. Measured in `notes/coverage-fork-artifacts-2026-10-09.md`: 22 forks
+  in `mount_dcfs_test` gave -21 to -27 on seven branches; the same test with
+  `%m.profraw` (no continuous mode: the child works on a private copy of the
+  counters) gave none; a 25-line program with this shape shows it with one fork.
+  Not a lost update (atomic counters do not help), not the helper that execs
+  mount(8) (it is not instrumented), not a truncated profile. Fix: no function
+  returns in both processes. `dcfs/fork_split.h`'s `ForkSplit(child, parent)`
+  runs the child's side in the child and returns its value there, and runs the
+  parent's side, which exits, in the parent; `ForkDaemon` returns the daemon's
+  reporter in the child only and the wrapper exits inside it. `ForkSplit` is not
+  instrumented (it is the one function that returns twice). Guards:
+  `scripts/cov-lcov.sh` fails a test whose lcov has a count of 2^31 or more and
+  names the lines (so `bazel coverage` of the one test shows it, not only the
+  combined report), and `//test/qemu:coverage_pipeline_test` runs a fixture that
+  forks both ways (it must be refused when a function returns twice, and
+  accepted, with every count 1, through `ForkSplit`). A new fork that returns in
+  both processes needs the same shape. Not fixed: the fork of
+  `bench/process.cc`, whose child never returns (it execs or exits) but whose
+  `fork()` wrapper does: it cannot go negative, and its parent-leg branch
+  (`child == 0` false) reads 0 although it ran (an undercount of two branches).
 - **Line and branch status that depends on scheduling** (FORGET vs
   BATCH_FORGET, the session loop's read-ahead and `-EINTR` paths, the daemon's
   shutdown path): not artifacts of the tooling but of the tests, listed in

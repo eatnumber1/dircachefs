@@ -4,16 +4,15 @@
 #
 # mount(8) runs `mount.dcfs SOURCE MOUNTPOINT [-sfnv] [-N ns] -o OPTIONS` for
 # a `dcfs` mount. This test runs the wrapper as mount(8) does, on the ext4
-# image vdb, and checks: the tree is served (the FUSE mount's source is the spec as
-# written, umount stops dcfs, a SIGKILLed dcfs releases the superblock); the
-# option split (native options are refused, dcfs.ro is dcfs's, remount
-# changes only the dcfs mount, a bogus dcfs. option mounts nothing and says
-# why); daemonization (the wrapper returns when dcfs
-# answers FUSE_INIT, a failure after the fork is the wrapper's exit status
-# and message, a daemonized dcfs has no stdio and logs to syslog,
-# dcfs.foreground stays in the foreground); a file
-# mounted below the source refused; a non-root caller refused with the
-# reason.
+# image vdb, and checks: the tree is served (the FUSE mount's source is the
+# spec as written, umount stops dcfs, a SIGKILLed dcfs releases the
+# superblock); the option split (native options are refused, dcfs.ro is
+# dcfs's, remount changes only the dcfs mount, a bogus dcfs. option mounts
+# nothing and says why); daemonization (the wrapper returns when dcfs answers
+# FUSE_INIT, a failure after the fork is the wrapper's exit status and
+# message, a daemonized dcfs has no stdio and logs to syslog, dcfs.foreground
+# stays in the foreground); a file mounted below the source refused; a
+# non-root caller refused with the reason.
 #
 # Not here (later steps of phase 15): the instance identity and cache path
 # (15.3), stubs for submounts (15.4), fsck.dcfs and exports (15.5), systemd

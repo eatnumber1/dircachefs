@@ -2193,14 +2193,15 @@ what it says.
 
 **fsck.dcfs** (step 15.5; russ, 2026-10-09: "add support for the sixth field of
 fstab, so you can do fsck via fstab on a filesystem that's set up via dcfs").
-`fsck -A` runs `fsck.<type> FLAGS SOURCE` for a line whose passno is not 0,
-with the type of the fstab line, `dcfs` (verified for a directory SOURCE in
-`mount_dcfs_systemd_test`); systemd's generator makes `systemd-fsck@` units
-for device paths only, so it never runs it for a dcfs line (the README says
-passno 0 there); dcfs installs `fsck.dcfs` by the argv[0] dispatch like its other
-helpers. It receives only the device and fsck's flags, so it finds its line
-(and the `dcfs.` options) through `findmnt --fstab` run as a child; `-o OPTIONS` names them for a check by hand with no
-line (an option of the helper, not a test hook).
+`fsck -A` runs `fsck.<type> FLAGS SOURCE` for a line whose passno is not 0, with
+the type of the fstab line, `dcfs` (verified for a directory SOURCE in
+`mount_dcfs_systemd_test`); systemd's generator makes `systemd-fsck@` units for
+device paths only, so it never runs it for a dcfs line (the README says passno 0
+there); dcfs installs `fsck.dcfs` by the argv[0] dispatch like its other
+helpers. It receives only the device and fsck's flags, so it finds its line (and
+the `dcfs.` options) through `findmnt --fstab` run as a child; `-o OPTIONS`
+names them for a check by hand with no line (an option of the helper, not a test
+hook).
 
 *Why the backing filesystem has no checker here.* dcfs serves a directory
 of a filesystem the administrator mounts: there is no device here to check, and
@@ -2834,13 +2835,13 @@ synchronous `FUSE_DESTROY` opt-in (patch 6) retires the most at once: the
 umount helper, the lock files, the fusectl dependence and the
 mount-after-unmount limitation.
 
-Over-mounting is not FUSE-only machinery and stays: dcfs opens SOURCE with `O_PATH` before mounting and never uses a path
-again, so `mount -t dcfs ... /srv/media /srv/media` hides the backing
-under dcfs, which is also the hygiene
-property russ values (nothing reaches the backing except through the
-daemon's descriptor). Production mounts the disk by fstab at a raw path
-and serves it from there (the native-type capture that once mounted the
-block device itself was deleted in plan step 15.11).
+Over-mounting is not FUSE-only machinery and stays: dcfs opens SOURCE with
+`O_PATH` before mounting and never uses a path again, so `mount -t dcfs ...
+/srv/media /srv/media` hides the backing under dcfs, which is also the hygiene
+property russ values (nothing reaches the backing except through the daemon's
+descriptor). Production mounts the disk by fstab at a raw path and serves it
+from there (the native-type capture that once mounted the block device itself
+was deleted in plan step 15.11).
 
 ## Syscall fault injection stays link-time (russ, 2026-10-16)
 

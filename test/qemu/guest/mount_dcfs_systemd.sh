@@ -38,7 +38,9 @@ DEV_BTRFS=/dev/vdc
 CACHE=/var/cache/dcfs
 OUT=/tmp/out
 SRC=/srv/live # the bind form's directory
-RAW=/srv/nested # the nested bind line's SOURCE: a plain directory with no mount below it (dcfs refuses a SOURCE with mounts below)
+# The nested dcfs line's SOURCE: a plain directory. It must have no mount
+# below it: dcfs refuses a SOURCE with mounts below, and /srv/raw has them.
+NESTED=/srv/nested
 MNT=/mnt/m    # for the command-line checks
 MISSING_UUID=0e0e0e0e-dead-4bee-8f00-000000000001
 
@@ -201,7 +203,7 @@ fi
 	fail wrapper-installed "/sbin/mount.dcfs and /sbin/mount.fuse.dcfs are not both executable"
 
 mkdir -p -m 0700 "$CACHE"
-mkdir -p "$SRC" "$RAW" "$MNT" /data /mnt/live /mnt/missing /mnt/fail /mnt/xfs /mnt/btrfs /tmp/other /srv/raw/data /srv/raw/xfs /srv/raw/btrfs /srv/raw/missing
+mkdir -p "$SRC" "$NESTED" "$MNT" /data /mnt/live /mnt/missing /mnt/fail /mnt/xfs /mnt/btrfs /tmp/other /srv/raw/data /srv/raw/xfs /srv/raw/btrfs /srv/raw/missing
 
 # restart_check MODE: systemctl restart of rp.mount, three times. MODE both
 # names rp-c.mount too, so systemctl waits for both jobs and its status is
@@ -281,7 +283,7 @@ boot1() {
 	BTRFS_UUID=$(blkid -s UUID -o value "$DEV_BTRFS")
 	UUID=$(blkid -s UUID -o value "$DEV")
 	echo live >"$SRC/live.txt"
-	echo raw >"$RAW/raw.txt"
+	echo raw >"$NESTED/raw.txt"
 	if [ -z "$UUID" ] || [ -z "$XFS_UUID" ] || [ -z "$BTRFS_UUID" ]; then
 		fail fixture-uuid "blkid prints no UUID for $DEV ($UUID), $DEV_XFS ($XFS_UUID) or $DEV_BTRFS ($BTRFS_UUID)"
 		return
@@ -404,11 +406,13 @@ boot1() {
 	# backings are not supported yet), an xfs and a btrfs by UUID (the kernel
 	# mounts them: the image has no xfsprogs or btrfs-progs) each with a dcfs
 	# line, a nofail mount of a device that is not there with its dcfs line,
-	# and (noauto) one that fails to start.
+	# and (noauto) one that fails to start. Under mount -a -t dcfs the dcfs
+	# /mnt/missing line mounts over a plain directory (mount -a skips the raw
+	# lines); nofail on a missing device is covered at boot, in boot 2.
 	cat >/etc/fstab <<EOF
 UUID=$UUID /srv/raw/data ext4 noatime 0 2
 /srv/raw/data /data dcfs x-systemd.requires-mounts-for=/srv/raw/data,dcfs.cache_db=$CACHE/data.db,dcfs.stderrthreshold=0 0 2
-$RAW /data/sub dcfs dcfs.ro,dcfs.cache_db=$CACHE/sub.db,dcfs.stderrthreshold=0 0 0
+$NESTED /data/sub dcfs dcfs.ro,dcfs.cache_db=$CACHE/sub.db,dcfs.stderrthreshold=0 0 0
 $SRC /mnt/live dcfs _netdev,x-systemd.requires-mounts-for=$CACHE,dcfs.cache_db=$CACHE/live.db,dcfs.stderrthreshold=0 0 0
 UUID=$XFS_UUID /srv/raw/xfs xfs defaults 0 0
 /srv/raw/xfs /mnt/xfs dcfs x-systemd.requires-mounts-for=/srv/raw/xfs,dcfs.cache_db=$CACHE/xfs.db,dcfs.stderrthreshold=0 0 0
@@ -500,7 +504,7 @@ EOF
 		fail fstab-native-uuid-served "type=$1 source=$2"
 	fi
 	set -- $(fs_of /data/sub)
-	if [ "$1" = fuse.dcfs ] && [ "$2" = "$RAW" ] && [ "$(cat /data/sub/raw.txt 2>&1)" = raw ]; then
+	if [ "$1" = fuse.dcfs ] && [ "$2" = "$NESTED" ] && [ "$(cat /data/sub/raw.txt 2>&1)" = raw ]; then
 		pass fstab-bind-nested-served
 	else
 		fail fstab-bind-nested-served "type=$1 source=$2 $(ls -l /data/sub 2>&1)"
@@ -697,7 +701,7 @@ EOF
 	# The daemon's log is in the journal, attributed to its mount unit, at the
 	# threshold the options set (dcfs.stderrthreshold=0: INFO).
 	if journal_has "starting: source=/srv/raw/data " -t dcfs _SYSTEMD_UNIT=data.mount &&
-		journal_has "starting: source=$RAW" -t dcfs _SYSTEMD_UNIT=data-sub.mount; then
+		journal_has "starting: source=$NESTED" -t dcfs _SYSTEMD_UNIT=data-sub.mount; then
 		pass journal-daemon-log-by-unit
 	else
 		fail journal-daemon-log-by-unit "$(journalctl --no-pager -b -t dcfs -o short-full _SYSTEMD_UNIT=data.mount 2>&1 | tail -n 5; journalctl --no-pager -b -t dcfs 2>&1 | tail -n 8)"
@@ -900,6 +904,16 @@ boot2() {
 		pass reboot-passno-2-dcfs-line-is-not-fscked-by-systemd
 	else
 		fail reboot-passno-2-dcfs-line-is-not-fscked-by-systemd "$fsck_unit finished at $fsck_done"
+	fi
+	# The positive control: the passno-2 ext4 line over the device does get
+	# its systemd-fsck@ unit, so the check above is not true merely because
+	# systemd runs none.
+	dev_unit=$(systemd-escape -p --template=systemd-fsck@.service "/dev/disk/by-uuid/$(blkid -s UUID -o value "$DEV")")
+	dev_done=$(systemctl show -p ExecMainExitTimestampMonotonic --value "$dev_unit")
+	if [ "${dev_done:-0}" -gt 0 ]; then
+		pass reboot-passno-2-device-line-is-fscked-by-systemd
+	else
+		fail reboot-passno-2-device-line-is-fscked-by-systemd "$dev_unit finished at $dev_done"
 	fi
 	# The reboot stopped every daemon of the previous boot cleanly: each
 	# logged "shutdown: clean" and this boot's starts all found it clean. The

@@ -147,6 +147,16 @@ TEST_F(DeviceIdFaultTest, EveryUnsupportedErrnoNamesTheFilesystem) {
   }
 }
 
+// NFS never answers FS_IOC_GETFSUUID (ENOTTY), so a network backing is
+// refused at startup (README, "Network backings").
+TEST_F(DeviceIdFaultTest, NfsIsRefusedBecauseItHasNoFilesystemUuid) {
+  GetFaults().fstatfs_type = NFS_SUPER_MAGIC;
+  GetFaults().ioctl_errno[FS_IOC_GETFSUUID] = ENOTTY;
+  EXPECT_THAT(IdOf("/"),
+              StatusIs(absl::StatusCode::kUnimplemented,
+                       AllOf(HasSubstr("nfs"), HasSubstr("FS_IOC_GETFSUUID"))));
+}
+
 TEST_F(DeviceIdFaultTest, AUuidOfTheWrongLengthIsRefused) {
   GetFaults().getfsuuid_len = 17;
   EXPECT_THAT(IdOf("/"),

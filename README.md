@@ -454,30 +454,30 @@ nas:/export       /srv/raw/nas   nfs   vers=4.2,_netdev,nofail                  
   options are accepted, since mount(8) adds or reads them itself; any other
   native option is an error, because dcfs makes no underlying mount to give it
   to. `dcfs.ro` makes the dcfs mount read-only.
-- **The sixth field** (the fsck pass): dcfs only checks its cache database;
-  it runs no checker on the backing filesystem (there is no device: dcfs serves
-  a directory). **Use `0` on the dcfs line under systemd**: its generator makes
-  `systemd-fsck@` units for device paths only, and a dcfs SOURCE is a
-  directory, so systemd runs no fsck for a dcfs line whatever the field says
-  (checked at boot in the systemd guest, `mount_dcfs_systemd_test`); run
-  `fsck.dcfs` by hand when you want the cache database checked. util-linux
-  `fsck -A` does run `fsck.dcfs` for a dcfs line with a non-zero field, on the
-  directory (it reports that there is no device to check and checks the cache
-  database); `fsck -A -N` lists it (same test). Other init systems are not
-  checked. See
-  [Checking a dcfs filesystem](#checking-a-dcfs-filesystem).
+- **The sixth field** (the fsck pass): dcfs only checks its cache database; it
+  runs no checker on the backing filesystem (there is no device: dcfs serves a
+  directory). **Use `0` on the dcfs line under systemd**: its generator makes
+  `systemd-fsck@` units for device paths only, and a dcfs SOURCE is a directory,
+  so systemd runs no fsck for a dcfs line whatever the field says (checked at
+  boot in the systemd guest, `mount_dcfs_systemd_test`); run `fsck.dcfs` by hand
+  when you want the cache database checked. util-linux `fsck -A` does run
+  `fsck.dcfs` for a dcfs line with a non-zero field, on the directory (it
+  reports that there is no device to check and checks the cache database);
+  `fsck -A -N` lists it (same test). Only systemd and util-linux `fsck -A` are
+  tested. See [Checking a dcfs filesystem](#checking-a-dcfs-filesystem).
 - **A line is a mount**: `mount /data`, `umount /data`, `mount -a` and
   `umount -R /data` work as for any fstab entry, and `mount /data` takes
   the line's options. Write absolute paths in the line.
 
-**Network backings are not supported yet.** dcfs refuses to start on an NFS
-(or other network) backing, because it identifies a backing by its filesystem
-UUID, which network filesystems do not provide; support is planned (plan step
-14.10). The example and paragraph are kept for that step. Network backings
-need `_netdev`: systemd does not know that a `dcfs` mount
-of an NFS export is a network mount: `_netdev` makes it wait for the network
-and keeps it out of local-fs.target. Add `nofail` to a mount the machine can
-boot without, and `noauto` to one that should not mount at boot.
+**Network backings are not supported yet.** dcfs refuses to start on an NFS (or
+other network) backing, because it identifies a backing by its filesystem UUID
+and NFS answers `FS_IOC_GETFSUUID` with `ENOTTY` (pinned by
+`NfsIsRefusedBecauseItHasNoFilesystemUuid` in `dcfs/device_id_fault_test.cc`);
+support is planned (plan step 14.10). The example and paragraph are kept for
+that step. Network backings need `_netdev`: systemd does not know that a `dcfs`
+mount of an NFS export is a network mount: `_netdev` makes it wait for the
+network and keeps it out of local-fs.target. Add `nofail` to a mount the machine
+can boot without, and `noauto` to one that should not mount at boot.
 
 **Without systemd**, `mount -a` (from the init scripts, or by hand) mounts
 the lines in file order, so put parents before the children mounted inside
@@ -527,10 +527,10 @@ dcfs trusts what it has cached, so the setup has to keep it true.
 - **Mount order and dependencies**: parents before children, the cache's
   filesystem before the instance (above).
 - **Why dcfs runs as root and refuses otherwise**: FUSE passthrough and the
-  filesystem-identity ioctls need `CAP_SYS_ADMIN`, `open_by_handle_at` needs `CAP_DAC_READ_SEARCH`, and
-  serving each caller with that caller's credentials needs `setfsuid`,
-  `setfsgid` and `setgroups`. `mount.dcfs` as a normal user exits with
-  status 1 and says so; fstab's `user` option cannot work.
+  filesystem-identity ioctls need `CAP_SYS_ADMIN`, `open_by_handle_at` needs
+  `CAP_DAC_READ_SEARCH`, and serving each caller with that caller's credentials
+  needs `setfsuid`, `setfsgid` and `setgroups`. `mount.dcfs` as a normal user
+  exits with status 1 and says so; fstab's `user` option cannot work.
 - **NFS**: see [Exporting over NFS](#exporting-over-nfs).
 
 ### Exporting over NFS
