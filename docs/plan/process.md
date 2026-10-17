@@ -334,7 +334,14 @@ reading. Not for writing code, nor for subtle protocol judgement.
    output to the orchestrator's scratchpad; the orchestrator verifies
    findings before anything enters the repository. No write work until a
    cage exists (a labelled, `--rm` container with one lane mounted).
-5. Gemini's findings are treated as leads, not facts: a claim that would
+5. Narrow jobs, several of them (russ, 2026-10-17: "The long context is
+   good, but be wary of Flash's limitations. Consider using multiple,
+   narrowly targeted reviewers."). Give each job the whole tree as
+   context but one question: one invariant, one document against the
+   code, one directory's dead code. Never a five-category sweep on
+   Flash. Run several such jobs instead of one broad one, and compare
+   their answers where they overlap.
+6. Gemini's findings are treated as leads, not facts: a claim that would
    change the plan is re-verified (12.18 is the precedent: its "not
    usable" verdict was wrong).
 
