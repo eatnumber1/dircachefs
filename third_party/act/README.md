@@ -35,7 +35,7 @@ or, from a shell that is not yet in the `docker` group (and builds first,
 so the Bazel server is not started without the `kvm` group):
 
 ```
-sg kvm -c 'bazel build //third_party/act'
+bazel build //third_party/act
 sg docker -c 'bazel-bin/third_party/act/act -j fast'
 ```
 

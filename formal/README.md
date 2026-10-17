@@ -61,8 +61,8 @@ bazel test //formal:lifetime_test          # the lifetime model (~40 s)
 bazel test //formal:ident_test             # the identity model (~15 s)
 ```
 
-(On russ's machine, wrap Bazel in `sg kvm -c '...'` as for every Bazel
-command; these tests don't need KVM, but the Bazel server does.)
+(These tests don't need KVM, but the Bazel server does: run plain `bazel` from
+the checkout, in a login session that has the `kvm` group.)
 
 Trace validation, which checks recorded runs of the code against the model,
 has its own targets next to the guests that record the traces (they do

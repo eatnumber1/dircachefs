@@ -17,9 +17,9 @@ and btrfs -- see "Step 5.2: ext4, xfs and btrfs" near the end).
 ## How to run
 
 ```
-sg kvm -c 'bazel test //test/qemu:pjdfstest_test_ext4'
-sg kvm -c 'bazel test //test/qemu:pjdfstest_test_xfs'
-sg kvm -c 'bazel test //test/qemu:pjdfstest_test_btrfs'
+bazel test //test/qemu:pjdfstest_test_ext4
+bazel test //test/qemu:pjdfstest_test_xfs
+bazel test //test/qemu:pjdfstest_test_btrfs
 ```
 
 (`pjdfstest_test`, with no suffix, is an alias for `pjdfstest_test_ext4`;
@@ -371,9 +371,9 @@ ext4, xfs or btrfs.
 **Reproducing:**
 
 ```
-sg kvm -c 'bazel test //test/qemu:pjdfstest_test_ext4'
-sg kvm -c 'bazel test //test/qemu:pjdfstest_test_xfs'
-sg kvm -c 'bazel test //test/qemu:pjdfstest_test_btrfs'
+bazel test //test/qemu:pjdfstest_test_ext4
+bazel test //test/qemu:pjdfstest_test_xfs
+bazel test //test/qemu:pjdfstest_test_btrfs
 ```
 
 Serial logs:
