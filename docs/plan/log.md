@@ -3300,3 +3300,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - First per-step style review (the watchdog move): two findings sent back; two questions ruled by
   the orchestrator into style.md (1.11 has no blanket exemption for host-side tools; Python tests
   inject environment and clock as parameters).
+- The Gemini watchdog moved to tools/agents/gemini_watchdog.py with a README (a harness tool for
+  that agent, kept at russ's request; its poll justified under 1.11's cannot-signal clause; status
+  file under $XDG_RUNTIME_DIR), after one style-review round. Merged.
