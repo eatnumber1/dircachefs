@@ -39,9 +39,11 @@
 (*                                                                         *)
 (* A network backing (step 14.10; docs/design.md "Backings without a      *)
 (* filesystem UUID"): the backing may be replaced by another whose        *)
-(* objects present byte-identical handles (Swap), which the start's       *)
-(* identity check refuses (StartRefused: the administrator deletes the    *)
-(* database); the server may be out (ServerDown, ServerUp: requests reach *)
+(* objects present byte-identical handles (Swap), which the start's root  *)
+(* check refuses if the root's handle differs (StartRefused: the          *)
+(* administrator deletes the database) and cannot see if it does not      *)
+(* (SameIdentity: two filesystems exported under one fsid number); the    *)
+(* server may be out (ServerDown, ServerUp: requests reach                *)
 (* nothing, EIO, and no row goes for it) and may come back with new       *)
 (* handles (VolatileHandles); under Phase 14 an NFS client cannot open a  *)
 (* nodeid without a row by its number (OpenByIno = FALSE).                *)
@@ -108,7 +110,8 @@ CONSTANTS
     \* filesystem UUID"):
     SwapBName,     \* the directory of another backing that may replace
                    \* this one (Swap), or None at every name
-    SameIdentity,  \* ... which presents the same identity (name and root)
+    SameIdentity,  \* ... which presents the same identity: f_type and the
+                   \* root's handle (one fsid number on two filesystems)
     MaxSwaps,      \* bound on swaps
     SwapWhileUp,   \* a swap may come while dcfs runs, not only between runs
     MaxOutages,    \* bound on server outages (ServerDown, then ServerUp)
@@ -663,7 +666,9 @@ Start ==
                    probe, countVars, badMade, sid, srv, hep, swaps, outages>>
 
 \* The start finds another backing's identity (main.cc: the database's
-\* source identity, then the root row's handle) and refuses; the
+\* source identity, a UUID or for a network backing only f_type, then the
+\* root row's handle, which is what tells two exports apart) and refuses;
+\* the
 \* administrator deletes the database, which is always safe, and starts
 \* again with a cold cache. (Not a Wipe: no bound, since refusing is the
 \* only way on.)
@@ -685,9 +690,12 @@ StartRefused ==
 \* The backing is replaced by another one (SwapBName: another server, or
 \* another filesystem exported in its place) whose objects may have the
 \* same inode numbers and generations as this one's, hence byte-identical
-\* handles (two filesystems under one fsid number; a replica). This one's
-\* objects are out of reach from then on (dead, for dcfs). Between runs, or
-\* (SwapWhileUp) while dcfs runs.
+\* handles (two filesystems under one fsid number; a replica). On NFS such
+\* handles come with a byte-identical root handle (SameIdentity); a backing
+\* with another root handle has other handle bytes everywhere, so giving
+\* it colliding ones (MC_ident_net.cfg) is the worst case for the start's
+\* root check. This one's objects are out of reach from then on (dead, for
+\* dcfs). Between runs, or (SwapWhileUp) while dcfs runs.
 Swap ==
     /\ swaps < MaxSwaps /\ SwapObjs # {}
     /\ ~Up \/ SwapWhileUp

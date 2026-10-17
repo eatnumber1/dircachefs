@@ -276,12 +276,12 @@ the README go to 14.10b below. What was settled:
   follow-up for identity; it would need the handle-free access path russ
   rejected on 2026-10-08. No samba or ksmbd-tools in the guests either.
 - The design: docs/design.md "Backings without a filesystem UUID (network
-  filesystems)": `SourceIdentity` (a UUID, or `f_type` plus a name:
-  `dcfs.backing_id=` or the mountinfo source), the root row's handle check
-  as the stronger half on NFS, `f_fsid` dropped from 2026-10-08's plan (it
-  is 0), the administrator's guarantees (exclusive access, persistent
-  handles, no replacement while dcfs runs; neither a hard mount nor a sync
-  export is required), the handle and generation rules (today's matching
+  filesystems)": `SourceIdentity` (a UUID, or only `f_type`), with the root
+  row's handle check as what tells two exports apart, `f_fsid` dropped from
+  2026-10-08's plan (it is 0), the administrator's guarantees (exclusive
+  access, a unique and fixed fsid per export, no replacement while dcfs
+  runs; neither a hard mount nor a sync export is required), the handle and
+  generation rules (today's matching
   unchanged; Phase 14 needs a digest generation and no open by number on
   NFS), and what the cache does on a server restart, an outage, a changed
   fsid, a moved export and volatile handles.
@@ -296,46 +296,45 @@ the README go to 14.10b below. What was settled:
   crash with an `async` export the cache may list changes the server lost,
   so the administrator probably wants to delete the cache database; Phase
   14's generation on NFS is a digest of the server's handle bytes (for
-  Phase 14's own steps, not 14.10b).
-- Still open for russ: whether to drop the backing name altogether (the
-  identity then `f_type` plus the root row's handle check, README requiring
-  a unique fixed fsid per export, as exports(5) does); whether "no
-  replacement while dcfs runs" stays a documented guarantee.
+  Phase 14's own steps, not 14.10b); no backing name at all (neither a
+  `dcfs.backing_id` option nor the mountinfo source): the identity of a
+  backing without a UUID is `f_type` plus the root row's check, and README
+  requires a unique, fixed fsid per export (as exports(5) does), which also
+  gives persistent handles. Two filesystems under one fsid number are a
+  documented limitation (`limitations/ident_net_same_identity`), not a
+  guarded case.
+- Still open for russ: whether "no replacement while dcfs runs" stays a
+  documented guarantee.
 
 ## 14.10b Network backings: the implementation
 
 Owner: dcfs-protocol. After the error-handling rework of dcfs/ that was in
-flight on 2026-10-16 (it touches device_id.cc and main.cc), and after russ
-answers 14.10's two open questions (the brief below still has the backing
-name, defaulting to the mountinfo source; if russ drops the name, items 2
-and 3's name half and the name tests go, and README requires a unique
-fixed fsid per export instead). Test first throughout; the design is
-docs/design.md "Backings without a filesystem UUID".
+flight on 2026-10-16 (it touches device_id.cc and main.cc). Test first
+throughout; the design is docs/design.md "Backings without a filesystem
+UUID". russ's rulings of 2026-10-17 are in the brief: no backing name, no
+hard-mount or sync-export requirement. If russ drops the "no replacement
+while dcfs runs" guarantee (still open), only README's wording changes.
 
 Code:
 1. `SourceIdentity` (dcfs/device_id.{h,cc}, renamed or not) replaces
    `DeviceId` as the source's identity, one type with one interface
    (russ, 2026-10-08; style 25.5): a UUID with btrfs's subvolume id, or
-   `f_type` plus a name (bytes). `Serialize`/`Parse` become variable-length
-   with a kind byte; `ToString` escapes the name (file names are bytes).
-   `GetDeviceId`'s `ENOTTY` branch builds the named kind instead of
-   `Unimplemented`; ZFS and the like keep failing later, at their first
-   handle. Decide in the step whether `FileHandle` and the `filesystems`
-   table keep a per-handle device at all (one backing per database since
-   amendment 12; the schema may change without a migration before release):
-   one way to do it, and the report says which.
-2. The name: the new `dcfs.backing_id=NAME` option (mount.dcfs's option
-   split, the daemon's flag, dcfs.8, README's flags table) if given, else
-   the source of the mount holding SOURCE, read from `/proc/self/mountinfo`
-   by SOURCE's mount id at start, in the window where main.cc already reads
-   mountinfo for `MountsBelow` (no path after startup).
-3. The start compares the stored identity with the current one in main.cc's
-   existing check and refuses a mismatch naming both and both remedies
-   (delete the database; or `dcfs.backing_id=` with the old name). The
-   root row's check stays as it is.
-4. `name_to_handle_at` of SOURCE failing with `EOVERFLOW` at start gets an
+   only `f_type` for a backing without one. `Serialize`/`Parse` become
+   variable-length with a kind byte; `ToString` prints the filesystem type
+   by name (`FstypeName`). `GetDeviceId`'s `ENOTTY` branch builds the
+   `f_type` kind instead of `Unimplemented`; ZFS and the like keep failing
+   later, at their first handle. Decide in the step whether `FileHandle` and
+   the `filesystems` table keep a per-handle device at all (one backing per
+   database since amendment 12; the schema may change without a migration
+   before release): one way to do it, and the report says which.
+2. The start compares the stored identity with the current one in main.cc's
+   existing check and refuses a mismatch naming both and the remedy (delete
+   the database). The root row's check stays as it is; for a backing
+   without a UUID it is what tells two exports apart, and its message says
+   so (an export re-made with another fsid, or another export).
+3. `name_to_handle_at` of SOURCE failing with `EOVERFLOW` at start gets an
    error naming the server's handle size as the cause.
-5. No change to `OpenNode`/`StaleOrUnreadable`, and nothing that looks at
+4. No change to `OpenNode`/`StaleOrUnreadable`, and nothing that looks at
    hard or soft mounts (russ, 2026-10-17): the rule the design relies on
    (only a confirmed `ESTALE` forgets a row; an `EIO` or `ETIMEDOUT` from a
    soft mount's timeout is a backing error like any other) already holds;
@@ -343,10 +342,10 @@ Code:
 
 Tests (failing first; the guests chrooted into the Debian rootfs with the
 guest's own knfsd, as nfs_backing_test sets it up):
-- Unit: `SourceIdentity` round trips, comparison and printing of both kinds,
-  names with arbitrary bytes; device_id_fault_test's
-  `NfsIsRefusedBecauseItHasNoFilesystemUuid` becomes the named-identity case;
-  the `EOVERFLOW` refusal.
+- Unit: `SourceIdentity` round trips, comparison and printing of both
+  kinds; device_id_fault_test's `NfsIsRefusedBecauseItHasNoFilesystemUuid`
+  becomes the `f_type` case; a database made on one `f_type` refused on
+  another; the `EOVERFLOW` refusal.
 - A guest test of dcfs on a loopback NFS mount of ext4: listing and content
   match the export; a warm metadata pass makes no NFS round trip (the
   client's `/proc/self/mountstats` GETATTR/LOOKUP counts unchanged) and
@@ -364,10 +363,11 @@ guest's own knfsd, as nfs_backing_test sets it up):
   remounting the export and restarting dcfs the start refuses with the
   identity message; deleting the database starts cold.
 - Identity at start: the export moved to another path with the same fsid
-  starts warm with `dcfs.backing_id` set and is refused without it; vdc
-  exported under a UUID fsid in vdb's place is refused (root handle); vdc
-  exported under vdb's fsid number with another `dcfs.backing_id` is refused
-  (name).
+  starts warm; vdb re-exported under another fsid is refused (root handle);
+  vdc exported under a UUID fsid in vdb's place is refused (root handle);
+  vdc exported under vdb's fsid number is not detected, the documented
+  limitation, which the test pins so that a change in it is seen (and
+  README's unique-fsid requirement names).
 - The systemd guest's `_netdev` line on a real NFS mount: the Debian cloud
   image (third_party/debian_cloud) has no NFS server; either add
   nfs-kernel-server to that guest's image or export from a second guest, the
@@ -378,7 +378,8 @@ guest's own knfsd, as nfs_backing_test sets it up):
   validates it.
 
 Docs: README's network-backing paragraph and fstab example restored as
-supported, with the administrator's guarantees, `dcfs.backing_id`, and the
+supported, with the administrator's guarantees (a unique, fixed fsid per
+export among them), and the
 `async`-export note (after a server crash the cache may list changes the
 server lost; delete the cache database), and nothing about hard or soft
 mounts; the Requirements list says what a backing without a UUID needs;

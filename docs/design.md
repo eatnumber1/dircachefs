@@ -425,35 +425,37 @@ which kind it is):
 
 - a filesystem UUID where the kernel gives one (ext4, xfs, btrfs with its
   subvolume id), as today's `DeviceId`;
-- otherwise the filesystem type (`f_type`) and a **name**: the
-  administrator's `dcfs.backing_id=NAME` mount option if given, else the
-  source of the mount that holds SOURCE, from `/proc/self/mountinfo` (found
-  by SOURCE's mount id, read at start while paths are still allowed). The
-  name is bytes, escaped when printed.
+- otherwise only the filesystem type (`f_type`).
 
 The database records it when it is created and the start refuses a
 mismatch, naming both values and saying that deleting the database starts
-a cold cache (which is always safe) or, for a name that changed but still
-means the same backing, that `dcfs.backing_id` keeps the old name. The
-root row's check (inode number, generation, handle) runs as before, and on
-NFS it is the stronger half: the root's handle is the server's, so it
-changes when the export's fsid changes, when the export is another
-directory or another filesystem under a UUID fsid; it stays when the
-export only moved to another path. What it cannot tell apart is two
-filesystems exported under one `fsid=` number, and that is what the name is
-for. `f_fsid` is not part of the identity (step 14's 2026-10-08 plan had
-it): it is 0 on NFS.
+a cold cache (which is always safe). For a backing without a UUID, what
+ties the database to the backing is the root row's check (inode number,
+generation, handle), which runs as before: the root's handle is the
+server's, so it changes when the export's fsid changes, and when another
+directory, or another filesystem under its UUID fsid, is exported in its
+place; it stays when the export only moved to another path, which keeps
+the cache warm. What it cannot tell apart is two filesystems exported
+under one `fsid=` number (their root handles are byte-identical), which is
+why README requires a unique, fixed fsid per export, as exports(5) already
+does. There is no administrator-supplied name and no use of the mount's
+source (russ, 2026-10-17): the mountinfo source is the superblock's, not
+what was mounted (measured above), and an fsid that is unique and fixed
+identifies the export better than any name. `f_fsid` is not part of the
+identity either (step 14's 2026-10-08 plan had it): it is 0 on NFS.
 
-Neither half is a guarantee, only a check against the likely mistakes (a
-database pointed at another server, an export re-made with another fsid).
+The check is a guard against the likely mistakes (a database pointed at
+another export, an export re-made with another fsid), not a guarantee.
 What the administrator guarantees for a network backing, and dcfs cannot
 check, is in README ("Network backings"):
 
 - **Exclusive access**: no other client, and nothing on the server,
   changes the exported tree while dcfs serves it or between its runs.
-- **Persistent handles**: the export keeps its fsid across server restarts
-  (knfsd: an explicit `fsid=`, or a filesystem with a UUID), and the server
-  does not hand out volatile handles.
+- **A unique, fixed fsid per export**: no two exports share an fsid, and
+  an export keeps its fsid across server restarts (knfsd: an explicit
+  `fsid=`, or a filesystem with a UUID). This is also what makes the
+  server's handles persistent; a server that hands out volatile handles
+  cannot give it.
 - **No replacement while dcfs runs**: the server does not serve the
   export's path before the filesystem is mounted on it (knfsd's
   `mountpoint` export option) and does not swap in a replica under the same
@@ -543,26 +545,29 @@ and `limitations/ident_target_net_wipe`.
   (`limitations/ident_net_swap_while_running`); that is the guarantee of no
   replacement while dcfs runs.
 - *The export moved, same fsid*: invisible while dcfs runs (the handles
-  stay valid). At the next start the root's handle matches; the name
-  matches if it is `dcfs.backing_id`, and if it is the mount source and the
-  administrator mounted the new path, the start refuses (a cold cache that
-  was not needed, never a wrong one).
+  stay valid), and the next start finds the same root handle and starts
+  warm, whatever path the administrator mounts.
+- *Two filesystems under one fsid number, swapped between runs*: their
+  root handles are byte-identical, so the start does not see the swap,
+  and handles whose bytes collide reach the other filesystem's objects
+  (`limitations/ident_net_same_identity`). Excluded by the guarantee of a
+  unique, fixed fsid per export.
 - *Volatile handles* (a server that hands out new handles after a restart,
   such as knfsd exporting a filesystem without a UUID and without
   `fsid=`): every row's handle is `ESTALE`, the parent check finds the name
   with another handle and forgets the row, and NFS clients of dcfs get
   `ESTALE` for live objects; never another object
-  (`limitations/ident_net_volatile_handles`). Unsupported: the guarantee of
-  persistent handles.
+  (`limitations/ident_net_volatile_handles`). Unsupported: excluded by the
+  guarantee of a unique, fixed fsid.
 
 The identity model (`formal/ident.tla`, README "The identity model")
-checks these: a backing swapped while dcfs is down (`Swap`) with objects
-whose handles are byte-identical to the old ones, which the start's
-identity check refuses (`MC_ident_net.cfg`;
-`known_bugs/ident_net_no_source_check` without it,
-`limitations/ident_net_same_identity` when the two backings present one
-identity); the outage; volatile handles; and Phase 14 without opening by
-inode number.
+checks these: a backing swapped while dcfs is down (`Swap`) for one whose
+root handle differs, refused by the start's root check even if its
+objects' handles were byte-identical to the old ones (`MC_ident_net.cfg`;
+`known_bugs/ident_net_no_source_check` without the check), and the swap
+the check cannot see, two filesystems under one fsid number
+(`limitations/ident_net_same_identity`); the outage; volatile handles; and
+Phase 14 without opening by inode number.
 
 ### Why submounts are refused
 
