@@ -110,7 +110,13 @@ process (its waves and file ownership table) is in `history.md`.
    FETCH_HEAD`. Update the status table, `log.md` and the top-level
    `STATUS.md` (the public progress page: Now, Next, Waiting on the
    maintainer, Recently landed; no quota or agent details) and commit
-   them.
+   them. Then refresh russ's private dashboard, "dcfs Mission Control"
+   (https://claude.ai/artifact/EVypNNcogbNcxzRjBYp8rK): rewrite its three
+   snapshot files (the steps in order as in `STATUS.md`, the quota
+   readings from "Quota management" below, `gh run list --limit 12`),
+   upload each as an asset and point its dataset at the new file with a
+   fresh `updated` time. Its datasets go stale after a day or two and
+   say so on the page, which is the reminder when a refresh is missed.
    The lane stays for the next step.
 7. **Sync-point suites** run in a lane checked out at `main` (already
    built), not in `~/Sources/dircachefs`, whose Bazel server is russ's.
