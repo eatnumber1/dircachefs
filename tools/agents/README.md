@@ -68,3 +68,57 @@ dialog appears.
 Its waits are bounded deadlines, as `docs/style.md` 1.11 allows: the pty has no
 event for "the panel has drawn" or "the prompt is up", so it polls until a
 deadline.
+
+## dashboard_lanes
+
+Keeps the "lanes" table of the private claude.ai dashboard current. Claude
+Code hooks call it with the hook's JSON on stdin; it records which subagents
+run on which lane, writes the table to `lanes.json`, and tells the
+orchestrator when that file differs from the last uploaded copy. It is driven
+by events only: nothing polls and nothing runs on a timer.
+
+Subcommands (all read the hook JSON from stdin, all exit 0):
+
+- `post-agent` (PostToolUse, matcher `Agent`): records a launched background
+  agent (`status` `async_launched`) with its lane (the first
+  `dircachefs-lanes/lane-N` in the prompt), model (`tool_input.model`, else
+  `resolvedModel`, else the `model:` of `.claude/agents/<type>.md`) and effort
+  (that file's `effort:`); a foreground agent records nothing. Calls made by a
+  subagent (the input has `agent_id`) are ignored. If the table changed since
+  the last upload it prints `additionalContext` telling the orchestrator to
+  upload the file.
+- `subagent-stop` (SubagentStop): removes the agent, regenerates, prints
+  nothing.
+- `stop` (the main session's Stop): regenerates; if the table changed since
+  the last upload it blocks with a reason naming the file, unless
+  `stop_hook_active` is true (no loops) or the caller is a subagent.
+- `mark-uploaded`: records the current file's sha256 as uploaded. The
+  orchestrator runs it after uploading.
+- `show`: prints the table.
+
+The table has an orchestrator row and one row per `lane-N` under
+`~/Sources/dircachefs-lanes/`. A lane with a recorded agent shows the step
+(from its branch `step-X`, else the agent's description), agent type, model
+and effort as `running`; a lane with no agent but an `agy` process whose
+working directory is the lane shows `agy, sandboxed` and its `--model`;
+otherwise it is `idle`.
+
+State is in `$DCFS_DASHBOARD_DIR` (default `~/.cache/dcfs-dashboard/`):
+`running.json`, `lanes.json`, `uploaded.sha256`, and an optional
+`config.json` (`{"model": ..., "effort": ...}`) for the orchestrator row.
+A malformed input or an unreadable state file prints one line to stderr and
+exits 0, because a failing hook can wedge the session.
+
+Hook configuration (in `.claude/settings.json`, installed by the
+orchestrator):
+
+```json
+{"hooks": {
+  "PostToolUse": [{"matcher": "Agent", "hooks": [{"type": "command", "command": "python3 -I $CLAUDE_PROJECT_DIR/tools/agents/dashboard_lanes.py post-agent", "timeout": 10}]}],
+  "SubagentStop": [{"hooks": [{"type": "command", "command": "python3 -I $CLAUDE_PROJECT_DIR/tools/agents/dashboard_lanes.py subagent-stop", "timeout": 10}]}],
+  "Stop": [{"hooks": [{"type": "command", "command": "python3 -I $CLAUDE_PROJECT_DIR/tools/agents/dashboard_lanes.py stop", "timeout": 10}]}]
+}}
+```
+
+It runs directly with `python3 -I`, no Bazel needed; the tests are
+`//tools/agents:dashboard_lanes_test`.

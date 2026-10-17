@@ -55,3 +55,28 @@ py_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
     deps = [":claude_usage_lib"],
 )
+
+# Keeps the lanes table of the private dashboard current from Claude Code
+# hooks (events, no polling). See README.md in this directory.
+py_library(
+    name = "dashboard_lanes_lib",
+    srcs = ["dashboard_lanes.py"],
+    imports = ["."],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+py_binary(
+    name = "dashboard_lanes",
+    srcs = ["dashboard_lanes.py"],
+    main = "dashboard_lanes.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+py_test(
+    name = "dashboard_lanes_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["dashboard_lanes_test.py"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":dashboard_lanes_lib"],
+)
