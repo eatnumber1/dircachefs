@@ -3750,3 +3750,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   says what its function does for any caller; why a particular caller
   calls it is written at that caller." backing.h's SetAttr comment is
   fixed in 17.2e, which rewrites that rule.
+- 2026-10-17, russ on style questions 5-10: "I don't care at all about pure
+  style questions in host tooling (this is part of why I suggest that we
+  write everything in C++). If any of these are not purely stylistic,
+  please re-ask them." And: "for shell though, the Google Shell Style
+  Guide says two spaces. The fact you had to ask meant that nobody read
+  it, even though we say it's part of our style requirements. Yet another
+  reason to switch to C++." So: 6 and 8 dropped (pure style); 5 is decided
+  by the hook contract, not taste (a hook exits 0, so table dispatch);
+  7 is two spaces per the guide (tab files convert, shfmt in 7.6b);
+  9 and 10 re-asked. docs/style.md gains 1-4 and a sentence that pure
+  style in host tooling is neither reviewed nor asked about.
