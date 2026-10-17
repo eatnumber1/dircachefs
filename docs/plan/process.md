@@ -266,3 +266,33 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   ("Needs russ"), so russ can catch up after being away.
 - When russ is away, keep going with whatever does not need russ, and
   collect what does.
+
+## Using Gemini through `agy` (2026-10-16)
+
+russ is on Google AI Pro: the Antigravity quota is part of a paid
+subscription, so the aim is to spend all of it before each weekly reset,
+responsibly. Facts (local `agy -p "/usage"`, and Google's developer forum;
+Google publishes no per-model numbers):
+- Pools are separate: the general Gemini pool (weekly and five-hour),
+  Gemini 4 Argon's own weekly limit, and a Claude-and-GPT pool. One Argon
+  review took about 9% of Argon's week and 2% of the general pool.
+- The Claude-and-GPT pool on Pro is a small baseline, drains much faster,
+  and forum reports describe multi-day lockouts once it is empty; it was
+  at 0% on 2026-10-16. Paid top-ups ("AI credits") exist.
+Guidelines:
+1. Read `agy -p "/usage"` before every dispatch and note the figures in
+   log.md when a job starts.
+2. Gemini 3.8 Flash for volume (censuses, surveys, mechanical reading);
+   Gemini 4 Argon for medium work (reviews, investigations), about ten jobs
+   a week, stopping at 10% of its limit; the general pool down to 5%.
+3. No Claude or GPT models through agy: the pool is small, slow to refill,
+   and the orchestrator's Claude subagents are the Claude budget. Never
+   enable or spend AI credits: that is money, russ's call each time.
+4. Safety: agy is a weaker model with shell access. Only read-only work,
+   `--sandbox --mode plan`, in a lane checkout with nothing unmerged,
+   output to the orchestrator's scratchpad; the orchestrator verifies
+   findings before anything enters the repository. No write work until a
+   cage exists (a labelled, `--rm` container with one lane mounted).
+5. Gemini's findings are treated as leads, not facts: a claim that would
+   change the plan is re-verified (12.18 is the precedent: its "not
+   usable" verdict was wrong).
