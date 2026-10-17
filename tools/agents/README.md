@@ -105,6 +105,11 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
   (`uploaded.sha256` and `sloc.uploaded.sha256`). The orchestrator runs it
   after uploading.
 - `show`: prints the table.
+- `ledger add [ID] field=value ...`: appends a row to the dispatch ledger
+  for an unhooked job (an agy/Gemini job; model suffix sets effort, tokens
+  blank, notes for quota delta).
+- `ledger set ID field=value ...`: fills or updates outcome fields in the
+  dispatch ledger at merge time.
 
 The table has an orchestrator row and one row per `lane-N` under
 `~/Sources/dircachefs-lanes/`. A lane with recorded agents shows the step
@@ -133,9 +138,58 @@ of the main checkout (`$DCFS_MAIN_REPO` or `~/Sources/dircachefs`), outputting
   ordered by size descending, followed by four `all` summary rows for the
   areas.
 
+The dispatch ledger (`docs/plan/dispatch-ledger.tsv` in the main checkout)
+records every agent job so its model and effort can later be judged
+empirically against its outcome, deciding which effort and model suits each
+task class. It is tab-separated with the header:
+
+```text
+id	dispatched	step	task_class	agent	model	effort	tokens	duration_s	rounds	blockers	shoulds	nits	escapes	verdict	notes
+```
+
+- Fields recorded at dispatch:
+  - `id`: the agent ID once known, or a generated unique ID.
+  - `dispatched`: ISO-8601 UTC timestamp of dispatch.
+  - `step`: step name from the lane's branch or agent description.
+  - `task_class`: task category derived from agent type (`dcfs-mechanical` ->
+    `mechanical`, `dcfs-implementer` -> `implementation`, `dcfs-investigator` ->
+    `investigation`, `dcfs-protocol` -> `protocol`, `dcfs-reviewer` ->
+    `review`, `dcfs-style-reviewer` -> `style-review`), overridable later.
+  - `agent`: agent type name (or `agy` for orchestrator-added jobs).
+  - `model`: resolved model name.
+  - `effort`: resolved effort level.
+- Fields filled on completion:
+  - `tokens`: total tokens consumed (from SubagentStop or completion hook input
+    if provided; blank otherwise).
+  - `duration_s`: run duration in seconds (from completion hook input if
+    provided; blank otherwise).
+- Outcome fields filled at merge time:
+  - `rounds`: number of review rounds or revisions.
+  - `blockers`: count of blocking review issues.
+  - `shoulds`: count of non-blocking should-fix review issues.
+  - `nits`: count of nit comments.
+  - `escapes`: defects or missed requirements that escaped into the tree.
+  - `verdict`: final outcome (`accepted`, `abandoned`, etc.).
+  - `notes`: notes, including quota deltas for agy jobs or merge observations.
+
+Outcome fields are filled at merge time using:
+
+```bash
+python3 -I tools/agents/dashboard_lanes.py ledger set ID field=value ...
+```
+
+For unhooked jobs (such as Gemini jobs through `agy`), a row is appended with:
+
+```bash
+python3 -I tools/agents/dashboard_lanes.py ledger add [ID] field=value ...
+```
+
+A failure to write the ledger never fails a hook (exits 0 with at most one
+stderr line).
+
 State is in `$DCFS_DASHBOARD_DIR` (default `~/.cache/dcfs-dashboard/`):
 `running.json`, `finished.json`, `lanes.json`, `uploaded.sha256`, `sloc.json`,
-`sloc.head`, `sloc.uploaded.sha256`, and an optional `config.json`
+`sloc.head`, `sloc.uploaded.sha256`, and an optional config.json
 (`{"model": ..., "effort": ...}`) for the orchestrator row.
 A malformed input or an unreadable state file prints one line to stderr and
 exits 0, because a failing hook can wedge the session.

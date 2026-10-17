@@ -14,14 +14,18 @@ no polling. See README.md in this directory for the hook configuration.
     dashboard_lanes.py stop            the main session's Stop hook
     dashboard_lanes.py mark-uploaded   record the current file as uploaded
     dashboard_lanes.py show            print the lanes file
+    dashboard_lanes.py ledger add ...  append row for unhooked agent job
+    dashboard_lanes.py ledger set ...  fill outcome fields at merge time
 
 State lives in $DCFS_DASHBOARD_DIR (default ~/.cache/dcfs-dashboard):
 running.json, finished.json, lanes.json, uploaded.sha256, sloc.json,
 sloc.head, sloc.uploaded.sha256, and an optional config.json with "model"
-and "effort" for the orchestrator row.
+and "effort" for the orchestrator row. Dispatch ledger is kept in
+docs/plan/dispatch-ledger.tsv under the main repository checkout.
 """
 
 import dataclasses
+import datetime
 import fcntl
 import hashlib
 import json
@@ -30,6 +34,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import uuid
 
 LANE_IN_PROMPT = re.compile(r"dircachefs-lanes/lane-(\d+)")
 LANE_DIR = re.compile(r"lane-(\d+)$")
@@ -37,6 +42,35 @@ EFFORT_SUFFIX = re.compile(r"(.+)-(low|medium|high)$")
 FINISHED_KEPT = 50
 TEST_FILE = re.compile(r"_test\.(cc|h|py|sh)$")
 SLOC_AREAS = ["prod", "test", "model", "tools"]
+
+LEDGER_COLUMNS = [
+    "id",
+    "dispatched",
+    "step",
+    "task_class",
+    "agent",
+    "model",
+    "effort",
+    "tokens",
+    "duration_s",
+    "rounds",
+    "blockers",
+    "shoulds",
+    "nits",
+    "escapes",
+    "verdict",
+    "notes",
+]
+LEDGER_HEADER = "\t".join(LEDGER_COLUMNS) + "\n"
+
+TASK_CLASSES = {
+    "dcfs-mechanical": "mechanical",
+    "dcfs-implementer": "implementation",
+    "dcfs-investigator": "investigation",
+    "dcfs-protocol": "protocol",
+    "dcfs-reviewer": "review",
+    "dcfs-style-reviewer": "style-review",
+}
 
 
 @dataclasses.dataclass
@@ -46,6 +80,8 @@ class Env:
     agents_dir: str
     proc_root: str
     main_repo: str = ""
+    now: object = None
+    stderr: object = sys.stderr
 
     @classmethod
     def from_environ(cls, environ):
@@ -67,10 +103,25 @@ class Env:
                     os.path.join(home, "Sources", "dircachefs"),
                 ),
             ),
+            now=lambda: datetime.datetime.now(
+                datetime.timezone.utc
+            ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            stderr=sys.stderr,
         )
 
     def path(self, name):
         return os.path.join(self.dashboard_dir, name)
+
+    def ledger_path(self):
+        return os.path.join(self.main_repo, "docs", "plan",
+                            "dispatch-ledger.tsv")
+
+    def current_time(self):
+        if self.now is not None:
+            return self.now() if callable(self.now) else str(self.now)
+        return datetime.datetime.now(
+            datetime.timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def read_text(path):
@@ -410,12 +461,256 @@ def upload_context(env):
     }})
 
 
+def read_ledger(path):
+    """Reads ledger rows as list of dicts. If file missing, returns []."""
+    if not os.path.exists(path):
+        return []
+    text = read_text(path)
+    lines = text.splitlines()
+    if not lines:
+        return []
+    header = lines[0].split("\t")
+    rows = []
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        vals = line.split("\t")
+        if len(vals) < len(header):
+            vals.extend([""] * (len(header) - len(vals)))
+        rows.append(dict(zip(header, vals)))
+    return rows
+
+
+def write_ledger(path, rows):
+    """Writes ledger rows atomically with LEDGER_HEADER."""
+    lines = [LEDGER_HEADER]
+    for r in rows:
+        lines.append(
+            "\t".join(str(r.get(col, "")) for col in LEDGER_COLUMNS) + "\n"
+        )
+    write_atomic(path, "".join(lines))
+
+
+def extract_tokens_and_duration(data):
+    """Extracts (tokens_str, duration_str) from event/response dict."""
+    tokens = ""
+    duration = ""
+    if "tokens" in data and data["tokens"] is not None:
+        tokens = str(data["tokens"])
+    elif "total_tokens" in data and data["total_tokens"] is not None:
+        tokens = str(data["total_tokens"])
+    elif "usage" in data and isinstance(data["usage"], dict):
+        u = data["usage"]
+        if "total_tokens" in u and u["total_tokens"] is not None:
+            tokens = str(u["total_tokens"])
+        elif "tokens" in u and u["tokens"] is not None:
+            tokens = str(u["tokens"])
+        elif "input_tokens" in u and "output_tokens" in u:
+            tokens = str(u["input_tokens"] + u["output_tokens"])
+
+    if "duration_s" in data and data["duration_s"] is not None:
+        duration = str(data["duration_s"])
+    elif "duration" in data and data["duration"] is not None:
+        duration = str(data["duration"])
+    elif "duration_seconds" in data and data["duration_seconds"] is not None:
+        duration = str(data["duration_seconds"])
+
+    return tokens, duration
+
+
+def resolve_step(env, prompt, description):
+    """Resolves step from lane branch or falls back to description."""
+    match = LANE_IN_PROMPT.search(prompt)
+    if match:
+        lane_dir = os.path.join(env.lanes_root, "lane-" + match.group(1))
+        try:
+            branch = lane_branch(lane_dir)
+            if branch:
+                return step_of(branch)
+        except OSError:
+            pass
+    return description
+
+
+def record_ledger_dispatch(env, event):
+    tool_input = event.get("tool_input", {})
+    response = event.get("tool_response", {})
+    agent_id = (response.get("agentId")
+                or event.get("agent_id")
+                or uuid.uuid4().hex[:8])
+    subagent_type = tool_input.get("subagent_type", "")
+    front = frontmatter(env, subagent_type)
+    model = (tool_input.get("model")
+             or response.get("resolvedModel")
+             or front.get("model", ""))
+    effort = tool_input.get("effort") or front.get("effort", "")
+    step = resolve_step(env, tool_input.get("prompt", ""),
+                        tool_input.get("description", ""))
+    task_class = TASK_CLASSES.get(subagent_type, "")
+
+    tokens, duration = "", ""
+    if response.get("status") != "async_launched":
+        tokens, duration = extract_tokens_and_duration(response)
+        if not tokens and not duration:
+            tokens, duration = extract_tokens_and_duration(event)
+
+    row = {col: "" for col in LEDGER_COLUMNS}
+    row.update({
+        "id": agent_id,
+        "dispatched": env.current_time(),
+        "step": step,
+        "task_class": task_class,
+        "agent": subagent_type,
+        "model": model,
+        "effort": effort,
+        "tokens": tokens,
+        "duration_s": duration,
+    })
+
+    ledger_path = env.ledger_path()
+    rows = read_ledger(ledger_path)
+    rows.append(row)
+    write_ledger(ledger_path, rows)
+
+
+def record_ledger_stop(env, event):
+    agent_id = event.get("agent_id")
+    if not agent_id:
+        return
+    tokens, duration = extract_tokens_and_duration(event)
+    if not tokens and not duration:
+        return
+    ledger_path = env.ledger_path()
+    rows = read_ledger(ledger_path)
+    updated = False
+    for r in reversed(rows):
+        if r.get("id") == agent_id:
+            if tokens:
+                r["tokens"] = tokens
+            if duration:
+                r["duration_s"] = duration
+            updated = True
+            break
+    if updated:
+        write_ledger(ledger_path, rows)
+
+
+def parse_key_value_args(args):
+    """Parses list of arguments as dict of key-value pairs."""
+    kwargs = {}
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("--"):
+            key = arg[2:]
+            if "=" in key:
+                k, v = key.split("=", 1)
+                kwargs[k.replace("-", "_")] = v
+            elif i + 1 < len(args) and not args[i + 1].startswith("-"):
+                kwargs[key.replace("-", "_")] = args[i + 1]
+                i += 1
+            else:
+                kwargs[key.replace("-", "_")] = ""
+        elif "=" in arg:
+            k, v = arg.split("=", 1)
+            kwargs[k.replace("-", "_")] = v
+        else:
+            if "id" not in kwargs:
+                kwargs["id"] = arg
+        i += 1
+    return kwargs
+
+
+def ledger_add(env, args):
+    kwargs = parse_key_value_args(args)
+    job_id = kwargs.get("id") or uuid.uuid4().hex[:8]
+    agent = kwargs.get("agent", "agy")
+    model = kwargs.get("model", "")
+    effort = kwargs.get("effort", "")
+    m = EFFORT_SUFFIX.match(model)
+    if m:
+        model = m.group(1)
+        if not effort:
+            effort = m.group(2)
+    task_class = kwargs.get("task_class") or TASK_CLASSES.get(agent, "")
+
+    row = {col: "" for col in LEDGER_COLUMNS}
+    row.update({
+        "id": job_id,
+        "dispatched": kwargs.get("dispatched") or env.current_time(),
+        "step": kwargs.get("step", ""),
+        "task_class": task_class,
+        "agent": agent,
+        "model": model,
+        "effort": effort,
+        "tokens": kwargs.get("tokens", ""),
+        "duration_s": kwargs.get("duration_s", ""),
+        "rounds": kwargs.get("rounds", ""),
+        "blockers": kwargs.get("blockers", ""),
+        "shoulds": kwargs.get("shoulds", ""),
+        "nits": kwargs.get("nits", ""),
+        "escapes": kwargs.get("escapes", ""),
+        "verdict": kwargs.get("verdict", ""),
+        "notes": kwargs.get("notes", ""),
+    })
+
+    ledger_path = env.ledger_path()
+    rows = read_ledger(ledger_path)
+    rows.append(row)
+    write_ledger(ledger_path, rows)
+    return ""
+
+
+def ledger_set(env, args):
+    if len(args) < 2:
+        raise ValueError("usage: ledger set ID field=value ...")
+    job_id = args[0]
+    updates = {}
+    for arg in args[1:]:
+        if "=" in arg:
+            k, v = arg.split("=", 1)
+            updates[k.strip().replace("-", "_")] = v.strip()
+        else:
+            raise ValueError("invalid field=value argument: %r" % arg)
+
+    ledger_path = env.ledger_path()
+    rows = read_ledger(ledger_path)
+    updated = False
+    for r in rows:
+        if r.get("id") == job_id:
+            for k, v in updates.items():
+                if k in LEDGER_COLUMNS:
+                    r[k] = v
+            updated = True
+            break
+    if not updated:
+        raise KeyError("ledger: no row with id %r" % job_id)
+    write_ledger(ledger_path, rows)
+    return ""
+
+
+def ledger(env, args):
+    if not args:
+        raise ValueError("ledger requires a subcommand (add or set)")
+    sub = args[0]
+    if sub == "add":
+        return ledger_add(env, args[1:])
+    elif sub == "set":
+        return ledger_set(env, args[1:])
+    else:
+        raise ValueError("unknown ledger subcommand: %r" % sub)
+
+
 def post_agent(env, event):
     # An agent_id means a subagent made this call: its launches are not
     # lanes of the orchestrator.
     if "agent_id" in event:
         return ""
     record_agent(env, event)
+    try:
+        record_ledger_dispatch(env, event)
+    except Exception as e:
+        env.stderr.write("dashboard_lanes: ledger: %r\n" % e)
     return upload_context(env)
 
 
@@ -449,6 +744,10 @@ def subagent_stop(env, event):
         kept = dict(list(finished.items())[-FINISHED_KEPT:])
         write_atomic(env.path("finished.json"), json.dumps(kept, indent=2))
     regenerate(env)
+    try:
+        record_ledger_stop(env, event)
+    except Exception as e:
+        env.stderr.write("dashboard_lanes: ledger: %r\n" % e)
     return ""
 
 
@@ -537,9 +836,12 @@ def main(argv, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
     and the hook succeeds silently.
     """
     env = env or Env.from_environ(os.environ)
+    env.stderr = stderr
     try:
         with lock(env):
-            if argv[0] in MANUAL:
+            if argv[0] == "ledger":
+                stdout.write(ledger(env, argv[1:]))
+            elif argv[0] in MANUAL:
                 stdout.write(MANUAL[argv[0]](env))
             else:
                 event = json.loads(stdin.read() or "{}")

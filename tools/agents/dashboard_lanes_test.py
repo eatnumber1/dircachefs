@@ -782,6 +782,235 @@ class StopMessageTest(Fixture):
         self.assertNotIn("lanes.json", decision["reason"])
         self.assertIn("Dashboard sloc changed: upload", decision["reason"])
 
+class DispatchLedgerTest(Fixture):
+
+    def setUp(self):
+        super().setUp()
+        self.env.now = lambda: "2026-10-17T15:00:00Z"
+        self.write(os.path.join(self.agents, "dcfs-mechanical.md"),
+                   "---\nname: dcfs-mechanical\nmodel: haiku\neffort: low\n"
+                   "---\nbody\n")
+        self.write(os.path.join(self.agents, "dcfs-investigator.md"),
+                   "---\nname: dcfs-investigator\nmodel: sonnet\neffort: high\n"
+                   "---\nbody\n")
+        self.write(os.path.join(self.agents, "dcfs-protocol.md"),
+                   "---\nname: dcfs-protocol\nmodel: opus\neffort: high\n"
+                   "---\nbody\n")
+        self.write(os.path.join(self.agents, "dcfs-style-reviewer.md"),
+                   "---\nname: dcfs-style-reviewer\nmodel: sonnet\n"
+                   "effort: medium\n---\nbody\n")
+
+    def ledger_rows(self):
+        path = os.path.join(self.main_repo, "docs", "plan",
+                            "dispatch-ledger.tsv")
+        if not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        if not lines:
+            return []
+        header = lines[0].split("\t")
+        rows = []
+        for line in lines[1:]:
+            if line.strip():
+                rows.append(dict(zip(header, line.split("\t"))))
+        return rows
+
+    def run_cmd(self, argv):
+        out, err = io.StringIO(), io.StringIO()
+        code = dashboard_lanes.main(
+            argv, stdin=io.StringIO(""), stdout=out, stderr=err,
+            env=self.env)
+        self.assertEqual(code, 0)
+        return out.getvalue(), err.getvalue()
+
+    def test_post_agent_records_dispatch_in_ledger(self):
+        self.launch(agent_id="a1", prompt="dircachefs-lanes/lane-1")
+        rows = self.ledger_rows()
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["id"], "a1")
+        self.assertEqual(r["dispatched"], "2026-10-17T15:00:00Z")
+        self.assertEqual(r["step"], "25.9b")
+        self.assertEqual(r["task_class"], "implementation")
+        self.assertEqual(r["agent"], "dcfs-implementer")
+        self.assertEqual(r["model"], "sonnet")
+        self.assertEqual(r["effort"], "medium")
+        self.assertEqual(r["tokens"], "")
+        self.assertEqual(r["duration_s"], "")
+        self.assertEqual(r["verdict"], "")
+
+    def test_task_class_mapping_for_all_types(self):
+        mappings = [
+            ("dcfs-mechanical", "mechanical"),
+            ("dcfs-implementer", "implementation"),
+            ("dcfs-investigator", "investigation"),
+            ("dcfs-protocol", "protocol"),
+            ("dcfs-reviewer", "review"),
+            ("dcfs-style-reviewer", "style-review"),
+        ]
+        for i, (agent_type, expected_class) in enumerate(mappings):
+            self.launch(agent_id=f"a_{i}", subagent_type=agent_type,
+                        prompt="lane-2: dircachefs-lanes/lane-2")
+        rows = self.ledger_rows()
+        self.assertEqual(len(rows), len(mappings))
+        for row, (_, expected_class) in zip(rows, mappings):
+            self.assertEqual(row["task_class"], expected_class)
+
+    def test_generated_id_when_not_provided(self):
+        self.run_hook("post-agent", {
+            "tool_input": {
+                "prompt": "dircachefs-lanes/lane-1",
+                "description": "standalone task",
+                "subagent_type": "dcfs-implementer",
+            },
+            "tool_response": {"status": "completed"},
+        })
+        rows = self.ledger_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(len(rows[0]["id"]) > 0)
+        self.assertEqual(rows[0]["step"], "25.9b")
+
+    def test_subagent_stop_fills_tokens_and_duration(self):
+        self.launch(agent_id="a1")
+        self.run_hook("subagent-stop", {
+            "agent_id": "a1",
+            "tokens": 12500,
+            "duration_s": 42.5,
+        })
+        rows = self.ledger_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["tokens"], "12500")
+        self.assertEqual(rows[0]["duration_s"], "42.5")
+
+    def test_subagent_stop_without_metrics_leaves_blank(self):
+        self.launch(agent_id="a1")
+        self.run_hook("subagent-stop", {"agent_id": "a1"})
+        rows = self.ledger_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["tokens"], "")
+        self.assertEqual(rows[0]["duration_s"], "")
+
+    def test_subagent_stop_unknown_agent_does_not_fail(self):
+        out, err = self.run_hook("subagent-stop", {
+            "agent_id": "unknown_stop",
+            "tokens": 500,
+        })
+        self.assertEqual((out, err), ("", ""))
+
+    def test_foreground_completion_with_tokens_and_duration(self):
+        self.run_hook("post-agent", {
+            "tool_input": {
+                "prompt": "dircachefs-lanes/lane-1",
+                "description": "quick fix",
+                "subagent_type": "dcfs-mechanical",
+            },
+            "tool_response": {
+                "status": "completed",
+                "agentId": "fg-1",
+                "tokens": 300,
+                "duration_s": 4.2,
+            },
+        })
+        rows = self.ledger_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], "fg-1")
+        self.assertEqual(rows[0]["tokens"], "300")
+        self.assertEqual(rows[0]["duration_s"], "4.2")
+
+    def test_failure_to_write_ledger_never_fails_hook(self):
+        bad_repo = os.path.join(self.proc, "not_a_dir")
+        self.write(bad_repo, "file")
+        self.env.main_repo = bad_repo
+        out, err = self.launch(agent_id="a1")
+        self.assertIn("hookSpecificOutput", out)
+        self.assertLessEqual(len(err.splitlines()), 1)
+        self.assertIn("ledger", err)
+
+    def test_ledger_add_command_for_orchestrator(self):
+        out, err = self.run_cmd([
+            "ledger", "add",
+            "step=26.31",
+            "task_class=investigation",
+            "agent=agy",
+            "model=gemini-3.8-flash-high",
+            "notes=quota delta 43 pts",
+        ])
+        self.assertEqual((out, err), ("", ""))
+        rows = self.ledger_rows()
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["step"], "26.31")
+        self.assertEqual(r["task_class"], "investigation")
+        self.assertEqual(r["agent"], "agy")
+        self.assertEqual(r["model"], "gemini-3.8-flash")
+        self.assertEqual(r["effort"], "high")
+        self.assertEqual(r["tokens"], "")
+        self.assertEqual(r["notes"], "quota delta 43 pts")
+        self.assertEqual(r["dispatched"], "2026-10-17T15:00:00Z")
+        self.assertTrue(len(r["id"]) > 0)
+
+    def test_ledger_add_with_explicit_id(self):
+        self.run_cmd([
+            "ledger", "add", "job-42",
+            "step=12.23",
+            "model=gemini-4-argon-medium",
+        ])
+        rows = self.ledger_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], "job-42")
+        self.assertEqual(rows[0]["model"], "gemini-4-argon")
+        self.assertEqual(rows[0]["effort"], "medium")
+
+    def test_ledger_set_outcome_fields(self):
+        self.run_cmd([
+            "ledger", "add", "job-100",
+            "step=25.10",
+            "task_class=implementation",
+            "agent=dcfs-implementer",
+            "model=sonnet",
+            "effort=medium",
+        ])
+        out, err = self.run_cmd([
+            "ledger", "set", "job-100",
+            "rounds=2",
+            "blockers=0",
+            "shoulds=1",
+            "nits=3",
+            "escapes=0",
+            "verdict=accepted",
+            "notes=clean merge",
+        ])
+        self.assertEqual((out, err), ("", ""))
+        rows = self.ledger_rows()
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["id"], "job-100")
+        self.assertEqual(r["rounds"], "2")
+        self.assertEqual(r["blockers"], "0")
+        self.assertEqual(r["shoulds"], "1")
+        self.assertEqual(r["nits"], "3")
+        self.assertEqual(r["escapes"], "0")
+        self.assertEqual(r["verdict"], "accepted")
+        self.assertEqual(r["notes"], "clean merge")
+
+    def test_ledger_set_unknown_id_fails_cleanly(self):
+        out, err = self.run_cmd(["ledger", "set", "no-such-id", "rounds=1"])
+        self.assertEqual(out, "")
+        self.assertEqual(len(err.splitlines()), 1)
+        self.assertIn("no-such-id", err)
+
+    def test_ledger_set_overrides_task_class(self):
+        self.run_cmd(["ledger", "add", "job-200", "task_class=mechanical"])
+        self.run_cmd(["ledger", "set", "job-200", "task_class=protocol"])
+        rows = self.ledger_rows()
+        self.assertEqual(rows[0]["task_class"], "protocol")
+
+    def test_ledger_unknown_subcommand(self):
+        out, err = self.run_cmd(["ledger", "bogus"])
+        self.assertEqual(out, "")
+        self.assertEqual(len(err.splitlines()), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
