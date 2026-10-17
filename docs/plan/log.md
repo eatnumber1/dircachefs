@@ -3608,3 +3608,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   errors raise the baseline to 96.95 lines / 82.90 branches (from
   96.50 / 81.24). The mutation-changed failure was the force-push's missing
   base, no fix needed. main should now pass CI; russ may push.
+
+- 2026-10-17: 12.18b merged: SibylFS as a differential second oracle
+  (pinned prebuilt checker and suite, verdict wrapper with host and guest
+  self-checks, hand-written scripts medium on ext4, a 1/40 sample large, the
+  full suite manual in 16 shards; through dcfs the full suite matched the
+  backing exactly). Reviewed by Gemini 4 Argon (medium, sandboxed) instead
+  of the Opus reviewer process.md asks for oracle steps, to spare the Claude
+  plan; 21 findings re-verified by the author, the confirmed ones fixed,
+  among them a malformed shard spec that selected nothing and passed, and a
+  memory allowance that ran out of memory under ASan on every target (now
+  mem 320 / asan_mem 1152, measured). russ's licence rulings are in
+  third_party/sibylfs/README.md.
