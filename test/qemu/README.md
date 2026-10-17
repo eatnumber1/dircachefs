@@ -2086,9 +2086,17 @@ file system image that `guest/init` chroots into, as the NFS test does with
 its Debian image; `third_party/xfstests/README.md` ("The runtime") says what is
 in it, what was left out and which tests that turns into "not run".
 
-- `guest/xfstests.sh` mounts `/dev/vdb` (`TEST_DEV`) and `/dev/vdc`
-  (`SCRATCH_DEV`) through `mount -t fuse.dcfs` (`FSTYP=fuse`,
-  `FUSE_SUBTYP=.dcfs`), runs the tests of group `auto` less
+- `guest/xfstests.sh` mounts the devices `/dev/vdb` and `/dev/vdc` natively, on
+  `/backing/test` and `/backing/scratch` (dcfs serves a directory, not a
+  device: step 15.11), and makes the directory `fs` of each xfstests'
+  `TEST_DEV` and `SCRATCH_DEV`; xfstests mounts them through
+  `mount -t fuse.dcfs` (`FSTYP=fuse`, `FUSE_SUBTYP=.dcfs`; the mount's source is
+  the directory, which is what `df` and `umount` of xfstests go by). The
+  directory is not the native mount's root because `umount ROOT` would
+  unmount the native file system, which dcfs holds. A directory is not a block
+  device, so the tests that act on the raw devices are "not run" with
+  xfstests' own reason ("require ... to be valid block disk"). The script
+  runs the tests of group `auto` less
   `guest/xfstests.excluded`, `guest/xfstests.<fstype>.excluded` and the slow
   tests (below), ten per `check` (fewer when the run's own time is nearly
   spent), and compares the outcome of each with the lists of the file system:
@@ -2106,13 +2114,16 @@ in it, what was left out and which tests that turns into "not run".
   fixtures. `scripts/xfstests-notrun.sh` writes a notrun list from the serial
   logs of a run; read it before listing it, since a reason that says a probe
   broke (`xfs_io ... failed`) is a finding.
-- The scratch device gets a new file system (`mkfs`, whose status is checked)
-  before each batch, and the guest's `/cache` and `/tmp` are tmpfs. A test
-  that writes to the raw scratch device (generic/740 makes a file system of
-  every kind on it) ends its batch (`SOLO` in `xfstests.sh`): what it leaves
-  there would fail every later test of the batch that mounts the device
-  (generic/770 did). The image's `mount` only adds dcfs's options; its
-  `umount` is Alpine's, which runs `umount.fuse.dcfs` (step 15.6b): the
+- The scratch device gets a new file system (`mkfs`, whose status is checked,
+  after its native mount is unmounted, which also needs the daemon gone) before
+  each batch, and the guest's `/cache` and `/tmp` are tmpfs. The image's `mount`
+  only adds dcfs's options; its `umount` puts the mount point of a dcfs mount
+  in the place of its source (`umount SOURCE` is how xfstests unmounts, and
+  umount(8) takes a path that is a directory for a mount point only) and runs
+  `umount -c`, so that Alpine's umount finds the type `fuse.dcfs` and runs
+  `umount.fuse.dcfs` (step 15.6b; a plain `umount PATH` asks `statfs(2)`,
+  which has no subtype, and would run no helper: generic/097 mounted again at
+  once and was refused, "in use by another dcfs process"). The
   helper returns when the daemon has exited, so a remount finds the cache
   database free, and xfstests' unmount/mount cycles regression-test it. The
   helper learns that the unmount ended the superblock from fusectl, so the
@@ -2177,12 +2188,13 @@ in it, what was left out and which tests that turns into "not run".
   and kernel stack: slow or hung), the last lines dcfs logged when the run
   failed, and a summary with the seconds the shard took.
 - Tests that act on the raw scratch device (`_require_block_device
-  $SCRATCH_DEV`, about 35): all are "not run" (no `godown`, no `dmsetup`, loop
-  devices, aio, `_scratch_mkfs_sized`) or excluded (generic/570), except
-  generic/076 (a `cat` of the device while fsstress runs; a read), generic/740
-  (`mkfs` of every kind on the unmounted device) and 411 and 589 (mounts of the
-  same device, expected failures): what they pass is the block layer's, not
-  dcfs's.
+  $SCRATCH_DEV`, about 35): all are "not run" through dcfs, whose `SCRATCH_DEV`
+  is a directory (before step 26.30, when it was the device, generic/076 (a
+  `cat` of the device while fsstress runs; a read), generic/740 (`mkfs` of every
+  kind on the unmounted device) and 411 and 589 (mounts of the same device,
+  expected failures) ran: what they passed was the block layer's, not dcfs's).
+  With `xfstests_native=1` they run on the device, which is what the native
+  shards are for.
 
 ## NFS test and the Debian rootfs
 

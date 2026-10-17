@@ -6,11 +6,16 @@
 # bash, GNU coreutils, util-linux's mount, xfs_io, perl and the rest of what
 # `check` and the tests call, xfstests under /xfstests), which guest/init
 # chroots into; this script is /tests/xfstests.sh there. vdb and vdc are the
-# backing devices of xfstests' TEST_DEV and SCRATCH_DEV; xfstests mounts them
+# backing devices (ext4, xfs or btrfs, the test's matrix variant). dcfs serves
+# a directory, not a device (step 15.11), so this script mounts each device
+# natively, on /backing/test and /backing/scratch, and makes xfstests'
+# TEST_DEV and SCRATCH_DEV the directory "fs" of each: xfstests mounts them
 # with `mount -t fuse.dcfs` (FSTYP=fuse, FUSE_SUBTYP=.dcfs), which runs
-# mount.dcfs, whose native mount of the device picks up ext4, xfs or btrfs
-# (the test's matrix variant). xfstests' own checks decide what does not apply
-# to a FUSE file system and report it "not run".
+# mount.dcfs, and finds the mount again by its source and unmounts it by name,
+# both of which are the directory. (The directory cannot be the native mount's
+# root: `umount ROOT` would unmount the native file system, not dcfs.) With
+# xfstests_native=1 xfstests mounts the devices itself. xfstests' own checks
+# decide what does not apply to a FUSE file system and report it "not run".
 #
 # The sets of tests:
 #   normal  the generic group "auto" less xfstests.excluded and
@@ -47,8 +52,10 @@ LISTS=$XF/dcfs
 GROUP_LIST=$XF/tests/generic/group.list
 RESULTS=/tmp/xfstests_results.txt
 SHARD_LIST=/tmp/xfstests_shard.txt
-TEST_DEV=/dev/vdb
-SCRATCH_DEV=/dev/vdc
+RAW_TEST=/dev/vdb
+RAW_SCRATCH=/dev/vdc
+BACKING_TEST=/backing/test
+BACKING_SCRATCH=/backing/scratch
 TEST_DIR=/mnt/test
 SCRATCH_MNT=/mnt/scratch
 
@@ -69,10 +76,25 @@ BATCH=${BATCH:-10}
 BUDGET=$(cmdline_word xfstests_budget)
 BUDGET=${BUDGET:-3400}
 
+# What xfstests calls TEST_DEV and SCRATCH_DEV: the devices themselves when it
+# mounts them (xfstests_native=1), else the directory of the native mount that
+# dcfs serves (the header says why it is a directory below the mount's root).
+if [ "$NATIVE" = 1 ]; then
+	TEST_DEV=$RAW_TEST
+	SCRATCH_DEV=$RAW_SCRATCH
+else
+	TEST_DEV=$BACKING_TEST/fs
+	SCRATCH_DEV=$BACKING_SCRATCH/fs
+fi
+
 cleanup() {
 	rc=$?
 	umount "$SCRATCH_MNT" 2>/dev/null || true
 	umount "$TEST_DIR" 2>/dev/null || true
+	if [ "$NATIVE" != 1 ]; then
+		umount "$BACKING_SCRATCH" 2>/dev/null || true
+		umount "$BACKING_TEST" 2>/dev/null || true
+	fi
 	return "$rc"
 }
 trap cleanup EXIT
@@ -80,17 +102,22 @@ trap cleanup EXIT
 echo "xfstests.sh: kernel $(uname -r)"
 require_commands bash perl xfs_io mount findmnt flock timeout logger logread
 
-FSTYPE=$(blkid "$TEST_DEV" 2>/dev/null | sed -n 's/.*TYPE="\([^"]*\)".*/\1/p')
+# The file system type of a device, as blkid says (empty for none).
+fstype_of() {
+	blkid "$1" 2>/dev/null | sed -n 's/.*TYPE="\([^"]*\)".*/\1/p'
+}
+
+FSTYPE=$(fstype_of "$RAW_TEST")
 echo "xfstests.sh: backing file system: ${FSTYPE:-unknown}"
 case "$FSTYPE" in
 ext4 | xfs | btrfs) ;;
 *)
-	fail xfstests-backing "TEST_DEV $TEST_DEV is '$FSTYPE', not ext4, xfs or btrfs"
+	fail xfstests-backing "$RAW_TEST is '$FSTYPE', not ext4, xfs or btrfs"
 	exit "$FAILED"
 	;;
 esac
-[ "$(blkid "$SCRATCH_DEV" 2>/dev/null | sed -n 's/.*TYPE="\([^"]*\)".*/\1/p')" = "$FSTYPE" ] ||
-	fail xfstests-backing "SCRATCH_DEV $SCRATCH_DEV is not $FSTYPE"
+[ "$(fstype_of "$RAW_SCRATCH")" = "$FSTYPE" ] ||
+	fail xfstests-backing "$RAW_SCRATCH is not $FSTYPE"
 
 # A new, empty file system on the device. Its status counts: a device that is
 # still held (a daemon that did not exit, a mount left behind) would otherwise
@@ -107,14 +134,40 @@ mkfs_dev() {
 		exit "$FAILED"
 	fi
 }
+# backing_mount DEVICE DIR: the native mount dcfs serves a directory of (the
+# header says why dcfs gets "fs" below DIR). The mount's status counts: a
+# device that did not mount would leave xfstests a directory of the guest's
+# own root file system to test.
+backing_mount() {
+	mkdir -p "$2"
+	if ! mount "$1" "$2" >/tmp/mount.out 2>&1 || ! mkdir -p "$2/fs"; then
+		bm_why=$(head -n 3 /tmp/mount.out)
+		fail xfstests-backing "mounting $1 on $2 failed: $bm_why"
+		exit "$FAILED"
+	fi
+}
 # A new scratch file system (and a new cache for it) before each batch of
 # tests, as xfstests makes one with its mkfs: for a FUSE file system xfstests
 # only deletes the files, which would leave the previous test's directories,
-# attributes and hidden files behind.
+# attributes and hidden files behind. Under dcfs the native mount goes first,
+# and its status counts like mkfs's: a daemon that did not exit (or a test's
+# process left in the mount) keeps it busy, which is the failure to report.
 reset_scratch() {
 	umount "$SCRATCH_MNT" 2>/dev/null
-	rm -f /cache/vdc.db /cache/vdc.db-wal /cache/vdc.db-shm
-	mkfs_dev "$SCRATCH_DEV"
+	if [ "$NATIVE" = 1 ]; then
+		mkfs_dev "$RAW_SCRATCH"
+		return
+	fi
+	if ! umount "$BACKING_SCRATCH" >/tmp/umount.out 2>&1; then
+		rs_why=$(head -n 3 /tmp/umount.out)
+		fail xfstests-backing "umount $BACKING_SCRATCH failed: $rs_why"
+		exit "$FAILED"
+	fi
+	for rs_suffix in "" -wal -shm; do
+		rm -f "/cache/backing_scratch_fs.db$rs_suffix"
+	done
+	mkfs_dev "$RAW_SCRATCH"
+	backing_mount "$RAW_SCRATCH" "$BACKING_SCRATCH"
 }
 
 # mdev -s made the device nodes root-only; the tests run as other users too.
@@ -167,8 +220,10 @@ fi
 if [ "$NATIVE" = 1 ]; then
 	echo "export FSTYP=$FSTYPE" >>$XF/local.config
 	# The native file systems are made by xfstests (mkfs of $FSTYP).
-	mkfs_dev "$TEST_DEV"
+	mkfs_dev "$RAW_TEST"
 else
+	backing_mount "$RAW_TEST" "$BACKING_TEST"
+	backing_mount "$RAW_SCRATCH" "$BACKING_SCRATCH"
 	cat >>$XF/local.config <<EOC
 export FSTYP=fuse
 export FUSE_SUBTYP=.dcfs
@@ -388,10 +443,11 @@ retry_missing() {
 	done </tmp/retry.txt
 }
 
-# Tests that write to the raw scratch device while dcfs does not hold it: the
-# device then holds what they made, not the file system of this run, for every
-# test after them in the batch (generic/740 makes one of every kind). They end
-# their batch, and the next one starts with a new scratch file system.
+# Tests that write to the raw scratch device: the device then holds what they
+# made, not the file system of this run, for every test after them in the batch
+# (generic/740 makes one of every kind). Under dcfs the scratch "device" is a
+# directory and xfstests does not run them; with xfstests_native=1 it does.
+# They end their batch, and the next one starts with a new scratch file system.
 SOLO="generic/740"
 
 : >$RESULTS

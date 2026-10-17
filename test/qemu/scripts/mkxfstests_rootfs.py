@@ -20,9 +20,10 @@ Debian image (qemu_test's `rootfs`). Contents:
                      per-filesystem lists of tests (--list)
   /etc               passwd and group with root, nobody and the users the
                      tests expect (fsgqa, 123456-fsgqa, fsgqa2), mtab
-  /usr/local/bin/mount
-                     mount that gives every FUSE mount its dcfs options (umount
-                     needs no wrapper: it runs umount.fuse.dcfs, step 15.6b)
+  /usr/local/bin/mount, /usr/local/bin/umount
+                     mount that gives every FUSE mount its dcfs options, and
+                     umount that takes the source of a dcfs mount for the
+                     mount (both then run umount.fuse.dcfs, step 15.6b)
   /usr/lib/glibc_strerror.so
                      LD_PRELOAD library: glibc's error messages for musl programs
   /mnt/test, /mnt/scratch, /cache, /tmp, /proc, /sys, /dev
@@ -224,10 +225,18 @@ MOUNT_WRAPPER = """#!/bin/sh
 # of FSTYP (`mount -t fuse DEV DIR`, which has no helper) or with options of
 # their own. dcfs needs a cache database for every mount (dcfs.cache_db, until
 # plan step 15.3's default) and the tests make device nodes and setuid
-# files, which libfuse mounts refuse by default (README.md: nosuid,nodev unless dcfs.fuse_opt=suid and =dev), so
-# this adds all of them (the last two unless the test asks for nosuid), the
-# database named after the device, and calls the
-# helper that serves every FUSE mount of this guest.
+# files, which libfuse mounts refuse by default (README.md: nosuid,nodev
+# unless dcfs.fuse_opt=suid and =dev), so this adds all of them (the last two
+# unless the test asks for nosuid), the database named after the source
+# directory (guest/xfstests.sh), and calls the helper that serves every FUSE
+# mount of this guest.
+# dcfs refuses the options of a native mount, since it makes none (step 15.11),
+# and the guest's native mount is the script's (guest/xfstests.sh): nosuid is
+# only the FUSE mount's (above) and goes no further, and the access time
+# options (generic/003 and 120 mount with them) are the backing file system's,
+# so this remounts it with them, or with relatime and diratime (what it was
+# made with) when the test gives none, before dcfs starts. `ro` is dcfs.ro,
+# dcfs's own way to mount read-only.
 # The glibc error messages (guest/xfstests.sh preloads them for the tests'
 # tools) are not for the mount helper: the daemon is a glibc program that
 # needs none, and the preloaded library is only for the musl tools.
@@ -238,12 +247,22 @@ fuse_opts=",dcfs.fuse_opt=suid,dcfs.fuse_opt=dev"
 dev=""
 dir=""
 remount=0
+atime=relatime
+diratime=diratime
+# Options of a native mount, which dcfs refuses: kept out of its command line.
+native_opts="nosuid|noatime|relatime|strictatime|nodiratime"
 for arg in "$@"; do
 	case "$prev" in
 	-t) type=$arg ;;
 	-o)
 		case ",$arg," in *,remount,*) remount=1 ;; esac
 		case ",$arg," in *,nosuid,*) fuse_opts="" ;; esac
+		for o in $(echo "$arg" | tr , ' '); do
+			case "$o" in
+			noatime | relatime | strictatime) atime=$o ;;
+			nodiratime) diratime=nodiratime ;;
+			esac
+		done
 		;;
 	esac
 	case "$arg" in
@@ -270,22 +289,73 @@ fuse | fuse.dcfs | dcfs)
 				skip=0
 			elif [ "$a" = -t ]; then
 				skip=1
+			elif [ "$a" = -o ]; then
+				o=$(echo "$1" |
+					tr , '\\n' |
+					sed 's/^ro$/dcfs.ro/' |
+					grep -v -x -E "$native_opts" |
+					paste -s -d,)
+				shift
+				n=$((n - 1))
+				[ -n "$o" ] && set -- "$@" -o "$o"
 			else
 				set -- "$@" "$a"
 			fi
 		done
+		/bin/mount -o "remount,$atime,$diratime" "${dev%/fs}" || exit
 		# No retry and no wait for the previous daemon: umount(8) runs
 		# umount.fuse.dcfs (step 15.6b), which returns when the daemon has exited.
-		exec /bin/mount -t fuse.dcfs -o "dcfs.cache_db=/cache/${dev##*/}.db$fuse_opts" "$@"
+		db=/cache/$(echo "${dev#/}" | tr / _).db
+		opts="dcfs.cache_db=$db$fuse_opts"
+		exec /bin/mount -t fuse.dcfs -o "$opts" "$@"
 	fi
 	;;
 esac
 exec /bin/mount "$@"
 """
 
+UMOUNT_WRAPPER = """#!/bin/sh
+# Installed by mkxfstests_rootfs.py (step 26.30), ahead of /bin/umount in PATH.
+#
+# xfstests unmounts a FUSE file system by what it mounted: `umount DEV`, where
+# DEV is the source of the mount. dcfs's source is a directory (step 15.11),
+# and umount(8) takes a path that is a directory for a mount point and
+# answers "not mounted" when none is, so this puts the mount point of the
+# dcfs mount whose source the argument is in its place. An argument that is a
+# mount point, or is not the source of a dcfs mount, goes to umount(8) as it is.
+# It runs `umount -c`, which finds the mount's type (fuse.dcfs) in mountinfo and
+# so runs umount.fuse.dcfs, which returns when the daemon has exited: a plain
+# `umount PATH` asks statfs(2), whose answer (fuse) has no helper here, and
+# would return while the daemon still holds its cache database (generic/097
+# mounted it again at once and was refused: "in use by another dcfs process").
+n=$#
+while [ "$n" -gt 0 ]; do
+	a=$1
+	shift
+	n=$((n - 1))
+	case "$a" in
+	/*)
+		mp=$(awk -v src="$a" '
+			$5 == src { target = 1 }
+			{
+				for (i = 6; i <= NF; i++) {
+					if ($i != "-") continue
+					if ($(i + 1) != "fuse.dcfs") continue
+					if ($(i + 2) == src) found = $5
+				}
+			}
+			END { if (!target) print found }' /proc/self/mountinfo)
+		[ -n "$mp" ] && a=$mp
+		;;
+	esac
+	set -- "$@" "$a"
+done
+exec /bin/umount -c "$@"
+"""
+
 
 def stage_wrappers(root):
-    for name, text in (('mount', MOUNT_WRAPPER),):
+    for name, text in (('mount', MOUNT_WRAPPER), ('umount', UMOUNT_WRAPPER)):
         dest = os.path.join(root, 'usr/local/bin', name)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, 'w') as f:

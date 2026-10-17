@@ -72,17 +72,22 @@ image (`qemu_test`'s `rootfs`). Every part comes through Bazel:
   (`helpers.bzl` lists them);
 - busybox (for the applets no Alpine package supplies, `sh` among them), a
   `mount` that gives every FUSE mount of the guest its `dcfs.cache_db`
-  (named after the device), and `dcfs.fuse_opt=suid` and
+  (named after the source directory), and `dcfs.fuse_opt=suid` and
   `=dev` unless the test asks for `nosuid` (`mount -t fuse.dcfs` is what
   xfstests runs for `FSTYP=fuse`, `FUSE_SUBTYP=.dcfs`; a few tests mount with
-  `-t fuse`, or with options of their own); `umount` is Alpine's own and runs
-  `/sbin/umount.fuse.dcfs` (step 15.6b), which returns when the daemon has
-  exited (the guest mounts fusectl, which the helper asks whether the unmount
-  ended the superblock), so xfstests' remounts of the same device find the
-  cache database free (generic runs are the helper's regression test); and `shim/glibc_strerror.c` preloaded.
+  `-t fuse`, or with options of their own); a `umount` that takes the source
+  of a dcfs mount (a directory since step 15.11, which umount(8) would take
+  for a mount point) for its mount point and runs Alpine's `umount -c`, which
+  runs `/sbin/umount.fuse.dcfs` (step 15.6b), which returns when the daemon
+  has exited (the guest mounts fusectl, which the helper asks whether the
+  unmount ended the superblock), so xfstests' remounts of the same device find
+  the cache database free (generic runs are the helper's regression test); and
+  `shim/glibc_strerror.c` preloaded.
 
-The guest mounts `/dev/vdb` as `TEST_DEV` and `/dev/vdc` as `SCRATCH_DEV`
-through dcfs (so the backing file system, ext4, xfs or btrfs, is the matrix
+The guest mounts `/dev/vdb` and `/dev/vdc` natively (`/backing/test` and
+`/backing/scratch`: dcfs serves a directory, step 15.11) and gives xfstests the
+directory `fs` of each as `TEST_DEV` and `SCRATCH_DEV`, through dcfs (so the
+backing file system, ext4, xfs or btrfs, is the matrix
 variant's), puts the cache databases and `/tmp` on tmpfs (dcfs commits to its
 database durably; on the image's disk each commit waited for the host), and
 makes a new file system on the scratch device before each batch of tests (for

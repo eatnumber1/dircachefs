@@ -15,12 +15,12 @@ generic/026 fuse does not define maximum ACL count
 generic/027 Filesystem fuse not supported in _scratch_mkfs_sized
 generic/031 xfs_io fcollapse failed (old kernel/wrong fs?)
 generic/032 xfs_io fiemap failed (old kernel/wrong fs?)
-generic/034 dmsetup utility required, skipped this test
+generic/034 require /backing/scratch/fs to be valid block disk
 generic/036 /xfstests/src/aio-dio-regress/aio-dio-fcntl-race not built
 generic/038 This test requires at least NGB free on /mnt/scratch to run
-generic/039 dmsetup utility required, skipped this test
-generic/040 dmsetup utility required, skipped this test
-generic/041 dmsetup utility required, skipped this test
+generic/039 require /backing/scratch/fs to be valid block disk
+generic/040 require /backing/scratch/fs to be valid block disk
+generic/041 require /backing/scratch/fs to be valid block disk
 generic/042 src/godown executable not found
 generic/043 src/godown executable not found
 generic/044 src/godown executable not found
@@ -34,38 +34,39 @@ generic/051 src/godown executable not found
 generic/052 src/godown executable not found
 generic/054 src/godown executable not found
 generic/055 src/godown executable not found
-generic/056 dmsetup utility required, skipped this test
-generic/057 dmsetup utility required, skipped this test
+generic/056 require /backing/scratch/fs to be valid block disk
+generic/057 require /backing/scratch/fs to be valid block disk
 generic/058 xfs_io fiemap failed (old kernel/wrong fs?)
-generic/059 dmsetup utility required, skipped this test
+generic/059 require /backing/scratch/fs to be valid block disk
 generic/060 xfs_io fiemap failed (old kernel/wrong fs?)
 generic/061 xfs_io fiemap failed (old kernel/wrong fs?)
 generic/063 xfs_io fiemap failed (old kernel/wrong fs?)
 generic/064 xfs_io fiemap failed (old kernel/wrong fs?)
-generic/065 dmsetup utility required, skipped this test
-generic/066 dmsetup utility required, skipped this test
+generic/065 require /backing/scratch/fs to be valid block disk
+generic/066 require /backing/scratch/fs to be valid block disk
 generic/067 This test requires loopback device support
 generic/068 fuse does not support freezing
 generic/072 xfs_io fcollapse failed (old kernel/wrong fs?)
-generic/073 dmsetup utility required, skipped this test
+generic/073 require /backing/scratch/fs to be valid block disk
+generic/076 require /backing/scratch/fs to be local device
 generic/077 Filesystem fuse not supported in _scratch_mkfs_sized
 generic/078 kernel doesn't support renameatN syscall
 generic/079 /xfstests/src/t_immutable not built
-generic/081 dmsetup utility required, skipped this test
+generic/081 require /backing/scratch/fs to be valid block disk
 generic/082 Quota user tools not installed
 generic/083 Filesystem fuse not supported in _scratch_mkfs_sized
-generic/085 dmsetup utility required, skipped this test
-generic/090 dmsetup utility required, skipped this test
+generic/085 require /backing/scratch/fs to be valid block disk
+generic/090 require /backing/scratch/fs to be valid block disk
 generic/092 xfs_io fiemap failed (old kernel/wrong fs?)
 generic/094 xfs_io fiemap failed (old kernel/wrong fs?)
 generic/095 kernel does not support asynchronous I/O
 generic/096 Filesystem fuse not supported in _scratch_mkfs_sized
-generic/101 dmsetup utility required, skipped this test
+generic/101 require /backing/scratch/fs to be valid block disk
 generic/102 Filesystem fuse not supported in _scratch_mkfs_sized
-generic/104 dmsetup utility required, skipped this test
-generic/106 dmsetup utility required, skipped this test
-generic/107 dmsetup utility required, skipped this test
-generic/108 scsi_debug module not found
+generic/104 require /backing/scratch/fs to be valid block disk
+generic/106 require /backing/scratch/fs to be valid block disk
+generic/107 require /backing/scratch/fs to be valid block disk
+generic/108 require /backing/scratch/fs to be valid block disk
 generic/110 Reflink not supported by test filesystem type: fuse
 generic/111 Reflink not supported by test filesystem type: fuse
 generic/112 kernel does not support asynchronous I/O
@@ -176,13 +177,13 @@ generic/241 dbench not found
 generic/242 Reflink not supported by scratch filesystem type: fuse
 generic/243 Reflink not supported by scratch filesystem type: fuse
 generic/244 Quota user tools not installed
-generic/250 dmsetup utility required, skipped this test
+generic/250 require /backing/scratch/fs to be valid block disk
 generic/251 FITRIM not supported on /mnt/scratch
-generic/252 dmsetup utility required, skipped this test
+generic/252 require /backing/scratch/fs to be valid block disk
 generic/253 Reflink not supported by scratch filesystem type: fuse
 generic/254 Reflink not supported by scratch filesystem type: fuse
 generic/255 xfs_io fiemap failed (old kernel/wrong fs?)
-generic/256 Scratch device too small
+generic/256 Filesystem fuse not supported in _scratch_mkfs_sized
 generic/259 Reflink not supported by scratch filesystem type: fuse
 generic/260 FITRIM not supported on /mnt/scratch
 generic/261 Reflink not supported by scratch filesystem type: fuse
@@ -196,9 +197,9 @@ generic/269 Filesystem fuse not supported in _scratch_mkfs_sized
 generic/270 Quota user tools not installed
 generic/271 Reflink not supported by scratch filesystem type: fuse
 generic/272 Reflink not supported by scratch filesystem type: fuse
-generic/273 Scratch device too small
-generic/274 Scratch device too small
-generic/275 Scratch device too small
+generic/273 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/274 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/275 Filesystem fuse not supported in _scratch_mkfs_sized
 generic/276 Reflink not supported by scratch filesystem type: fuse
 generic/278 Reflink not supported by scratch filesystem type: fuse
 generic/279 Reflink not supported by scratch filesystem type: fuse
@@ -225,17 +226,17 @@ generic/302 Reflink not supported by scratch filesystem type: fuse
 generic/303 Reflink not supported by test filesystem type: fuse
 generic/304 Dedupe not supported by test filesystem type: fuse
 generic/305 Reflink not supported by scratch filesystem type: fuse
-generic/311 dmsetup utility required, skipped this test
-generic/312 Scratch device too small
+generic/311 require /backing/scratch/fs to be valid block disk
+generic/312 Filesystem fuse not supported in _scratch_mkfs_sized
 generic/316 xfs_io fiemap failed (old kernel/wrong fs?)
 generic/317 userns not supported by this kernel
 generic/318 userns not supported by this kernel
-generic/320 Scratch device too small
-generic/321 dmsetup utility required, skipped this test
-generic/322 dmsetup utility required, skipped this test
+generic/320 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/321 require /backing/scratch/fs to be valid block disk
+generic/322 require /backing/scratch/fs to be valid block disk
 generic/323 /xfstests/src/aio-dio-regress/aio-last-ref-held-by-io not built
 generic/324 defragmentation not supported for fstype "fuse"
-generic/325 dmsetup utility required, skipped this test
+generic/325 require /backing/scratch/fs to be valid block disk
 generic/326 Reflink not supported by scratch filesystem type: fuse
 generic/327 Reflink not supported by scratch filesystem type: fuse
 generic/328 Reflink not supported by scratch filesystem type: fuse
@@ -245,21 +246,21 @@ generic/331 Reflink not supported by scratch filesystem type: fuse
 generic/332 Reflink not supported by scratch filesystem type: fuse
 generic/333 Reflink not supported by scratch filesystem type: fuse
 generic/334 Reflink not supported by scratch filesystem type: fuse
-generic/335 dmsetup utility required, skipped this test
-generic/336 dmsetup utility required, skipped this test
-generic/338 dmsetup utility required, skipped this test
-generic/341 dmsetup utility required, skipped this test
-generic/342 dmsetup utility required, skipped this test
-generic/343 dmsetup utility required, skipped this test
-generic/347 dmsetup utility required, skipped this test
-generic/348 dmsetup utility required, skipped this test
+generic/335 require /backing/scratch/fs to be valid block disk
+generic/336 require /backing/scratch/fs to be valid block disk
+generic/338 require /backing/scratch/fs to be valid block disk
+generic/341 require /backing/scratch/fs to be valid block disk
+generic/342 require /backing/scratch/fs to be valid block disk
+generic/343 require /backing/scratch/fs to be valid block disk
+generic/347 require /backing/scratch/fs to be valid block disk
+generic/348 require /backing/scratch/fs to be valid block disk
 generic/352 Reflink not supported by scratch filesystem type: fuse
 generic/353 Reflink not supported by scratch filesystem type: fuse
 generic/356 swapfiles are not supported
 generic/357 swapfiles are not supported
 generic/358 Reflink not supported by scratch filesystem type: fuse
 generic/359 Reflink not supported by scratch filesystem type: fuse
-generic/361 This test requires loopback device support
+generic/361 require /backing/scratch/fs to be valid block disk
 generic/365 xfs_io fsmap support is missing
 generic/366 kernel does not support asynchronous I/O
 generic/368 filesystem doesn't support -o inlinecrypt
@@ -269,7 +270,7 @@ generic/371 Filesystem fuse not supported in _scratch_mkfs_sized
 generic/372 Reflink not supported by scratch filesystem type: fuse
 generic/373 Reflink not supported by scratch filesystem type: fuse
 generic/374 Dedupe not supported by scratch filesystem type: fuse
-generic/376 dmsetup utility required, skipped this test
+generic/376 require /backing/scratch/fs to be valid block disk
 generic/379 Quota user tools not installed
 generic/380 Quota user tools not installed
 generic/381 Quota user tools not installed
@@ -279,7 +280,7 @@ generic/384 Quota user tools not installed
 generic/385 Quota user tools not installed
 generic/386 Quota user tools not installed
 generic/387 Reflink not supported by scratch filesystem type: fuse
-generic/388 src/godown executable not found
+generic/388 require /backing/scratch/fs to be local device
 generic/390 fuse does not support freezing
 generic/392 src/godown executable not found
 generic/395 No encryption support for fuse
@@ -290,10 +291,11 @@ generic/399 No encryption support for fuse
 generic/400 Quota user tools not installed
 generic/402 filesystem fuse timestamp bounds are unknown
 generic/404 xfs_io finsert failed (old kernel/wrong fs?)
-generic/405 dmsetup utility required, skipped this test
+generic/405 require /backing/scratch/fs to be valid block disk
 generic/407 Reflink not supported by test filesystem type: fuse
 generic/408 Dedupe not supported by test filesystem type: fuse
-generic/413 mount /dev/vdc with dax failed
+generic/411 require /backing/scratch/fs to be local device
+generic/413 mount /backing/scratch/fs with dax failed
 generic/414 Reflink not supported by scratch filesystem type: fuse
 generic/415 Reflink not supported by scratch filesystem type: fuse
 generic/416 Filesystem fuse not supported in _scratch_mkfs_sized
@@ -305,38 +307,39 @@ generic/427 /xfstests/src/aio-dio-regress/aio-dio-eof-race not built
 generic/429 No encryption support for fuse
 generic/435 No encryption support for fuse
 generic/440 No encryption support for fuse
-generic/441 dmsetup utility required, skipped this test
+generic/441 require /backing/scratch/fs to be valid block disk
 generic/447 Reflink not supported by scratch filesystem type: fuse
 generic/449 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/450 Only test on sector size < half of block size
 generic/451 /xfstests/src/aio-dio-regress/aio-dio-cycle-write not built
 generic/453 fuse does not allow unrestricted byte streams for names
 generic/454 fuse does not allow unrestricted byte streams for names
 generic/455 This test requires a valid $LOGWRITES_DEV
-generic/456 dmsetup utility required, skipped this test
+generic/456 require /backing/scratch/fs to be valid block disk
 generic/457 Reflink not supported by scratch filesystem type: fuse
 generic/458 Reflink not supported by scratch filesystem type: fuse
-generic/459 dmsetup utility required, skipped this test
+generic/459 require /backing/scratch/fs to be valid block disk
 generic/460 This test requires at least NGB free on /mnt/scratch to run
 generic/461 src/godown executable not found
-generic/462 mount /dev/vdc with dax failed
+generic/462 mount /backing/scratch/fs with dax failed
 generic/463 Reflink not supported by test filesystem type: fuse
 generic/465 /xfstests/src/aio-dio-regress/aio-dio-append-write-read-race not built
-generic/466 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/466 require /backing/scratch/fs to be valid block disk
 generic/468 src/godown executable not found
 generic/470 This test requires a valid $LOGWRITES_DEV
 generic/472 swapfiles are not supported
 generic/474 src/godown executable not found
-generic/475 dmsetup utility required, skipped this test
-generic/479 dmsetup utility required, skipped this test
-generic/480 dmsetup utility required, skipped this test
-generic/481 dmsetup utility required, skipped this test
+generic/475 require /backing/scratch/fs to be valid block disk
+generic/479 require /backing/scratch/fs to be valid block disk
+generic/480 require /backing/scratch/fs to be valid block disk
+generic/481 require /backing/scratch/fs to be valid block disk
 generic/482 This test requires a valid $LOGWRITES_DEV
-generic/483 dmsetup utility required, skipped this test
-generic/484 dmsetup utility required, skipped this test
+generic/483 require /backing/scratch/fs to be valid block disk
+generic/484 require /backing/scratch/fs to be valid block disk
 generic/485 xfs_io finsert failed (old kernel/wrong fs?)
 generic/487 This test requires a valid $SCRATCH_LOGDEV
 generic/488 Filesystem fuse not supported in _scratch_mkfs_sized
-generic/489 dmsetup utility required, skipped this test
+generic/489 require /backing/scratch/fs to be valid block disk
 generic/491 fuse does not support freezing
 generic/492 xfs_io label failed (old kernel/wrong fs?)
 generic/493 swapfiles are not supported
@@ -344,34 +347,34 @@ generic/494 swapfiles are not supported
 generic/495 swapfiles are not supported
 generic/496 swapfiles are not supported
 generic/497 swapfiles are not supported
-generic/498 dmsetup utility required, skipped this test
+generic/498 require /backing/scratch/fs to be valid block disk
 generic/499 xfs_io fcollapse failed (old kernel/wrong fs?)
-generic/500 dmsetup utility required, skipped this test
+generic/500 require /backing/scratch/fs to be valid block disk
 generic/501 Reflink not supported by scratch filesystem type: fuse
-generic/502 dmsetup utility required, skipped this test
+generic/502 require /backing/scratch/fs to be valid block disk
 generic/503 xfs_io fcollapse failed (old kernel/wrong fs?)
 generic/505 src/godown executable not found
 generic/506 Quota user tools not installed
 generic/507 src/godown executable not found
 generic/508 src/godown executable not found
-generic/509 dmsetup utility required, skipped this test
-generic/510 dmsetup utility required, skipped this test
+generic/509 require /backing/scratch/fs to be valid block disk
+generic/510 require /backing/scratch/fs to be valid block disk
 generic/511 Filesystem fuse not supported in _scratch_mkfs_sized
-generic/512 dmsetup utility required, skipped this test
+generic/512 require /backing/scratch/fs to be valid block disk
 generic/513 Reflink not supported by scratch filesystem type: fuse
 generic/514 Reflink not supported by scratch filesystem type: fuse
 generic/515 Reflink not supported by scratch filesystem type: fuse
 generic/516 Dedupe not supported by test filesystem type: fuse
 generic/517 Dedupe not supported by scratch filesystem type: fuse
 generic/518 Reflink not supported by scratch filesystem type: fuse
-generic/520 dmsetup utility required, skipped this test
-generic/526 dmsetup utility required, skipped this test
-generic/527 dmsetup utility required, skipped this test
+generic/520 require /backing/scratch/fs to be valid block disk
+generic/526 require /backing/scratch/fs to be valid block disk
+generic/527 require /backing/scratch/fs to be valid block disk
 generic/528 inode creation time not supported by this filesystem
 generic/530 src/godown executable not found
 generic/531 /xfstests/src/t_open_tmpfiles not built
-generic/534 dmsetup utility required, skipped this test
-generic/535 dmsetup utility required, skipped this test
+generic/534 require /backing/scratch/fs to be valid block disk
+generic/535 require /backing/scratch/fs to be valid block disk
 generic/536 src/godown executable not found
 generic/537 FSTRIM not supported
 generic/538 /xfstests/src/aio-dio-regress/aio-dio-write-verify not built
@@ -381,21 +384,21 @@ generic/542 Reflink not supported by scratch filesystem type: fuse
 generic/543 Reflink not supported by scratch filesystem type: fuse
 generic/544 Reflink not supported by scratch filesystem type: fuse
 generic/546 Reflink not supported by scratch filesystem type: fuse
-generic/547 dmsetup utility required, skipped this test
+generic/547 require /backing/scratch/fs to be valid block disk
 generic/548 No encryption support for fuse
 generic/549 No encryption support for fuse
 generic/550 No encryption support for fuse
 generic/551 /xfstests/src/aio-dio-regress/aio-dio-write-verify not built
-generic/552 dmsetup utility required, skipped this test
+generic/552 require /backing/scratch/fs to be valid block disk
 generic/554 swapfiles are not supported
 generic/556 fuse does not support casefold feature
-generic/557 dmsetup utility required, skipped this test
+generic/557 require /backing/scratch/fs to be valid block disk
 generic/558 fuse does not have a fixed number of inodes available
 generic/559 duperemove utility required, skipped this test
 generic/560 duperemove utility required, skipped this test
 generic/561 duperemove utility required, skipped this test
 generic/562 Reflink not supported by scratch filesystem type: fuse
-generic/563 Test requires cgroupN enabled
+generic/563 This test requires loopback device support
 generic/564 This test requires loopback device support
 generic/566 Quota user tools not installed
 generic/569 swapfiles are not supported
@@ -416,6 +419,7 @@ generic/585 kernel doesn't support renameatN syscall
 generic/586 /xfstests/src/aio-dio-regress/aio-dio-append-write-fallocate-race not built
 generic/587 Quota user tools not installed
 generic/588 Reflink not supported by scratch filesystem type: fuse
+generic/589 require /backing/scratch/fs to be local device
 generic/590 This test requires at least NGB free on /mnt/scratch to run
 generic/592 No encryption support for fuse
 generic/593 No encryption support for fuse
@@ -427,17 +431,17 @@ generic/600 Quota user tools not installed
 generic/601 Quota user tools not installed
 generic/602 No encryption support for fuse
 generic/603 setquota doesn't support project quota (-P)
-generic/605 mount /dev/vdc with dax=always failed
-generic/606 mount /dev/vdc with dax=always failed
+generic/605 mount /backing/scratch/fs with dax=always failed
+generic/606 mount /backing/scratch/fs with dax=always failed
 generic/607 xfs_io chattr +x failed (old kernel/wrong fs?)
-generic/608 mount /dev/vdc with dax=always failed
+generic/608 mount /backing/scratch/fs with dax=always failed
 generic/612 Reflink not supported by test filesystem type: fuse
 generic/613 No encryption support for fuse
 generic/614 test requires delayed allocation buffered writes
 generic/616 kernel does not support IO_URING
 generic/617 kernel does not support IO_URING
 generic/619 Filesystem fuse not supported in _scratch_mkfs_sized
-generic/620 scratch device size too small, N < N
+generic/620 require /backing/scratch/fs to be valid block disk
 generic/621 No encryption support for fuse
 generic/622 src/godown executable not found
 generic/623 xfs_io shutdown failed (old kernel/wrong fs?)
@@ -446,12 +450,12 @@ generic/625 fsverity utility required, skipped this test
 generic/626 kernel doesn't support renameatN syscall
 generic/627 kernel does not support asynchronous I/O
 generic/628 Reflink not supported by scratch filesystem type: fuse
-generic/629 dmsetup utility required, skipped this test
+generic/629 require /backing/scratch/fs to be valid block disk
 generic/630 Dedupe not supported by scratch filesystem type: fuse
 generic/631 this test requires overlay support
 generic/635 src/godown executable not found
 generic/636 swapfiles are not supported
-generic/640 dmsetup utility required, skipped this test
+generic/640 require /backing/scratch/fs to be valid block disk
 generic/641 swapfiles are not supported
 generic/643 swapfiles are not supported
 generic/644 idmapped mounts not support by fuse
@@ -484,7 +488,7 @@ generic/672 Reflink not supported by scratch filesystem type: fuse
 generic/673 Reflink not supported by scratch filesystem type: fuse
 generic/674 Dedupe not supported by scratch filesystem type: fuse
 generic/675 Reflink not supported by scratch filesystem type: fuse
-generic/677 dmsetup utility required, skipped this test
+generic/677 require /backing/scratch/fs to be valid block disk
 generic/678 kernel does not support IO_URING
 generic/679 xfs_io fiemap failed (old kernel/wrong fs?)
 generic/681 Quota user tools not installed
@@ -492,12 +496,12 @@ generic/682 Quota user tools not installed
 generic/686 xfs_io finsert failed (old kernel/wrong fs?)
 generic/687 xfs_io fcollapse failed (old kernel/wrong fs?)
 generic/689 idmapped mounts not support by fuse
-generic/690 dmsetup utility required, skipped this test
+generic/690 require /backing/scratch/fs to be valid block disk
 generic/691 Quota user tools not installed
 generic/692 fsverity utility required, skipped this test
 generic/693 No encryption support for fuse
 generic/694 This test requires at least NGB free on /mnt/test to run
-generic/695 dmsetup utility required, skipped this test
+generic/695 require /backing/scratch/fs to be valid block disk
 generic/698 idmapped mounts not support by fuse
 generic/699 this test requires overlay support
 generic/700 kernel doesn't support renameatN syscall
@@ -525,52 +529,53 @@ generic/724 xfs_io exchangerange not supported on fuse
 generic/725 xfs_io exchangerange not supported on fuse
 generic/726 xfs_io exchangerange not supported on fuse
 generic/727 xfs_io exchangerange not supported on fuse
-generic/730 scsi_debug module not found
-generic/731 scsi_debug module not found
+generic/730 require /backing/test/fs to be valid block disk
+generic/731 require /backing/test/fs to be valid block disk
 generic/733 Reflink not supported by scratch filesystem type: fuse
 generic/734 Reflink not supported by test filesystem type: fuse
 generic/735 xfs_io finsert failed (old kernel/wrong fs?)
 generic/737 src/godown executable not found
 generic/738 fuse does not support freezing
 generic/739 No encryption support for fuse
-generic/741 dmsetup utility required, skipped this test
+generic/740 require /backing/scratch/fs to be valid block disk
+generic/741 require /backing/scratch/fs to be valid block disk
 generic/742 xfs_io fiemap failed (old kernel/wrong fs?)
-generic/743 dmsetup utility required, skipped this test
+generic/743 require /backing/scratch/fs to be valid block disk
 generic/744 fuse does not support duplicate fsid
-generic/745 dmsetup utility required, skipped this test
+generic/745 require /backing/scratch/fs to be valid block disk
 generic/746 This test requires loopback device support
-generic/747 Scratch device too small
+generic/747 Filesystem fuse not supported in _scratch_mkfs_sized
 generic/751 Cannot find debugfs on /sys/kernel/debug
 generic/752 xfs_io exchangerange not supported on fuse
-generic/753 dmsetup utility required, skipped this test
+generic/753 require /backing/scratch/fs to be valid block disk
 generic/757 aio-dio utilities required
 generic/762 Quota user tools not installed
-generic/764 dmsetup utility required, skipped this test
+generic/764 require /backing/scratch/fs to be valid block disk
 generic/765 write atomic not supported by this block device
 generic/766 src/godown executable not found
 generic/767 scsi_debug module not found
-generic/768 multi-block atomic writes not supported by this filesystem
-generic/769 multi-block atomic writes not supported by this filesystem
-generic/770 multi-block atomic writes not supported by this filesystem
-generic/771 dmsetup utility required, skipped this test
+generic/768 require /backing/scratch/fs to be valid block disk
+generic/769 require /backing/scratch/fs to be valid block disk
+generic/770 require /backing/scratch/fs to be valid block disk
+generic/771 require /backing/scratch/fs to be valid block disk
 generic/772 file_getattr not supported for regular files on fuse
 generic/773 write atomic not supported by this block device
 generic/774 multi-block atomic writes not supported by this filesystem
 generic/775 multi-block atomic writes not supported by this filesystem
 generic/776 write atomic not supported by this block device
 generic/778 multi-block atomic writes not supported by this filesystem
-generic/779 dmsetup utility required, skipped this test
-generic/781 scratch device too small, N < N
-generic/782 dmsetup utility required, skipped this test
+generic/779 require /backing/scratch/fs to be valid block disk
+generic/781 require /backing/scratch/fs to be valid block disk
+generic/782 require /backing/scratch/fs to be valid block disk
 generic/783 this test requires overlay support
-generic/784 dmsetup utility required, skipped this test
-generic/785 dmsetup utility required, skipped this test
+generic/784 require /backing/scratch/fs to be valid block disk
+generic/785 require /backing/scratch/fs to be valid block disk
 generic/786 Require fcntl setdeleg support
 generic/787 Require fcntl setdeleg support
 generic/788 fsverity utility required, skipped this test
-generic/789 dmsetup utility required, skipped this test
-generic/790 dmsetup utility required, skipped this test
-generic/791 dmsetup utility required, skipped this test
-generic/792 dmsetup utility required, skipped this test
-generic/793 scratch device too small, N < N
-generic/794 src/godown executable not found
+generic/789 require /backing/scratch/fs to be valid block disk
+generic/790 require /backing/scratch/fs to be valid block disk
+generic/791 require /backing/scratch/fs to be valid block disk
+generic/792 require /backing/scratch/fs to be valid block disk
+generic/793 this test requires a zoned block device
+generic/794 require /backing/scratch/fs to be valid block disk

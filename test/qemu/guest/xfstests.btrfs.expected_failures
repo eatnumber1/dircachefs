@@ -5,14 +5,11 @@
 # (run FallocateFd, WriteFile and CopyFileRangeFd as the caller), fixed with a test first.
 # Tests that take most of the limit or more are in xfstests.slow, tests that cannot run in
 # this guest in xfstests.excluded; the tests that are "not run" are in xfstests.btrfs.notrun.
-generic/003 `mount -o remount,ro` is ignored by dcfs (a remount changes only the dcfs mount: dcfs.ro), so the read-only file system the test makes is still writable and its directory access time changes (README.md, limitations: remount,ro and statx attributes)
 generic/020 the test sets as many attributes as FSTYP=fuse allows in a generic default and btrfs answers ENOSPC (its leaf is full): the backing answers, not dcfs; the test knows the limit only for FSTYP=btrfs
 generic/080 the mtime and ctime of a file written through a shared mmap are stale after close() (README.md: writes through a shared writable mmap after the last close() are seen late)
 generic/215 the mtime and ctime of a file written through a shared mmap are stale after close() (README.md: writes through a shared writable mmap after the last close() are seen late)
 generic/277 the kernel serves the previous ctime after chattr until the attribute timeout (README.md: after chattr through dcfs the kernel may serve the previous ctime)
 generic/294 `mount -o remount,ro` is ignored by dcfs (dcfs.ro is the way to make the dcfs mount read-only; README.md, limitations: remount,ro and statx attributes), so touch on the "read-only" mount succeeds
 generic/306 `mount -o remount,ro` is ignored by dcfs (dcfs.ro is the way to make the dcfs mount read-only; README.md, limitations: remount,ro and statx attributes), so touch on the "read-only" mount succeeds
-generic/411 the test mounts the scratch device several times at once; dcfs refuses a second daemon on one cache database ("in use by another dcfs process"), README.md, limitations: a second dcfs needs its own cache database
 generic/424 statx(2) does not report the append, immutable, nodump and compressed attributes that chattr set: FUSE has no way to carry them (README.md, limitations: remount,ro and statx attributes)
-generic/589 the test mounts the scratch device several times at once; dcfs refuses a second daemon on one cache database ("in use by another dcfs process"), README.md, limitations: a second dcfs needs its own cache database
 generic/732 the test mounts the scratch device twice (two mount points); dcfs refuses a second daemon on one cache database ("in use by another dcfs process"), README.md, limitations: a second dcfs needs its own cache database
