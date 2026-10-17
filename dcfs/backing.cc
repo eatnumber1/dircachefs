@@ -45,6 +45,7 @@
 #include "absl/strings/str_join.h"
 #include "absl/time/time.h"
 #include "absl/types/source_location.h"
+#include "dcfs/backing_door.h"
 #include "dcfs/checkpoint.h"
 #include "dcfs/context.h"
 #include "dcfs/credentials.h"
@@ -283,7 +284,7 @@ void RestoreRoot(const SavedGroups &groups) {
     LOG(ERROR) << "cannot restore root filesystem credentials: setfsuid " << uid
                << ", setgroups " << status << ", setfsgid " << gid << " (fsuid "
                << syscalls::fsuid() << ", fsgid " << syscalls::fsgid() << ")";
-    syscalls::PoisonBacking();
+    PoisonBacking();
     if (g_fuse_session != nullptr) {
       fuse_session_exit(g_fuse_session);
     }

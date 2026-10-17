@@ -20,13 +20,15 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/match.h"
+#include "dcfs/backing_door.h"
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls_backing.h"
@@ -613,31 +615,104 @@ TEST(SyscallsWrapperTest, SyslogNeverFails) {
   syscalls::syslog(LOG_INFO, "syscalls_test: a message with a %s in it");
 }
 
-TEST(SyscallsBackingTest, PoisonBackingPermanentlyRefusesBackingSyscalls) {
-  EXPECT_FALSE(syscalls::IsBackingPoisoned());
-  absl::StatusOr<pid_t> pid = syscalls::fork();
-  ASSERT_THAT(pid, IsOk());
-  if (*pid == 0) {
-    if (syscalls::IsBackingPoisoned()) syscalls::_exit(1);
-    syscalls::PoisonBacking();
-    if (!syscalls::IsBackingPoisoned()) syscalls::_exit(2);
-    auto status = syscalls::openat(AT_FDCWD, "/dev/null", O_RDONLY);
-    if (status.ok() || !absl::IsInternal(status.status()) ||
-        !absl::StrContains(status.status().message(), "backing is poisoned")) {
-      syscalls::_exit(3);
-    }
-    auto stat_status = syscalls::fstat(-1);
-    if (stat_status.ok() || !absl::IsInternal(stat_status.status()) ||
-        !absl::StrContains(stat_status.status().message(),
-                           "backing is poisoned")) {
-      syscalls::_exit(4);
-    }
-    syscalls::_exit(0);
+// Every wrapper of syscalls_backing.h, by name, called with arguments it
+// cannot act on (descriptor -1, a path that does not exist): what it
+// returned. A wrapper added to syscalls_backing.h belongs here.
+std::vector<std::pair<std::string, absl::Status>> CallEveryBackingWrapper() {
+  constexpr std::string_view kNoPath = "/nonexistent/dcfs-poison";
+  char buf[16] = {};
+  const uint8_t value[] = {1};
+  const struct timespec times[2] = {};
+  std::vector<uint8_t> handle_buf(sizeof(file_handle) + MAX_HANDLE_SZ);
+  auto *handle = reinterpret_cast<file_handle *>(handle_buf.data());
+  handle->handle_bytes = MAX_HANDLE_SZ;
+  int mount_id = 0;
+  int version = 0;
+  return {
+      {"openat", syscalls::openat(-1, "x").status()},
+      {"read", syscalls::read(-1, buf, sizeof(buf)).status()},
+      {"fstatvfs", syscalls::fstatvfs(-1).status()},
+      {"fstat", syscalls::fstat(-1).status()},
+      {"fstatat", syscalls::fstatat(-1, "x").status()},
+      {"name_to_handle_at",
+       syscalls::name_to_handle_at(-1, "x", *handle, mount_id)},
+      {"open_by_handle_at", syscalls::open_by_handle_at(-1, *handle).status()},
+      {"ioctl", syscalls::ioctl(-1, FS_IOC_GETVERSION, &version).status()},
+      {"getdents64", syscalls::getdents64(-1, buf, sizeof(buf)).status()},
+      {"lseek", syscalls::lseek(-1, 0, SEEK_SET).status()},
+      {"statx", syscalls::statx(-1, "x", 0, STATX_BASIC_STATS).status()},
+      {"fstatfs", syscalls::fstatfs(-1).status()},
+      {"readlinkat", syscalls::readlinkat(-1, "x", buf, sizeof(buf)).status()},
+      {"fgetxattr",
+       syscalls::fgetxattr(-1, "user.x", buf, sizeof(buf)).status()},
+      {"flistxattr", syscalls::flistxattr(-1, buf, sizeof(buf)).status()},
+      {"fsetxattr", syscalls::fsetxattr(-1, "user.x", value, 0)},
+      {"fremovexattr", syscalls::fremovexattr(-1, "user.x")},
+      {"getxattr",
+       syscalls::getxattr(kNoPath, "user.x", buf, sizeof(buf)).status()},
+      {"listxattr", syscalls::listxattr(kNoPath, buf, sizeof(buf)).status()},
+      {"setxattr", syscalls::setxattr(kNoPath, "user.x", value, 0)},
+      {"removexattr", syscalls::removexattr(kNoPath, "user.x")},
+      {"fchmodat", syscalls::fchmodat(-1, "x", 0600, 0)},
+      {"utimensat", syscalls::utimensat(-1, "x", times, 0)},
+      {"linkat", syscalls::linkat(-1, "x", -1, "y", 0)},
+      {"unlinkat", syscalls::unlinkat(-1, "x", 0)},
+      {"renameat2", syscalls::renameat2(-1, "x", -1, "y", 0)},
+      {"mkdirat", syscalls::mkdirat(-1, "x", 0700)},
+      {"mknodat", syscalls::mknodat(-1, "x", S_IFIFO | 0600, 0)},
+      {"symlinkat", syscalls::symlinkat("x", -1, "y")},
+      {"fchmod", syscalls::fchmod(-1, 0600)},
+      {"fchownat", syscalls::fchownat(-1, "x", 0, 0, 0)},
+      {"futimens", syscalls::futimens(-1, times)},
+      {"ftruncate", syscalls::ftruncate(-1, 0)},
+      {"fsync", syscalls::fsync(-1)},
+      {"fdatasync", syscalls::fdatasync(-1)},
+      {"syncfs", syscalls::syncfs(-1)},
+      {"fallocate", syscalls::fallocate(-1, 0, 0, 1)},
+      {"pread", syscalls::pread(-1, buf, sizeof(buf), 0).status()},
+      {"copy_file_range",
+       syscalls::copy_file_range(-1, 0, -1, 0, sizeof(buf), 0).status()},
+      {"pwrite", syscalls::pwrite(-1, buf, sizeof(buf), 0).status()},
+      {"write", syscalls::write(-1, buf, sizeof(buf)).status()},
+      {"mount", syscalls::mount(nullptr, kNoPath, nullptr, 0, nullptr)},
+      {"umount2", syscalls::umount2(kNoPath, 0)},
+  };
+}
+
+// The control for the next test: before the door is poisoned every wrapper
+// reaches the kernel, which refuses the descriptor or the path (the door's
+// refusal is EIO).
+TEST(SyscallsBackingTest, NoWrapperRefusesBeforeTheDoorIsPoisoned) {
+  ASSERT_THAT(BackingDoor(), IsOk());
+  for (const auto &[name, status] : CallEveryBackingWrapper()) {
+    EXPECT_THAT(GetErrnoFromStatus(status),
+                IsOkAndHolds(::testing::AnyOf(EBADF, ENOENT)))
+        << name << ": " << status;
   }
-  int status = -1;
-  ASSERT_THAT(syscalls::waitpid(*pid, &status, 0), IsOkAndHolds(*pid));
-  EXPECT_EQ(status, 0);
-  EXPECT_FALSE(syscalls::IsBackingPoisoned());
+}
+
+// Poisons the door, calls every wrapper, logs each that was not refused with
+// the door's status, and exits with how many there were.
+[[noreturn]] void PoisonAndCallEveryBackingWrapper() {
+  PoisonBacking();
+  int let_through = 0;
+  for (const auto &[name, status] : CallEveryBackingWrapper()) {
+    if (status == BackingDoor()) continue;
+    LOG(ERROR) << name << " was not refused: " << status;
+    ++let_through;
+  }
+  syscalls::_exit(let_through);
+}
+
+// Once poisoned, every wrapper refuses with the door's status. In a child:
+// the door stays poisoned for the rest of the process's life.
+TEST(SyscallsBackingTest, EveryWrapperRefusesOnceTheDoorIsPoisoned) {
+  ASSERT_OK_AND_ASSIGN(pid_t child, syscalls::fork());
+  if (child == 0) PoisonAndCallEveryBackingWrapper();
+  int wait_status = -1;
+  ASSERT_THAT(syscalls::waitpid(child, &wait_status, 0), IsOkAndHolds(child));
+  // 0: exited with status 0, every wrapper refused (the child logs any other).
+  EXPECT_EQ(wait_status, 0);
 }
 
 }  // namespace

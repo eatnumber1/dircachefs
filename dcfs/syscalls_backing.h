@@ -24,18 +24,17 @@
 #include <utility>
 
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
+#include "dcfs/backing_door.h"
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
 
 namespace dcfs {
 namespace syscalls {
 
-// Backing door self-poisoning (step 25.9): when root credentials cannot be
-// restored, backing is permanently poisoned and all backing syscalls are
-// refused.
-void PoisonBacking();
-bool IsBackingPoisoned();
+// Every wrapper here refuses with BackingDoor()'s status once the door is
+// poisoned (dcfs/backing_door.h).
 
 // O_CLOEXEC is unconditionally added.
 absl::StatusOr<FileDescriptor> openat(int dirfd, std::string_view pathname,
@@ -147,10 +146,7 @@ absl::Status umount2(std::string_view target, int flags);
 namespace syscalls {
 
 absl::StatusOr<int> ioctl(int fd, unsigned long request, auto &&...args) {
-  if (IsBackingPoisoned()) {
-    return absl::InternalError(
-        "backing is poisoned: failed to restore root credentials");
-  }
+  RETURN_IF_ERROR(BackingDoor());
   int rc = ::ioctl(fd, request, std::forward<decltype(args)>(args)...);
   if (rc == -1) return ErrnoToStatus(errno, "ioctl");
   return rc;

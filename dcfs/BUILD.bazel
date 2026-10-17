@@ -295,6 +295,19 @@ qemu_cc_test(
     ],
 )
 
+# The backing door's poisoned state (backing_door.h; docs/style.md 1.6b): the
+# guard every backing-reaching wrapper passes, which RestoreRoot poisons and
+# SessionLoop reads.
+cc_library(
+    name = "backing_door",
+    srcs = ["backing_door.cc"],
+    hdrs = ["backing_door.h"],
+    deps = [
+      ":status",
+      "@absl//absl/status",
+    ],
+)
+
 # The backing-reaching wrappers (syscalls_backing.h): anything given a backing
 # fd, file handle or name. Visible to this package, testonly and bench; which
 # targets of those may depend on it is //tools:syscalls_backing_users_test's
@@ -308,10 +321,12 @@ cc_library(
       "//dcfs/testonly:__pkg__",
     ],
     deps = [
+      ":backing_door",
       ":escape",
       ":status",
       ":syscalls",
       "@absl//absl/status",
+      "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
       "@absl//absl/strings:str_format",
@@ -341,12 +356,14 @@ qemu_cc_test(
     srcs = ["syscalls_test.cc"],
     disks = [("vdb", "ext4", "32M")],  # name_to_handle_at/FS_IOC_GETVERSION/xattrs need a real filesystem
     deps = [
+      ":backing_door",
       ":status",
       ":syscalls",
       ":syscalls_backing",
       ":syscalls_process",
       "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/algorithm:container",
+      "@absl//absl/log",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",
@@ -1650,6 +1667,7 @@ cc_library(
     srcs = ["backing.cc"],
     hdrs = ["backing.h"],
     deps = [
+      ":backing_door",
       ":checkpoint",
       ":protocol_events",
       ":escape",
