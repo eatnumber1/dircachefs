@@ -617,14 +617,12 @@ absl::Status FinishRun(Context &ctx);
 // FIFOs, sockets and devices go through FchmodOPath (reopening one of
 // those for a real fd could block or have a side effect); a symlink's
 // mode cannot be changed at all on Linux (there is no lchmod) and this
-// fails with EOPNOTSUPP. FUSE_SET_ATTR_KILL_SUID/KILL_SGID without
-// FUSE_SET_ATTR_MODE clears S_ISUID/S_ISGID from the node's *current*
-// mode instead (the kernel already cleared them in attr.st_mode whenever
-// it also sent MODE, so that combination needs no extra handling here),
-// S_ISGID only where the backing filesystem's own write by `caller` would
-// clear it (group-executable, or `caller` neither root nor in the node's
-// group; DirCacheFS::Setattr asks for it for a write's privilege removal);
-// it is a no-op on a symlink, which has no meaningful mode bits to clear.
+// fails with EOPNOTSUPP. With FUSE_SET_ATTR_SIZE too, the mode keeps
+// S_ISUID/S_ISGID only where the truncate left them. FUSE_SET_ATTR_KILL_SUID/
+// KILL_SGID without FUSE_SET_ATTR_MODE clears S_ISUID/S_ISGID from the
+// node's *current* mode instead, S_ISGID only where a write by `caller`
+// would clear it (docs/design.md, "Caller credentials"); it is a no-op on a
+// symlink, which has no meaningful mode bits to clear.
 // Owner and times use the same regular/dir-vs-other-types split as mode,
 // except that both are unremarkable on a symlink (unlike mode); size is
 // only ever valid for a regular file -- EISDIR/EINVAL otherwise, as the
@@ -644,6 +642,10 @@ absl::Status FinishRun(Context &ctx);
 // the file's group) before it is sent.
 absl::Status SetAttr(Context &ctx, const Credentials &caller, InodeId id,
                      const struct stat &attr, int to_set);
+
+// Whether a SETATTR's `to_set` asks for nothing but (perhaps) the ctime,
+// which cannot be set: what a chown(path, -1, -1) sends.
+bool SetsNothing(int to_set);
 
 }  // namespace dcfs::backing
 

@@ -2386,13 +2386,26 @@ absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
 }
 
 // Whether the backing filesystem's own write by `caller` would clear the
-// setgid bit, if set, of the object `stx` describes (setattr_should_drop_sgid,
-// under AsCaller, where only fsuid 0 keeps CAP_FSETID): the object is
-// group-executable, or the caller is neither root nor in its group.
-bool WriteClearsSetgid(const Credentials &caller, const struct statx &stx) {
-  if ((stx.stx_mode & S_IXGRP) != 0) return true;
-  return caller.uid != 0 && caller.gid != stx.stx_gid &&
-         !absl::c_linear_search(caller.groups, stx.stx_gid);
+// setgid bit, if set, of a file without group execute whose group is `gid`
+// (setattr_should_drop_suidgid under AsCaller, where only fsuid 0 keeps
+// CAP_FSETID): the caller is neither root nor in the group. (With group
+// execute the kernel's own rule clears setgid with a mode instead.)
+bool WriteClearsSetgid(const Credentials &caller, gid_t gid) {
+  if (caller.uid == 0) return false;
+  return caller.gid != gid && !absl::c_linear_search(caller.groups, gid);
+}
+
+// The mode FUSE_SET_ATTR_MODE asks for. With FUSE_SET_ATTR_SIZE too it is
+// the kernel's privilege removal for a truncate (no system call sets both),
+// which the truncate, run as the caller, has done by the current rule:
+// setuid and setgid stay only where the truncate left them, so the mode
+// never sets again a bit the truncate cleared.
+absl::StatusOr<mode_t> RequestedMode(int fd, const struct stat &attr,
+                                     int to_set) {
+  if ((to_set & FUSE_SET_ATTR_SIZE) == 0) return attr.st_mode;
+  ASSIGN_OR_RETURN(struct statx after,
+                   syscalls::statx(fd, "", AT_EMPTY_PATH, STATX_MODE));
+  return attr.st_mode & (after.stx_mode | ~mode_t{S_ISUID | S_ISGID});
 }
 
 // FUSE_SET_ATTR_SIZE: only ever valid for a regular file, same as the
@@ -2427,6 +2440,8 @@ absl::Status ApplyTimes(const Credentials &caller, int opath_fd, mode_t type,
 
 }  // namespace
 
+bool SetsNothing(int to_set) { return (to_set & ~FUSE_SET_ATTR_CTIME) == 0; }
+
 absl::Status SetAttr(Context &ctx, const Credentials &caller, InodeId id,
                      const struct stat &attr, int to_set) {
   ASSIGN_OR_RETURN(FileDescriptor fd, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
@@ -2459,7 +2474,8 @@ absl::Status SetAttrFd(const Credentials &caller, int fd,
   }
 
   if (to_set & FUSE_SET_ATTR_MODE) {
-    RETURN_IF_ERROR(ApplyMode(fd, type, attr.st_mode));
+    ASSIGN_OR_RETURN(mode_t mode, RequestedMode(fd, attr, to_set));
+    RETURN_IF_ERROR(ApplyMode(fd, type, mode));
   } else if ((to_set & (FUSE_SET_ATTR_KILL_SUID | FUSE_SET_ATTR_KILL_SGID)) &&
              !S_ISLNK(type)) {
     // KILL_SUID/KILL_SGID sent without MODE: the kernel wants the
@@ -2470,7 +2486,8 @@ absl::Status SetAttrFd(const Credentials &caller, int fd,
     // bits.
     mode_t current_mode = stx.stx_mode & 07777;
     if (to_set & FUSE_SET_ATTR_KILL_SUID) current_mode &= ~S_ISUID;
-    if ((to_set & FUSE_SET_ATTR_KILL_SGID) && WriteClearsSetgid(caller, stx)) {
+    if ((to_set & FUSE_SET_ATTR_KILL_SGID) &&
+        WriteClearsSetgid(caller, stx.stx_gid)) {
       current_mode &= ~S_ISGID;
     }
     RETURN_IF_ERROR(ApplyMode(fd, type, current_mode));
@@ -2495,9 +2512,9 @@ absl::Status SetAttrFd(const Credentials &caller, int fd,
     RETURN_IF_ERROR(ApplyTimes(caller, fd, type, times));
   }
 
-  // Nothing to set but (perhaps) ctime: a chown(path, -1, -1) (see
-  // SetAttr's declaration comment). The ctime value is never used.
-  if ((to_set & ~FUSE_SET_ATTR_CTIME) == 0) {
+  // Nothing to set: a chown(path, -1, -1) (see SetAttr's declaration
+  // comment).
+  if (SetsNothing(to_set)) {
     RETURN_IF_ERROR(AsCaller(caller, [&] {
       return syscalls::fchownat(fd, "", static_cast<uid_t>(-1),
                                 static_cast<gid_t>(-1), AT_EMPTY_PATH);

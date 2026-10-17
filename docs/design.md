@@ -2215,44 +2215,59 @@ reads the mode back from the backing filesystem.
 - opening an existing file, and every probe, read and refresh.
 
 **Setuid and setgid on writes the kernel handles** (step 17.2b). Before a
-write, fallocate or copy_file_range, the kernel's FUSE side removes
-privileges itself (`file_remove_privs`, with the writer's credentials), and
+write, fallocate, copy_file_range or truncate by a caller without
+`CAP_FSETID`, the kernel's FUSE side removes privileges itself
+(`file_remove_privs`, `do_truncate`, with the caller's credentials), and
 since dcfs negotiates neither `FUSE_CAP_HANDLE_KILLPRIV` nor its `_V2`,
 `fuse_setattr` re-derives the mode by the pre-6.2 rule: setuid always,
-setgid only with group execute. The current rule (`setattr_should_drop_sgid`)
-also clears setgid without group execute for a writer outside the file's
-group without `CAP_FSETID`. Two cases follow, each with a workaround that
-the kernel fix (`docs/plan/notes/kernel-patches.md`, row 4: `fuse_setattr`
-calling `setattr_should_drop_sgid()` after refreshing `i_mode`) retires:
+setgid only with group execute. The current rule
+(`setattr_should_drop_suidgid`) also clears setgid without group execute
+for a caller outside the file's group. A caller with `CAP_FSETID` (root)
+clears neither bit; its write still removes `security.capability`. Three
+cases follow, each with a workaround that the kernel fix
+(`docs/plan/notes/kernel-patches.md`, row 4: `fuse_setattr` calling
+`setattr_should_drop_sgid()` after refreshing `i_mode`) retires:
 
 - Setgid without group execute: the kernel's SETATTR sets nothing, the
-  same request a `chown(path, -1, -1)` makes. Run as that chown, as the
-  caller, it failed the write of a non-owner with `EPERM` (clearing the bit
-  is a mode change only the owner may make; the native filesystem allows
-  the write and clears it). The removal always comes while the file is
-  open for writing, so dcfs takes a SETATTR that sets nothing on a file open
-  for writing for the write's (`DirCacheFS::Setattr`): it clears setgid, as
-  root, where the backing filesystem's own write by the caller would
-  (`FUSE_SET_ATTR_KILL_SGID`), and runs no chown. The price is that a
-  non-owner's `chown(path, -1, -1)` of such a file, while anyone has it open
-  for writing, succeeds and clears the bit where the native filesystem
-  refuses it with `EPERM`. With no writable open it is the caller's chown,
-  as before. Passthrough writes need nothing more for this mode: the bit is
+  same request a `chown(path, -1, -1)` makes (so does root's write of a file
+  with `security.capability`, after its REMOVEXATTR). Run as that chown, as
+  the caller, it failed the write of a non-owner with `EPERM` (clearing the
+  bit is a mode change only the owner may make; the native filesystem
+  allows the write and clears it). The removal always comes while the file
+  is open for writing, so dcfs takes a SETATTR that sets nothing on a file
+  open for writing for the write's (`DirCacheFS::Setattr`): it clears
+  setgid, as root, where a write by the caller would (`FUSE_SET_ATTR_KILL_SGID`:
+  the caller neither root nor in the file's group; the group-execute term of
+  the kernel's rule never applies, since for such a file the kernel sends a
+  mode), and runs no chown. The price is that a non-owner's
+  `chown(path, -1, -1)` of such a file, while anyone has it open for
+  writing, succeeds and clears the bit where the native filesystem refuses
+  it with `EPERM`. With no writable open it is the caller's chown, as
+  before. Passthrough writes need nothing more for this mode: the bit is
   gone before the daemon's write.
-- Setuid and setgid without group execute: the kernel's SETATTR is the mode
-  minus setuid, which dcfs cannot tell from the owner's chmod, and a
-  passthrough write reaches the backing file as the daemon (`CAP_FSETID`),
+- Setuid and setgid without group execute, written: the kernel's SETATTR is
+  the mode minus setuid, which dcfs cannot tell from the owner's chmod, and
+  a passthrough write reaches the backing file as the daemon (`CAP_FSETID`),
   which keeps setgid too. dcfs declines passthrough for a file with this
   mode (`PassthroughFor`), so the kernel sends the writes and `WriteFile`
   runs them as the caller. The choice is made at the inode's first open
   (one registration serves every open of an inode, and the kernel refuses
   an open without passthrough of an inode that has one, with `EIO`), so a
   read-only open declines too, and a file given this mode while open keeps
-  passthrough until its last release: a write in that window keeps setgid.
-  The cost, for files with this mode only (`dcfs_bench`'s Write and
-  SetidWrite, ext4 in the guest, 1 MiB overwritten in 64 KiB writes on one
-  open, mean of 5): 9.1 ms through passthrough, 32.8 ms declined (the
-  backing filesystem directly: 0.14 ms).
+  passthrough until dcfs handles its last release: a write in that window
+  keeps setgid. The cost, for files with this mode only (2026-10-17,
+  `dcfs_bench`'s Write and SetidWrite, ext4 in the QEMU guest, 1 MiB
+  overwritten in 64 KiB writes on one open, mean of 5): 9.1 ms through
+  passthrough, 32.8 ms declined (the backing filesystem directly: 0.14 ms).
+- Setuid and setgid without group execute, truncated: the kernel sends one
+  SETATTR of the size and of the mode minus setuid. The truncate runs as
+  the caller and clears both bits on the backing filesystem; the mode,
+  applied as asked, would set setgid again. No system call sets a size and
+  a mode at once, so such a mode is always the kernel's privilege removal,
+  and `backing::SetAttr` keeps setuid and setgid only where the truncate
+  left them. (Applying the mode at all, rather than skipping it, still
+  clears what the kernel's rule asks for where dcfs's truncate cleared
+  less: a caller with uid 0 but without `CAP_FSETID`.)
 
 **`default_permissions` is required** (russ, 2026-10-08). The kernel
 checks the caller's permissions against dcfs's cached attributes before a

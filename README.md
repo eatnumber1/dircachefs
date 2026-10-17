@@ -1216,16 +1216,17 @@ recovery protocol, concurrency, and the test strategy.
   (plan phase 15). The paths given on the command line (SOURCE, the
   mount point, `dcfs.cache_db`) are not escaped in startup messages yet.
 - **Setuid and setgid bits on writes follow the backing filesystem, with
-  two gaps until a kernel fix.** A write, fallocate or copy_file_range
-  through dcfs clears setuid and setgid as the backing filesystem would for
+  two gaps until a kernel fix.** A write, fallocate, copy_file_range or
+  truncate through dcfs clears setuid and setgid as the backing filesystem would for
   the writer. The gaps: a file given setuid and setgid without group
   execute while it is open keeps setgid through a write by someone outside
-  its group, until its last close; and while a file with setgid but not
-  group execute is open for writing, `chown(path, -1, -1)` by someone who
-  neither owns it nor is in its group succeeds and clears the bit, where
-  the backing filesystem refuses it with `EPERM`. Writes to a file with
-  setuid and setgid but not group execute do not use FUSE passthrough and
-  are about 3.6 times slower (`docs/design.md`, "Caller credentials").
+  its group, until dcfs handles its last close; and while a file with setgid
+  but not group execute is open for writing, `chown(path, -1, -1)` by
+  someone who neither owns it nor is in its group succeeds and clears the
+  bit, where the backing filesystem refuses it with `EPERM`. Writes to a
+  file with setuid and setgid but not group execute do not use FUSE
+  passthrough and were about 3.6 times slower (ext4 in the QEMU guest,
+  2026-10-17; `docs/design.md`, "Caller credentials").
 - **A backing filesystem that stops taking writes holds the whole daemon.**
   With the backing filesystem frozen (`fsfreeze -f`, an LVM or storage
   snapshot, a hung network mount), a change through dcfs blocks in its

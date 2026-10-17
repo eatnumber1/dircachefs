@@ -41,6 +41,7 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "bench/dm_delay.h"
 #include "bench/process.h"
 #include "bench/tree.h"
@@ -169,7 +170,7 @@ constexpr std::pair<std::string_view, mode_t> kWriteFiles[] = {
 bool MakeWriteFiles(const std::string &src) {
   for (const auto &[name, mode] : kWriteFiles) {
     absl::StatusOr<FileDescriptor> fd =
-        syscalls::openat(AT_FDCWD, src + "/" + std::string(name),
+        syscalls::openat(AT_FDCWD, absl::StrCat(src, "/", name),
                          O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (!fd.ok() || !syscalls::fchmod(**fd, mode).ok()) return false;
   }
@@ -300,20 +301,26 @@ void BM_Readdir(benchmark::State &state, const Target *t) {
 // process's alone, without the daemon's.
 void WriteMiB(benchmark::State &state, const Target &t, std::string_view name) {
   constexpr off_t kMiB = off_t{1} << 20;
-  const std::string path = t.root + "/" + std::string(name);
-  const std::string chunk(size_t{64} << 10, 'x');
+  std::string path = absl::StrCat(t.root, "/", name);
+  std::string chunk(size_t{64} << 10, 'x');
   absl::StatusOr<FileDescriptor> fd =
       syscalls::openat(AT_FDCWD, path, O_WRONLY);
   if (!fd.ok()) {
-    state.SkipWithError("open failed on " + path);
+    state.SkipWithError(
+        absl::StrCat("open ", path, ": ", fd.status().message()));
     return;
   }
   for (auto _ : state) {
     for (off_t off = 0; off < kMiB; off += std::ssize(chunk)) {
       absl::StatusOr<size_t> n =
           syscalls::pwrite(**fd, chunk.data(), chunk.size(), off);
-      if (!n.ok() || *n != chunk.size()) {
-        state.SkipWithError("write failed on " + path);
+      if (!n.ok()) {
+        state.SkipWithError(
+            absl::StrCat("write ", path, ": ", n.status().message()));
+        return;
+      }
+      if (*n != chunk.size()) {
+        state.SkipWithError(absl::StrCat("short write to ", path));
         return;
       }
     }

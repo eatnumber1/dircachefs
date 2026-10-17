@@ -100,7 +100,7 @@ std::vector<std::string_view> XattrsChangedBySetattr(int to_set) {
   // An otherwise empty setattr is a chown(path, -1, -1) (see
   // backing::SetAttr).
   if ((to_set & (FUSE_SET_ATTR_UID | FUSE_SET_ATTR_GID | FUSE_SET_ATTR_SIZE)) ||
-      (to_set & ~FUSE_SET_ATTR_CTIME) == 0) {
+      backing::SetsNothing(to_set)) {
     names.push_back(kCapabilityXattr);
   }
   return names;
@@ -114,25 +114,9 @@ std::string ErrnoName(int err) {
 
 // The passthrough backing id for `fd`, the new shared backing descriptor
 // of a file whose mode is `mode` (see BackingFile), or 0: the kernel did
-// not grant one (logged once at Init), or dcfs declines it.
-//
-// dcfs declines it for a file with setuid and setgid but not group execute
-// (docs/plan/notes/kernel-patches.md row 4). A passthrough write never
-// reaches dcfs: the kernel removes privileges itself, with the writer's
-// credentials, and without FUSE_CAP_HANDLE_KILLPRIV fuse_setattr re-derives
-// the mode by its pre-6.2 rule (setuid always, setgid only with group
-// execute). For this mode its SETATTR asks for the mode minus setuid,
-// which dcfs cannot tell from the owner's chmod, and the write reaches the
-// backing file as the daemon (CAP_FSETID), which keeps setgid too: a
-// writer outside the file's group would leave it set. Declined, the
-// kernel sends the writes, and Write runs them as the caller, so the
-// backing filesystem clears setgid for whom it should. With setgid alone
-// the kernel's SETATTR sets nothing and Setattr drops setgid for the
-// writer; with group execute the kernel's rule drops it. The choice is
-// made once per inode, at its first open: the kernel refuses an open
-// without passthrough of an inode that has it, so a read-only open
-// declines too, and a chmod while the file is open changes nothing until
-// its last release.
+// not grant one (logged once at Init), or dcfs declines it for setuid and
+// setgid without group execute, whose setgid a passthrough write would keep
+// (docs/design.md, "Caller credentials").
 absl::StatusOr<int> PassthroughFor(FuseRequest &req, int fd, mode_t mode) {
   if ((mode & (S_ISUID | S_ISGID | S_IXGRP)) == (S_ISUID | S_ISGID)) return 0;
   return req.PassthroughOpen(fd);
@@ -791,20 +775,11 @@ absl::Status DirCacheFS::Setattr(FuseRequest &req, fuse_ino_t ino,
                                  fuse_file_info *fi) {
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "setattr");
-  // A SETATTR that sets nothing is a chown(path, -1, -1) (see
-  // backing::SetAttr), or the kernel removing privileges before a write,
-  // fallocate or copy_file_range (file_remove_privs) where its own pre-6.2
-  // rule (fuse_setattr) clears no mode bit: setgid without group execute,
-  // which the current rule clears for a writer outside the file's group, or
-  // security.capability alone, which the kernel has already removed through
-  // the mount. The two look the same, and the second always comes while the
-  // file is open for writing, so then it is taken for the write's: setgid
-  // goes as the backing filesystem's own write would take it
-  // (FUSE_SET_ATTR_KILL_SGID), not by a chown, which a non-owner may not
-  // make. (A non-owner's chown(path, -1, -1) of such a file while it is
-  // open for writing is then allowed and clears the bit, where the backing
-  // filesystem would refuse it.)
-  if (to_set == 0 && open_for_write_.contains(id)) {
+  // A SETATTR that sets nothing is a chown(path, -1, -1) or the kernel's
+  // privilege removal before a write; on a file open for writing it is
+  // taken for the second, whose setgid goes as a write by the caller would
+  // take it (docs/design.md, "Caller credentials").
+  if (backing::SetsNothing(to_set) && open_for_write_.contains(id)) {
     to_set |= FUSE_SET_ATTR_KILL_SGID;
   }
   if (auto it = removed_.find(id); it != removed_.end()) {

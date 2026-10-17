@@ -429,6 +429,13 @@ expect_stat sgid-group-member-keeps '%a' pub/sgid_ops/f_grp 2666
 #   nothing, the same request a chown(path, -1, -1) makes ("chown").
 # - "held": root holds a read-only open while bob writes (one backing file,
 #   and so one passthrough choice, per inode).
+# - A truncate by bob of a 6666 file: one SETATTR of the size and of the
+#   mode minus S_ISUID.
+# - Root (CAP_FSETID) clears nothing; "capwrite" sets security.capability
+#   first, so the kernel removes it and sends a SETATTR that sets nothing.
+#
+# Each case runs twice: on files made warm, and on files made at the same
+# time whose operation runs after the caches are dropped.
 
 NAT2=/src/native2b
 P2=pub/sgid2b
@@ -437,6 +444,10 @@ chmod 0777 "$NAT2" "$MNT/$P2"
 echo "source" >"$NAT2/src"
 echo "source" >"$MNT/$P2/src"
 chmod 0666 "$NAT2/src" "$MNT/$P2/src"
+# A version 2 file capability: cap_net_raw permitted.
+CAPHEX=0000000200200000000000000000000000000000
+
+root() { "$@"; }
 
 # sgid_op USER OP DIR FILE: OP on DIR/FILE as USER; prints its exit status,
 # 0 or 1.
@@ -448,6 +459,10 @@ sgid_op() {
 	case $op in
 	write) $who sh -c "echo x >>'$dir/$file'" ;;
 	held) { $who sh -c "echo x >>'$dir/$file'"; } 3<"$dir/$file" ;;
+	capwrite)
+		"$TESTUTIL" setxattrhex "$dir/$file" security.capability \
+			"$CAPHEX" && $who sh -c "echo x >>'$dir/$file'"
+		;;
 	fallocate) $who "$TESTUTIL" fallocate "$dir/$file" 0 0 4096 ;;
 	copy) $who "$TESTUTIL" copyrange-into "$dir/src" "$dir/$file" ;;
 	truncate) $who "$TESTUTIL" truncate "$dir/$file" 4 ;;
@@ -456,12 +471,38 @@ sgid_op() {
 	if [ $? -eq 0 ]; then echo 0; else echo 1; fi
 }
 
+# sgid_make FILE OWNER MODE: FILE in the native directory and on the mount.
+sgid_make() {
+	for d in "$NAT2" "$MNT/$P2"; do
+		echo "test-data" >"$d/$1"
+		chown "$2" "$d/$1"
+		chmod "$3" "$d/$1"
+	done
+}
+
+# sgid_check TEST FILE USER OP WANT: OP on FILE as USER, natively and through
+# the mount; both, and the backing file, must end as WANT.
+sgid_check() {
+	nat="$(sgid_op "$3" "$4" "$NAT2" "$2"):$(stat -c '%a' "$NAT2/$2")"
+	mnt="$(sgid_op "$3" "$4" "$MNT/$P2" "$2"):$(stat -c '%a' "$MNT/$P2/$2")"
+	src="${mnt%%:*}:$(stat -c '%a' "$SRC/$P2/$2")"
+	if [ "$nat" = "$5" ] && [ "$mnt" = "$5" ] && [ "$src" = "$5" ]; then
+		pass "$1"
+	else
+		fail "$1" "want $5, native $nat, mount $mnt, src $src"
+	fi
+}
+
 # name owner mode user op want
 SGID2B_CASES="
 suid-owner-write 1001:2000 6666 bob write 0:666
 suid-other-write 0:2000 6666 bob write 0:666
 suid-other-held 0:2000 6666 bob held 0:666
+suid-other-fallocate 0:2000 6666 bob fallocate 0:666
+suid-other-copy 0:2000 6666 bob copy 0:666
+suid-other-truncate 0:2000 6666 bob truncate 0:666
 suid-member-write 0:2000 6666 alice write 0:2666
+suid-root-write 0:2000 6666 root write 0:6666
 sgid-other-write 0:2000 2666 bob write 0:666
 sgid-other-held 0:2000 2666 bob held 0:666
 sgid-other-fallocate 0:2000 2666 bob fallocate 0:666
@@ -469,23 +510,21 @@ sgid-other-copy 0:2000 2666 bob copy 0:666
 sgid-other-truncate 0:2000 2666 bob truncate 0:666
 sgid-other-chown 0:2000 2666 bob chown 1:2666
 sgid-member-write 0:2000 2666 alice write 0:2666
+sgid-root-write 0:2000 2666 root write 0:2666
+sgid-gx-root-capwrite 0:2000 2755 root capwrite 0:2755
 "
 
 while read -r name owner mode who op want; do
 	[ -n "$name" ] || continue
-	for d in "$NAT2" "$MNT/$P2"; do
-		echo "test-data" >"$d/$name"
-		chown "$owner" "$d/$name"
-		chmod "$mode" "$d/$name"
-	done
-	nat="$(sgid_op "$who" "$op" "$NAT2" "$name"):$(stat -c '%a' "$NAT2/$name")"
-	mnt="$(sgid_op "$who" "$op" "$MNT/$P2" "$name"):$(stat -c '%a' "$MNT/$P2/$name")"
-	src="${mnt%%:*}:$(stat -c '%a' "$SRC/$P2/$name")"
-	if [ "$nat" = "$want" ] && [ "$mnt" = "$want" ] && [ "$src" = "$want" ]; then
-		pass "sgid2b-$name"
-	else
-		fail "sgid2b-$name" "want $want, native $nat, mount $mnt, src $src"
-	fi
+	sgid_make "$name" "$owner" "$mode"
+	sgid_make "$name.cold" "$owner" "$mode"
+done <<EOF
+$SGID2B_CASES
+EOF
+
+while read -r name owner mode who op want; do
+	[ -n "$name" ] || continue
+	sgid_check "sgid2b-$name" "$name" "$who" "$op" "$want"
 done <<EOF
 $SGID2B_CASES
 EOF
@@ -493,12 +532,13 @@ EOF
 drop_caches_quiesced
 while read -r name owner mode who op want; do
 	[ -n "$name" ] || continue
+	sgid_check "sgid2b-$name-cold-cache" "$name.cold" "$who" "$op" "$want"
 	nat=$(stat -c '%a' "$NAT2/$name")
-	cold=$(stat -c '%a' "$MNT/$P2/$name")
-	if [ "$cold" = "$nat" ]; then
-		pass "sgid2b-$name-cold-cache"
+	mnt=$(stat -c '%a' "$MNT/$P2/$name")
+	if [ "$mnt" = "$nat" ]; then
+		pass "sgid2b-$name-restat"
 	else
-		fail "sgid2b-$name-cold-cache" "native $nat, cold $cold"
+		fail "sgid2b-$name-restat" "native $nat, mount $mnt"
 	fi
 done <<EOF
 $SGID2B_CASES
