@@ -3385,3 +3385,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   carries the CI, coverage and TLC badges, what is in flight, what is next,
   what waits on russ and what landed recently. Kept current at every merge
   (process.md step 6). Quota and agent details stay out of it.
+
+- 2026-10-16: 15.11c merged, c0d1442 (rebased on 814ff83; fast tier 300
+  passed, 2 skipped). The systemd guest fixture works on the bind form again,
+  the options test and the capture's leftovers are gone, `fsck -A` on bind
+  lines is documented as verified with a positive control (systemd fscks the
+  ext4 device line), and an NFS refusal test backs the README's sentence. One
+  style review round.

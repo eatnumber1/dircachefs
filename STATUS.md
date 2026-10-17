@@ -31,7 +31,6 @@ _Last updated: 2026-10-16._
 
 | Step | What | State |
 |---|---|---|
-| 15.11c | Repair what deleting the old mount form left broken (a failing systemd test, stale docs, dead code); document fsck on bind lines | in review fixes |
 | 25.9b | Finish "no intentional crashes": the poisoned-backing shutdown test, banned symbols, remove unreachable checks | next |
 | 25.28b | The sync interval bounds the cache's own durability lag after a power cut | queued |
 | 17.2b | Setgid on writes through passthrough: reproduce, then fix | queued |
@@ -53,6 +52,8 @@ _Last updated: 2026-10-16._
 
 ## Recently landed
 
+- 2026-10-16: 15.11c, the repairs after deleting the old mount form (the
+  systemd test, stale docs, dead code; fsck on bind lines verified).
 - 2026-10-16: the SibylFS verdict re-checked and reversed (usable as a
   differential oracle); link-time fault injection kept, the virtual-syscalls
   rewrite reverted; reviews of the temporary orchestrator's week; 26.29
