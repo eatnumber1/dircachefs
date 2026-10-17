@@ -11,7 +11,6 @@
 #include <string_view>
 #include <utility>
 
-#include "absl/base/nullability.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/function_ref.h"
@@ -299,6 +298,7 @@ Connection &Connection::operator=(Connection &&o) noexcept {
   swap(statement_cache_, o.statement_cache_);
   swap(savepoint_depth_, o.savepoint_depth_);
   swap(sync_transaction_, o.sync_transaction_);
+  swap(checkpointed_version_, o.checkpointed_version_);
   return *this;
 }
 
@@ -328,23 +328,27 @@ absl::Status Connection::Close() {
   return absl::OkStatus();
 }
 
-absl::Status Connection::Checkpoint(CheckpointMode mode,
-                                    int *absl_nullable log_frames,
-                                    int *absl_nullable checkpointed_frames) {
-  if (db_ == nullptr) return absl::OkStatus();
-  int log = 0;
-  int ckpt = 0;
-  int rc = sqlite3_wal_checkpoint_v2(db_, /*zDb=*/nullptr,
-                                     static_cast<int>(mode), &log, &ckpt);
-  if (log_frames != nullptr) *log_frames = log;
-  if (checkpointed_frames != nullptr) *checkpointed_frames = ckpt;
-  if (rc != SQLITE_OK) {
-    if (mode == CheckpointMode::kPassive && rc == SQLITE_BUSY) {
-      return absl::OkStatus();
-    }
+absl::Status Connection::Checkpoint(CheckpointMode mode) {
+  if (sqlite3_wal_checkpoint_v2(db_, /*zDb=*/nullptr, static_cast<int>(mode),
+                                /*pnLog=*/nullptr,
+                                /*pnCkpt=*/nullptr) != SQLITE_OK) {
     return LastErrorStatus();
   }
+  ASSIGN_OR_RETURN(checkpointed_version_, DataVersion());
   return absl::OkStatus();
+}
+
+absl::StatusOr<bool> Connection::CommittedSinceCheckpoint() const {
+  ASSIGN_OR_RETURN(uint32_t version, DataVersion());
+  return version != checkpointed_version_;
+}
+
+absl::StatusOr<uint32_t> Connection::DataVersion() const {
+  unsigned int version = 0;
+  const int rc =
+      sqlite3_file_control(db_, "main", SQLITE_FCNTL_DATA_VERSION, &version);
+  RET_CHECK_EQ(rc, SQLITE_OK) << "every connection has a main database";
+  return version;
 }
 
 absl::Status Connection::Exec(std::string_view sql) {
@@ -553,6 +557,7 @@ absl::StatusOr<Connection> ConnectionFactory::Open() const {
   if (rc != SQLITE_OK) return conn.LastErrorStatus();
 
   RETURN_IF_ERROR(ApplyOpenPragmas(conn));
+  ASSIGN_OR_RETURN(conn.checkpointed_version_, conn.DataVersion());
   return conn;
 }
 

@@ -2355,7 +2355,8 @@ absl::Status FinishRun(Context &ctx) {
   // Model: BeginShutdown; the sync point below is StopSync and StopClear.
   ctx.events->ShutdownBegin(ctx);
   RETURN_IF_ERROR(SyncBacking(ctx));
-  RETURN_IF_ERROR(ctx.db.Checkpoint());
+  RETURN_IF_ERROR(
+      ctx.db.Checkpoint(sqlite3::Connection::CheckpointMode::kTruncate));
   // Model: StopCkpt.
   ctx.events->Checkpointed(ctx);
   if (ctx.dirty.any || ctx.dirty.atime) {
