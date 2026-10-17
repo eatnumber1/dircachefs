@@ -25,7 +25,6 @@
 #include "dcfs/remount.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
-#include "dcfs/syscalls_backing.h"
 #include "dcfs/syscalls_process.h"
 
 namespace dcfs {
@@ -41,12 +40,17 @@ constexpr std::string_view kFuseConnections = "/sys/fs/fuse/connections";
 
 // Makes `dir` (the one level: /run is the system's) if it is not there.
 absl::Status MakeLockDir(std::string_view dir) {
-  absl::Status made = syscalls::mkdirat(AT_FDCWD, dir, 0700);
+  absl::Status made = syscalls::mkdir(dir, 0700);
   if (!made.ok() && StatusToErrno(made) != EEXIST) {
     return absl::StatusBuilder(made) << "creating " << dir;
   }
   return absl::OkStatus();
 }
+
+// The file `fd` is open on, for syscalls::stat: a stat by descriptor is a
+// backing call (syscalls_backing.h), and the lock file and the fusectl
+// directory are no backing files. procfs reaches an unlinked file too.
+std::string ProcFdPath(int fd) { return absl::StrCat("/proc/self/fd/", fd); }
 
 bool SameFile(const struct stat &a, const struct stat &b) {
   return a.st_dev == b.st_dev && a.st_ino == b.st_ino;
@@ -85,9 +89,8 @@ absl::StatusOr<DaemonLock> HoldDaemonLock(std::string_view mountinfo,
   DaemonLock lock{.path = DaemonLockPath(*device, dir)};
   bool announced = false;
   while (true) {
-    ASSIGN_OR_RETURN(
-        FileDescriptor fd,
-        syscalls::openat(AT_FDCWD, lock.path, O_RDWR | O_CREAT, 0600));
+    ASSIGN_OR_RETURN(FileDescriptor fd,
+                     syscalls::open(lock.path, O_RDWR | O_CREAT, 0600));
     if (absl::Status locked = syscalls::flock(*fd, LOCK_EX | LOCK_NB);
         !locked.ok()) {
       if (StatusToErrno(locked) != EWOULDBLOCK) {
@@ -104,8 +107,8 @@ absl::StatusOr<DaemonLock> HoldDaemonLock(std::string_view mountinfo,
     }
     // The holder removes the file before it exits: the file this lock is on
     // may no longer be the one at the path.
-    ASSIGN_OR_RETURN(struct stat held, syscalls::fstat(*fd));
-    absl::StatusOr<struct stat> named = syscalls::fstatat(AT_FDCWD, lock.path);
+    ASSIGN_OR_RETURN(struct stat held, syscalls::stat(ProcFdPath(*fd)));
+    absl::StatusOr<struct stat> named = syscalls::stat(lock.path);
     if (named.ok() && SameFile(held, *named)) {
       // Never closed: the kernel releases the lock when this process exits.
       (void)std::move(fd).Release();
@@ -118,7 +121,7 @@ absl::StatusOr<DaemonLock> HoldDaemonLock(std::string_view mountinfo,
 }
 
 void RemoveDaemonLockFile(const DaemonLock &lock) {
-  if (absl::Status removed = syscalls::unlinkat(AT_FDCWD, lock.path, 0);
+  if (absl::Status removed = syscalls::unlink(lock.path);
       !removed.ok() && StatusToErrno(removed) != ENOENT) {
     LOG(WARNING) << removed;
   }
@@ -149,17 +152,16 @@ absl::Status UmountAndWait(const UmountArgs &args) {
         }
       }
       if (entry.has_value() && entry->fstype == "fuse.dcfs") {
-        if (absl::StatusOr<FileDescriptor> opened = syscalls::openat(
-                AT_FDCWD, DaemonLockPath(entry->device), O_RDWR);
+        if (absl::StatusOr<FileDescriptor> opened =
+                syscalls::open(DaemonLockPath(entry->device), O_RDWR);
             opened.ok()) {
           lock = *std::move(opened);
         }
         size_t colon = entry->device.find(':');
         if (absl::StatusOr<FileDescriptor> opened =
-                syscalls::openat(AT_FDCWD,
-                                 absl::StrCat(kFuseConnections, "/",
-                                              entry->device.substr(colon + 1)),
-                                 O_PATH | O_DIRECTORY);
+                syscalls::open(absl::StrCat(kFuseConnections, "/",
+                                            entry->device.substr(colon + 1)),
+                               O_PATH | O_DIRECTORY);
             opened.ok()) {
           connection = *std::move(opened);
         }
@@ -199,7 +201,7 @@ absl::Status UmountAndWait(const UmountArgs &args) {
   // Did this unmount end the superblock? Its fusectl directory is gone (no
   // links) if so: a bind mount, an rbind, a copy in another namespace or `-r`
   // on a busy mount leave it, and the daemon serving it.
-  ASSIGN_OR_RETURN(struct stat dir, syscalls::fstat(**connection));
+  ASSIGN_OR_RETURN(struct stat dir, syscalls::stat(ProcFdPath(**connection)));
   if (dir.st_nlink != 0) return absl::OkStatus();
   // Blocks until the daemon exits (its exclusive lock goes with it). A signal
   // ends the wait: Ctrl-C, or systemd killing the helper; one that is not

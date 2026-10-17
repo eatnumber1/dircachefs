@@ -12,12 +12,15 @@
 #include <cstdlib>
 #include <string>
 
+#include "absl/base/log_severity.h"
 #include "absl/log/log_entry.h"
 #include "absl/log/log_sink.h"
 #include "absl/log/log_sink_registry.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/match.h"
+#include "dcfs/backing_door.h"
 #include "dcfs/fd.h"
 #include "dcfs/mount_dcfs.h"
 #include "dcfs/syscalls.h"
@@ -82,6 +85,43 @@ TEST(RemoveDaemonLockFileTest, ARemovalThatFailsOnlyWarns) {
   // and the daemon goes on shutting down.
   RemoveDaemonLockFile({.path = LockDir("never_there.lock")});
   RemoveDaemonLockFile({.path = "/proc"});
+}
+
+// Counts the WARNING and ERROR lines logged while it lives.
+class WarningCount : public absl::LogSink {
+ public:
+  WarningCount() { absl::AddLogSink(this); }
+  ~WarningCount() override { absl::RemoveLogSink(this); }
+  void Send(const absl::LogEntry &entry) override {
+    if (entry.log_severity() >= absl::LogSeverity::kWarning) ++count;
+  }
+  int count = 0;
+};
+
+// With the backing door poisoned, takes and removes the lock of device
+// 0:95 in `dir`; exits 0 if both worked without a warning.
+[[noreturn]] void HoldAndRemoveBehindAPoisonedDoor(const std::string &dir) {
+  PoisonBacking();
+  WarningCount warnings;
+  absl::StatusOr<DaemonLock> lock = HoldDaemonLock(Info(95), "/m", dir);
+  if (!lock.ok()) syscalls::_exit(1);
+  RemoveDaemonLockFile(*lock);
+  syscalls::_exit(warnings.count == 0 ? 0 : 2);
+}
+
+// The lock file is in /run/dcfs, no backing filesystem: a daemon whose backing
+// door is poisoned (dcfs/backing_door.h) still removes it as it exits, with no
+// warning. In a child: the door stays poisoned.
+TEST(RemoveDaemonLockFileTest, APoisonedBackingDoorDoesNotStopIt) {
+  std::string dir = LockDir("poisoned");
+  absl::StatusOr<pid_t> child = syscalls::fork();
+  ASSERT_THAT(child, IsOk());
+  if (*child == 0) HoldAndRemoveBehindAPoisonedDoor(dir);
+  int wait_status = -1;
+  ASSERT_THAT(syscalls::waitpid(*child, &wait_status, 0), IsOk());
+  EXPECT_EQ(wait_status, 0);
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, dir + "/0_95.lock"),
+              StatusIs(absl::StatusCode::kNotFound));
 }
 
 // A child that holds the lock of device 0:`minor` in `dir`, says so on

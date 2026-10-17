@@ -615,6 +615,21 @@ TEST(SyscallsWrapperTest, SyslogNeverFails) {
   syscalls::syslog(LOG_INFO, "syscalls_test: a message with a %s in it");
 }
 
+// The by-path calls for dcfs's own files (the lock file), and their errors.
+TEST_F(SyscallsTest, OwnFilesByPath) {
+  std::string dir = "/proc/self/fd/" + std::to_string(tmpdir_fd_) + "/own";
+  std::string file = dir + "/f";
+  ASSERT_THAT(syscalls::mkdir(dir, 0700), IsOk());
+  EXPECT_EQ(StatusToErrno(syscalls::mkdir(dir, 0700)), EEXIST);
+  EXPECT_EQ(StatusToErrno(syscalls::open(file, O_RDWR).status()), ENOENT);
+  ASSERT_THAT(syscalls::open(file, O_RDWR | O_CREAT, 0600), IsOk());
+  ASSERT_OK_AND_ASSIGN(struct stat st, syscalls::stat(file));
+  EXPECT_TRUE(S_ISREG(st.st_mode));
+  EXPECT_THAT(syscalls::unlink(file), IsOk());
+  EXPECT_EQ(StatusToErrno(syscalls::unlink(file)), ENOENT);
+  EXPECT_EQ(StatusToErrno(syscalls::stat(file).status()), ENOENT);
+}
+
 // Every wrapper of syscalls_backing.h, by name, called with arguments it
 // cannot act on (descriptor -1, a path that does not exist): what it
 // returned. A wrapper added to syscalls_backing.h belongs here.

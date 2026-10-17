@@ -4,6 +4,7 @@
 
 #include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
 
@@ -103,6 +104,20 @@ absl::StatusOr<size_t> send(int fd, const void *buf, size_t count, int flags);
 // `ident` must outlive the process's logging (a literal).
 void openlog(const char *ident, int option, int facility);
 void syslog(int priority, std::string_view message);
+
+// --- dcfs's own files off the backing filesystem ----------------------------
+//
+// The daemon's lock file in /run/dcfs (umount_helper.h), by path. They do not
+// pass the backing door (backing_door.h), so a daemon whose door is poisoned
+// still releases its lock. Never for a name on the backing filesystem: those
+// are syscalls_backing.h's *at calls, at the door.
+
+// open(2), O_CLOEXEC added; mkdir(2); unlink(2); stat(2).
+absl::StatusOr<FileDescriptor> open(std::string_view path, int flags,
+                                    mode_t mode = 0);
+absl::Status mkdir(std::string_view path, mode_t mode);
+absl::Status unlink(std::string_view path);
+absl::StatusOr<struct stat> stat(std::string_view path);
 
 }  // namespace dcfs::syscalls
 

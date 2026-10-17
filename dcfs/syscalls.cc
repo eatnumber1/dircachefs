@@ -214,4 +214,40 @@ void syslog(int priority, std::string_view message) {
   ::syslog(priority, "%s", message_str.c_str());
 }
 
+absl::StatusOr<FileDescriptor> open(std::string_view path, int flags,
+                                    mode_t mode) {
+  std::string path_str(path);
+  int fd = ::open(path_str.c_str(), flags | O_CLOEXEC, mode);
+  if (fd == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("open(", EscapeBytes(path), ")"));
+  }
+  return FileDescriptor(fd);
+}
+
+absl::Status mkdir(std::string_view path, mode_t mode) {
+  std::string path_str(path);
+  if (::mkdir(path_str.c_str(), mode) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("mkdir(", EscapeBytes(path), ")"));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status unlink(std::string_view path) {
+  std::string path_str(path);
+  if (::unlink(path_str.c_str()) == -1) {
+    return ErrnoToStatus(errno,
+                         absl::StrCat("unlink(", EscapeBytes(path), ")"));
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<struct stat> stat(std::string_view path) {
+  std::string path_str(path);
+  struct stat buf{};
+  if (::stat(path_str.c_str(), &buf) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("stat(", EscapeBytes(path), ")"));
+  }
+  return buf;
+}
+
 }  // namespace dcfs::syscalls

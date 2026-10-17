@@ -686,9 +686,13 @@ until 2026-10-10; this section is it.)
   from then on, and whatever runs the subsystem asks it at its own door
   and begins the orderly shutdown. For the backing filesystem
   (`dcfs/backing_door.h`): every backing syscall is made by a wrapper of
-  `syscalls_backing.h` (the build graph enforces that only `backing.cc` and
-  its lower layers reach them), and each wrapper's first line is the one
-  guard, `RETURN_IF_ERROR(BackingDoor())`; a credential switch that cannot
+  `syscalls_backing.h`, whose dependents the build graph limits to
+  `backing.cc` and its lower layers, startup, the mount.dcfs wrapper's
+  modules and tests (`dcfs/syscalls_backing_users.txt`, 1.8), and each
+  wrapper's first line is the one guard, `RETURN_IF_ERROR(BackingDoor())`.
+  dcfs's own files off the backing filesystem (the daemon's lock file in
+  `/run/dcfs`) use `syscalls.h`'s by-path calls, which pass no door, so a
+  poisoned daemon still releases its lock. A credential switch that cannot
   be undone calls `PoisonBacking()` (`RestoreRoot`), every wrapper then
   refuses with `EIO`, and `SessionLoop::Run` checks the door before each
   message, serves nothing more and returns the refusal, so the daemon
@@ -975,7 +979,10 @@ each.
   `ioctl`); plus startup in `main.cc` (`openat` of `--source`, `fstat`).
   Process-local syscalls (resource limits, credentials, `/proc` reads, the
   cache database file, mount tables) may call the `syscalls::` wrappers
-  directly from any file. The build graph enforces the split: the
+  directly from any file; `syscalls.h`'s by-path `open`, `mkdir`, `unlink`
+  and `stat` are for dcfs's own files off the backing filesystem (the
+  daemon's lock file in `/run/dcfs`, the fusectl directory) and never take
+  a backing name. The build graph enforces the split: the
   backing-reaching wrappers are `//dcfs:syscalls_backing`
   (`syscalls_backing.h`), the process-local ones `//dcfs:syscalls` (`syscalls.h`), and
   `//tools:syscalls_backing_users_test` compares the targets that depend on

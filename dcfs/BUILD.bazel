@@ -701,12 +701,12 @@ cc_library(
       ":remount",
       ":status",
       ":syscalls",
-      ":syscalls_backing",
       ":syscalls_process",
       "@absl//absl/log",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
+      "@absl//absl/strings",
     ],
 )
 
@@ -815,16 +815,19 @@ qemu_cc_test(
     timeout = "short",
     srcs = ["umount_helper_test.cc"],
     deps = [
+      ":backing_door",
       ":status",
       ":syscalls",
       ":syscalls_backing",
       ":syscalls_process",
       ":umount_helper",
+      "@absl//absl/base:log_severity",
       "@absl//absl/log:log_entry",
       "@absl//absl/log:log_sink",
       "@absl//absl/log:log_sink_registry",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
+      "@absl//absl/status:statusor",
       "@googletest//:gtest_main",
     ],
 )
