@@ -1615,15 +1615,20 @@ a fill older than the interval surviving a cut and one after the sync
 point lost; `sqlite_durability_test` judges the crash states of the
 checkpoint itself.
 
-No request waits for the checkpoint (`DirCacheFS::FinishSyncPoint`): it
-runs after the reply of the request whose start ran the periodic sync
-point, or of the `FSYNC`/`FSYNCDIR`, and before dcfs reads the next
-request. It is a backing-free step between requests, so it needs no
-cancellation checkpoint. A checkpoint that fails (the cache disk's I/O
-error) is logged at WARNING; its commits stay unsynced until the next sync
-point, an interval later, and the bound has that exception. SQLite answers
-a `PASSIVE` checkpoint `SQLITE_BUSY` only while another connection runs
-one; dcfs runs the only one, so that answer is a failure like any other.
+The request whose sync point it is does not wait for the checkpoint
+(`DirCacheFS::FinishSyncPoint`): it runs after the reply of the request
+whose start ran the periodic sync point, or of the `FSYNC`/`FSYNCDIR`, and
+before dcfs serves the next request. A request that arrives meanwhile does
+wait for it (dcfs has one thread), and the first commit after a checkpoint
+restarts the WAL and pays one fsync of its header. It is a backing-free
+step between requests, so it needs no cancellation checkpoint.
+
+A checkpoint that fails (the cache disk's I/O error, a full filesystem)
+is logged at WARNING; its commits stay unsynced until a later checkpoint
+completes, and the bound has that exception. SQLite answers a `PASSIVE`
+checkpoint `SQLITE_BUSY` only while another connection runs a checkpoint
+or recovers the WAL; dcfs is the only connection that does either, so that
+answer is a failure like any other.
 
 ### Why not `synchronous=FULL` everywhere
 

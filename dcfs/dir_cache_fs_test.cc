@@ -3429,9 +3429,9 @@ class ReplyAndCheckpointOrder : public ProtocolEvents {
   std::vector<std::string> order;
 };
 
-// Step 25.28b: no request waits for the checkpoint: it runs after the reply
-// of the request whose start ran the periodic sync point, and of an
-// FSYNCDIR, before the next request is read.
+// The request whose sync point it is does not wait for the checkpoint: it
+// runs after the reply of the request whose start ran the periodic sync
+// point, and of an FSYNCDIR, before the next request is served.
 TEST_F(ClockTest, TheCheckpointComesAfterTheReply) {
   Start(absl::StrCat(source_, "_wal.sqlite"));
   ASSERT_EQ(Mkdir(kRootInode, "d").first.error, 0);
