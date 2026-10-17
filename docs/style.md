@@ -1371,6 +1371,29 @@ necessary, but if you think one is necessary, come to me."
   (CI). Every test declares `size` and `timeout` (the QEMU macros refuse a
   missing one); pick the tier from the measured duration. The soak test is
   `manual`.
+- **A test's verdict does not depend on host load or speed** (russ,
+  2026-10-17: "in general for all our tests I'm interested in them being
+  load-agnostic"). It counts events (syscalls, requests, I/O operations,
+  instructions retired), waits on events (`wait`, a pidfd, `testutil
+  waitline`, `waitmount`, `waitpath` or `waitexit`, a lock, a fifo read), and uses time only as a
+  hang guard that the harness sizes (`run-qemu.sh`'s allowance from the
+  target's budgets, Bazel's `timeout`): a guard that fires says the test
+  hung, never that it was slow. Not a verdict: a duration or a CPU time
+  compared with a bound, a `sleep` that stands in for an event (1.11), a
+  window of a fixed length the operations must fit in. A budget that cannot
+  be held on a loaded host (CPU time) is not held on a run `run-qemu.sh` marks
+  load-starved; it prints the number and says so
+  (`test/qemu/README.md`, "Load starvation"). A test whose subject is time
+  itself (a clock that must pass a second boundary, an interval that must
+  elapse) may wait for time to pass, as `justified_sleep` says why; only a
+  lower bound that load can lengthen and never shorten. The wall-clock
+  allowance `run-qemu.sh` derives from a target's budgets stays as the hang
+  guard until the tests that need it are replaced by ones that do not depend
+  on load (russ, 2026-10-17: "Keep it until we replace with non-load-sensitive
+  tests."). A target's budget lines are re-measured together or not at all,
+  with one run count in the section header of the budget file (russ,
+  2026-10-17: "Agreed"). The census of the tests that still break this is
+  `docs/plan/notes/load-agnostic-tests-2026-10-17.md`.
 - New code arrives covered, error paths included (from phase 7/8).
   **Never lower the coverage baseline** (russ, 2026-10-11: "You must not lower
   the coverage baseline. That's why it exists. Only ever increase it."). CI

@@ -1034,6 +1034,50 @@ rest of 26.34; the second is a rule and an audit.
 Owner: dcfs-investigator. Never widen a budget or tolerance to pass;
 never weaken a test (AGENTS.md).
 
+**As built (26.36, 2026-10-17).**
+1. A run `run-qemu.sh` marks load-starved is not held to its CPU budget (the
+   cost line says `not held to the budgets: host load-starved`); the I/O
+   budgets stay held. `run_qemu_cost_test` now reads a fixed pressure file in
+   every run: with the host's own pressure the flag now decides a verdict, and
+   the test failed once on a real host's pressure before that.
+2. The PMU: the guest sees a vPMU here with the existing `-cpu host`. User
+   instructions retired spread 0.01 to 0.8% on a quiet host and 0.01 to 2.1%
+   loaded, against CPU time's 12 to 28% and 49 to 326% (README, "Instructions
+   instead of CPU time"). Probe: `testutil pmu`, `//test/qemu:pmu_test`, CI step
+   "Report the PMU" (`.github/ci/pmu.sh`, `//tools:pmu_report_test`).
+   Recommendation in the README; the switch is follow-up A below.
+3. The audit: `docs/plan/notes/load-agnostic-tests-2026-10-17.md`. 63 listed
+   sleeps: 1 (a), 5 (b), 46 (c), 11 (d); plus 6 (b) verdicts on time outside the
+   list. 13 of the (c) fixed (`tools/repo_shape_sleeps.txt` 63 to 50), with
+   `testutil waitexit`, `testutil waitpath` and `lib.sh` `wait_exit`, which replaced a python pidfd
+   wait of `mount_dcfs_systemd.sh`.
+4. `docs/style.md` section 2: the rule, russ's words, the hang-guard ruling
+   ("Keep it until we replace with non-load-sensitive tests.") and the
+   re-measure ruling ("Agreed").
+
+**Proposed follow-ups (from 26.36).**
+- A. Switch `cpu_budgets.txt` to `instr_user` (10% tolerance, unheld where
+  `perf_event_open` fails), re-measuring all its lines together over one run
+  count; includes `fault_ace_a_test`, `fault_ace_mixed_test_ext4` and
+  `xfstests_1_test_ext4`, which 26.36 did not measure.
+- B. Sync points on demand for the eight sync-interval sleeps.
+- C. `cancel.sh` by counts of backing requests after the signal (four verdicts
+  on time).
+- D. `readdir_boundary.sh`'s linear-versus-quadratic check by instructions.
+- E. The fault windows (`fault_recover.sh`, `fault_selftest.sh`) by events
+  (11.3c).
+- F. `probe`/`expect_answered`/`fd_blocked`/`quiesce_daemon` by counters, and
+  the fourteen settles after them.
+- G. `nfs.sh`'s rpc readiness and mount retry; `init`'s coverage-run waits.
+- H. `xfstests.sh`'s per-test `LIMIT` sized from the harness's allowance.
+- I. The disks' I/O budgets move with load (`write_test_ext4` writes 329 to 336
+  against 325, flushes 144 to 150 against 145, at 87 to 91% host pressure,
+  unchanged by 26.36; `fault_ace_b_test` 0.2 to 0.6% over): ext4's periodic
+  journal commit fires by guest time. Mount the test disks with a long commit
+  interval or hold those counts only on runs that are not load-starved (russ
+  decides), then re-measure with the other lines of `xfstests_1_test_ext4` and
+  the ACE tests under russ's rule: lines together, one run count.
+
 ## 26.38 The cache database's permissions are the administrator's (russ, 2026-10-17; queued)
 
 russ, on the Gemini finding that dcfs "tightens" a stricter 0400 database
