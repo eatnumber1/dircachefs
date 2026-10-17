@@ -215,13 +215,15 @@ class DirCacheFS : private events::Bookkeeping {
   // offers no idle hook, so there is no timer: an idle daemon keeps a
   // non-empty dirty set and its unsynced cache commits until its next
   // request, its next fsync, or a clean shutdown. That is safe; it only
-  // makes the re-read after a crash larger. So when a request starts, a
-  // power cut can lose only cache commits younger than one interval, unless
-  // the last sync point's checkpoint failed (logged at WARNING;
-  // formal/durability.tla, step 25.28b).
+  // makes the re-read after a crash larger. The bound (step 25.28b,
+  // formal/durability.tla's BoundAtRequestEnd): a request that starts while
+  // a cache commit a power cut could lose is one interval old ends with
+  // every commit durable, unless its checkpoint failed (logged at
+  // WARNING).
   void MaybeSyncNow();
   // The sync point's last step, after the request's reply and before the
-  // next request is read (see fuse_ops.cc): the checkpoint SyncNow left due.
+  // next request is served (see fuse_ops.cc): the checkpoint SyncNow left
+  // due.
   void FinishSyncPoint();
   // Whether a sync point's backing half has a reason to run now (see
   // SyncNow).
