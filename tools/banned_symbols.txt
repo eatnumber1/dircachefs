@@ -92,6 +92,17 @@ ban __fprintf_chk | Abseil only
 ban __sprintf_chk | Abseil only
 ban __snprintf_chk | Abseil only
 
+# "No intentional crashes" (docs/style.md 1.6b; russ, 2026-10-09): a failure
+# is a Status, an invariant a RET_CHECK, a poisoned subsystem refuses at its
+# door. CHECK*, QCHECK*, DCHECK* (a CHECK in this fastbuild) and LOG(FATAL)
+# reach Abseil's fatal log messages; assert reaches __assert_fail.
+ban abort | no intentional crashes
+ban exit | no intentional crashes (an exit standing in for an error return)
+ban __assert_fail | no intentional crashes (assert)
+ban _ZSt9terminatev | no intentional crashes (std::terminate)
+ban _ZN4absl*log_internal15LogMessageFatal* | no intentional crashes (CHECK, LOG(FATAL))
+ban _ZN4absl*log_internal22LogMessageQuietlyFatal* | no intentional crashes (QCHECK, LOG(QFATAL))
+
 # ---- Allowed uses ------------------------------------------------------
 # Each line names an origin (an object path glob), a symbol and why that
 # use does not break the rule. //tools:banned_symbols_test fails on an allow
@@ -104,6 +115,14 @@ allow dcfs/_objs/remount/* _ZN4dcfs8syscalls8realpath* | startup only: the wrapp
 allow dcfs/_objs/syscalls_process/* execv | the umount.fuse.dcfs helper runs `umount -i` (step 15.6b) and fsck.dcfs runs the checkers (step 15.5): the callers are those helper entry points, never the daemon; nothing else execs
 allow dcfs/_objs/umount_helper/* _ZN4dcfs8syscalls8realpath* | startup only: the daemon canonicalizes MOUNTPOINT once, before the mount, to find its mountinfo line (CanonicalMountpoint); the umount.fuse helper resolves its target once, as the mountinfo line of a mount it was not given a canonical path for
 allow dcfs/_objs/mounts_below/* _ZN4dcfs8syscalls8realpath* | startup only: mounts_below.cc canonicalizes --source once, from main.cc (MountsBelow), before the mount
+
+# First party, no intentional crashes: what the compiler and Abseil's headers
+# put into every object of ours (a function of ours that calls assert or
+# std::terminate stays a violation).
+allow dcfs/* __assert_fail via _ZN4absl* | an assert inside an Abseil header function compiled into the object (the fastbuild does not define NDEBUG)
+allow dcfs/* __assert_fail via _ZNK4absl* | the same, in a const Abseil member function
+allow dcfs/* __assert_fail via _ZZN4absl* | the same, in a lambda inside an Abseil header function
+allow dcfs/* _ZSt9terminatev via __clang_call_terminate | the compiler's landing pad for an exception leaving a noexcept function (an allocation's std::bad_alloc), not a crash dcfs asks for
 
 # Abseil: formatting and diagnostics internals.
 allow abseil-cpp+/* clock_gettime | Abseil's own clock, mutex timeouts and sysinfo
@@ -119,6 +138,16 @@ allow abseil-cpp+/absl/time/_objs/clock_interface/* AbslInternalSleepFor* | absl
 allow abseil-cpp+/* snprintf | Abseil's own number, float, stack-trace and Mutex-debug formatting
 allow abseil-cpp+/* strerror_r | absl::base_internal::StrError
 allow abseil-cpp+/absl/strings/_objs/str_format_internal/parser* fprintf | the `#if defined(__clang__)` debug dump in str_format/constexpr_parser.h (clang only)
+allow abseil-cpp+/* __assert_fail | Abseil's own asserts (the fastbuild does not define NDEBUG)
+allow abseil-cpp+/* _ZSt9terminatev via __clang_call_terminate | the compiler's landing pad for an exception leaving a noexcept function
+allow abseil-cpp+/absl/base/_objs/raw_logging_internal/* abort | ABSL_RAW_LOG(FATAL) and ABSL_RAW_CHECK inside Abseil (an Abseil invariant, not a crash dcfs asks for)
+allow abseil-cpp+/absl/debugging/_objs/symbolize/* abort | ABSL_RAW_CHECK inside Abseil's symbolizer, which only a fatal log message's stack trace runs
+allow abseil-cpp+/absl/log/internal/_objs/log_message/* abort | LogMessage::FailWithoutStackTrace, the end of a fatal log message, which only a CHECK or LOG(FATAL) reaches (banned above)
+allow abseil-cpp+/absl/flags/_objs/parse/* exit | absl::ParseCommandLine's exit after --help, --version or an unknown flag: reached only from the plain `dcfs` binary's PlainMain (main.cc), never from the daemon (mount.dcfs) or the helpers, which take no Abseil flags
+allow abseil-cpp+/absl/flags/_objs/usage_internal/* exit | the same, absl::flags_internal::MaybeExit after --help or --version
+allow abseil-cpp+/absl/flags/_objs/reflection/* exit | FlagRegistry::RegisterFlag's exit on a flag defined twice, at static initialization (a build error, before main runs)
+allow <runtime> _ZN4absl*log_internal15LogMessageFatal* | defined in Abseil's log_message object, which LOG needs; no scanned object references them (a CHECK or LOG(FATAL) in our code would, and is a violation)
+allow <runtime> _ZN4absl*log_internal22LogMessageQuietlyFatal* | the same, for QCHECK and LOG(QFATAL)
 
 # SQLite: the amalgamation's unix VFS and extension loader.
 allow sqlite3+/* gettimeofday | the unix VFS's xCurrentTime and randomness seeding
@@ -143,12 +172,20 @@ allow libfuse+/* pthread_create | fuse_loop_mt and io_uring queues; dcfs runs fu
 allow libfuse+/* realpath | mount point resolution inside fuse_session_mount (startup)
 allow libfuse+/* posix_spawn* | fusermount3 fallback inside fuse_session_mount (startup)
 allow libfuse+/* execle | fusermount3 fallback inside fuse_session_mount (startup)
+allow libfuse+/* __assert_fail | libfuse's own asserts
+allow libfuse+/_objs/libfuse/fuse.* abort | the high-level API's node table and context invariants: dcfs uses the low-level session API
+allow libfuse+/_objs/libfuse/fuse_signals.* abort | exit_backtrace, the handler fuse_set_fail_signal_handlers installs for SIGSEGV and the like (dcfs installs only fuse_set_signal_handlers'), and exit_handler's guard against a negative signal number, which the kernel never delivers
+allow libfuse+/_objs/libfuse/fuse_uring.* abort | the io_uring queue handler, not used (goes with the io_uring decision)
+allow libfuse+/_objs/libfuse/mount.* abort | set_mount_flag's invariant in libfuse's mount option table
+allow libfuse+/_objs/libfuse/mount_util.* exit | the forked child of fusermount3's mtab helpers (add_mount, remove_mount, exec_umount) after a failed exec: not the daemon's process
 
 # numactl (libnuma, linked by an Abseil dependency): its sysfs parsing.
 allow numactl+/* getaddrinfo | libnuma's affinity.c, the `ip:` affinity handler (numactl's command line); dcfs never calls it. Goes with the libnuma/io_uring decision
 allow numactl+/* sprintf | libnuma builds sysfs paths
 allow numactl+/* fprintf | libnuma's warning prefix; -O0 only (an optimized build folds fprintf(stderr, "...") into fwrite)
 allow numactl+/* strerror | libnuma's own messages
+allow numactl+/* __assert_fail | libnuma's own asserts (affinity.c)
+allow numactl+/* exit | libnuma's numa_error, numa_warn and numa_bitmask_alloc on an allocation failure: libnuma's own policy; dcfs never calls libnuma (goes with the libnuma/io_uring decision)
 
 # Pulled in by the C runtime for the allowed uses above.
 allow <runtime> _ZN4dcfs8syscalls13clock_gettimeEi | the wrapper is linked with syscalls.o for the tests; nothing in the daemon calls it (a caller is a violation)

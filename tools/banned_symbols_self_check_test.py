@@ -2,8 +2,9 @@
 """Self-check of the banned-symbols gate (plan steps 26.1 and 26.8).
 
 Runs the real checker and the real deny list over a tiny program that calls
-realpath(3): the gate must fail, name the symbol and its rule, and an `allow`
-line must silence exactly the origin and symbol it names.
+realpath(3): the gate must fail, name the symbol and its rule, an `allow`
+line must silence exactly the origin and symbol it names, and one with `via`
+exactly the functions it names.
 """
 
 import sys
@@ -11,7 +12,8 @@ import unittest
 
 import banned_symbols
 
-ARGS = {}  # nm, deny_list, objects, binary: filled from the command line
+# nm, objdump, deny_list, objects, binary: filled from the command line
+ARGS = {}
 
 
 def deny_text():
@@ -21,8 +23,12 @@ def deny_text():
 
 def run_check(text):
     return banned_symbols.check(
-        ARGS["nm"], banned_symbols.read_objects(ARGS["objects"]),
-        ARGS["binary"], text)
+        ARGS["nm"], ARGS["objdump"],
+        banned_symbols.read_objects(ARGS["objects"]), ARGS["binary"], text)
+
+
+def fixture_origin():
+    return banned_symbols.read_objects(ARGS["objects"])[0][0]
 
 
 class BannedSymbolsSelfCheckTest(unittest.TestCase):
@@ -36,7 +42,7 @@ class BannedSymbolsSelfCheckTest(unittest.TestCase):
     def test_program_that_sleeps_fails_naming_the_no_timers_rule(self):
         problems = run_check(deny_text())
         self.assertTrue(
-            any("sleep" in p and "no timers" in p for p in problems),
+            any("symbol sleep " in p and "no timers" in p for p in problems),
             problems)
 
     def test_symbol_defined_in_binary_but_referenced_by_no_object_fails(self):
@@ -46,6 +52,9 @@ class BannedSymbolsSelfCheckTest(unittest.TestCase):
             problems)
         allowed = run_check(deny_text() + "allow <runtime> nftw64 | test\n")
         self.assertFalse([p for p in allowed if "nftw64" in p], allowed)
+        # Nothing references it, so no function can match a `via`.
+        via = run_check(deny_text() + "allow <runtime> nftw64 via * | test\n")
+        self.assertTrue([p for p in via if "nftw64" in p], via)
 
     def test_empty_deny_list_passes(self):
         # Control: the failure above comes from the deny list.
@@ -53,15 +62,41 @@ class BannedSymbolsSelfCheckTest(unittest.TestCase):
 
     def test_allow_line_silences_its_origin_only(self):
         text = deny_text()
-        origin = banned_symbols.read_objects(ARGS["objects"])[0][0]
         allowed = run_check(
-            text + "allow %s realpath | test\n" % origin)
+            text + "allow %s realpath | test\n" % fixture_origin())
         self.assertFalse([p for p in allowed if "realpath" in p], allowed)
         other = run_check(text + "allow nowhere/* realpath | test\n")
         self.assertTrue([p for p in other if "realpath" in p], other)
 
+    def test_via_line_silences_the_functions_it_names_only(self):
+        # The fixture's main calls sleep.
+        text = deny_text()
+        allowed = run_check(
+            text + "allow %s sleep via main | test\n" % fixture_origin())
+        self.assertFalse([p for p in allowed if "symbol sleep " in p], allowed)
+        used = set()
+        other = banned_symbols.check(
+            ARGS["nm"], ARGS["objdump"],
+            banned_symbols.read_objects(ARGS["objects"]), ARGS["binary"],
+            text + "allow %s sleep via Other* | test\n" % fixture_origin(),
+            used)
+        self.assertTrue(
+            [p for p in other if "symbol sleep " in p and " in main:" in p],
+            other)
+        self.assertFalse([a for a in used if a[1] == "sleep"], used)
+
+    def test_via_line_does_not_silence_a_reference_from_data(self):
+        # The fixture refers to usleep from a variable, in no function's code.
+        allowed = run_check(
+            deny_text() + "allow %s usleep via * | test\n" % fixture_origin())
+        self.assertTrue(
+            [p for p in allowed
+             if "usleep" in p and "outside any function's code" in p],
+            allowed)
+
     def test_malformed_lines_are_rejected(self):
-        for bad in ("ban realpath\n", "allow realpath | why\n", "x | y\n"):
+        for bad in ("ban realpath\n", "allow realpath | why\n", "x | y\n",
+                    "allow a b via | why\n", "allow a b c d | why\n"):
             with self.assertRaises(banned_symbols.DenyListError):
                 banned_symbols.parse_deny_list(bad)
 
@@ -70,7 +105,8 @@ def main():
     rest = []
     for arg in sys.argv[1:]:
         key, sep, value = arg.partition("=")
-        if sep and key in ("nm", "deny_list", "objects", "binary"):
+        if sep and key in ("nm", "objdump", "deny_list", "objects",
+                           "binary"):
             ARGS[key] = value
         else:
             rest.append(arg)

@@ -2,6 +2,7 @@
 // (not *_test.cc, not under testonly/) that crashes on purpose.
 #include <cassert>
 #include <cstdlib>
+#include <exception>
 
 #include "absl/log/check.h"
 #include "absl/log/log.h"
@@ -14,4 +15,11 @@ void Crashes(int x) {
   LOG(FATAL) << "no";  // HIT
   assert(x != 7);  // HIT
   std::abort();  // HIT
+}
+
+void Exits(int x) {
+  if (x == 1) std::exit(1);  // HIT
+  if (x == 2) exit(2);  // HIT
+  if (x == 3) std::quick_exit(3);  // HIT
+  std::terminate();  // HIT
 }

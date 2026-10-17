@@ -15,15 +15,24 @@ Line format of the deny list (`#` starts a comment, `|` separates fields):
 
   ban SYMBOL_GLOB | rule
   allow ORIGIN_GLOB SYMBOL_GLOB | reason
+  allow ORIGIN_GLOB SYMBOL_GLOB via FUNCTION_GLOB | reason
 
 SYMBOL_GLOB is an fnmatch pattern over the (mangled) symbol name without a
 version suffix; ORIGIN_GLOB one over an object's path ("dcfs/_objs/...",
 "libfuse+/_objs/..."); the origin `<runtime>` covers a symbol that is
-defined in the binary but referenced by no scanned object.
+defined in the binary but referenced by no scanned object. A line with `via`
+covers only the references made from the code of the object's functions
+that FUNCTION_GLOB matches (by mangled name, from the object's disassembly):
+every object of ours references __assert_fail from the Abseil header
+functions compiled into it, and that line lets the same symbol from a
+function of ours stay a violation.
 """
 
 import argparse
+import collections
 import fnmatch
+import functools
+import re
 import subprocess
 import sys
 
@@ -38,7 +47,8 @@ class DenyListError(Exception):
 
 
 def parse_deny_list(text):
-    """Returns (bans, allows): [(glob, rule)] and [(origin, glob, reason)]."""
+    """Returns (bans, allows): [(glob, rule)] and [(origin, glob, via,
+    reason)], `via` None on a line without one."""
     bans = []
     allows = []
     for number, line in enumerate(text.splitlines(), 1):
@@ -52,10 +62,13 @@ def parse_deny_list(text):
         if len(words) == 2 and words[0] == "ban":
             bans.append((words[1], why))
         elif len(words) == 3 and words[0] == "allow":
-            allows.append((words[1], words[2], why))
+            allows.append((words[1], words[2], None, why))
+        elif len(words) == 5 and words[0] == "allow" and words[3] == "via":
+            allows.append((words[1], words[2], words[4], why))
         else:
-            raise DenyListError("line %d: not 'ban GLOB' or "
-                                "'allow ORIGIN GLOB': %r" % (number, head))
+            raise DenyListError("line %d: not 'ban GLOB', 'allow ORIGIN GLOB' "
+                                "or 'allow ORIGIN GLOB via FUNCTION': %r"
+                                % (number, head))
     return bans, allows
 
 
@@ -79,19 +92,70 @@ def rule_of(bans, symbol):
     return None
 
 
-def allowed(allows, origin, symbol, used=None):
-    """True if an allow line covers `symbol` from `origin`; records it."""
-    hit = False
-    for entry in allows:
-        if (fnmatch.fnmatchcase(origin, entry[0]) and
-                fnmatch.fnmatchcase(symbol, entry[1])):
-            hit = True
-            if used is not None:
-                used.add(entry)
-    return hit
+def record(used, entries):
+    if used is not None:
+        used.update(entries)
 
 
-def check(nm, objects, binary, deny_text, used=None):
+def covering(allows, origin, symbol):
+    """The allow lines whose origin and symbol globs match."""
+    return [entry for entry in allows
+            if fnmatch.fnmatchcase(origin, entry[0]) and
+            fnmatch.fnmatchcase(symbol, entry[1])]
+
+
+# llvm-objdump -dr: a function's first line, and a relocation line (the
+# symbol, then an addend such as -0x4; mangled and C names have no + or -).
+FUNCTION_RE = re.compile(r"^[0-9a-f]+ <(?P<name>[^>]+)>:$")
+RELOCATION_RE = re.compile(r"\sR_\w+\s+(?P<symbol>[^\s+-]+)")
+
+
+@functools.cache
+def referrers_by_symbol(objdump, path):
+    """{symbol: the functions of the object at `path` whose code has a
+    relocation against it}, one disassembly per object."""
+    out = subprocess.run([objdump, "-dr", "--no-show-raw-insn", path],
+                         check=True, capture_output=True, text=True).stdout
+    functions = collections.defaultdict(set)
+    function = None
+    for line in out.splitlines():
+        header = FUNCTION_RE.match(line)
+        if header:
+            function = header.group("name")
+            continue
+        relocation = RELOCATION_RE.search(line)
+        if relocation:
+            functions[relocation.group("symbol")].add(function)
+    return functions
+
+
+def uncovered(objdump, allows, origin, path, symbol, used):
+    """Where the object `origin` references `symbol` without an allow line
+    covering it: [] when covered, otherwise " in FUNCTION" per function, or
+    one "" for the object as a whole. The functions are looked up only when
+    lines with `via` are all that match."""
+    lines = covering(allows, origin, symbol)
+    whole = [entry for entry in lines if entry[2] is None]
+    record(used, whole)
+    if whole:
+        return []
+    if not lines:
+        return [""]
+    functions = referrers_by_symbol(objdump, path).get(symbol, set())
+    if not functions:
+        # A reference from data (a function pointer): no function to match.
+        return [" outside any function's code"]
+    left = []
+    for function in sorted(functions):
+        hits = [entry for entry in lines
+                if fnmatch.fnmatchcase(function, entry[2])]
+        record(used, hits)
+        if not hits:
+            left.append(" in " + function)
+    return left
+
+
+def check(nm, objdump, objects, binary, deny_text, used=None):
     """Returns a list of violation messages (empty: the binary is clean).
 
     `objects` is the origin names and file paths of the linked objects:
@@ -107,14 +171,20 @@ def check(nm, objects, binary, deny_text, used=None):
             if rule is None:
                 continue
             referenced.add(symbol)
-            if allowed(allows, origin, symbol, used):
-                continue
-            problems.append("banned symbol %s referenced by %s: %s"
-                            % (symbol, origin, rule))
+            for where in uncovered(objdump, allows, origin, path, symbol,
+                                   used):
+                problems.append("banned symbol %s referenced by %s%s: %s"
+                                % (symbol, origin, where, rule))
     for symbol in sorted(nm_symbols(nm, binary, "--defined-only")):
         rule = rule_of(bans, symbol)
-        if (rule is not None and symbol not in referenced and
-                not allowed(allows, RUNTIME, symbol, used)):
+        if rule is None or symbol in referenced:
+            continue
+        # Nothing scanned references it, so there is no function to match:
+        # only a line without `via` covers it.
+        whole = [entry for entry in covering(allows, RUNTIME, symbol)
+                 if entry[2] is None]
+        record(used, whole)
+        if not whole:
             problems.append("banned symbol %s is in the linked binary but no "
                             "scanned object references it (pulled in by the "
                             "C or C++ runtime): %s" % (symbol, rule))
@@ -138,6 +208,7 @@ def read_objects(manifest):
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--nm", required=True)
+    parser.add_argument("--objdump", required=True)
     parser.add_argument("--deny_list", required=True)
     parser.add_argument("--objects", required=True,
                         help="manifest written by linked_objects")
@@ -145,8 +216,8 @@ def main(argv):
     args = parser.parse_args(argv)
     with open(args.deny_list, encoding="utf-8") as f:
         deny_text = f.read()
-    problems = check(args.nm, read_objects(args.objects), args.binary,
-                     deny_text)
+    problems = check(args.nm, args.objdump, read_objects(args.objects),
+                     args.binary, deny_text)
     for problem in problems:
         print(problem, file=sys.stderr)
     return 1 if problems else 0

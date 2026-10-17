@@ -1,5 +1,7 @@
 // Known-good input of check_in_production.query: logging that does not end
-// the process.
+// the process, and a forked child's _exit.
+#include <unistd.h>
+
 #include "absl/log/log.h"
 
 void Reports(int x) {
@@ -8,3 +10,5 @@ void Reports(int x) {
   }
   LOG(INFO) << x;
 }
+
+void ChildAfterAFailedExec() { _exit(127); }

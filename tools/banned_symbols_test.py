@@ -6,7 +6,8 @@ import unittest
 
 import banned_symbols
 
-ARGS = {}  # nm, deny_list, objects, binary: filled from the command line
+# nm, objdump, deny_list, objects, binary: filled from the command line
+ARGS = {}
 
 
 class BannedSymbolsTest(unittest.TestCase):
@@ -15,8 +16,9 @@ class BannedSymbolsTest(unittest.TestCase):
         with open(ARGS["deny_list"], encoding="utf-8") as f:
             deny_text = f.read()
         problems = banned_symbols.check(
-            ARGS["nm"], banned_symbols.read_objects(ARGS["objects"]),
-            ARGS["binary"], deny_text)
+            ARGS["nm"], ARGS["objdump"],
+            banned_symbols.read_objects(ARGS["objects"]), ARGS["binary"],
+            deny_text)
         self.assertEqual([], problems, "\n" + "\n".join(problems))
 
     def test_every_allow_line_is_used(self):
@@ -25,8 +27,9 @@ class BannedSymbolsTest(unittest.TestCase):
             deny_text = f.read()
         used = set()
         banned_symbols.check(
-            ARGS["nm"], banned_symbols.read_objects(ARGS["objects"]),
-            ARGS["binary"], deny_text, used)
+            ARGS["nm"], ARGS["objdump"],
+            banned_symbols.read_objects(ARGS["objects"]), ARGS["binary"],
+            deny_text, used)
         _, allows = banned_symbols.parse_deny_list(deny_text)
         unused = [a for a in allows if a not in used]
         self.assertEqual([], unused, "allow lines that match nothing")
@@ -36,7 +39,8 @@ def main():
     rest = []
     for arg in sys.argv[1:]:
         key, sep, value = arg.partition("=")
-        if sep and key in ("nm", "deny_list", "objects", "binary"):
+        if sep and key in ("nm", "objdump", "deny_list", "objects",
+                           "binary"):
             ARGS[key] = value
         else:
             rest.append(arg)

@@ -165,6 +165,7 @@ py_test(
     srcs = ["banned_symbols_test.py"],
     args = [
         "nm=$(rootpath @dcfs_llvm//:nm)",
+        "objdump=$(rootpath @dcfs_llvm//:objdump)",
         "deny_list=$(location banned_symbols.txt)",
         "objects=$(location :main_static_objects)",
         "binary=$(location //dcfs:main_static)",
@@ -174,6 +175,7 @@ py_test(
         ":main_static_objects",
         "//dcfs:main_static",
         "@dcfs_llvm//:nm",
+        "@dcfs_llvm//:objdump",
     ],
     target_compatible_with = BANNED_SYMBOLS_COMPATIBLE,
     deps = [":banned_symbols_lib"],
@@ -181,13 +183,15 @@ py_test(
 
 # Self-check of the gate (26.1): the same checker and the real deny list over
 # a binary that calls realpath must fail and name the symbol and its rule,
-# and an allow line must silence exactly its origin and symbol.
+# an allow line must silence exactly its origin and symbol, and one with
+# `via` exactly the functions it names.
 py_test(
     name = "banned_symbols_self_check_test",
     size = "small",
     srcs = ["banned_symbols_self_check_test.py"],
     args = [
         "nm=$(rootpath @dcfs_llvm//:nm)",
+        "objdump=$(rootpath @dcfs_llvm//:objdump)",
         "deny_list=$(location banned_symbols.txt)",
         "objects=$(location :banned_symbols_fixture_objects)",
         "binary=$(location :banned_symbols_fixture)",
@@ -197,6 +201,7 @@ py_test(
         ":banned_symbols_fixture",
         ":banned_symbols_fixture_objects",
         "@dcfs_llvm//:nm",
+        "@dcfs_llvm//:objdump",
     ],
     target_compatible_with = BANNED_SYMBOLS_COMPATIBLE,
     deps = [":banned_symbols_lib"],
