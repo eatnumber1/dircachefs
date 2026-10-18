@@ -96,6 +96,7 @@
 #include "absl/strings/str_split.h"
 #include "absl/time/simulated_clock.h"
 #include "absl/time/time.h"
+#include "absl/types/span.h"
 #include "dcfs/backing.h"
 #include "dcfs/backing_door.h"
 #include "dcfs/context.h"
@@ -7430,6 +7431,10 @@ TEST_F(DirCacheFSTest, InterruptedPopulationIsTraced) {
   ctx_.interrupts = &NoInterrupts();
 }
 
+// A name long enough (about 45 bytes) that 1,200 of them take more than
+// one getdents64 buffer of 64 KiB.
+std::string LongName(int i) { return absl::StrCat(std::string(40, 'n'), i); }
+
 // Counts one kind of ProtocolEvents::BackingCall.
 class CountBackingCalls final : public ProtocolEvents {
  public:
@@ -7444,8 +7449,8 @@ class CountBackingCalls final : public ProtocolEvents {
   std::string what_;
 };
 
-// Step 22.5: a readdir's population has the lookup's interruption point
-// before its reads. Interrupted there, a readdir of an uncached empty
+// A readdir's population has the lookup's interruption point before its
+// reads. Interrupted there, a readdir of an uncached empty
 // directory (whose population has no probe batch) replies EINTR without
 // opening it.
 TEST_F(DirCacheFSTest, ReaddirOfAnUncachedEmptyDirectoryIsInterruptible) {
@@ -7467,16 +7472,18 @@ TEST_F(DirCacheFSTest, ReaddirOfAnUncachedEmptyDirectoryIsInterruptible) {
   ctx_.interrupts = &NoInterrupts();
 }
 
-// Step 22.5: an interruption point before each getdents64 of a listing.
+// An interruption point before each getdents64 of a listing.
 // A directory whose names take more than one getdents64 buffer (64 KiB),
 // interrupted at its third interruption point (after the population's
 // first, and the first getdents64's): EINTR after one getdents64, before
 // any probe, nothing recorded.
 TEST_F(DirCacheFSTest, ListingIsInterruptedBetweenItsReads) {
   ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
-  constexpr int kNames = 1200;  // of 45 bytes: about 77 KiB of dirents
+  // Of about 45 bytes each, about 77 KiB of dirents, which ext4 hands out
+  // in 64 KiB getdents64 buffers: two with names, then the end.
+  constexpr int kNames = 1200;
   for (int i = 0; i < kNames; ++i) {
-    WriteFile(Path(absl::StrCat("d/", std::string(40, 'n'), i)));
+    WriteFile(Path(absl::StrCat("d/", LongName(i))));
   }
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
@@ -7501,7 +7508,7 @@ TEST_F(DirCacheFSTest, ListingIsInterruptedBetweenItsReads) {
   ctx_.interrupts = &NoInterrupts();
 }
 
-// Step 22.5: a GETATTR whose attributes must be refreshed has an
+// A GETATTR whose attributes must be refreshed has an
 // interruption point before the refresh (formal/dcfs.tla's Interrupt at
 // GA_stat): interrupted, it replies EINTR without opening the object, and
 // the attributes stay unknown.
@@ -7529,7 +7536,7 @@ TEST_F(DirCacheFSTest, GetattrIsInterruptedBeforeItsRefresh) {
   ctx_.interrupts = &NoInterrupts();
 }
 
-// Step 22.5 (docs/style.md 1.12): a READDIR stopped by an interruption
+// (docs/style.md 1.12) A READDIR stopped by an interruption
 // point after it built some entries replies those, a short listing; here
 // ParentOf's, before it asks the backing filesystem for "..", after ".".
 TEST_F(DirCacheFSTest, ReaddirInterruptedAtItsParentRepliesTheEntriesBefore) {
@@ -7631,7 +7638,31 @@ TEST_F(DirCacheFSTest, ReaddirplusWhoseFirstRefreshFailsRepliesTheError) {
   EXPECT_EQ(ErrnoOf(List(d, true).status()), EINTR);
 }
 
-// Step 22.5: the other requests whose refresh of a directory's attributes
+// A GETATTR of a file dcfs holds open answers from a held fill, a statx
+// of the descriptor (formal/dcfs.tla's FG_stat), with an interruption
+// point before it: interrupted there, EINTR and no statx.
+TEST_F(DirCacheFSTest, GetattrOfAnOpenFileIsInterruptedBeforeItsHeldFill) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  interrupts.at = 1;
+  CountBackingCalls held_fills("statx");
+  observers_->Add(&held_fills);
+  EXPECT_EQ(Getattr(f).first.error, -EINTR);
+  EXPECT_EQ(held_fills.count, 0);
+  interrupts.at = 0;
+  EXPECT_EQ(Getattr(f).first.error, 0);
+  EXPECT_EQ(held_fills.count, 1);
+  observers_->Remove(&held_fills);
+  ctx_.interrupts = &NoInterrupts();
+  EXPECT_EQ(Release(f, fh).error, 0);
+}
+
+// The other requests whose refresh of a directory's attributes
 // is their own work have an interruption point before it: an OPENDIR and a
 // LOOKUP of "." (the model's getattr, GA_stat), and a LOOKUP of ".." (from
 // a directory, and from a boundary stub).
@@ -7645,7 +7676,7 @@ TEST_F(DirCacheFSTest, RefreshesOfDotAndDotDotAreInterruptible) {
   ASSERT_OK_AND_ASSIGN(InodeId e, Id("e", d));
   auto [mp, mp_entry] = Lookup(d, "mp");
   ASSERT_EQ(mp.error, 0);
-  const InodeId stub = static_cast<InodeId>(mp_entry.nodeid);
+  InodeId stub = static_cast<InodeId>(mp_entry.nodeid);
   FakeInterrupts interrupts;
   ctx_.interrupts = &interrupts;
   interrupts.at = 1;
@@ -7753,7 +7784,7 @@ TEST_F(DirCacheFSTest, TraceScenarioInterruptedListing) {
   ctx_.interrupts = &interrupts;
   StartTrace();
   interrupts.at = 1;
-  (void)List(d, false);
+  List(d, false).status().IgnoreError();
   ctx_.interrupts = &NoInterrupts();
 }
 
@@ -8292,7 +8323,8 @@ INSTANTIATE_TEST_SUITE_P(
       return info.param.name;
     });
 
-// --- The interrupt sweep (step 22.5) -----------------------------------------
+// --- The interrupt sweep
+// ------------------------------------------------------
 //
 // The code's form of formal/dcfs.tla's InterruptBound, swept: each
 // scenario's request, on a fresh tree and cache, is interrupted from each
@@ -8369,24 +8401,21 @@ class InterruptRun : public DirCacheFSTest {
     sweep_.at = at.value_or(-2);
     sweep_.interrupts.pending = at == -1;
     sweep_.armed = true;
-    const int error = Request(scenario);
+    int error = Request(scenario);
     sweep_.armed = false;
     return {.every = sweep_.every, .after = sweep_.after, .error = error};
   }
 
  private:
-  // A name long enough that a listing of kLargeNames of them takes more
-  // than one getdents64 buffer (64 KiB).
-  static std::string LongName(int i) {
-    return absl::StrCat(std::string(40, 'n'), i);
-  }
   static constexpr int kLargeNames = 1200;
 
   void MakeTree(std::string_view scenario) {
     ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
     if (scenario == "readdir_empty") return;
     if (scenario == "readdir_large") {
-      for (int i = 0; i < kLargeNames; ++i) WriteFile(Path("d/" + LongName(i)));
+      for (int i = 0; i < kLargeNames; ++i) {
+        WriteFile(Path(absl::StrCat("d/", LongName(i))));
+      }
       return;
     }
     // Two probe batches.
@@ -8428,6 +8457,15 @@ class InterruptRun : public DirCacheFSTest {
     if (scenario == "getattr") {
       InterruptedSetup([&] { Chmod(f_, S_IFREG | 0600); });
     }
+    if (scenario == "opendir") {
+      InterruptedSetup([&] { Chmod(d_, S_IFDIR | 0700); });
+    }
+    if (scenario == "write" || scenario == "release" ||
+        scenario == "getattr_held") {
+      auto [open, fh] = Open(f_, scenario == "write" ? O_RDWR : O_RDONLY);
+      ASSERT_EQ(open.error, 0);
+      fh_ = fh;
+    }
   }
 
   // The scenario's request; the errno it replied (0: success).
@@ -8439,13 +8477,19 @@ class InterruptRun : public DirCacheFSTest {
     if (scenario.starts_with("readdirplus")) {
       return ErrnoOf(List(d_, true).status());
     }
-    if (scenario == "getattr") return -Getattr(f_).first.error;
+    if (scenario.starts_with("getattr")) return -Getattr(f_).first.error;
+    if (scenario == "opendir") return -Opendir(d_).error;
     if (scenario == "create") return -Mkdir(kRootInode, "new").first.error;
+    if (scenario == "create_file") {
+      return -Create(kRootInode, "new", O_CREAT | O_RDWR).reply.error;
+    }
+    if (scenario == "write") return -Write(f_, fh_, "x", 0).error;
+    if (scenario == "release") return -Release(f_, fh_).error;
     if (scenario == "unlink") return -Unlink(kRootInode, "f").error;
     if (scenario == "rename") {
       return -Rename(kRootInode, "f", kRootInode, "g").error;
     }
-    if (scenario == "attrchange") return -Chmod(f_, S_IFREG | 0600).error;
+    if (scenario == "setattr") return -Chmod(f_, S_IFREG | 0600).error;
     return -Fsyncdir(kRootInode).error;  // "sync"
   }
 
@@ -8454,6 +8498,7 @@ class InterruptRun : public DirCacheFSTest {
   BackingCallSweep sweep_;
   InodeId d_ = 0;
   InodeId f_ = 0;
+  uint64_t fh_ = 0;
 };
 
 struct InterruptCase {
@@ -8466,31 +8511,18 @@ struct InterruptCase {
   int max_at = -1;
 };
 
-// The runs, in hooks (an OpenNode is three: open_by_handle_at, its
-// identity statx and ReadGeneration; a refresh is an OpenNode and a
-// statx), with the model's Run(kind) they stand for:
-//  - a population (a lookup's or a readdir's; the model's 0, PD_read an
-//    interruption point): the rest of its OpenNode and the directory's
-//    statx, after the interruption point at its start; then one before
-//    each getdents64 and each batch of probes;
-//  - a lookup's reply entry, refreshed (outside the model's lookup, which
-//    has replied: formal/README.md, "Timely interrupts"): a refresh, with
-//    no interruption point;
-//  - a readdirplus (the model's 1, RDP_stat): its first entry's whole
-//    refresh, with no interruption point before it; then the rest of one
-//    refresh, or of ParentOf's OpenNode and its parent's probe, each after
-//    its interruption point;
-//  - a getattr (the model's 0, GA_stat): the rest of its refresh;
-//  - the mutations (the model's 1, or a create's 2, after its syscall):
-//    from the interruption point to the reply, the opens between it and
-//    the syscall included, as the model's syscall step holds them: a
-//    create's syscall, its probe (2 hooks) and the parent's statx; an
-//    unlink's and a rename's syscall and refreshes (a rename's of the
-//    moved object too); an attribute change's target OpenNode before its
-//    syscall, and after it a refresh and the side-effect xattr read
-//    (OpenNode, XattrOf);
-//  - a sync point (the model's 0): after the interruption point before
-//    its syncfs, the read-only check (fstatvfs).
+// The runs, in hooks (an OpenNode is three: open_by_handle_at, its identity
+// statx and ReadGeneration; a refresh is an OpenNode and a statx). Each is
+// the code's form of the model's Run(kind): 0 for a population (the rest of
+// its OpenNode and statx after the point at its start), a getattr, an
+// opendir and a held getattr (the rest of one refresh or held fill), a
+// write and a sync point (fstatvfs after syncfs); 1 for a readdirplus (its
+// first entry's whole refresh), a release (its held fill) and a mutation
+// past its syscall (the opens before the syscall, the syscall and the
+// refreshes after: a create's probe too, a file's create its open's too,
+// an attribute change's side-effect xattr read too). A lookup's reply entry,
+// outside the model's lookup, may take a whole refresh: it cannot reply short
+// (formal/README.md).
 const InterruptCase kInterruptCases[] = {
     {.scenario = "lookup", .run = 3},
     {.scenario = "lookup_refresh", .run = 4},
@@ -8501,10 +8533,15 @@ const InterruptCase kInterruptCases[] = {
     {.scenario = "readdirplus", .run = 4},
     {.scenario = "readdirplus_parent", .run = 4},
     {.scenario = "getattr", .run = 3},
+    {.scenario = "getattr_held", .run = 0},
+    {.scenario = "opendir", .run = 3},
     {.scenario = "create", .run = 4},
+    {.scenario = "create_file", .run = 8},
     {.scenario = "unlink", .run = 4},
     {.scenario = "rename", .run = 8},
-    {.scenario = "attrchange", .run = 11},
+    {.scenario = "setattr", .run = 11},
+    {.scenario = "write", .run = 0},
+    {.scenario = "release", .run = 1},
     {.scenario = "sync", .run = 1},
 };
 
@@ -8516,15 +8553,14 @@ struct SweepRun {
   bool within = true;
 };
 SweepRun RunInterrupted(const InterruptCase &c, int at, int total) {
-  constexpr int64_t kProbesPerBatch = 16;  // backing.cc's
   InterruptRun run;
   run.Begin(c.scenario);
-  const InterruptRun::Outcome outcome = run.Run(c.scenario, at);
+  InterruptRun::Outcome outcome = run.Run(c.scenario, at);
   run.End();
   const std::vector<std::string> &after = outcome.after;
-  const int64_t getdents = absl::c_count(after, "getdents64");
-  const int64_t probes = absl::c_count(after, "ProbeChild");
-  const int64_t other = static_cast<int64_t>(after.size()) - getdents - probes;
+  int64_t getdents = absl::c_count(after, "getdents64");
+  int64_t probes = absl::c_count(after, "ProbeChild");
+  int64_t other = static_cast<int64_t>(after.size()) - getdents - probes;
   return {
       .what = absl::StrCat(
           c.scenario, " interrupted ",
@@ -8534,7 +8570,8 @@ SweepRun RunInterrupted(const InterruptCase &c, int at, int total) {
           outcome.error == 0 ? "OK" : ErrnoToErrorName(outcome.error),
           ", then: ", absl::StrJoin(after, "; ")),
       .after = after.size(),
-      .within = getdents == 0 && probes <= kProbesPerBatch - 1 &&
+      .within = getdents == 0 &&
+                std::cmp_less(probes, backing::kProbesPerInterruptionPoint) &&
                 other <= c.run &&
                 (outcome.error == 0 || outcome.error == EINTR),
   };
@@ -8550,8 +8587,8 @@ TEST(InterruptSweepTest, BackingCallsAfterAnInterruptStayWithinTheRun) {
       every = run.Run(c.scenario, std::nullopt).every;
       run.End();
     }
-    const int total = static_cast<int>(every.size());
-    const int n = c.max_at < 0 ? total : std::min(total, c.max_at);
+    int total = static_cast<int>(every.size());
+    int n = c.max_at < 0 ? total : std::min(total, c.max_at);
     SweepRun worst;
     for (int at = -1; at < n; ++at) {
       SweepRun r = RunInterrupted(c, at, total);
@@ -8562,8 +8599,9 @@ TEST(InterruptSweepTest, BackingCallsAfterAnInterruptStayWithinTheRun) {
     // interrupt.
     std::cout << "INTERRUPT-SWEEP " << c.scenario << ": " << total
               << " backing calls ("
-              << absl::StrJoin(every.begin(),
-                               every.begin() + std::min(total, 12), "; ")
+              << absl::StrJoin(absl::MakeConstSpan(every).first(
+                                   std::min<size_t>(every.size(), 12)),
+                               "; ")
               << (total > 12 ? "; ..." : "")
               << "); the longest run after an interrupt: " << worst.what
               << '\n';

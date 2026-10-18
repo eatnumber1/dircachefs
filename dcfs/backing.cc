@@ -450,7 +450,7 @@ absl::StatusOr<std::vector<std::pair<std::string, std::string>>> XattrsOf(
 }
 
 // The names in directory `dir_fd` (which must be at offset 0), without "."
-// and "..". EINTR at the interruption point before any getdents64.
+// and "..", with an interruption point before each getdents64.
 absl::StatusOr<std::vector<std::string>> ReadDirNames(Context &ctx,
                                                       int dir_fd) {
   // uint64_t elements keep the buffer 8-byte aligned, which the kernel's
@@ -458,10 +458,8 @@ absl::StatusOr<std::vector<std::string>> ReadDirNames(Context &ctx,
   absl::FixedArray<uint64_t> buf(kDirentBufferBytes / sizeof(uint64_t));
   std::vector<std::string> names;
   while (true) {
-    // An interruption point before each read of the listing: interrupted,
-    // the population stops here and records nothing (formal/dcfs.tla's
-    // PopulateRead is all of the population's reads in one step, between
-    // its PD_read and PD_commit interruption points).
+    // formal/dcfs.tla's PopulateRead is all of a population's reads in one
+    // step, between its PD_read and PD_commit interruption points.
     RETURN_IF_ERROR(
         CheckInterrupted(ctx, InterruptionPoint("a directory's names")));
     BackingCall(ctx, "getdents64");
@@ -1458,7 +1456,6 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
   for (size_t i = 0; i < names.size(); ++i) {
     // Between probe batches (formal/dcfs.tla's Interrupt at PD_commit):
     // an interrupted population stops here and records nothing.
-    constexpr size_t kProbesPerInterruptionPoint = 16;
     if (i % kProbesPerInterruptionPoint == 0) {
       RETURN_IF_ERROR(
           CheckInterrupted(ctx, InterruptionPoint("a directory's probes")));

@@ -1091,6 +1091,7 @@ DIR_CACHE_FS_TEST_DEPS = [
     "@absl//absl/strings",
     "@absl//absl/time",
     "@absl//absl/time:simulated_clock",
+    "@absl//absl/types:span",
     "@googletest//:gtest_main",
     "@libfuse//:libfuse",
     "@sqlite//:sqlite3",
@@ -1227,8 +1228,13 @@ qemu_cc_test(
 qemu_cc_test(
     name = "dir_cache_fs_interrupt_sweep_test",
     size = "small",
+    # 7.1 s of guest wall time plain, 19.1 s under ASan (2026-10-18, 49% of
+    # it waiting for a CPU): "short" leaves too little at load 40.
     timeout = "moderate",
-    asan_mem = 896,
+    # Under ASan it peaks at 593 MiB in use (at -m 896, 2026-10-18): with
+    # the kernel's 18.5 MiB, 612 + 50% rounds up to 960 (test/qemu/README.md,
+    # "Guest memory").
+    asan_mem = 960,
     srcs = ["dir_cache_fs_test.cc"],
     args = ["--gtest_filter=InterruptSweepTest.*"],
     disks = [("vdb", "ext4", "32M")],
