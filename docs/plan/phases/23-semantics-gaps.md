@@ -733,3 +733,345 @@ its permission rule must come out as they do natively.
   12.16's brief.
 
 Owner: dcfs-implementer, after 25.34 merges.
+
+## 23.13 Stubs for submounts and btrfs subvolumes present at start (russ, 2026-10-17; queued; M2, required for M3)
+
+russ (2026-10-17): "I do want stubs for both subvolumes and submounts
+present at start to be supported, as that's my real-world usecase. It's a
+requirement to get to M3." Today dcfs refuses to start with anything mounted
+below SOURCE (`RefuseMountsBelow`, `dcfs/main.cc:326`,
+`dcfs/mounts_below.cc:165`), so the media pool's layout (disks and
+subvolumes below one root) cannot run at all.
+
+**Acceptance criterion: russ's deployment, as a required guest test**
+(russ, 2026-10-17, quoted exactly: "let there exist a btrfs at /mnt/btrfs",
+then the two commands below, "So the subvolume will be uncached.", and "Also
+add a submount too, for completeness.").
+
+```text
+mount -t dcfs -o dcfs.cache_db=/run/dcfs/db /mnt/btrfs /mnt/btrfs.cached
+mount -o bind /mnt/btrfs/subvol /mnt/btrfs.cached/subvol
+```
+
+The step is done when, in a guest, each of the two layouts below works from
+a cold database *and* from a warm one:
+- **(a) btrfs with a subvolume.** `/mnt/btrfs` is btrfs holding a
+  subvolume `subvol` (and ordinary files) before dcfs starts. dcfs starts
+  (no refusal) over it at a separate directory. In the dcfs mount `subvol`
+  is listed by `readdir`, a lookup of it succeeds and `stat` gives the stub's
+  attributes (a directory, the subvolume root's mode and owner, a nodeid at
+  or above 2^63). `mount -o bind /mnt/btrfs/subvol /mnt/btrfs.cached/subvol`
+  succeeds. Afterwards: reads, writes, creates and removals under
+  `/mnt/btrfs.cached/subvol` reach the subvolume directly (a file created
+  through the bind is at once in `/mnt/btrfs/subvol`; the converse too), the
+  **uncached** claim holds (the testonly checking daemon's cost counter,
+  `dcfs/testonly/cost_counter.h` through `guest/request_lib.sh`, shows zero
+  FUSE requests of every kind for operations under the bind, the one
+  `LOOKUP` of the bind mount's own path walk excepted; the daemon's log has
+  no "inside the boundary stub" line; the database has no rows under the
+  stub), and everything else in the dcfs mount is served cached as before
+  (a second `find` of the rest of the tree causes no backing reads, the
+  existing `/sys/block` check).
+- **(b) A filesystem below SOURCE.** The same with an ext4 filesystem
+  (`vdc`) mounted at `/mnt/btrfs/sub` before dcfs starts, bind-mounted over
+  its stub in the same way. (The matrix runs (a) on btrfs and (b) on
+  ext4, xfs and btrfs backings.)
+- **Order.** `umount /mnt/btrfs.cached` while the bind is mounted fails with
+  `EBUSY` and leaves both mounts working (the kernel's rule for any mount
+  with a child mount, which is also what the backing does); unmounting the
+  bind and then dcfs (or `umount -R`, which does that order) ends the daemon
+  with status 0 and a clean-shutdown record (the next start does no
+  recovery).
+- **Restart with the bind on top.** *Proposed (by "behave like the
+  backing"): it works, there is no refusal and no new mechanism; the order
+  above is the administrator's.* The orderly restart is unmount of the
+  bind, unmount of dcfs, mount of dcfs, mount of the bind; with the bind on
+  top it cannot even begin (`EBUSY`), as natively. A daemon that dies with
+  the bind mounted leaves the dcfs mount dead (`ENOTCONN`) and the bind
+  mounted on its stub; this is the existing "wrong restart order" of
+  `guest/nfs.sh` (`bind-export-wrong-order-fails-eio`), documented in
+  README's order rule. A new dcfs mounted over the dead one's directory
+  hides the bind beneath it (as a native mount over a non-empty directory
+  hides what is there), so the bind is made again. By the kernel code
+  (`fs/fuse/dir.c:391-454`, Linux v7.3-rc4: `fuse_dentry_revalidate` sends a
+  `LOOKUP` once `entry_timeout` has passed and invalidates the dentry on any
+  error, `ENOTCONN` of an aborted connection included, or a different
+  nodeid or generation; `fs/dcache.c:1860-1888`: `d_invalidate` detaches
+  mounts on the dentry), a bind on the stub of a *dead* dcfs is detached by
+  the kernel at the first walk through the name after `entry_timeout`
+  (default one hour), and the same detachment happens on a live dcfs if the
+  stub's nodeid or generation ever changed: which is why a stub row must
+  never change identity while its name is a boundary (design.md, "Boundary
+  stubs", already requires this). The guest test records which of these the
+  kernel does; this paragraph is corrected from its output. Alternative: the
+  wrapper refuses to mount over a directory that has mounts beneath it
+  (stricter than native, and detecting it would be a new mechanism): not
+  proposed.
+- **Why the stub is a valid mount point** (kernel requirements, v7.3-rc4):
+  `graft_tree` (`fs/namespace.c:2836-2846`) needs the mount point and the
+  mounted root to be both directories (the stub is `S_IFDIR`, its mode is
+  the boundary root's) and refuses `SB_NOUSER` superblocks, which a FUSE
+  mount is not; `get_mountpoint` (`fs/namespace.c:874-884`) refuses a
+  dentry that is unlinked (`d_unlinked`: the stub's dentry is hashed, since
+  `LOOKUP` returned an entry); nothing in the mount path asks the
+  filesystem anything beyond the path walk's `LOOKUP`. After the mount the
+  path walk revalidates the stub's name against dcfs only when the entry has
+  expired or a `LOOKUP_REVAL` retry is made, and only the name in the
+  parent, never anything inside, so a mount on the stub costs dcfs at most
+  one `LOOKUP` per `entry_timeout`, answered from the `stubs` row with no
+  backing I/O. 23.5 and README call the stub a "mount point for another
+  instance", but no guest test mounts anything on a stub (they only list,
+  `stat`, refuse inside, restart and hand NFS handles for one; `grep stub
+  test/qemu/guest/*.sh`): this step's test is the first, so the claim is
+  unproven until it passes.
+
+**As built, from the code (2026-10-17).**
+- *A runtime boundary* (`IsBoundary`, `dcfs/backing.cc:334`, called by
+  `ProbeChild`, 588): a directory whose `st_dev` or mount id
+  (`STATX_MNT_ID_UNIQUE`) differs from its parent's. `PopulateDirectory`
+  (a listing) and `ResolveName` (a lookup of an unlisted name) probe every
+  child they meet, so the first listing or lookup of the directory holding
+  the name records a `refused` dentry and a `stubs` row (`cache::SetRefused`,
+  nodeid from 2^63 up, random generation, the boundary root's `statx`
+  attributes) and logs ERROR once (`LogRefusedBoundary`). Nothing behind the
+  boundary is probed, cached or served, and the directory a mount covers is
+  never seen, because `openat` follows the mount.
+- *What a client sees* (design.md "Boundary stubs"): `readdir` lists the
+  name (`ListDir` merges stubs in rowid order); `lookup`/`stat`/`access`/
+  `statfs`/xattr reads answer from the stub row (a directory with the mount
+  root's mode, owner and times as of the last probe, `st_ino` = the nodeid,
+  `st_dev` the dcfs mount's); `opendir`, any lookup, create, open or
+  `readdir` inside it, and `setattr`/xattr changes of it: `ENOTSUP`, ERROR
+  once per stub per run (`DirCacheFS::RefuseStub`); `unlink`/`rmdir` of it
+  `EBUSY`; `rename`/`link` of it or across it `EXDEV`, into it `ENOTSUP`
+  (the kernel looks the name up in the stub first); ioctl `ENOTTY`. The
+  stub survives restarts (same nodeid) and is `ESTALE` once its dentry is
+  recorded as something else.
+- *Why start-time mounts are refused* (design.md "Why submounts are
+  refused"): one FUSE mount has one `st_dev`, so `(st_dev, st_ino)` of two
+  filesystems could collide (`tar`, `rsync`, `cp -a` hard-link detection,
+  `find` loop detection). The same reason applies to a runtime boundary,
+  which stubs solve; the start-time stub records ("the plan's stub records
+  for the submounts present at start") were "not built" because only the
+  removed clone form (15.9) needed them. The start check is therefore a
+  stopgap, not a limit of the design.
+- *btrfs subvolumes today* are **stubbed, not refused and not mixed**: a
+  subvolume is no mount (not in mountinfo, so the start check cannot see
+  it) but its root has its own `st_dev`, and `IsBoundary` compares
+  `stx_dev_major/minor` first, so `ProbeChild` refuses it and
+  `ProbeObject` (which labels rows with the parent's device) is never
+  reached for it. A subvolume that exists before dcfs starts is found the
+  first time its parent is listed or the name looked up, exactly like a
+  fresh one (`boundary_test` on btrfs, `guest/boundary.sh`: created after
+  the daemon started, in a directory dcfs had not listed yet, which is the
+  same code path; also kept across a restart and by
+  `create.sh`'s `btrfs-subvol-boundary-refused`). README's Limitations
+  title ("no btrfs subvolumes") and the sentence "a real gap" about start
+  say more than the code does; what is untested is a cold database started
+  over an existing subvolume.
+- *Not handled*: a mount point that is a **file**. `IsBoundary` returns
+  false for a non-directory, so a file mounted at runtime from another
+  filesystem is, by the code, recorded as an ordinary file with its
+  attributes and a handle taken on the other filesystem but labelled with
+  the parent's device (it opens by handle on the wrong filesystem); a
+  same-filesystem file bind mount aliases the other inode like a hard link.
+  Phase 15's decision 9 (ENOTSUP on lookup) was never built (15.4's "non-
+  directory boundaries"). Not tested either way; the guest test below
+  settles it.
+
+**Wanted.** The same stub behaviour at start as at runtime: a filesystem
+mounted below SOURCE when dcfs starts, and a btrfs subvolume below SOURCE
+when dcfs starts, appear as stubs, with nothing behind them cached or
+served, and dcfs starts without refusing.
+
+**Design, with proposed answers.**
+1. **Detection: lazy, through the probe that already exists.** No start-time
+   tree walk, no backing I/O at start: a boundary is found when a listing or
+   lookup first meets it (`only cache what the client asked for`), by the
+   `IsBoundary` code that finds runtime ones, for mounts and subvolumes
+   alike. Alternative: read mountinfo at start and probe each mount point
+   (touches the other disk when dcfs starts; subvolumes still need the lazy
+   path, so it would be a second mechanism).
+2. **What removing the refusal loses, and the one start-time pass that
+   replaces it.** The refusal was also the only guard against a *warm*
+   cache: a database from an earlier run that holds the directory a mount
+   now covers as an ordinary present dentry with children would be served
+   stale, the covered directory's contents shown under the mount point. So
+   `RefuseMountsBelow` becomes a reconcile (`ReconcileMountsBelow`, in
+   `mounts_below.cc`, reusing `MountPointsBelow`): for each mount point under
+   SOURCE (topmost of any chain; deeper ones are inside it), walk the *cache*
+   by name from the root, with no backing access, and where the dentry is
+   cached present, record it unknown (the tri-state rule: the cached value is
+   no longer known to be true), in one transaction before FUSE mounts, after
+   `StartRun`'s recovery. The first lookup then probes it and takes the
+   existing present-to-refused path (stub created, covered subtree
+   discarded); readdir of the parent lists it as a stub meanwhile or not at
+   all (the implementer checks `ListDir`, and checks what happens to the
+   covered inode rows and open handles: they must go the way a runtime
+   present-to-refused change sends them). A name not in the cache, or
+   already refused, is left alone. Subvolumes need nothing here: a subvolume
+   is a new name (an out-of-band create like any other while dcfs is
+   stopped: unsupported) or already a stub. README says so. Alternative:
+   no reconcile, document "a mount added over a cached directory while dcfs
+   is stopped is served stale until the cache is wiped"; rejected, because
+   mounts are listed for free and fstab changes between runs are the common
+   case.
+3. **Remove, do not keep.** Delete the refusal, its message, the
+   `startup-refuses-submount` and `bind-file-below-refused` checks and
+   `RefuseMountsBelow`'s test; keep `MountPointsBelow` (the reconcile uses
+   it) and the mountinfo escapes. One INFO line at start names the mounts
+   found ("N mounts below SOURCE are served as stubs"). `StartupPurge`
+   stays as it is (it is about old databases).
+4. **Stub attributes** are the boundary root's as of the probe, as today;
+   the first lookup of a start-time mount touches the other filesystem's
+   root once, when a client asks (a disk that sleeps wakes for that one
+   `statx`, and the stub row serves every later lookup, also after a
+   restart). Stated in README.
+5. **NFS export identity.** Unchanged: a stub's handle is its nodeid and
+   generation, persisted in `stubs`, so it survives restarts and fails
+   `ESTALE` after a cache wipe. A stub found lazily after a restart gets a
+   new nodeid the first time and keeps it. With `exportfs ... crossmnt`, an
+   instance mounted over the stub (the README's tree) is crossed by knfsd
+   as any mount is; the stub itself never is. A client's handle for the
+   directory a new mount covers fails `ESTALE` after the reconcile (its row
+   went with the present-to-refused change), which is what the backing's
+   export does for an object that is no longer reachable.
+6. **Nested and stacked mounts.** Only the topmost boundary of a path is a
+   stub; mounts inside it are behind the boundary and ignored (the
+   reconcile skips a mount point under one already handled). Two mounts on
+   one point: the probe sees the top one, so the stub is its root.
+7. **A file mount point (decision to confirm).** Proposed: extend the
+   stub to a non-directory boundary, so it is *never reported as absent and
+   never served from the wrong filesystem*: `IsBoundary` becomes true for a
+   non-directory whose `st_dev` or mount id differs (for a same-filesystem
+   file bind mount the mount id differs too: the stub, not an alias), the
+   stub's mode is the mounted file's type and mode, `GETATTR` answers from
+   the row, `open`, `setattr`, `readlink` and xattr changes `ENOTSUP` (once
+   per stub, ERROR), `unlink` `EBUSY`. The `readdir` entry has the stub's
+   `d_type`. Alternative (decision 9 as written): `ENOTSUP` on lookup and
+   the name left out of `readdir`: simpler, but `ls -l` of the parent then
+   fails on the name, and "never reported as absent" is lost. Either way the
+   current silent service stops. Not on russ's path, so this sub-item may
+   land second.
+8. **Stale stubs.** A mount removed between runs (or a boundary gone) leaves
+   its stub until the parent is relisted (design.md "Not done here",
+   unchanged by this step); it keeps a child instance's mount attached,
+   which is why stubs outlive boundaries deliberately. Proposed: leave it,
+   document it (`umount` then restart does not bring the covered directory
+   back; wipe the cache or relist). Alternative: record every refused dentry
+   unknown at start (DB only; each stub reprobed by its first lookup, one
+   `statx` of the other filesystem's root per stub per run): reverts
+   automatically, but costs that probe after every restart, and changes
+   `boundary_test`'s `restart-from-cache`, which asserts the opposite.
+9. **Contract flags found while reading** (these exist today at runtime
+   and now matter for start): *(a)* renaming a mount point natively is
+   `EBUSY` (rename(2), `EBUSY`: "in use by the system (for example as a
+   mount point)"); dcfs answers `EXDEV` for the stub itself, which is right
+   only for a rename *across* it; on btrfs, renaming a subvolume root within
+   its parent succeeds natively. *(b)* `find -xdev`, `du -x`, `rsync -x` and
+   `tar --one-file-system` stop at a mount natively because `st_dev` changes;
+   the stub shares the dcfs mount's `st_dev` (only the kernel's
+   `FUSE_ATTR_SUBMOUNT` could change that), so they descend and get
+   `ENOTSUP`: loud, which is wanted for a backup tool, but different from
+   native. Both are measured by the differential tests below and go to russ
+   as questions (change `rename` of a mount-kind stub to `EBUSY`? should
+   `opendir` of a stub return an empty directory for tools that cannot
+   know?). Provisional: keep today's answers, record the difference in
+   README and `docs/design.md`'s "Behave like the backing" list.
+10. **Docs.** README: "Instances, trees and boundaries" (drop "dcfs refuses
+    to start in that case"), the Limitations bullet (retitled "Filesystems
+    mounted below the source and btrfs subvolumes are stubs", with the warm
+    cache rule of 2 and the stale-stub rule of 8), the log table row at
+    README.md:734 (now also at start), the NFS notes. design.md: non-goal
+    bullet (line 69), the section "Filesystem identity and why submounts
+    are refused" (rename it "...and how submounts and subvolumes are served";
+    update the three in-document links and the table of contents), startup
+    step 2 and the "Not done here" bullet. Phase 15 decision 9 and 15.4's
+    text get a line pointing here. `test/qemu/README.md`'s `readonly_test`
+    and `nfs_test` paragraphs.
+
+**The model.** `formal/ident.tla` and `formal/lifetime.tla` already have
+boundaries (`Boundaries`, `StubIds`, `Refuse`, `StubGone`; `MC_ident_stubs`
+and `MC_lifetime_stubs` start with a filesystem mounted at each name and
+mount and unmount behind dcfs's back), so a boundary present at the first
+start is inside the model; the new part is the start-time step. Add it to
+both (a restart action that records a present name unknown when a mount now
+covers it, before serving) and a property that no name covered by a mount
+at start is served as its old contents; `known_bugs/` gets the variant
+without the step (warm cache served stale) whose test expects the
+counterexample. A bind mount on a stub relies on one thing more: the stub's nodeid and
+generation do not change while its name stays a boundary (design.md,
+"Boundary stubs": a name refused again keeps its stub). The model mints a
+generation for each new stub (`BugStubGenFixed` is the variant that does
+not); the step checks that `MC_ident_stubs` and `MC_lifetime_stubs` state
+the stability as an invariant (a boundary name's stub row never changes
+identity, a refusal forgotten and refused again included), and adds it
+with a known-bug variant if they do not. `dcfs.tla`'s write-through model has no refused state and
+is untouched; its trace validation is unaffected (the reconcile is a
+database-only unknown, not a backing mutation). If the model shows the
+reconcile can interact with the dirty set or recovery (it runs after
+`StartRun`), that is a finding for russ before code.
+
+**Tests (first, failing today).**
+- **The acceptance test** (a new `deployment_test`, guest C++ per the
+  C++-over-shell rule, 25.34's helpers; matrix ext4/xfs/btrfs backings,
+  with (a) on btrfs only): the layouts (a) and (b), the order and the
+  restart cases of the acceptance criterion above, each cold and warm, with
+  the request-counter check of zero requests under the bind, the `EBUSY`
+  of the early `umount`, the clean end, a read-only variant
+  (`mount -o bind,ro` on the stub), and the dead-daemon case recording what
+  the kernel does to the bind. It fails today at `mount.dcfs` with
+  "dcfs does not yet support filesystems mounted below SOURCE" for (b); for
+  (a) it fails today only at its restart-with-subvolume-on-a-cold-database
+  step if any (the code path says it passes up to the bind), which the first
+  failing run reports, so the quoted failure is the real one.
+- Unit (`cache`/`mounts_below` tests): `ReconcileMountsBelow` on fixture
+  mountinfo text and a cached tree: present dentry becomes unknown; refused,
+  absent, unknown and uncached names untouched; a name under a handled
+  mount skipped; SOURCE `/`; a mount on SOURCE itself ignored; octal
+  escapes; every error path. `RefuseMountsBelow`'s tests go.
+- Guest `boundary_test` (ext4, xfs, btrfs, new sections): vdc mounted at
+  `/src/d/mp` *before the first start* with a cold database: the stub is
+  listed, `stat` is a directory with the root's mode and owner, a nodeid
+  at or above 2^63, `ls` inside is `ENOTSUP`, the covered file is never
+  visible, ERROR once, the same after a restart without a probe. Warm
+  cache: dcfs runs and lists `d` (the covered directory has a child), stop,
+  mount vdc, start: the stub, not the old child, and the old child's handle
+  `ESTALE`. btrfs: a subvolume present before the first start, cold
+  database; a subvolume holding a subvolume (only the first is a stub);
+  `nfs` variant: an NFS client lists the stub and gets `ENOTSUP` inside.
+  Nested mounts at start; two mounts on one point; a mount at SOURCE's own
+  level; dcfs mounted over SOURCE with a submount below it (the existing
+  supported configuration).
+- File mounts (`mount_dcfs.sh`'s `bind-file-below-refused` becomes
+  `bind-file-below-stub`, plus a runtime file mount in `boundary_test`):
+  per decision 7, plus a regression for today's silent service (a file
+  bind-mounted from vdc over a file: today reads through the wrong
+  filesystem).
+- Differential against native (the backing without dcfs in the loop,
+  `docs/design.md` "Behave like the backing, only faster"): the parent's
+  `ls -a` names equal; the stub's `mode`, `uid`, `gid`, times and `nlink`
+  equal the mount root's at probe time; `rmdir` `EBUSY` equal; `rename` of
+  the mount point, `find -xdev` and `du -x` recorded as the known
+  differences of 9 with the native result printed beside, so a change to
+  either side shows.
+- Medium tier: `readonly_test` loses `startup-refuses-submount` (its
+  `boundary-*` checks stay); `handles`, `create`, `nfs` keep their runtime
+  checks.
+
+**Owner:** dcfs-protocol (Opus, high): the reconcile changes dentry
+tri-state at start, the nodeids and handles NFS clients hold, and the TLA+
+model; review by dcfs-reviewer. A dcfs-implementer would do the docs, the
+refusal's removal and the file-mount sub-item, but the pass in 2 and its
+model cannot be split from them. Budget: one lane, one step; the file-mount
+sub-item (7) and the contract flags (9) may be cut to a follow-up (23.14)
+if russ answers them late, without holding back 1 to 6, 8 and 10.
+
+**Open questions for russ** (dashboard "Questions for you"; each has the
+provisional ruling above): file mount point as a stub or ENOTSUP (7); stale
+stubs left or reprobed at every start (8); `rename` of a mount-kind stub
+`EXDEV` or native `EBUSY`, and `find -xdev`/`du -x` over a stub (9);
+dcfs restarted or dead with a bind mounted on a stub: works as natively
+(`EBUSY` to unmount, `ENOTCONN` when dead, no refusal), or the wrapper
+refuses to mount over a directory with mounts beneath it (acceptance
+criterion).
