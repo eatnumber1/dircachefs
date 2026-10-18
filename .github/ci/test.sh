@@ -29,6 +29,8 @@
 #                    step 17.1: eighteen shards of 11 to 21 minutes would
 #                    double the full, asan and ubsan jobs); --tag also takes
 #                    --shard and --sizes;
+#   --weekly         test the weekly deferred tests (step 5.13: ASan and UBSan
+#                    variants of idle_long_test, pjdfstest and bench_full_test);
 #   --print-queries  print the cquery expression of each size (no Bazel run),
 #                    for //tools:test_sh_test.
 # These are consumed here; every other argument goes to Bazel.
@@ -45,6 +47,7 @@ tag=""
 print_queries=0
 list=0
 sizes="small,medium,large,enormous"
+weekly=0
 bazel_args=()
 config_args=()
 for arg in "$@"; do
@@ -54,12 +57,20 @@ for arg in "$@"; do
 	--list) list=1 ;;
 	--tag=*) tag="${arg#--tag=}" ;;
 	--print-queries) print_queries=1 ;;
+	--weekly) weekly=1 ;;
 	*)
 		bazel_args+=("$arg")
 		# cquery takes the build options (--config=asan, ...) but not
 		# the test options (--test_timeout, ...).
 		case "$arg" in --config=* | --define=*) config_args+=("$arg") ;; esac
 		;;
+	esac
+done
+
+is_sanitizer=0
+for c in "${config_args[@]}"; do
+	case "$c" in
+	--config=asan | --config=ubsan) is_sanitizer=1 ;;
 	esac
 done
 
@@ -75,9 +86,39 @@ xfstests*)
 	;;
 esac
 
+# In 28 CI runs these sanitizer runs never caught a bug and cost about 150 busy
+# minutes per run. Moved out of per-push CI and into the weekly workflow.
+sanitizer_weekly_tests=(
+	//test/qemu:idle_long_test
+	//test/qemu:bench_full_test
+	//test/qemu:pjdfstest_chown_test_ext4
+	//test/qemu:pjdfstest_chown_test_xfs
+	//test/qemu:pjdfstest_chown_test_btrfs
+	//test/qemu:pjdfstest_rename_test_ext4
+	//test/qemu:pjdfstest_rename_test_xfs
+	//test/qemu:pjdfstest_rename_test_btrfs
+	//test/qemu:pjdfstest_rest_test_ext4
+	//test/qemu:pjdfstest_rest_test_xfs
+	//test/qemu:pjdfstest_rest_test_btrfs
+)
+
 excluded=()
 if [ "${DCFS_CI_KVM:-0}" != 1 ]; then
-	excluded+=(//test/qemu:pjdfstest_test_xfs //test/qemu:pjdfstest_test_btrfs)
+	excluded+=(
+		//test/qemu:pjdfstest_test_xfs
+		//test/qemu:pjdfstest_test_btrfs
+		//test/qemu:pjdfstest_chown_test_xfs
+		//test/qemu:pjdfstest_chown_test_btrfs
+		//test/qemu:pjdfstest_rename_test_xfs
+		//test/qemu:pjdfstest_rename_test_btrfs
+		//test/qemu:pjdfstest_rest_test_xfs
+		//test/qemu:pjdfstest_rest_test_btrfs
+	)
+fi
+if [ "$is_sanitizer" = 1 ] && [ "$weekly" = 0 ]; then
+	# In 28 CI runs these sanitizer runs never caught a bug and cost about 150
+	# busy minutes per run.
+	excluded+=("${sanitizer_weekly_tests[@]}")
 fi
 
 # The cquery expression of the tests of size $1 this invocation may run. Tests
@@ -114,12 +155,24 @@ without() {
 	awk -v list="$*" 'BEGIN { n = split(list, a, " "); for (i = 1; i <= n; i++) drop[a[i]] = 1 } !($2 in drop)'
 }
 
+# Keeps only the lines whose label is one of the arguments.
+only() {
+	awk -v list="$*" 'BEGIN { n = split(list, a, " "); for (i = 1; i <= n; i++) keep[a[i]] = 1 } $2 in keep'
+}
+
 targets=(//...)
 if [ -n "$tag" ] && [ -z "$shard" ]; then
 	shard=0/1 # a tag selects test targets, which only the shard path lists
 fi
+if [ "$weekly" = 1 ] && [ -z "$shard" ]; then
+	shard=0/1 # weekly selects deferred targets, which only the shard path lists
+fi
 if [ -n "$shard" ]; then
-	mapfile -t targets < <(suite_tests | without "${excluded[@]}" | ./.github/ci/shard.sh "${shard%/*}" "${shard#*/}")
+	if [ "$weekly" = 1 ]; then
+		mapfile -t targets < <(suite_tests | only "${sanitizer_weekly_tests[@]}" | without "${excluded[@]}" | ./.github/ci/shard.sh "${shard%/*}" "${shard#*/}")
+	else
+		mapfile -t targets < <(suite_tests | without "${excluded[@]}" | ./.github/ci/shard.sh "${shard%/*}" "${shard#*/}")
+	fi
 	echo "test.sh: shard $shard of sizes $sizes: ${#targets[@]} test targets" >&2
 	if [ "${#targets[@]}" = 0 ]; then
 		echo "test.sh: nothing to test in this shard" >&2

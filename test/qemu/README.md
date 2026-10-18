@@ -225,8 +225,8 @@ and `qemu_cc_test` requires an explicit `size` and `timeout` (the macros
 | Tier | Command | Contents | Wall time (KVM) |
 |---|---|---|---|
 | small | `bazel test --config=fast //...` | unit tests, ext4 variant of each e2e matrix test, boot, cache_permissions, lifecycle | about 1 minute |
-| medium | `bazel test --config=presubmit //...` (small + medium) | xfs and btrfs variants, readdir_boundary, release_leak | a few minutes |
-| large / enormous | `bazel test //...` (everything except `manual`; CI) | nfs_test and mount_dcfs_systemd_test (large), xfstests' generic tests on three filesystems (enormous: six shards each, `xfstests_<n>_test_<fstype>`; tag `xfstests`, run by their own CI job, not by `full`, `asan` or `ubsan`: see "xfstests (Phase 17)"), pjdfstest on three filesystems (enormous; about 10 minutes alone, about 18 when two run side by side) | about 36 minutes without xfstests; xfstests adds about 20 minutes per backing file system |
+| medium | `bazel test --config=presubmit //...` (small + medium) | xfs and btrfs variants, readdir_boundary, release_leak, mount_dcfs_systemd_test | a few minutes |
+| large / enormous | `bazel test //...` (everything except `manual`; CI) | nfs_test (large), xfstests' generic tests on three filesystems (enormous: six shards each, `xfstests_<n>_test_<fstype>`; tag `xfstests`, run by their own CI job, not by `full`, `asan` or `ubsan`: see "xfstests (Phase 17)"), pjdfstest on three filesystems (enormous; about 10 minutes alone, about 18 when two run side by side) | about 36 minutes without xfstests; xfstests adds about 20 minutes per backing file system |
 
 The rows above are the tiers, not an agent's inner loop: an edit-compile-debug
 loop runs only the changed targets, and the tiers once before reporting
@@ -2316,8 +2316,8 @@ What the real `mount(8)` path showed that the busybox guest could not:
 Cost (2026-10-09, KVM, a 4-core host shared with other work): a 388 MiB image
 download once; the whole test about 60 s, systemd taking 7 to 11 s to reach
 the script on each boot; the default 256 MiB guest (`peak_used` 61 MiB,
-`reclaim_scans=0`, dcfs 7 MiB per daemon); tier large, timeout long (the two
-boots share it: 420 s each). Run it with
+`reclaim_scans=0`, dcfs 7 MiB per daemon); tier medium, timeout moderate
+(the two boots share it: measured about 31 s, step 5.13). Run it with
 `bazel test //test/qemu:mount_dcfs_systemd_test`; `--test_output=all` prints
 both boots. Coverage is not collected from this guest (the daemons are not
 started from `guest/init`'s environment).

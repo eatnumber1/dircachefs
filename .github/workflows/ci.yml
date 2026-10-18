@@ -80,6 +80,12 @@ on:
           medium test. About two hours on six runners.
         type: boolean
         default: false
+      weekly:
+        description: >-
+          Also run the weekly sanitizer tests (step 5.13: ASan and UBSan runs of
+          idle_long_test, pjdfstest and bench_full_test).
+        type: boolean
+        default: false
       cold:
         description: >-
           Run every job with no cache restored and none saved: the cold path
@@ -91,8 +97,9 @@ on:
         type: boolean
         default: false
   # The schedule exists only for what changes without a commit: OSV
-  # advisories, and the noisy run (step 26.14e: a weekly search for races, which
-  # needs no commit either). The push gate's test jobs are skipped on it.
+  # advisories, the weekly sanitizer runs (step 5.13: expensive sanitizer variants
+  # deferred from per-push CI), and the noisy run (step 26.14e: a weekly search for
+  # races, which needs no commit either). The push gate's test jobs are skipped on it.
   schedule:
     - cron: "17 5 * * 1"
 
@@ -604,7 +611,8 @@ jobs:
       # Step 26.16: where Bazel writes its profile (test.sh, coverage.sh,
       # tools/reproducible_build.sh); the steps below summarize and upload it.
       DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/full-${{ matrix.shard }}.json.gz
-    needs: presubmit
+    # Reviews happen before CI, so the order does not change what is caught before review, and wave 3 starts about 10 minutes sooner.
+    needs: fast
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
@@ -727,7 +735,8 @@ jobs:
       # Step 26.16: where Bazel writes its profile (test.sh, coverage.sh,
       # tools/reproducible_build.sh); the steps below summarize and upload it.
       DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/xfstests-${{ matrix.backing }}.json.gz
-    needs: presubmit
+    # Reviews happen before CI, so the order does not change what is caught before review, and wave 3 starts about 10 minutes sooner.
+    needs: fast
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
@@ -798,6 +807,9 @@ jobs:
     # (.github/ci/test.sh --shard=I/3: a deterministic partition of the suite's
     # test targets; the jobs run in parallel with each other and with the
     # other suites).
+    # In 28 CI runs these sanitizer runs never caught a bug and cost about 150
+    # busy minutes per run: idle_long_test, the pjdfstest tests and
+    # bench_full_test are moved out of per-push CI and into the weekly workflow.
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -809,7 +821,8 @@ jobs:
       # Step 26.16: where Bazel writes its profile (test.sh, coverage.sh,
       # tools/reproducible_build.sh); the steps below summarize and upload it.
       DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/asan-${{ matrix.shard }}.json.gz
-    needs: presubmit
+    # Reviews happen before CI, so the order does not change what is caught before review, and wave 3 starts about 10 minutes sooner.
+    needs: fast
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
@@ -897,6 +910,9 @@ jobs:
     # (.github/ci/test.sh --shard=I/3: a deterministic partition of the suite's
     # test targets; the jobs run in parallel with each other and with the
     # other suites).
+    # In 28 CI runs these sanitizer runs never caught a bug and cost about 150
+    # busy minutes per run: idle_long_test, the pjdfstest tests and
+    # bench_full_test are moved out of per-push CI and into the weekly workflow.
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -908,7 +924,8 @@ jobs:
       # Step 26.16: where Bazel writes its profile (test.sh, coverage.sh,
       # tools/reproducible_build.sh); the steps below summarize and upload it.
       DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/ubsan-${{ matrix.shard }}.json.gz
-    needs: presubmit
+    # Reviews happen before CI, so the order does not change what is caught before review, and wave 3 starts about 10 minutes sooner.
+    needs: fast
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
@@ -1305,6 +1322,76 @@ jobs:
         with:
           name: noisy-report-${{ matrix.suite }}-${{ matrix.shard }}
           path: noisy-report
+          if-no-files-found: ignore
+
+  sanitizers-weekly:
+    # Step 5.13: ASan and UBSan runs of idle_long_test, pjdfstest and
+    # bench_full_test deferred from per-push CI (.github/ci/test.sh --weekly).
+    # In 28 CI runs these sanitizer runs never caught a bug and cost about 150
+    # busy minutes per run.
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.weekly) }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [asan, ubsan]
+    timeout-minutes: 180
+    env:
+      DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/sanitizers-weekly-${{ matrix.config }}.json.gz
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
+        run: ./.github/ci/prepare.sh
+      - name: Restore the repository cache
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
+          restore-keys: |
+            bazel-repo-
+      - name: Restore the extracted LLVM toolchain
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: bazel-llvm-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'third_party/llvm/*') }}
+      - name: Restore Bazel caches (read-only)
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazelisk
+          key: bazel-sanitizers-weekly-${{ matrix.config }}-restore-only-${{ github.sha }}
+          restore-keys: |
+            bazel-${{ matrix.config }}-0-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-${{ matrix.config }}-0-
+            bazel-${{ matrix.config }}-
+            bazel-
+      - name: Test (${{ matrix.config }})
+        run: ./.github/ci/test.sh --config=${{ matrix.config }} --weekly
+      - name: Report the accelerator
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/accelerator.sh
+      - name: Where the time went (job summary)
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/profile.sh
+      - name: Upload the Bazel profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bazel-profile-sanitizers-weekly-${{ matrix.config }}
+          path: ci-profile
+          if-no-files-found: ignore
+      - name: Upload test logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-logs-sanitizers-weekly-${{ matrix.config }}
+          path: ci-test-logs
           if-no-files-found: ignore
 
   badges:

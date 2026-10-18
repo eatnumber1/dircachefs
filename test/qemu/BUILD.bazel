@@ -860,8 +860,8 @@ qemu_test(
     # 457 + 53 reserved, times 1.5, rounded up to 64.
     asan_mem = 768,
     systemd_image = "//third_party/debian_cloud:image",
-    size = "large",
-    timeout = "long",
+    size = "medium",
+    timeout = "moderate",
 )
 
 qemu_test_matrix(
