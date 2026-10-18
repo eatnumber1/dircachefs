@@ -20,5 +20,6 @@ EXTENDS MC
 \* out: an override cannot refer to what it overrides.)
 InterruptPcsWithoutCreate ==
     {"RN_probe", "PD_read", "PD_commit", "U_sys", "R_sys",
-     "A_sys", "FC_sys", "FS_sys", "W_sys"}
+     "A_sys", "GA_stat", "RDP_stat", "FC_sys", "FS_sys",
+     "W_sys", "FG_stat", "FG_rstat"}
 =============================================================================

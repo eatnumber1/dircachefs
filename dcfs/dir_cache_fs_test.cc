@@ -7499,6 +7499,92 @@ TEST_F(DirCacheFSTest, ListingIsInterruptedBetweenItsReads) {
   ctx_.interrupts = &NoInterrupts();
 }
 
+// Step 22.5: a GETATTR whose attributes must be refreshed has an
+// interruption point before the refresh (formal/dcfs.tla's Interrupt at
+// GA_stat): interrupted, it replies EINTR without opening the object, and
+// the attributes stay unknown.
+TEST_F(DirCacheFSTest, GetattrIsInterruptedBeforeItsRefresh) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  interrupts.at = 1;
+  // An attribute change interrupted before its syscall: d's attributes
+  // unknown.
+  ASSERT_EQ(Chmod(d, S_IFDIR | 0700).error, -EINTR);
+  StartTrace();
+  interrupts.checkpoints = 0;
+  CountBackingCalls opens("open_by_handle_at");
+  observers_->Add(&opens);
+  EXPECT_EQ(Getattr(d).first.error, -EINTR);
+  observers_->Remove(&opens);
+  EXPECT_EQ(opens.count, 0);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, d));
+  EXPECT_FALSE(attr.valid);
+  interrupts.at = 0;
+  EXPECT_EQ(Getattr(d).first.error, 0);
+  ctx_.interrupts = &NoInterrupts();
+}
+
+// Step 22.5 (docs/style.md 1.12): a READDIR stopped by an interruption
+// point after it built some entries replies those, a short listing; here
+// ParentOf's, before it asks the backing filesystem for "..", after ".".
+TEST_F(DirCacheFSTest, ReaddirInterruptedAtItsParentRepliesTheEntriesBefore) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  WriteFile(Path("d/f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  ASSERT_THAT(List(d, false), IsOk());
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  interrupts.at = 1;
+  // A rename of d interrupted before its syscall: d's own dentry unknown,
+  // so ParentOf must read the backing filesystem.
+  ASSERT_EQ(Rename(kRootInode, "d", kRootInode, "e").error, -EINTR);
+  StartTrace();
+  interrupts.checkpoints = 0;
+  EXPECT_THAT(List(d, false), IsOkAndHolds(::testing::ElementsAre(".")));
+  interrupts.at = 0;
+  EXPECT_THAT(List(d, false),
+              IsOkAndHolds(::testing::ElementsAre(".", "..", "f")));
+  ctx_.interrupts = &NoInterrupts();
+}
+
+// Step 22.5: a READDIRPLUS has an interruption point before each entry's
+// refresh. At "."'s (formal/dcfs.tla's RDP_stat) nothing is built: EINTR.
+// At an entry's, after "." and "..": those, a short listing.
+TEST_F(DirCacheFSTest,
+       ReaddirplusInterruptedAtARefreshRepliesTheEntriesBefore) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  WriteFile(Path("d/f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  ASSERT_THAT(List(d, false), IsOk());
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f", d));
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  interrupts.at = 1;
+  // Attribute changes interrupted before their syscalls: d's and f's
+  // attributes unknown.
+  ASSERT_EQ(Chmod(d, S_IFDIR | 0700).error, -EINTR);
+  interrupts.checkpoints = 0;
+  ASSERT_EQ(Chmod(f, S_IFREG | 0600).error, -EINTR);
+  StartTrace();
+  interrupts.checkpoints = 0;
+  EXPECT_EQ(ErrnoOf(List(d, true).status()), EINTR);
+  // "."'s refresh passes (the first interruption point), f's stops.
+  interrupts.at = 2;
+  interrupts.checkpoints = 0;
+  EXPECT_THAT(List(d, true), IsOkAndHolds(::testing::ElementsAre(".", "..")));
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+  EXPECT_FALSE(attr.valid);
+  interrupts.at = 0;
+  EXPECT_THAT(List(d, true),
+              IsOkAndHolds(::testing::ElementsAre(".", "..", "f")));
+  ctx_.interrupts = &NoInterrupts();
+}
+
 // A mutation interrupted before its backing syscall replies EINTR: the
 // backing filesystem is untouched, the names phase 1 made unknown stay
 // unknown and dirty, and the mutation's guard is released.
@@ -8297,10 +8383,14 @@ struct InterruptCase {
 //    its syncfs, the read-only check (fstatvfs).
 const InterruptCase kInterruptCases[] = {
     {.scenario = "lookup", .run = 3},
+    {.scenario = "lookup_refresh", .run = 4},
     {.scenario = "readdir_uncached", .run = 3},
     {.scenario = "readdir_empty", .run = 3},
     // Its listing's first calls only: the probes after are as above.
     {.scenario = "readdir_large", .run = 3, .max_at = 8},
+    {.scenario = "readdirplus", .run = 3},
+    {.scenario = "readdirplus_parent", .run = 3},
+    {.scenario = "getattr", .run = 3},
     {.scenario = "create", .run = 4},
     {.scenario = "unlink", .run = 4},
     {.scenario = "rename", .run = 8},

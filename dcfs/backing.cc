@@ -1656,7 +1656,9 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
   if (cached.has_value()) return *cached;
 
   // `dir`'s own dentry is unknown (audit F6): ask the backing filesystem.
-  // A fill of the parent's row, as PopulateDirectory records a child.
+  // A fill of the parent's row, as PopulateDirectory records a child, with
+  // an interruption point before its backing reads.
+  RETURN_IF_ERROR(CheckInterrupted(ctx, "a directory's parent"));
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   ctx.events->ParentLookupStarted(ctx, dir);
   ASSIGN_OR_RETURN(FileDescriptor dir_fd,

@@ -480,15 +480,17 @@ absl::Status DirCacheFS::RefuseStub(FuseRequest &req, InodeId id,
   return req.ReplyErrno(err);
 }
 
-absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(InodeId id) {
+absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(
+    InodeId id, std::string_view interruption_point) {
   if (cache::IsStub(id)) return StubEntry(id);
   ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
-  return EntryForAttr(id, attr);
+  return EntryForAttr(id, attr, interruption_point);
 }
 
 absl::StatusOr<fuse_entry_param> DirCacheFS::EntryForAttr(
-    InodeId id, cache::CachedAttr attr) {
-  ASSIGN_OR_RETURN(attr, FreshAttr(id, attr, /*reply=*/true));
+    InodeId id, cache::CachedAttr attr, std::string_view interruption_point) {
+  ASSIGN_OR_RETURN(attr,
+                   FreshAttr(id, attr, /*reply=*/true, interruption_point));
 
   fuse_entry_param entry{};
   entry.ino = static_cast<fuse_ino_t>(id);
@@ -556,9 +558,15 @@ absl::StatusOr<fuse_entry_param> DirCacheFS::EntryAfterPhase2(
   return fallback;
 }
 
-absl::StatusOr<cache::CachedAttr> DirCacheFS::FreshAttr(InodeId id,
-                                                        cache::CachedAttr attr,
-                                                        bool reply) {
+absl::StatusOr<cache::CachedAttr> DirCacheFS::FreshAttr(
+    InodeId id, cache::CachedAttr attr, bool reply,
+    std::string_view interruption_point) {
+  // The caller's interruption point, if it has one, before a backing read.
+  const auto stop_if_interrupted = [&]() -> absl::Status {
+    return interruption_point.empty()
+               ? absl::OkStatus()
+               : CheckInterrupted(ctx_, interruption_point);
+  };
   // Model: a getattr's first step (GAFrom), served or refreshed. Every
   // caller read `attr` from the cache with no syscall since.
   events::Scope scope(*ctx_.events, ctx_, &ProtocolEvents::GetattrBegin,
@@ -574,12 +582,14 @@ absl::StatusOr<cache::CachedAttr> DirCacheFS::FreshAttr(InodeId id,
     if (std::optional<int> held = reply ? OpenFdOf(id) : std::nullopt;
         held.has_value() && !open_for_write_.contains(id) &&
         !removed_.contains(id)) {
+      RETURN_IF_ERROR(stop_if_interrupted());
       struct statx stx{};
       RETURN_IF_ERROR(backing::FillHeldAttrs(ctx_, id, *held, &stx));
       ASSIGN_OR_RETURN(attr, RequireAttr(id));
       return cache::WithStatx(attr, stx);
     }
     if (attr.valid) return attr;
+    RETURN_IF_ERROR(stop_if_interrupted());
     struct statx stx{};
     RETURN_IF_ERROR(RefreshAttrsOf(id, &stx));
     // The row itself (fuse_gen, identity) may have changed meanwhile, e.g.
@@ -765,7 +775,10 @@ absl::Status DirCacheFS::Getattr(FuseRequest &req, fuse_ino_t ino,
     ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttrOrRemoved(id));
     return req.ReplyAttr(attr.st, AttrTimeoutFor(id));
   }
-  ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(static_cast<InodeId>(ino)));
+  // An interruption point before the refresh, if one is needed
+  // (formal/dcfs.tla's Interrupt at GA_stat).
+  ASSIGN_OR_RETURN(fuse_entry_param entry,
+                   EntryFor(static_cast<InodeId>(ino), "a getattr's refresh"));
   return req.ReplyAttr(entry.attr,
                        AttrTimeoutFor(static_cast<InodeId>(entry.ino)));
 }
@@ -865,20 +878,26 @@ absl::Status DirCacheFS::Lookup(FuseRequest &req, fuse_ino_t parent_ino,
                                 std::string_view name) {
   InodeId parent = static_cast<InodeId>(parent_ino);
 
+  // "." and "..": an interruption point before a refresh, if one is
+  // needed (for ".", formal/dcfs.tla's Interrupt at GA_stat), and before
+  // ParentOf's backing reads.
   if (name == ".") {
-    ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(parent));
+    ASSIGN_OR_RETURN(fuse_entry_param entry,
+                     EntryFor(parent, "a lookup of \".\"'s refresh"));
     return ReplyEntry(req, entry);
   }
   if (cache::IsStub(parent)) {
     if (name != "..") return RefuseStub(req, parent, "lookup");
     RETURN_IF_ERROR(RequireAttr(parent).status());  // ESTALE if gone
     ASSIGN_OR_RETURN(cache::StubRow stub, cache::GetStub(ctx_, parent));
-    ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(stub.parent));
+    ASSIGN_OR_RETURN(fuse_entry_param entry,
+                     EntryFor(stub.parent, "a lookup of \"..\"'s refresh"));
     return ReplyEntry(req, entry);
   }
   if (name == "..") {
     ASSIGN_OR_RETURN(InodeId up, backing::ParentOf(ctx_, parent));
-    ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(up));
+    ASSIGN_OR_RETURN(fuse_entry_param entry,
+                     EntryFor(up, "a lookup of \"..\"'s refresh"));
     return ReplyEntry(req, entry);
   }
 
@@ -2201,7 +2220,10 @@ absl::Status DirCacheFS::Opendir(FuseRequest &req, fuse_ino_t ino,
   // directory it was); the kernel itself then answers its reads with
   // ENOENT, as for any removed directory.
   ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttrOrRemoved(id));
-  ASSIGN_OR_RETURN(attr, FreshAttr(id, attr));
+  // An interruption point before a refresh, if one is needed
+  // (formal/dcfs.tla's Interrupt at GA_stat).
+  ASSIGN_OR_RETURN(
+      attr, FreshAttr(id, attr, /*reply=*/false, "an opendir's refresh"));
   if (!S_ISDIR(attr.st.st_mode)) return req.ReplyErrno(ENOTDIR);
   return req.ReplyOpen(fi);
 }
@@ -2216,6 +2238,19 @@ struct stat DotStat(const cache::CachedAttr &attr) {
   st.st_ino = static_cast<ino_t>(attr.backing_ino);
   st.st_mode = S_IFDIR;
   return st;
+}
+
+// What a READDIR or READDIRPLUS replies once building its `count` entries
+// stopped with `built` (docs/style.md 1.12, the most useful answer): an
+// interruption point's EINTR after some entries were built is OK, those
+// entries being a short listing (a valid getdents result: the next call
+// continues from the last one's offset); with none built, or for any
+// other error, the error.
+absl::Status ShortListingOnInterrupt(const absl::Status &built, size_t count) {
+  if (count > 0 && GetErrnoFromStatus(built).value_or(0) == EINTR) {
+    return absl::OkStatus();
+  }
+  return built;
 }
 
 // The ListDir cursor a readdir offset resumes from: offsets 0 and 1 are
@@ -2326,30 +2361,40 @@ absl::Status DirCacheFS::Readdir(FuseRequest &req, fuse_ino_t ino, size_t size,
   // ones no-ops anyway).
   if (off == 0) StampAtime(dir);
 
+  // The entries, until an interruption point stops them: ParentOf's,
+  // before its backing reads.
   std::vector<FuseDirEntry> entries;
-  if (off < 1) {
-    ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(dir));
-    entries.push_back({.name = ".", .stbuf = DotStat(attr), .off = 1});
-  }
-  if (off < 2) {
-    // The root is its own parent (ParentOf), as a mount's root is: what is
-    // above --source is not part of the tree dcfs serves.
-    ASSIGN_OR_RETURN(InodeId parent, backing::ParentOf(ctx_, dir));
-    ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(parent));
-    entries.push_back({.name = "..", .stbuf = DotStat(attr), .off = 2});
-  }
-  for (const Listed &e : listed) {
-    // A stub's backing_ino is its nodeid (cache::StubRow). Rows with valid
-    // attributes came with the listing; the rest are read as before.
-    std::optional<cache::CachedAttr> attr = e.attr;
-    if (!attr.has_value()) {
-      ASSIGN_OR_RETURN(attr, RequireAttr(e.child));
+  const absl::Status built = [&]() -> absl::Status {
+    if (off < 1) {
+      ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(dir));
+      entries.push_back({.name = ".", .stbuf = DotStat(attr), .off = 1});
     }
-    struct stat st = {};
-    st.st_ino = attr->backing_ino;
-    st.st_mode = attr->st.st_mode;
-    entries.push_back({.name = e.name, .stbuf = st, .off = e.next_cursor + 2});
-  }
+    if (off < 2) {
+      // The root is its own parent (ParentOf), as a mount's root is: what
+      // is above --source is not part of the tree dcfs serves.
+      ASSIGN_OR_RETURN(InodeId parent, backing::ParentOf(ctx_, dir));
+      ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(parent));
+      entries.push_back({.name = "..", .stbuf = DotStat(attr), .off = 2});
+    }
+    for (const Listed &e : listed) {
+      // A stub's backing_ino is its nodeid (cache::StubRow). Rows with
+      // valid attributes came with the listing; the rest are read as
+      // before.
+      std::optional<cache::CachedAttr> attr = e.attr;
+      if (!attr.has_value()) {
+        ASSIGN_OR_RETURN(attr, RequireAttr(e.child));
+      }
+      struct stat st = {};
+      st.st_ino = attr->backing_ino;
+      st.st_mode = attr->st.st_mode;
+      entries.push_back(
+          {.name = e.name, .stbuf = st, .off = e.next_cursor + 2});
+    }
+    return absl::OkStatus();
+  }();
+  // Between the failure and the reply: an interrupt after some entries
+  // were built replies those.
+  RETURN_IF_ERROR(ShortListingOnInterrupt(built, entries.size()));
   return req.ReplyDirs(entries, size);
 }
 
@@ -2369,26 +2414,40 @@ absl::Status DirCacheFS::Readdirplus(FuseRequest &req, fuse_ino_t ino,
   // once per listing, as for Readdir.
   if (off == 0) StampAtime(dir);
 
+  // The entries, until an interruption point stops them: one before each
+  // entry's refresh, if it needs one (formal/dcfs.tla's Interrupt at
+  // RDP_stat for "."; the others come after the model's request has
+  // replied), and ParentOf's, before its backing reads.
   std::vector<FuseDirEntryPlus> entries;
-  if (off < 1) {
-    ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(dir));
-    entries.push_back({.name = ".", .entry = entry, .off = 1});
-  }
-  if (off < 2) {
-    ASSIGN_OR_RETURN(InodeId parent, backing::ParentOf(ctx_, dir));
-    ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(parent));
-    entries.push_back({.name = "..", .entry = entry, .off = 2});
-  }
-  // EntryFor may refresh an entry's attributes (syscalls; a fill, guarded
-  // on its own). Only entries that fit the reply were listed, so nothing
-  // is refreshed for an entry the reply then drops.
-  for (const Listed &e : listed) {
-    ASSIGN_OR_RETURN(fuse_entry_param entry,
-                     e.attr.has_value() ? EntryForAttr(e.child, *e.attr)
-                                        : EntryFor(e.child));
-    entries.push_back(
-        {.name = e.name, .entry = entry, .off = e.next_cursor + 2});
-  }
+  const absl::Status built = [&]() -> absl::Status {
+    if (off < 1) {
+      ASSIGN_OR_RETURN(fuse_entry_param entry,
+                       EntryFor(dir, "refreshing \".\""));
+      entries.push_back({.name = ".", .entry = entry, .off = 1});
+    }
+    if (off < 2) {
+      ASSIGN_OR_RETURN(InodeId parent, backing::ParentOf(ctx_, dir));
+      ASSIGN_OR_RETURN(fuse_entry_param entry,
+                       EntryFor(parent, "refreshing \"..\""));
+      entries.push_back({.name = "..", .entry = entry, .off = 2});
+    }
+    // EntryFor may refresh an entry's attributes (syscalls; a fill, guarded
+    // on its own). Only entries that fit the reply were listed, so nothing
+    // is refreshed for an entry the reply then drops.
+    for (const Listed &e : listed) {
+      constexpr std::string_view kRefresh = "refreshing an entry";
+      ASSIGN_OR_RETURN(fuse_entry_param entry,
+                       e.attr.has_value()
+                           ? EntryForAttr(e.child, *e.attr, kRefresh)
+                           : EntryFor(e.child, kRefresh));
+      entries.push_back(
+          {.name = e.name, .entry = entry, .off = e.next_cursor + 2});
+    }
+    return absl::OkStatus();
+  }();
+  // Between the failure and the reply: an interrupt after some entries
+  // were built replies those.
+  RETURN_IF_ERROR(ShortListingOnInterrupt(built, entries.size()));
   RETURN_IF_ERROR(req.ReplyDirsPlus(entries, size));
   // The kernel counts a lookup for every entry in the reply with a nonzero
   // nodeid except "." and ".." (fuse_direntplus_link), whether or not it

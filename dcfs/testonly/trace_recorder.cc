@@ -919,8 +919,10 @@ void TraceRecorder::LookupDecided(Context &ctx, Ino parent,
         Cut(ctx, parent, "boundary: a refused boundary");
       } else {
         Emit(ctx, parent, req, "lookup", fields);
-        if (outcome == events::LookupOutcome::kFound ||
-            outcome == events::LookupOutcome::kNegative) {
+        // A lookup request's answer; a mutation's resolve goes on.
+        if (req->kind == "lookup" &&
+            (outcome == events::LookupOutcome::kFound ||
+             outcome == events::LookupOutcome::kNegative)) {
           req->terminal = true;
         }
       }
@@ -963,7 +965,7 @@ void TraceRecorder::ResolveCommitted(Context &ctx, Ino parent,
     } else {
       Emit(ctx, parent, req, "resolve_commit",
            absl::StrCat(",\"recorded\":", Bool(recorded)));
-      req->terminal = true;
+      if (req->kind == "lookup") req->terminal = true;
     }
   }
   ChildFills(ctx, parent);
@@ -1102,7 +1104,9 @@ void TraceRecorder::PopulateCommitted(Context &ctx, Ino dir, uint64_t snapshot,
     } else {
       Emit(ctx, dir, req, "populate_commit",
            absl::StrCat(",\"recorded\":", Bool(recorded)));
-      req->terminal = true;
+      // A lookup request's answer; a readdir checks its listing again, a
+      // mutation's resolve goes on.
+      if (req->kind == "lookup") req->terminal = true;
     }
   }
   ChildFills(ctx, dir);
@@ -1760,10 +1764,15 @@ void TraceRecorder::FileReleased(Context &ctx, Ino id, bool writable,
 void TraceRecorder::Interrupted(Context &ctx) {
   Enter("Interrupted");
   // Every directory request the innermost FUSE request (and the frames
-  // inside it) is: the model's Interrupt of each.
+  // inside it) is: the model's Interrupt of each. Not one whose model
+  // request has replied already (a READDIR's ".." or a READDIRPLUS entry's
+  // refresh, after its listing was served): the code then replies the
+  // entries built so far, a shorter listing of the model's reply.
   for (auto &frame : std::views::reverse(frames_)) {
     for (auto &[dir, req] : frame.reqs) {
-      if (!Traced(dir) || !req.arrived || req.interrupted) continue;
+      if (!Traced(dir) || !req.arrived || req.interrupted || req.terminal) {
+        continue;
+      }
       req.interrupted = true;
       Dir &state = dirs_[dir];
       if (state.reading && state.read_slot == req.slot) {

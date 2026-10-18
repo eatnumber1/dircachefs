@@ -345,6 +345,7 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
 // identified (handle, inode number, generation), and found among -- or,
 // if it has none, added to -- the cached rows (not linked into its own
 // parent: nothing here knows its name). NotFound only if `dir` has no row.
+// An interruption point before the backing reads: EINTR, nothing recorded.
 absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir);
 
 // Probes just `name` in `parent` on the backing filesystem (as

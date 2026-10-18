@@ -523,10 +523,13 @@ Free(p) == running \in {None, p}
 
 \* The interruption points (the Interrupt section below): the pcs whose step
 \* comes right after a CheckInterrupted in the code. D's: a lookup's probe
-\* or population, between the population's probe batches, a mutation's
-\* syscall; F's (step 22.5): its create's, setattr's and write's syscall.
+\* or population (a readdir's too), between the population's probe
+\* batches, a mutation's syscall, a getattr's or readdirplus's refresh;
+\* F's (step 22.5): its create's, setattr's and write's syscall, its
+\* getattr's held fill or refresh.
 InterruptPcs == {"RN_probe", "PD_read", "PD_commit", "C_sys", "U_sys", "R_sys",
-                 "A_sys", "FC_sys", "FS_sys", "W_sys"}
+                 "A_sys", "GA_stat", "RDP_stat", "FC_sys", "FS_sys", "W_sys",
+                 "FG_stat", "FG_rstat"}
 \* Whether the interruption points see request r's interrupt: once it has
 \* arrived (Interrupts::Interrupted). known_bugs/interrupt_ignored
 \* overrides it.
@@ -1190,16 +1193,18 @@ WReply(p) ==
 (* one request at a time and cannot stop a backing syscall once issued; it *)
 (* looks for an interrupt of the request it serves at interruption points  *)
 (* (CheckInterrupted in dcfs/interruption_point.h), each just before a     *)
-(* backing syscall: before LookupOrPopulate's probe or population          *)
-(* (RN_probe, PD_read), between the population's probe batches (PD_commit: *)
-(* its reads are abandoned, nothing is committed), and before a mutation's *)
-(* phase-2 syscall (C_sys, U_sys, R_sys, A_sys; F's FC_sys and FS_sys, and *)
-(* a write's W_sys). There an interrupted request replies EINTR; a         *)
-(* mutation past phase 1 ends (Mutation::End) without a phase 3, its names *)
-(* and attributes left unknown and D or F dirty, as phase 1 left them: the *)
-(* backing filesystem is unchanged, so unknown is sound. From the syscall  *)
-(* through phase 3 there is no interruption point: the change exists and   *)
-(* is recorded, and the request replies success.                           *)
+(* backing syscall: before a lookup's probe (RN_probe), before a           *)
+(* population's reads, a lookup's or a readdir's (PD_read), between them   *)
+(* (PD_commit: its reads are abandoned, nothing is committed), before a    *)
+(* getattr's or a readdirplus's refresh (GA_stat, RDP_stat; F's FG_stat    *)
+(* and FG_rstat), and before a mutation's phase-2 syscall (C_sys, U_sys,   *)
+(* R_sys, A_sys; F's FC_sys and FS_sys, and a write's W_sys). There an     *)
+(* interrupted request replies EINTR; a mutation past phase 1 ends         *)
+(* (Mutation::End) without a phase 3, its names and attributes left        *)
+(* unknown and D or F dirty, as phase 1 left them: the backing filesystem  *)
+(* is unchanged, so unknown is sound. From the syscall through phase 3     *)
+(* there is no interruption point: the change exists and is recorded, and  *)
+(* the request replies success.                                            *)
 (*                                                                         *)
 (* Timely interrupts (step 22.5). The interrupt's arrival is a step of its *)
 (* own, InterruptArrives, at any moment of a request in flight (one        *)
@@ -1218,13 +1223,13 @@ WReply(p) ==
 (* its syscall: the refresh after a linkcreate's (C_stat), an unlink's, a  *)
 (* rename's or an attribute change's phase 3 (U_stat, R_stat, A_stat), F's *)
 (* probe after its create (FC_probe) and its refresh after a setattr       *)
-(* (FS_stat); for a release's held fill (FR_stat); and for a getattr's     *)
-(* refresh (GA_stat, F's FG_stat and FG_rstat) and a readdirplus's         *)
-(* (RDP_stat), none of which has an interruption point before it. 0 for a  *)
-(* lookup, a readdir, a write and a sync point. And it eventually replies, *)
-(* EINTR if it reaches an interruption point (InterruptedReplies,          *)
-(* InterruptActedOn), under the weak fairness of each request's own steps  *)
-(* (RequestFairness).                                                      *)
+(* (FS_stat), none of which has an interruption point before it (the       *)
+(* change exists: the request replies success); and for a release's held   *)
+(* fill (FR_stat), which has none either. 0 for every other request: a     *)
+(* lookup, a readdir, a readdirplus, a getattr, a write and a sync point.  *)
+(* And it eventually replies, EINTR if it reaches an interruption point    *)
+(* (InterruptedReplies, InterruptActedOn), under the weak fairness of each *)
+(* request's own steps (RequestFairness).                                  *)
 (*                                                                         *)
 (* What the bound counts is model steps that are backing syscalls. It does *)
 (* not count work with no backing syscall: cache queries and commits (on   *)
@@ -1238,11 +1243,12 @@ WReply(p) ==
 (* probe's openat, statx, name_to_handle_at, generation ioctl, a symlink's *)
 (* readlink, listxattr, and a getxattr for each of the object's xattrs, so *)
 (* not a fixed number) but PopulateRead, which in the code reads the       *)
-(* listing with getdents64 calls until its end, one per 64 KiB of entries  *)
-(* with no interruption point between them, then probes up to 16 names     *)
-(* between interruption points; and a readdir's population has no          *)
-(* interruption point before those reads, nor any at all for an empty      *)
-(* directory: two findings (formal/README.md, "Timely interrupts").        *)
+(* listing with getdents64 calls, one per 64 KiB of entries, with an       *)
+(* interruption point before each, then probes up to 16 names between      *)
+(* interruption points. Nor what the code does after the model's request   *)
+(* has replied, on objects other than D: a lookup's reply entry, refreshed *)
+(* if its attributes are unknown, with no interruption point               *)
+(* (formal/README.md, "Timely interrupts", lists these).                   *)
 (*                                                                         *)
 (* BugInterruptAfterSyscall: also interruptible after the syscall, before  *)
 (* phase 3, cancelling the mutation by putting its resolved name back.     *)
@@ -2519,8 +2525,7 @@ RecoveryTerminates == (mode # "up") ~> (mode = "up")
 Run(kind) ==
     CASE kind = "create" -> 2
       [] kind \in {"linkcreate", "unlink", "rename", "attrchange", "fcreate",
-                   "fset", "frelease", "getattr", "fgetattr",
-                   "readdirplus"} -> 1
+                   "fset", "frelease"} -> 1
       [] OTHER -> 0
 
 \* The bound, counted in work: after its interrupt arrives, a request takes
