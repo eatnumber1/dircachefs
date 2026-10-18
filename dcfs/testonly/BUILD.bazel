@@ -12,7 +12,10 @@ package(default_testonly = 1)
 cc_library(
     name = "assert_ok_and_assign",
     hdrs = ["assert_ok_and_assign.h"],
-    visibility = ["//dcfs:__pkg__"],
+    visibility = [
+        "//dcfs:__pkg__",
+        "//test/qemu:__pkg__",
+    ],
     deps = [
         "@absl//absl/status:status_matchers",
         "@googletest//:gtest",

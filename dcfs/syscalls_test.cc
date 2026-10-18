@@ -5,9 +5,12 @@
 #include <linux/fs.h>
 #include <linux/stat.h>
 #include <sys/file.h>
+#include <sys/inotify.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
 #include <sys/syslog.h>
 #include <sys/types.h>
 #include <syslog.h>
@@ -766,6 +769,61 @@ TEST(SyscallsBackingTest, EveryWrapperRefusesOnceTheDoorIsPoisoned) {
   ASSERT_THAT(syscalls::waitpid(child, &wait_status, 0), IsOkAndHolds(child));
   // 0: exited with status 0, every wrapper refused (the child logs any other).
   EXPECT_EQ(wait_status, 0);
+}
+
+TEST_F(SyscallsTest, ChmodRenameRmdirAndStatfs) {
+  const std::string dir = "/proc/self/fd/" + std::to_string(tmpdir_fd_);
+  const std::string sub = dir + "/sub";
+  ASSERT_THAT(syscalls::mkdir(sub, 0755), IsOk());
+  EXPECT_THAT(syscalls::chmod(sub, 0700), IsOk());
+  ASSERT_OK_AND_ASSIGN(struct stat st, syscalls::stat(sub));
+  EXPECT_EQ(st.st_mode & 07777, 0700u);
+  EXPECT_EQ(StatusToErrno(syscalls::chmod(dir + "/none", 0700)), ENOENT);
+
+  const std::string moved = dir + "/moved";
+  EXPECT_THAT(syscalls::rename(sub, moved), IsOk());
+  EXPECT_EQ(StatusToErrno(syscalls::stat(sub).status()), ENOENT);
+  EXPECT_THAT(syscalls::stat(moved), IsOk());
+  EXPECT_EQ(StatusToErrno(syscalls::rename(sub, moved)), ENOENT);
+
+  EXPECT_THAT(syscalls::rmdir(moved), IsOk());
+  EXPECT_EQ(StatusToErrno(syscalls::rmdir(moved)), ENOENT);
+
+  ASSERT_OK_AND_ASSIGN(struct statfs fs, syscalls::statfs(dir));
+  EXPECT_GT(fs.f_bsize, 0);
+  EXPECT_EQ(StatusToErrno(syscalls::statfs(dir + "/none").status()), ENOENT);
+}
+
+TEST_F(SyscallsTest, MmapMincoreAndMunmap) {
+  constexpr size_t kLength = 4096;
+  ASSERT_THAT(syscalls::ftruncate(file_fd_, kLength), IsOk());
+  ASSERT_OK_AND_ASSIGN(void *map, syscalls::mmap(nullptr, kLength, PROT_READ,
+                                                 MAP_SHARED, file_fd_, 0));
+  unsigned char vec[1] = {0xff};
+  EXPECT_THAT(syscalls::mincore(map, kLength, vec), IsOk());
+  EXPECT_EQ(vec[0] & ~1, 0);  // only the residency bit is defined
+  EXPECT_THAT(syscalls::munmap(map, kLength), IsOk());
+
+  EXPECT_EQ(StatusToErrno(
+                syscalls::mmap(nullptr, kLength, PROT_READ, MAP_SHARED, -1, 0)
+                    .status()),
+            EBADF);
+  EXPECT_EQ(StatusToErrno(syscalls::munmap(map, 0)), EINVAL);
+  EXPECT_EQ(StatusToErrno(syscalls::mincore(nullptr, kLength, vec)), ENOMEM);
+}
+
+TEST_F(SyscallsTest, InotifyInitAndAddWatch) {
+  ASSERT_OK_AND_ASSIGN(FileDescriptor fd, syscalls::inotify_init1(IN_NONBLOCK));
+  ASSERT_OK_AND_ASSIGN(int flags, syscalls::fcntl(*fd, F_GETFD));
+  EXPECT_NE(flags & FD_CLOEXEC, 0);
+  const std::string dir = "/proc/self/fd/" + std::to_string(tmpdir_fd_);
+  ASSERT_OK_AND_ASSIGN(int wd,
+                       syscalls::inotify_add_watch(*fd, dir, IN_CREATE));
+  EXPECT_GE(wd, 1);
+  EXPECT_EQ(
+      StatusToErrno(
+          syscalls::inotify_add_watch(*fd, dir + "/none", IN_CREATE).status()),
+      ENOENT);
 }
 
 }  // namespace

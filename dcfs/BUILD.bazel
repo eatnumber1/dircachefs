@@ -167,7 +167,10 @@ qemu_cc_test(
 
 cc_library(
     name = "status",
-    visibility = ["//dcfs/testonly:__pkg__"],
+    visibility = [
+      "//dcfs/testonly:__pkg__",
+      "//test/qemu:__pkg__",
+    ],
     # Abseil's unprefixed RETURN_IF_ERROR / ASSIGN_OR_RETURN for every
     # dependent (style 1.6, russ 2026-10-10); dcfs/status.h refuses to build
     # without it.
@@ -238,6 +241,7 @@ cc_library(
     visibility = [
       "//bench:__pkg__",
       "//dcfs/testonly:__pkg__",
+      "//test/qemu:__pkg__",
     ],
     hdrs = [
       "syscalls.h",
@@ -319,6 +323,7 @@ cc_library(
     visibility = [
       "//bench:__pkg__",
       "//dcfs/testonly:__pkg__",
+      "//test/qemu:__pkg__",
     ],
     deps = [
       ":backing_door",

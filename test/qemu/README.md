@@ -1876,6 +1876,23 @@ ext4, xfs and btrfs.
   backing filesystem (step 4.4; `write_test` has the full write-through
   test), 200 open/release cycles leak no fds, and all of this still works
   after killing and restarting the daemon against the same cache database.
+- `kernel_facts_test` (`kernel_facts.cc`, run by `guest/kernel_facts.sh`, which
+  only mounts dcfs): pins of what the kernel and dcfs do for
+  O_DIRECT and inotify, each a kernel behaviour dcfs relies on or its users
+  meet, cited to the kernel source in the test's comments, so that a kernel
+  update that changes one fails here. O_DIRECT on a passthrough open behaves
+  as on the backing (the same results, the same `EINVAL` for a misaligned
+  request on ext4 and xfs, the buffered fallback on btrfs) and the I/O is
+  direct (no page of the backing file in its page cache after the write,
+  read with `mincore`; a buffered write is the control); clearing O_DIRECT
+  with `fcntl(F_SETFL)` leaves the per-open backing file direct (a kernel
+  quirk, `docs/plan/notes/kernel-patches.md`); inotify on the mount sees the
+  changes made through it, as on the backing; a passthrough write raises
+  `IN_MODIFY` on the FUSE inode and on the backing inode; a change made
+  directly on the backing raises no event on the mount (the exclusive-access
+  limitation). Nothing in it depends on timing: events are queued in the
+  syscall and the checks count and order them. The differential half runs in
+  `/src/native`, a directory dcfs never touches.
 - `lifecycle_test` (`guest/lifecycle.sh`): step 3.5's daemon lifecycle and
   CLI -- usage/option validation, a missing or non-directory SOURCE, a
   cache database refused because it belongs to a different filesystem,

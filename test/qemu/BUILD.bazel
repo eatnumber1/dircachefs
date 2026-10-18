@@ -118,6 +118,7 @@ config_setting(
         "@xfstests//:fsx",
         "@xfstests//:replay-log",  # step 12.14
         ":crash_states",  # step 12.14
+        ":kernel_facts",
         "@alpine_busybox//:root/bin/busybox.static",
         "@alpine_strace//:root",  # step 26.3: /usr/bin/strace and musl
         "@alpine_dmsetup//:root",  # step 11.1: /sbin/dmsetup and libdevmapper
@@ -754,6 +755,45 @@ qemu_test_matrix(
     name = "passthrough_test",
     disks = [("vdb", "ext4", "320M")],
     guest_script = "guest/passthrough.sh",
+    size = "small",
+    other_size = "medium",
+    timeout = "moderate",
+)
+
+# What the kernel and dcfs do for O_DIRECT and inotify, pinned (kernel_facts.cc,
+# run by guest/kernel_facts.sh), on each backing file system. Measured
+# 2026-10-18 on a loaded host (load average 25-30), boot included: ext4 8.5 s,
+# xfs 11.1 s, btrfs 14.5 s; `moderate` is the guest's usual allowance.
+cc_binary(
+    name = "kernel_facts",
+    testonly = 1,
+    srcs = ["kernel_facts.cc"],
+    features = select({
+        ":asan_build": [],
+        ":ubsan_build": [],
+        "//conditions:default": ["fully_static_link"],
+    }),
+    linkstatic = True,
+    deps = [
+        "//dcfs:status",
+        "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
+        "//dcfs/testonly:assert_ok_and_assign",
+        "@absl//absl/cleanup",
+        "@absl//absl/container:fixed_array",
+        "@absl//absl/status",
+        "@absl//absl/status:status_matchers",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+        "@absl//absl/strings:str_format",
+        "@googletest//:gtest_main",
+    ],
+)
+
+qemu_test_matrix(
+    name = "kernel_facts_test",
+    disks = [("vdb", "ext4", "320M")],
+    guest_script = "guest/kernel_facts.sh",
     size = "small",
     other_size = "medium",
     timeout = "moderate",

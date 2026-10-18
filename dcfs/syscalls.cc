@@ -5,10 +5,13 @@
 #include <poll.h>
 #include <sys/file.h>
 #include <sys/fsuid.h>
+#include <sys/inotify.h>
+#include <sys/mman.h>
 #include <sys/poll.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
 #include <sys/syscall.h>
 #include <sys/syslog.h>
 #include <sys/types.h>
@@ -16,6 +19,9 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <span>
@@ -248,6 +254,80 @@ absl::StatusOr<struct stat> stat(std::string_view path) {
     return ErrnoToStatus(errno, absl::StrCat("stat(", EscapeBytes(path), ")"));
   }
   return buf;
+}
+
+absl::Status chmod(std::string_view path, mode_t mode) {
+  std::string path_str(path);
+  if (::chmod(path_str.c_str(), mode) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("chmod(", EscapeBytes(path), ")"));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status rename(std::string_view from, std::string_view to) {
+  std::string from_str(from);
+  std::string to_str(to);
+  if (::rename(from_str.c_str(), to_str.c_str()) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("rename(", EscapeBytes(from), ", ",
+                                             EscapeBytes(to), ")"));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status rmdir(std::string_view path) {
+  std::string path_str(path);
+  if (::rmdir(path_str.c_str()) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("rmdir(", EscapeBytes(path), ")"));
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<struct statfs> statfs(std::string_view path) {
+  std::string path_str(path);
+  struct statfs buf{};
+  if (::statfs(path_str.c_str(), &buf) == -1) {
+    return ErrnoToStatus(errno,
+                         absl::StrCat("statfs(", EscapeBytes(path), ")"));
+  }
+  return buf;
+}
+
+absl::StatusOr<void *> mmap(void *addr, size_t length, int prot, int flags,
+                            int fd, off_t offset) {
+  void *mapped = ::mmap(addr, length, prot, flags, fd, offset);
+  if (mapped == MAP_FAILED) {
+    return ErrnoToStatus(errno, absl::StrCat("mmap(", fd, ")"));
+  }
+  return mapped;
+}
+
+absl::Status munmap(void *addr, size_t length) {
+  if (::munmap(addr, length) == -1) return ErrnoToStatus(errno, "munmap");
+  return absl::OkStatus();
+}
+
+absl::Status mincore(void *addr, size_t length, unsigned char *vec) {
+  if (::mincore(addr, length, vec) == -1) {
+    return ErrnoToStatus(errno, "mincore");
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<FileDescriptor> inotify_init1(int flags) {
+  int fd = ::inotify_init1(flags | IN_CLOEXEC);
+  if (fd == -1) return ErrnoToStatus(errno, "inotify_init1");
+  return FileDescriptor(fd);
+}
+
+absl::StatusOr<int> inotify_add_watch(int fd, std::string_view path,
+                                      uint32_t mask) {
+  std::string path_str(path);
+  int wd = ::inotify_add_watch(fd, path_str.c_str(), mask);
+  if (wd == -1) {
+    return ErrnoToStatus(
+        errno, absl::StrCat("inotify_add_watch(", EscapeBytes(path), ")"));
+  }
+  return wd;
 }
 
 }  // namespace dcfs::syscalls

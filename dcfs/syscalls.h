@@ -5,9 +5,12 @@
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
 #include <sys/types.h>
 #include <time.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>
@@ -118,6 +121,26 @@ absl::StatusOr<FileDescriptor> open(std::string_view path, int flags,
 absl::Status mkdir(std::string_view path, mode_t mode);
 absl::Status unlink(std::string_view path);
 absl::StatusOr<struct stat> stat(std::string_view path);
+
+// chmod(2), rename(2), rmdir(2) and statfs(2), by path.
+absl::Status chmod(std::string_view path, mode_t mode);
+absl::Status rename(std::string_view from, std::string_view to);
+absl::Status rmdir(std::string_view path);
+absl::StatusOr<struct statfs> statfs(std::string_view path);
+
+// mmap(2), munmap(2) and mincore(2): the mapping's address, and for mincore
+// one byte per page of [addr, addr + length) in `vec`, whose low bit says the
+// page is in the page cache.
+absl::StatusOr<void *> mmap(void *addr, size_t length, int prot, int flags,
+                            int fd, off_t offset);
+absl::Status munmap(void *addr, size_t length);
+absl::Status mincore(void *addr, size_t length, unsigned char *vec);
+
+// inotify_init1(2) (IN_CLOEXEC is added to `flags`) and inotify_add_watch(2):
+// the watch descriptor.
+absl::StatusOr<FileDescriptor> inotify_init1(int flags);
+absl::StatusOr<int> inotify_add_watch(int fd, std::string_view path,
+                                      uint32_t mask);
 
 }  // namespace dcfs::syscalls
 
