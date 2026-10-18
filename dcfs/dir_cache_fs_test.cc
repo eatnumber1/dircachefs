@@ -7585,6 +7585,50 @@ TEST_F(DirCacheFSTest,
   ctx_.interrupts = &NoInterrupts();
 }
 
+// Step 22.5: the other requests whose refresh of a directory's attributes
+// is their own work have an interruption point before it: an OPENDIR and a
+// LOOKUP of "." (the model's getattr, GA_stat), and a LOOKUP of ".." (from
+// a directory, and from a boundary stub).
+TEST_F(DirCacheFSTest, RefreshesOfDotAndDotDotAreInterruptible) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d/e"), 0755), IsOk());
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d/mp"), 0755), IsOk());
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  MountBelow("d/mp");
+  ASSERT_OK_AND_ASSIGN(InodeId e, Id("e", d));
+  auto [mp, mp_entry] = Lookup(d, "mp");
+  ASSERT_EQ(mp.error, 0);
+  const InodeId stub = static_cast<InodeId>(mp_entry.nodeid);
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  interrupts.at = 1;
+  CountBackingCalls opens("open_by_handle_at");
+  observers_->Add(&opens);
+  std::vector<std::pair<std::string, absl::AnyInvocable<int()>>> requests;
+  requests.emplace_back("opendir", [&] { return Opendir(d).error; });
+  requests.emplace_back("lookup of .",
+                        [&] { return Lookup(d, ".").first.error; });
+  requests.emplace_back("lookup of ..",
+                        [&] { return Lookup(e, "..").first.error; });
+  requests.emplace_back("lookup of .. from a stub",
+                        [&] { return Lookup(stub, "..").first.error; });
+  for (auto &[what, request] : requests) {
+    // An attribute change interrupted before its syscall: d's attributes
+    // unknown, for the request to refresh.
+    interrupts.checkpoints = 0;
+    ASSERT_EQ(Chmod(d, S_IFDIR | 0700).error, -EINTR);
+    interrupts.checkpoints = 0;
+    opens.count = 0;
+    EXPECT_EQ(request(), -EINTR) << what;
+    EXPECT_EQ(opens.count, 0) << what;
+  }
+  observers_->Remove(&opens);
+  interrupts.at = 0;
+  EXPECT_EQ(Lookup(d, ".").first.error, 0);
+  ctx_.interrupts = &NoInterrupts();
+}
+
 // A mutation interrupted before its backing syscall replies EINTR: the
 // backing filesystem is untouched, the names phase 1 made unknown stay
 // unknown and dirty, and the mutation's guard is released.
