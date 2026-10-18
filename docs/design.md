@@ -2542,13 +2542,19 @@ of a file that carried `security.capability` (below), and `/proc` vouches
 for it only where the status file shows it with the request's uid as the
 filesystem uid (a kernel caller acting with overridden credentials, nfsd
 for a client, shows its own) and the task's `/proc/<pid>/ns/user` is
-dcfs's (`FuseRequest::CallerHasCapFsetid`). The kernel's question is
+dcfs's (`FuseRequest::CallerHasCapFsetid`, from the same read of the
+status file that gave the groups). The kernel's question is
 `capable(CAP_FSETID)` in the init user namespace
-(`setattr_should_drop_suidgid`, fs/attr.c), and `/proc` shows a task's
-capabilities in its own namespace; dcfs's own is the init namespace, as
-dcfs runs as the host's root. Following the `ns/user` link takes ptrace
-read access (fs/proc/namespaces.c, `proc_ns_get_link`), which a daemon
-without `CAP_SYS_PTRACE` lacks for a task of another uid or one holding a
+(`setattr_should_drop_suidgid`, fs/attr.c:75 (Linux v7.3-rc7)), and
+`/proc` shows a task's capabilities in its own namespace; dcfs's own is
+the init namespace: `mount.dcfs` refuses to start in any other
+(`RequireInitUserNamespace`, by `/proc/self/ns/user`'s inode,
+`USER_NS_INIT_INO`, include/uapi/linux/nsfs.h:50 (Linux v7.3-rc7);
+`credentials.sh`'s `userns-mount-refused`), where root's capabilities
+would not count where the kernel asks for them. Following the `ns/user`
+link takes ptrace read access (`proc_ns_get_link`,
+fs/proc/namespaces.c:63 (Linux v7.3-rc7)), which a daemon without
+`CAP_SYS_PTRACE` lacks for a task of another uid or one holding a
 capability the daemon does not. Wherever `/proc` cannot vouch (that, a
 pid of 0, a caller that exited), the caller is taken to lack it, with a
 WARNING (at most one per minute).
@@ -2557,13 +2563,16 @@ WARNING (at most one per minute).
 `openat(O_CREAT)`, `unlinkat`, `renameat2`, the chown (including the
 otherwise empty `chown(path, -1, -1)` the kernel forwards, which still
 updates ctime), utimes, the truncate, `setxattr`, `removexattr`,
-`fallocate` (including punch and zero), the write fallback (`WriteFile`),
-and `copy_file_range` (`CopyFileRangeFd`). Fallocate, write fallback and
-copy_file_range run inside `AsCaller` so that the backing filesystem's own
-`file_remove_privs` applies the kernel's privilege-removal rules with the
-caller's fsuid, fsgid and groups: an unprivileged caller outside the file's
-group drops `CAP_FSETID`, which clears the setgid bit on files without group
-execute (mode 02666 -> 0666). Phase 1 marks the attributes unknown and phase 3
+`fallocate` (including punch and zero), the write fallback (`WriteFile`,
+which goes with 23.16), and `copy_file_range` (`CopyFileRangeFd`). The
+truncate, fallocate, write fallback and copy_file_range keep `CAP_FSETID`
+(`AsCallerKeepingCapFsetid`: after the switch to a nonzero fsuid took it
+from the effective set, `capset` raises it again from the permitted set),
+so the backing filesystem's own removal of setuid and setgid
+(`file_remove_privs`, do_truncate's `dentry_needs_remove_privs`) removes
+nothing: the kernel has decided on the FUSE side, with the caller's real
+capabilities (below). A daemon without `CAP_FSETID` in its permitted set
+fails them with `EPERM`. Phase 1 marks the attributes unknown and phase 3
 reads the mode back from the backing filesystem.
 
 **Stay root:**
@@ -2582,10 +2591,12 @@ reads the mode back from the backing filesystem.
 **Setuid and setgid on writes** (steps 17.2b, 17.2e). A write, fallocate,
 copy_file_range, truncate or chown by a caller without `CAP_FSETID`
 clears setuid, and setgid where the file is group-executable or the
-caller is outside its group (`setattr_should_drop_suidgid`); a chown
-clears setuid from anyone. dcfs negotiates `FUSE_CAP_HANDLE_KILLPRIV_V2`,
-which leaves that to the filesystem, and `DirCacheFS::Init` refuses a
-kernel that does not offer it (protocol 7.33, Linux 5.11; every kernel
+caller is outside its group (`setattr_should_drop_suidgid`, fs/attr.c:63-77
+(Linux v7.3-rc7)); a chown clears setuid from anyone (`chown_common`,
+fs/open.c:816-818 (Linux v7.3-rc7)). dcfs negotiates
+`FUSE_CAP_HANDLE_KILLPRIV_V2`, which leaves that to the filesystem, and
+`DirCacheFS::Init` refuses a kernel that does not offer it (protocol
+7.33, Linux 5.11; every kernel
 with FUSE passthrough has it), so there is one path. Without it
 `fuse_setattr` re-derives the mode by the pre-6.2 rule (setuid always,
 setgid only with group execute), which 17.2b had to work around, and the
@@ -2594,41 +2605,60 @@ write first asked for `security.capability` with a `GETXATTR` round trip
 (step 17.2c, `docs/plan/notes/passthrough-write-cost-17.2c.md`). What the
 kernel sends with it:
 
-- A truncate arrives as a SETATTR of the size, with `FATTR_KILL_SUIDGID`
-  from a caller without `CAP_FSETID` (libfuse hands it over as
-  `FUSE_SET_ATTR_KILL_SUID`), never with a mode; so does an `O_TRUNC`
-  open's (dcfs leaves `FUSE_CAP_ATOMIC_O_TRUNC` off, so the kernel strips
-  `O_TRUNC` from the OPEN, and `FUSE_OPEN_KILL_SUIDGID` with it). A chown
-  arrives with `FATTR_KILL_SUIDGID` always. Both run as the caller, so the
-  backing filesystem clears the bits by its own rule, with the
-  capabilities `AsCaller` leaves: `CAP_FSETID` for fsuid 0 and none for any
-  other. So a truncate by uid 0 with the flag (root without `CAP_FSETID`;
-  the kernel decides that with the caller's own credentials) is followed by
-  the clear a write's removal makes (below); a non-root caller that holds
-  `CAP_FSETID` loses the bits on a truncate, an `O_TRUNC` open and a chown
-  where the native filesystem keeps them (the safe side); and root without
-  `CAP_FSETID` keeps setgid on a chown of a file without group execute
-  whose group it is not in, where the native filesystem clears it
-  (`setattr_should_drop_sgid`; `credentials.sh`'s `sgid-nofsetid-chown`):
-  setgid without group execute grants nothing at exec (fs/exec.c,
-  `bprm_fill_uid`, wants both), and the chown carries nothing that tells
-  that root from one with `CAP_FSETID`. A write that does not go through
-  passthrough carries `FUSE_WRITE_KILL_SUIDGID`, and `WriteFile` runs as
-  the caller too (the pinned libfuse 3.18.2 does not hand that flag over;
-  3.18.3 does). A CREATE with `O_TRUNC` carries `FUSE_OPEN_KILL_SUIDGID`,
-  but it makes a new file, which no open truncates.
+- A truncate arrives as a SETATTR of the size, never with a mode, and with
+  `FATTR_KILL_SUIDGID` exactly when the caller lacks `CAP_FSETID`: the
+  kernel's own `capable(CAP_FSETID)` (`fuse_do_setattr`,
+  fs/fuse/dir.c:2241-2243 (Linux v7.3-rc7)), exact across user namespaces
+  (libfuse hands it over as `FUSE_SET_ATTR_KILL_SUID`). So does an
+  `O_TRUNC` open's (dcfs leaves `FUSE_CAP_ATOMIC_O_TRUNC` off, so the
+  kernel strips `O_TRUNC` from the OPEN, and `FUSE_OPEN_KILL_SUIDGID` with
+  it). dcfs obeys the flag both ways, whatever the uid: the ftruncate,
+  keeping `CAP_FSETID`, clears nothing, and with the flag dcfs then clears,
+  as root, what that caller's write clears (`FUSE_SET_ATTR_KILL_PRIV`,
+  `SuidgidClearedByWrite`, below), making no chmod where neither bit is
+  set, as every truncate by such a caller carries the flag. A chown of a
+  non-directory that changes its owner or group arrives with
+  `FATTR_KILL_SUIDGID` always (fs/fuse/dir.c:2231-2234 (Linux v7.3-rc7)),
+  a `chown(path, -1, -1)` without it; neither says anything of the
+  caller's capabilities, and the chown runs as the caller, so the backing
+  filesystem clears the bits by its own rule, with the capabilities
+  `AsCaller` leaves: `CAP_FSETID` for fsuid 0 and none for any other. So
+  root without `CAP_FSETID` keeps setgid on a chown of a file without
+  group execute whose group it is not in, where the native filesystem
+  clears it (`setattr_should_drop_sgid`; `credentials.sh`'s
+  `sgid-nofsetid-chown`): setgid without group execute grants nothing at
+  exec (`bprm_fill_uid` wants both, fs/exec.c:1689 (Linux v7.3-rc7)). And
+  a non-root caller that holds `CAP_FSETID` has a chown of a setgid file
+  without group execute outside its group decided as if it did not: it
+  loses setgid on its own file where the native filesystem keeps it (the
+  safe side), and its `chown(path, -1, -1)` of another's such file fails
+  with `EPERM` where the native one succeeds and changes nothing
+  (`sgid-fsetid-chown`). A write that does not go through passthrough is
+  served by `WriteFile`, which keeps `CAP_FSETID` as the fallocate does:
+  the kernel sent its removal first (below), and the
+  `FUSE_WRITE_KILL_SUIDGID` it carries, which the pinned libfuse 3.18.2
+  does not hand over, is not needed (goes with 23.16, which retires that
+  path). A CREATE with `O_TRUNC` carries `FUSE_OPEN_KILL_SUIDGID`, but it
+  makes a new file, which no open truncates.
 - A write, fallocate or copy_file_range first goes through the kernel's
-  `file_remove_privs` on the FUSE inode (fs/inode.c), which sends a
-  SETATTR that sets nothing, the request a `chown(path, -1, -1)` makes, in
-  two cases only: for a writer without `CAP_FSETID` (in the init user
-  namespace) of a setuid or setgid file, and for anyone's write of a file
-  with `security.capability`, right after removing that with a REMOVEXATTR
-  (`setattr_prepare`'s `security_inode_killpriv`, fs/attr.c), the inode
-  locked from the one to the other. For a passthrough write that is all
-  dcfs sees: the write reaches the backing file as the daemon
-  (`CAP_FSETID`), which keeps both bits. The removal always comes while the
-  file is open for writing, so dcfs takes a SETATTR that sets nothing on a
-  file open for writing for the write's (`DirCacheFS::Setattr`). If no
+  `file_remove_privs` on the FUSE inode (fs/inode.c:2371-2395 (Linux
+  v7.3-rc7); `file_modified` in `fuse_file_fallocate` and
+  `fuse_copy_file_range`, fs/fuse/file.c:2881 and :2975, and
+  `kiocb_modified` in `fuse_cache_write_iter` for a write that does not go
+  through passthrough, :1518 (Linux v7.3-rc7)), which sends a SETATTR that
+  sets nothing, the request a `chown(path, -1, -1)` makes, in two cases
+  only: for a writer without `CAP_FSETID` (in the init user namespace) of
+  a setuid or setgid file, and for anyone's write of a file with
+  `security.capability`, right after removing that with a REMOVEXATTR
+  (`setattr_prepare`'s `security_inode_killpriv`, fs/attr.c:229 (Linux
+  v7.3-rc7)), the inode locked from the one to the other
+  (fs/fuse/passthrough.c:73 (Linux v7.3-rc7)). That is all dcfs learns: a
+  passthrough write reaches the backing file as the daemon (`CAP_FSETID`),
+  and dcfs's own fallocate, copy_file_range and write keep `CAP_FSETID`
+  (above), so none of them removes anything itself. The removal always
+  comes while the file is open for writing, so dcfs takes a SETATTR that
+  sets nothing on a file open for writing for the write's
+  (`DirCacheFS::Setattr`). If no
   REMOVEXATTR of `security.capability` came right before it
   (`BackingFile::capability_removed`), the writer lacks `CAP_FSETID`
   whatever `/proc` says, and dcfs clears, as root, what that writer's own
@@ -2646,12 +2676,27 @@ kernel sends with it:
   succeeds and clears the bits where the native filesystem refuses it with
   `EPERM`; root's clears setgid without group execute in a group root is
   not in, where the native filesystem keeps it (root's `CAP_FSETID`), and
-  matches it otherwise (setuid goes either way); and if root removed
-  `security.capability` itself (`removexattr(2)`, which takes
-  `CAP_SETFCAP`) right before, root's keeps setuid where the native
-  filesystem clears it. With no writable open it is the caller's chown. A
-  writer of a file with `security.capability` whose `CAP_FSETID` `/proc`
-  cannot vouch for loses the bits where the native filesystem might keep
+  matches it otherwise (setuid goes either way). If the file carries
+  `security.capability`, root's or another `CAP_FSETID` holder's keeps
+  setuid where the native filesystem clears it, the unsafe direction: the
+  chown has the kernel remove the capability first, a REMOVEXATTR
+  (`chown_common`'s `ATTR_KILL_PRIV`, fs/open.c:816-818 (Linux v7.3-rc7)),
+  so dcfs cannot tell it from that holder's write, whose bits stay
+  (`credentials.sh`'s `setuid-root-capchownheld`, native 0:666, mount
+  0:4666); the same after root removed the capability itself
+  (`removexattr(2)`, which takes `CAP_SETFCAP`) right before. The holder
+  could set setuid with a chmod anyway; what it does not get is the
+  native chown's removal. With no writable open it is the caller's chown,
+  but under `FUSE_CAP_HANDLE_KILLPRIV_V2` a non-owner's of a setuid or
+  setgid file with `security.capability` still has the capability
+  removed: `fuse_setattr` drops the mode change that setuid's removal makes
+  (fs/fuse/dir.c:2340-2342 (Linux v7.3-rc7)) before `setattr_prepare`'s
+  owner check (fs/attr.c:205 (Linux v7.3-rc7)) could refuse it, so the
+  REMOVEXATTR comes, and then the chown fails with `EPERM`, where the
+  native chown fails before the capability is touched
+  (`capchown-other-strips-then-fails`). A writer of a file with
+  `security.capability` whose `CAP_FSETID` `/proc` cannot vouch for loses
+  the bits where the native filesystem might keep
   them: a kernel caller with overridden credentials that keeps
   `CAP_FSETID`, a caller outside dcfs's pid namespace, and, with a daemon
   without `CAP_SYS_PTRACE`, root and any writer of another uid
@@ -2659,24 +2704,20 @@ kernel sends with it:
   `/proc` entry shows a `CAP_FSETID` it does not write with keeps them
   where the native filesystem clears them: an io_uring worker created
   before its process dropped `CAP_FSETID` runs a later request with the
-  submitter's credentials of the time (io_uring/io_uring.c,
-  `io_prep_async_work`, then `override_creds` at issue), while `/proc`
-  shows its own (fs/proc/array.c, `task_cap`: `real_cred`). All of these
-  are in that case alone; the
-  kernel patch of `docs/plan/notes/kernel-patches.md` row 4 (the kernel's
-  own decision, sent on that SETATTR) makes it exact.
+  submitter's credentials of the time (`io_prep_async_work`,
+  io_uring/io_uring.c:361-367, then `override_creds` at issue, :1380
+  (Linux v7.3-rc7)), while `/proc` shows its own (`task_cap`'s
+  `__task_cred`, the `real_cred`, fs/proc/array.c:317 and
+  include/linux/cred.h:321-322 (Linux v7.3-rc7)). All of these are in
+  that case alone; the kernel patch of
+  `docs/plan/notes/kernel-patches.md` row 4 (the kernel's own decision,
+  sent on that SETATTR) makes it exact.
 - Once a write finds an inode with nothing to remove, the kernel marks it
   `S_NOSEC` and skips the check on its later writes, until its attributes
   are refreshed from dcfs or a `security.*` xattr is set. A setuid or
   setgid file is never `S_NOSEC`, so each of its passthrough writes still
   asks for `security.capability` with a `GETXATTR` (answered from the
   cache).
-- `fallocate`, the write fallback and `copy_file_range` run as the caller,
-  so the backing filesystem's own `file_remove_privs` decides with fsuid
-  0's `CAP_FSETID` for root and none for anyone else: a non-root caller
-  that holds `CAP_FSETID` loses bits there that the native filesystem
-  keeps (the safe side), as on a truncate. The kernel's empty SETATTR
-  before them has already cleared what a root without it would lose.
 
 The cost (2026-10-17, `dcfs_bench`'s Write and SetidWrite, ext4 in the
 QEMU guest, 1 MiB overwritten in 64 KiB writes on one open, mean of 5, on
@@ -2747,8 +2788,11 @@ contents bypass the cache.
 - **Side-effect names** (the list in `dir_cache_fs.cc`): some operations
   other than setxattr change xattrs on the backing filesystem. Their phase
   1 marks the affected names unknown and their phase 3 reads them back:
-  - `system.posix_acl_access` on any chmod (including the chmod dcfs makes
-    to clear setuid or setgid), which rewrites the ACL to match the mode;
+  - `system.posix_acl_access` on a chmod the caller asked for, which
+    rewrites the ACL to match the mode (not on the chmod dcfs makes to
+    clear setuid or setgid, which leaves the ACL as it was: the ACL holds
+    none of those bits, `__posix_acl_chmod_masq`, fs/posix_acl.c:516-559
+    (Linux v7.3-rc7));
   - `security.capability` on chown or chgrp (even `chown(-1, -1)`),
     truncate, and any write or fallocate, which remove it.
 
@@ -3400,7 +3444,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `atime_test` | A `stat` through dcfs reports exactly the access time the backing filesystem has: after an open that reads nothing (unchanged), a read, a read while the file stays open (a stat while held), `chattr +A` and `O_NOATIME` (unchanged), an mmap read, lsattr's private open (unchanged), and from the cache with no backing read once closed; a directory listing and a readlink stamp the relatime "now" in the cache only (the backing filesystem's stays), a second within the day changes nothing, and all of it survives a restart of dcfs. (The power cut after a read: `fault_power_test`'s `atime` scenario.) |
 | `copy_test` | `copy_file_range` through dcfs shares extents on btrfs and xfs as natively and leaves the copy's attributes cached; `FICLONE` fails `EOPNOTSUPP` (the VFS's answer); `lsattr`/`chattr` (`FS_IOC_GETFLAGS`/`SETFLAGS`, `FSGETXATTR`) and `FS_IOC_GETVERSION` match the backing file, `chattr +i` is enforced (also for a file already open for writing), other ioctls get `ENOTTY`; `O_TMPFILE` linked by `AT_EMPTY_PATH` and through `/proc/self/fd`, `O_EXCL` and never linked, each as on the backing filesystem; a warm metadata pass reads nothing. |
 | `write_test` | Writes, appends, `O_TRUNC`, a 64 MiB passthrough write, concurrent opens of one file (the one-backing-file rule), fsync, fallocate, xattrs on files, directories and symlinks, ACL read-back after setxattr and chmod, `security.capability` removal on chown, truncate and write; a store through a shared mapping after the last close is reconciled at the inode's last `FORGET` (no out-of-band warning); served from the cache after a restart. |
-| `credentials_test` | As two unprivileged users: ownership of every create, setgid inheritance, supplementary groups, chown and chgrp rules, sticky directories, truncate, utimes, chmod and user xattrs, allowed and denied, agree with the backing filesystem; so do the setuid and setgid bits left by writes, fallocate, copy_file_range and truncate from owners, non-owners outside the file's group and group members, through passthrough and with a read-only open held, warm and after the kernel's caches are dropped; POSIX ACLs (named entries denying and granting access, default ACL inheritance and the umask) are enforced as on the backing filesystem; the daemon is back to root afterwards. |
+| `credentials_test` | As two unprivileged users: ownership of every create, setgid inheritance, supplementary groups, chown and chgrp rules, sticky directories, truncate, utimes, chmod and user xattrs, allowed and denied, agree with the backing filesystem; so do the setuid and setgid bits left by writes, fallocate, copy_file_range and truncate from owners, non-owners outside the file's group and group members, root with and without `CAP_FSETID`, a non-root holder of `CAP_FSETID` and the root of a user namespace, through passthrough and with a read-only open held, warm and after the kernel's caches are dropped, with the known divergences pinned; `mount.dcfs` refuses a child user namespace; POSIX ACLs (named entries denying and granting access, default ACL inheritance and the umask) are enforced as on the backing filesystem; the daemon is back to root afterwards. |
 | `crash_test` | `SIGKILL` while files are open for writing with unflushed passthrough writes: after a restart, sizes and mtimes match the backing files (this failed before writable opens marked attributes unknown). An out-of-band change is noticed on open and logged exactly once; dcfs's own mutations log no false positive. |
 | `power_test` | The state a power loss leaves, produced deterministically: mutate through the mount, `SIGKILL`, undo each mutation directly on the backing filesystem, restart. Recovery logs a warning, every touched entry shows the backing filesystem's truth, untouched entries stay warm. With recovery disabled, the checks fail. A periodic sync point empties the dirty set. It cannot produce a real power loss, since a guest's page cache survives anything short of a reboot. |
 | `enospc_backing_test`, `enospc_cache_test` | Out of space (step 11.4): the backing filesystem full (create, write, mkdir, setxattr, rename through dcfs fail with `ENOSPC`, as on the backing filesystem, and nothing is served as done; btrfs reserves metadata apart, so only the write must fail there), and the cache database's filesystem full before a create's phase 1, between a create and its close (the release cannot record the attributes, so a listing of the directory fails), during a create's phase 3 and a rename's, and before a sync point. Requests fail with `ENOSPC` or are replied as done; the kernel never answers "no such file" for a created file; the dirty set survives; after space is freed (and a restart) everything served matches the backing filesystem. |

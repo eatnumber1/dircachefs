@@ -2426,9 +2426,9 @@ absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
 
 // The setuid and setgid bits that a write by `caller`, who lacks
 // CAP_FSETID, clears from a regular file of mode `mode` whose group is
-// `gid` (fs/attr.c, setattr_should_drop_suidgid, which decides by
-// capability, never by uid): setuid, and setgid if the file is
-// group-executable or the caller is outside its group.
+// `gid` (setattr_should_drop_suidgid, fs/attr.c:63-77 (Linux v7.3-rc7),
+// which decides by capability, never by uid): setuid, and setgid if the
+// file is group-executable or the caller is outside its group.
 mode_t SuidgidClearedByWrite(const Credentials &caller, mode_t mode,
                              gid_t gid) {
   const bool in_group =

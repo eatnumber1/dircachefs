@@ -31,7 +31,8 @@ absl::StatusOr<ProcCredentials> ParseProcStatus(std::string_view status);
 
 // The credentials of thread `tid` (a thread group's leader is its process),
 // from /proc/<tid>/task/<tid>/status, which any reader may open (the
-// kernel's proc_pid_status entry is mode 0444, with no ptrace check).
+// kernel's proc_pid_status entry is mode 0444, with no ptrace check:
+// fs/proc/base.c:3650 (Linux v7.3-rc7)).
 absl::StatusOr<ProcCredentials> ReadProcCredentials(pid_t tid);
 
 // Whether thread `tid`'s user namespace is this process's: the nsfs inode

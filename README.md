@@ -64,7 +64,13 @@ The repository carries forward the history of a 2023 experiment called
   (`CAP_DAC_READ_SEARCH`), mounts FUSE and registers passthrough files
   (`CAP_SYS_ADMIN`), and switches to each caller's filesystem credentials.
   There is no unprivileged mode: `mount.dcfs` refuses to run as another user
-  and says why (see [Responsibilities](#responsibilities-of-the-administrator)).
+  and says why (see [Responsibilities](#responsibilities-of-the-administrator)),
+  and refuses to run as the root of a user namespace other than the
+  host's, whose capabilities do not count where the kernel asks for them.
+  Without `CAP_FSETID` in its permitted set, a truncate, fallocate,
+  copy_file_range or write that dcfs serves itself (without FUSE
+  passthrough, until plan step 23.16 retires that path) fails with
+  `EPERM`.
   `CAP_SYS_PTRACE` is not needed (Docker's default set lacks it): without
   it, a write by root (or another process holding `CAP_FSETID`) to a
   setuid or setgid file with file capabilities clears the bits where the
@@ -1248,23 +1254,30 @@ recovery protocol, concurrency, and the test strategy.
 - **Setuid and setgid bits on writes follow the backing filesystem, with
   some gaps.** A write, fallocate, copy_file_range or truncate through
   dcfs clears setuid and setgid as the backing filesystem would for the
-  writer, root without `CAP_FSETID` included. The gaps: while a setuid or
-  setgid file is open for writing, `chown(path, -1, -1)` by someone who
-  does not own it succeeds and clears the bits, where the backing
-  filesystem refuses it with `EPERM`, and root's clears setgid from a file
-  without group execute in a group root is not in, where the backing
-  filesystem keeps it. A non-root process that holds `CAP_FSETID` loses
-  the bits on a truncate, chown, fallocate, copy_file_range or a write
-  dcfs serves itself (no FUSE passthrough), where the backing filesystem
-  keeps them; root without `CAP_FSETID` keeps setgid of a file without
-  group execute on a chown, where the backing filesystem clears it. And
-  for a file with file capabilities (`security.capability`), a writer that
-  dcfs cannot confirm from `/proc` holds `CAP_FSETID` (a process outside
-  dcfs's pid namespace, a kernel service such as nfsd writing for a
-  client, or, with dcfs running without `CAP_SYS_PTRACE`, root) loses the
-  bits even where the backing filesystem would keep them. dcfs needs a
-  kernel with `FUSE_CAP_HANDLE_KILLPRIV_V2` (Linux 5.11 and later) and
-  refuses to mount without it (`docs/design.md`, "Caller credentials").
+  writer, by its `CAP_FSETID` as the kernel sees it: root without it loses
+  the bits, and a non-root process that holds it keeps them. The gaps:
+  while a setuid or setgid file is open for writing, `chown(path, -1, -1)`
+  by someone who does not own it succeeds and clears the bits, where the
+  backing filesystem refuses it with `EPERM`, and root's clears setgid
+  from a file without group execute in a group root is not in, where the
+  backing filesystem keeps it; if that file also has file capabilities
+  (`security.capability`), root's (or another `CAP_FSETID` holder's)
+  `chown(path, -1, -1)` keeps setuid where the backing filesystem clears
+  it. Without a writable open, a non-owner's `chown(path, -1, -1)` of a
+  setuid or setgid file with file capabilities removes the capabilities
+  and then fails with `EPERM`; the backing filesystem fails it before it
+  touches them. A chown decides setgid as if the caller lacked
+  `CAP_FSETID` unless it is root: a non-root holder loses setgid of a file
+  without group execute outside its group (its `chown(path, -1, -1)` of
+  another's such file fails with `EPERM`), and root without it keeps
+  that setgid, both where the backing filesystem does the opposite. And
+  for a file with file capabilities, a writer that dcfs cannot confirm
+  from `/proc` holds `CAP_FSETID` (a process outside dcfs's pid
+  namespace, a kernel service such as nfsd writing for a client, or, with
+  dcfs running without `CAP_SYS_PTRACE`, root) loses the bits even where
+  the backing filesystem would keep them. dcfs needs a kernel with
+  `FUSE_CAP_HANDLE_KILLPRIV_V2` (Linux 5.11 and later) and refuses to
+  mount without it (`docs/design.md`, "Caller credentials").
 - **A backing filesystem that stops taking writes holds the whole daemon.**
   With the backing filesystem frozen (`fsfreeze -f`, an LVM or storage
   snapshot, a hung network mount), a change through dcfs blocks in its

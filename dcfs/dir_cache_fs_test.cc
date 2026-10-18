@@ -7363,7 +7363,7 @@ TEST_F(DirCacheFSTest, TruncateRemovesPrivilegesByTheKernelsFlag) {
 // (Linux v7.3-rc7)). On a file with neither setuid nor setgid it costs
 // nothing over the same truncate without it, from root or anyone else: no
 // reopen and fchmod, and no access ACL to read back (a chmod that changes
-// only setuid and setgid leaves the ACL as it was, fs/posix_acl.c:516-556
+// only setuid and setgid leaves the ACL as it was, fs/posix_acl.c:516-559
 // (Linux v7.3-rc7), so the clear's is no side effect to read back).
 TEST_F(DirCacheFSTest, TruncateKillCostsAFileWithoutSetidBitsNothing) {
   const uid_t uids[] = {0, 1000};

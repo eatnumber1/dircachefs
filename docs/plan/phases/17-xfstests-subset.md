@@ -170,6 +170,44 @@ privilege removal: the kernel then keeps `SB_NOSEC` and stops sending a
 
 Owner: dcfs-protocol, then an Opus review (identity and permissions).
 
+As built (lane-3, branch step-17.2e, rebased 2026-10-18 onto 44676d75).
+Rounds 1 and 2: `DirCacheFS::Init` requires V2 beside POSIX ACLs and
+DONT_MASK (`InitWithoutHandleKillprivV2IsRefused`); every file gets
+passthrough (`PassthroughFor`, `MakeBackingFile`'s mode and
+`RequestedMode` retired); the empty SETATTR on a file open for writing is
+the write's removal (17.2b's `KILL_SGID` marker became
+`FUSE_SET_ATTR_KILL_PRIV`); groups come from `/proc/<tid>/task/<tid>/status`
+(`dcfs/proc_status.h`, replacing `fuse_req_getgroups`), with one
+read-to-EOF helper (`dcfs/proc_file.h`). Round 3 (russ: "what is the
+behavior when dcfs is not in the loop? I want that behavior"): the kernel
+sends a write's empty SETATTR only for a writer without `CAP_FSETID` or
+after removing `security.capability`, so dcfs clears by
+`SuidgidClearedByWrite` with no `/proc` read unless a REMOVEXATTR of the
+capability came right before (`BackingFile::capability_removed`); only then
+does `FuseRequest::CallerHasCapFsetid` ask `/proc` (CapEff for the
+request's uid, `ns/user` against dcfs's), and the bits stay where it
+vouches. Round 4 (review findings F1-F6 and nits, 2026-10-18):
+`AsCallerKeepingCapFsetid` (AsCaller, then `capset` raises `CAP_FSETID`
+from the permitted set; `syscalls::capget`/`capset`) runs the backing
+truncate, fallocate, copy_file_range and fallback write, so the kernel's
+decision on the FUSE side is the only removal; a truncate obeys
+`FATTR_KILL_SUIDGID` both ways whatever the uid (the uid 0 case is gone;
+no chmod where no setid bit is set; the KILL_PRIV chmod no longer marks
+the access ACL unknown, since it leaves the ACL as it was); `FuseRequest`
+reads the status file once per request (`CallerStatus`); `mount.dcfs`
+refuses a child user namespace (`RequireInitUserNamespace`); `testutil
+runascap` runs bob with an ambient `CAP_FSETID` (`credentials.sh`'s
+`*-fsetid-*`). Pinned prices: `setuid-root-capchownheld` (native 0:666,
+mount 0:4666, the unsafe direction: root's `chown(path, -1, -1)` of a
+held file with `security.capability` is a REMOVEXATTR and an empty
+SETATTR, as that holder's write), `capchown-other-strips-then-fails` (a
+non-owner's chown strips the capability, then `EPERM`), and
+`sgid-fsetid-chown` (native 0:2666, mount 1:2666). Decision with an
+alternative: the truncate keeps the caller's fsuid with `CAP_FSETID`
+rather than running as root (the review's suggestion), one mechanism with
+fallocate's. No model change: a setattr's phases are unchanged. Coverage
+baseline: main's (97.27 / 83.97).
+
 ## 17.2f Setuid and setgid, every case, against native (russ, 2026-10-17: "Yes"; after 17.2e)
 
 russ asked whether 17.2e's review showed completeness, not only

@@ -451,7 +451,10 @@ expect_stat sgid-group-member-keeps '%a' pub/sgid_ops/f_grp 2666
 #   for the request's uid (step 17.2e).
 # - "chown" is chown(path, -1, -1); "chownheld" the same while root holds
 #   the file open for writing, when it reaches dcfs as the SETATTR before a
-#   write does.
+#   write does; "capchownheld" sets security.capability first, so the
+#   chown, as a write would, has the kernel remove it with a REMOVEXATTR
+#   (chown_common's ATTR_KILL_PRIV, fs/open.c:816-818 (Linux v7.3-rc7))
+#   before that SETATTR.
 # - WANT "NATIVE|MOUNT" pins a known divergence: the native filesystem must
 #   answer NATIVE and the mount and the backing file MOUNT
 #   (docs/design.md, "Caller credentials", says why each exists).
@@ -503,6 +506,12 @@ sgid_op() {
     ;;
   chown) $who "$TESTUTIL" lchown "$dir/$file" -1 -1 ;;
   chownheld) { $who "$TESTUTIL" lchown "$dir/$file" -1 -1; } 3>>"$dir/$file" ;;
+  capchownheld)
+    {
+      "$TESTUTIL" setxattrhex "$dir/$file" security.capability "$CAPHEX" &&
+        $who "$TESTUTIL" lchown "$dir/$file" -1 -1
+    } 3>>"$dir/$file"
+    ;;
   esac </dev/null >/dev/null 2>&1
   if [ $? -eq 0 ]; then echo 0; else echo 1; fi
 }
@@ -592,6 +601,8 @@ setuid-root-chownheld 0:2000 4666 root chownheld 0:666
 sgid-gx-root-chownheld 0:2000 2776 root chownheld 0:776
 sgid-root-chownheld 0:2000 2666 root chownheld 0:2666|0:666
 sgid-other-chownheld 0:2000 2666 bob chownheld 1:2666|0:666
+setuid-root-capchownheld 0:2000 4666 root capchownheld 0:666|0:4666
+sgid-fsetid-chown 0:2000 2666 fsetid chown 0:2666|1:2666
 setuid-nofsetid-chown 0:2000 4666 nofsetid chown 0:666
 sgid-root-chown 0:2000 2666 root chown 0:2666
 sgid-gx-nofsetid-chown 0:2000 2776 nofsetid chown 0:776
@@ -683,6 +694,38 @@ while read -r name who mode want; do
 done <<EOF
 $CAP_CASES
 EOF
+
+# --- step 17.2e: a non-owner's chown of a file with a capability ----------
+#
+# chown(path, -1, -1) by bob of root's setuid file with security.capability.
+# Natively the chown fails with EPERM before the capability is touched:
+# setuid's removal is a mode change (notify_change, fs/attr.c:499-504 (Linux
+# v7.3-rc7)), which setattr_prepare refuses a non-owner (fs/attr.c:205
+# (Linux v7.3-rc7)) before it removes the capability (fs/attr.c:229 (Linux
+# v7.3-rc7)). Through the mount fuse_setattr drops that mode change first
+# (fs/fuse/dir.c:2340-2342 (Linux v7.3-rc7)), so
+# setattr_prepare removes the capability with a REMOVEXATTR, and the SETATTR
+# that follows fails with EPERM: pinned, with the capability's state in the
+# field after the mode (README, "Setuid, setgid and file capabilities").
+sgid_make capchown-other 0:2000 4666
+for d in "$NAT2" "$MNT/$P2"; do
+  "$TESTUTIL" setxattrhex "$d/capchown-other" security.capability "$CAPHEX"
+done
+capchown_state() {
+  echo "$(stat -c '%a' "$1"):$("$TESTUTIL" getxattrhex "$1" security.capability)"
+}
+nat="$(sgid_op bob chown "$NAT2" capchown-other):$(capchown_state "$NAT2/capchown-other")"
+mnt="$(sgid_op bob chown "$MNT/$P2" capchown-other):$(capchown_state "$MNT/$P2/capchown-other")"
+src="${mnt%%:*}:$(capchown_state "$SRC/$P2/capchown-other")"
+want_nat="1:4666:$CAPHEX"
+want_mnt="1:4666:ERR ENODATA"
+if [ "$nat" = "$want_nat" ] && [ "$mnt" = "$want_mnt" ] &&
+  [ "$src" = "$want_mnt" ]; then
+  pass capchown-other-strips-then-fails
+else
+  fail capchown-other-strips-then-fails \
+    "want $want_nat|$want_mnt, native $nat, mount $mnt, src $src"
+fi
 
 # --- the daemon is root again afterwards ----------------------------------
 
