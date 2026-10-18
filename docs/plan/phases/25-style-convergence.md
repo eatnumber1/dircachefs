@@ -1045,8 +1045,10 @@ rulings changed the step as written above.
   Checkpoint` is the shutdown's TRUNCATE alone (the passive mode, the
   SQLITE_BUSY swallow, the closed-connection return and the out-parameters
   are gone).
-- **FSYNC and FSYNCDIR are no longer sync points** (russ, 2026-10-17, Q1:
-  "A client asking for FSYNC doesn't expect a syncfs"). They pass the
+- **FSYNC and FSYNCDIR are sync points that run no syncfs** (russ,
+  2026-10-17, Q1: "A client asking for FSYNC doesn't expect a syncfs";
+  wording corrected 2026-10-18: they are a file's sync points, the
+  periodic one is the periodic sync point). They pass the
   backing fsync through and make the cache's durable point before the
   reply: no syncfs, no ClearDirty, and the interval's clock is not reset.
   The litmus outcomes the backing allows after an fsync are pinned as
@@ -1070,9 +1072,11 @@ rulings changed the step as written above.
 - **A failed durable point** (the Opus review's S1/S2): logged at
   WARNING at a sync point, `EIO` to an FSYNC or FSYNCDIR, and not repaired
   by a later one, since Linux reports a writeback error once
-  (`Documentation/filesystems/vfs.rst:711`, Linux v7.3-rc7) and SQLite's
+  (`Documentation/filesystems/vfs.rst:718`, Linux v7.3-rc7) and SQLite's
   recovery stops at the gap. The docs say a power loss can then take
-  every later commit, dirty marks included, until a restart;
+  every later commit, dirty marks included, until a power loss or a clean
+  shutdown's TRUNCATE checkpoint (a same-boot crash and restart keeps the
+  on-disk gap);
   `durability.tla`'s `failed` stays set until `PowerLossAndRestart`.
   25.28d's poison replaces this.
 - `dcfs.sync_interval_sec` must be positive and finite as a duration:

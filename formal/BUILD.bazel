@@ -16,12 +16,13 @@ MODEL = [
 
 # The real model. MC_small: every request kind and invariant, today's
 # kernel locking. MC_liveness: RecoveryTerminates. Timeout of small_test:
-# 1,869,733 distinct states since step 25.28b's sync point checkpoint
+# 1,869,733 distinct states since step 25.28b's durable point
 # (1,479,307 since step 12.11's attribute change); at about 80 us per
 # state on the CI runner that is about 150 s, but 12 min alone at load 13
 # on russ's machine (4.7 min at load 7-12, 2026-10-17), past "moderate"'s
 # 300 s. The others stay "moderate": recovery 42,479 states (12 s at load
-# 7-12), liveness 244,552 (130 s), interrupt 388,382.
+# 7-12), liveness 244,552 (122 s), interrupt 757,278 (142 s); the counts and
+# times are from the run of 2026-10-18 at load 19.
 tlc_test(
     name = "small_test",
     size = "medium",

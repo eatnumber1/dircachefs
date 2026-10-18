@@ -1490,6 +1490,13 @@ or mount SOURCE read-only (step 11.5b).
 
 ### Sync points
 
+A sync point is a point where something is made durable. The **periodic
+sync point** (and the clean shutdown's) runs `syncfs` of the backing
+filesystems, `ClearDirty` if the dirty set may be non-empty, then the
+cache's durable point (below). The kernel's `FSYNC` and `FSYNCDIR` are
+**a file's sync points**: the backing fsync, then the cache's durable
+point, and no `syncfs`.
+
 `backing::SyncBacking`: `syncfs(2)` on every mount fd, then, if all
 succeeded, empty the dirty set in one transaction, except inodes with an
 open outstanding (the kernel may still be writing to them, or reading them,
@@ -1551,9 +1558,9 @@ Sync points run:
 - at clean shutdown (`backing::FinishRun`), which is clean only if no row
   of either kind is left.
 
-The kernel's `FSYNC` and `FSYNCDIR` are not sync points (step 25.28b,
-russ's decision: a caller that asks for an fsync does not expect a
-`syncfs`). dcfs passes the fsync through (`backing::FsyncFd`, `FsyncDir`)
+The kernel's `FSYNC` and `FSYNCDIR` are sync points that run no `syncfs`
+(step 25.28b, russ's decision: a caller that asks for an fsync does not
+expect a `syncfs`). dcfs passes the fsync through (`backing::FsyncFd`, `FsyncDir`)
 and, before the reply, makes the cache durable (its durable point, below)
 if anything committed since the last one: what dcfs cached about the file,
 its inode number (which an NFS client's handle carries) among it, is then
@@ -1626,7 +1633,7 @@ The bound: a request that starts while a commit a power loss could lose is
 one sync interval old ends with every commit durable, unless its durable
 point, or one before it in the run, failed (`formal/durability.tla`'s
 `BoundAtRequestEnd`); after a failed one, every commit may stay losable
-until the next start (below). So, counted at
+until a power loss or a clean shutdown (below). So, counted at
 requests, a power loss loses only about the last interval of cache commits
 before the last request's start. `fault_power_test`'s `lag` and `lagclean`
 scenarios show, on real disks, a fill older than the interval surviving a
@@ -1646,8 +1653,8 @@ The periodic sync point's request does not wait for its durable point
 (`DirCacheFS::FinishSyncPoint`): it runs after the reply of the request
 whose start ran the sync point, and before dcfs serves the next request.
 A request that arrives meanwhile does wait for it (dcfs has one thread).
-It is a backing-free step between requests, so it needs no cancellation
-checkpoint. An `FSYNC`'s does make its caller wait: the caller asked for
+It is a backing-free step between requests, so it needs no
+interruption point. An `FSYNC`'s does make its caller wait: the caller asked for
 durability.
 
 A durable point that fails (the cache disk's I/O error) is logged at
@@ -1663,13 +1670,14 @@ the failed writeback could not write may never reach the disk (ext4, for
 one, records the error and ends the folio's writeback without dirtying it
 again, so nothing writes it later: `fs/ext4/page-io.c:114`). SQLite's
 recovery stops at the first frame whose checksum chain breaks, so every
-commit after the gap is lost with it, kSync commits included. Until the
-next start, then, a power loss can take away any commit since the last
-good durable point: fills, which cost re-reads, but also phase 1s' dirty
+commit after the gap is lost with it, kSync commits included. Until a
+power loss (or a clean shutdown's `TRUNCATE` checkpoint; a crash and
+restart in the same boot keeps the on-disk gap), then, a power loss can
+take away any commit since the last good durable point: fills, which cost re-reads, but also phase 1s' dirty
 marks, whose loss leaves stale entries (a row that names the state before
 a backing change that did reach the disk). `BoundAtRequestEnd` and
 `LostOnlySinceSync` hold only while no durable point has failed in the run
-(`formal/durability.tla`'s `failed` stays set until a restart). Step
+(`formal/durability.tla`'s `failed` stays set until `PowerLossAndRestart`). Step
 25.28d replaces this with a poison: the first failed fsync of the WAL
 discards the cache and ends the daemon.
 
@@ -1921,8 +1929,9 @@ the change exists, phase 3 records it, and the request replies success.
 A failed mutation's re-resolution of its names (`ReresolveAfterFailure`)
 is a fill with interruption points of its own: its first `EINTR` ends the
 request with `EINTR` (the names stay unknown), and a rename skips its second
-name. An interrupted `FSYNC` may have synced (its sync point has an
-interruption point after the backing `fsync`); repeating it is harmless.
+name. An `FSYNC` has one interruption point, before the backing `fsync`; once
+the fsync has run, its durable point and the reply follow, so an `FSYNC`
+replied `EINTR` did not sync, and repeating it is harmless anyway.
 The model's variants show what breaks otherwise (an interrupt after the
 syscall that puts the old name back: `CacheNeverWrong`; the same before
 the syscall without the kernel's lock: `TriState`; an interrupted mutation

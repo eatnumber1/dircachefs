@@ -98,7 +98,8 @@ ChildFilledIfDirOk(dirOk, childOk) == dirOk /\ childOk
 FillMarksIfDirNotOk(newRow, dirOk) == newRow /\ ~dirOk
 
 (***************************************************************************)
-(* MC_large.cfg and MC_nolock.cfg leave the periodic durable point out     *)
+(* MC_large, MC_nolock, MC_interrupt_nolock and MC_interrupt_muts2 leave  *)
+(* the periodic durable point out                                          *)
 (* (CacheDurable <- NoCacheDurable; step 25.28b). It only shrinks          *)
 (* dbOpts, and every property quantifies over dbOpts universally and every *)
 (* step that reads it (PowerLoss) has at least the same choices in a       *)
@@ -106,7 +107,8 @@ FillMarksIfDirNotOk(newRow, dirOk) == newRow /\ ~dirOk
 (* behavior without it does. It added about half again to the states of   *)
 (* the configurations that have it, and these two run near their          *)
 (* timeouts; trace validation has it, and so does every other             *)
-(* configuration.                                                          *)
+(* configuration (MC_interrupt_files, where fsync, write and interrupts    *)
+(* meet, among them).                                                      *)
 (***************************************************************************)
 NoCacheDurable == FALSE
 

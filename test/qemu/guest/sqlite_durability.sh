@@ -23,12 +23,13 @@
 # unlinks, a rename, a mkdir and rmdir, a write, a chmod, a setxattr (each
 # phase 1 synced unless the inodes are durably dirty already: the fast path,
 # normal), an FSYNC through dcfs (step 25.28b: the backing fsync and the
-# cache's durable point, an fsync of the WAL, before the reply; no sync
-# point, so the next phase 1 stays on the fast path), a periodic sync point
-# (the clock moved past the interval, then a request: syncfs, the dirty
-# set's clearing, and the durable point after the reply; after it the next
-# phase 1 is synced again), and a writeback of the WAL by the filesystem
-# alone (an fsync of the -wal from outside, as periodic writeback would).
+# cache's durable point, an fsync of the WAL, before the reply; a sync point
+# with no syncfs, so the next phase 1 stays on the fast path), a periodic
+# sync point (the clock moved past the interval, then a request: syncfs,
+# the dirty set's clearing, and the durable point after the reply; after it
+# the next phase 1 is synced again), and a writeback of the WAL by the
+# filesystem alone (an fsync of the -wal from outside, as periodic writeback
+# would).
 # After each one a STATFS through dcfs (served only after every request
 # queued before it, and after the durable point of the request before it)
 # orders what follows, and the test records the WAL's commits so far

@@ -306,7 +306,7 @@ EOT
 strace_budget budget-write write
 
 # FSYNC of a written file: the backing fsync and nothing more of the
-# backing's (step 25.28b: no sync point, no syncfs), between the open's and
+# backing's (step 25.28b: a sync point with no syncfs), between the open's and
 # the release's reads; then the cache's durable point (an fsync of its WAL,
 # a "sync" in the budget), since the write's attributes were committed.
 strace_op fsync dd if=/dev/zero of="$MNT/wr" bs=4096 count=1 conv=notrunc,fsync

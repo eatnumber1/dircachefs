@@ -96,8 +96,9 @@
  *       descriptor several times, each close a FLUSH).
  *   testutil fsync <path>
  *       Opens a file or a directory read-only and fsync(2)s it (through dcfs:
- *       FUSE FSYNC or FSYNCDIR, after which dcfs runs a sync point), then
- *       closes it; prints "ERR <errno-name>" on failure.
+ *       FUSE FSYNC or FSYNCDIR, after which dcfs makes the cache durable: a
+ *       sync point with no syncfs), then closes it; prints "ERR <errno-name>"
+ *       on failure.
  *   testutil syncfs <path>
  *       syncfs(2) on the filesystem <path> is on (what a dcfs sync point does
  *       to the backing filesystem); prints "ERR <errno-name>" on failure.

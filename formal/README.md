@@ -30,7 +30,7 @@ behind dcfs's back, for today's identity and Phase 14's: see
 
 A fifth, `durability.tla`, gives the cache database's durability a clock:
 how old a cache commit a power loss can take away, given when sync points
-checkpoint the WAL: see [The durability model](#the-durability-model).
+make the cache durable: see [The durability model](#the-durability-model).
 
 This file assumes no TLA+ background.
 
@@ -357,7 +357,7 @@ prints. A request's first step runs inside `Arrive`.
 | (sync, first step) | The periodic sync point: snapshot of the fill guards' clock, then syncfs: every backing write so far is durable (`SyncBarrier`) | Sync points | `backing::SyncBacking`, `cache::BeginSync` |
 | `SyncClearDirty` | Clear D's dirty row (normal durability) unless a mutation of D began or ended since the snapshot or is in flight; forget `dirty.durable` | Sync points | `cache::ClearDirty` |
 | `CacheDurable` | Step 25.28b: the periodic sync point's durable point of the cache (an fsync of its WAL): every commit so far is durable (`dbOpts` becomes `{dbCur}`). At any moment no request is between two syscalls, which covers where the code runs it: after the reply of the request whose start ran the sync point, before the next request is read | Sync points (the cache's durable point) | `DirCacheFS::MakeCacheDurable`, `FinishSyncPoint`, `sqlite3::Connection::MakeDurable` |
-| (fsync, fsyncdir, first step), `FsyncReply` | Step 25.28b: the kernel's FSYNC of the file a name holds (`fsync`, step 12.8) or its FSYNCDIR of D (`fsyncdir`): the fsync passed through (`FsyncOnly`: what the regime's fsync makes durable, nothing more), then the cache's durable point (`CacheDurable`'s effect; `FsyncedCacheDurable` checks it, `known_bugs/fsync_skips_durable_point` leaves it out) and the reply. No sync point: no syncfs, the dirty set stays (`FsyncSyncPoint` is FALSE; `known_bugs/sync_by_file_fsync` sets it) | Sync points (fsync) | `DirCacheFS::Fsync`, `Fsyncdir`, `backing::FsyncFd`, `FsyncDir` |
+| (fsync, fsyncdir, first step), `FsyncReply` | Step 25.28b: the kernel's FSYNC of the file a name holds (`fsync`, step 12.8) or its FSYNCDIR of D (`fsyncdir`): the fsync passed through (`FsyncOnly`: what the regime's fsync makes durable, nothing more), then the cache's durable point (`CacheDurable`'s effect; `FsyncedCacheDurable` checks it, `known_bugs/fsync_skips_durable_point` leaves it out) and the reply. A sync point of a file, with no syncfs, the dirty set stays (`FsyncSyncPoint` is FALSE; `known_bugs/sync_by_file_fsync` sets it) | Sync points (fsync) | `DirCacheFS::Fsync`, `Fsyncdir`, `backing::FsyncFd`, `FsyncDir` |
 | (write, first step), `WriteSyscall`, `WriteReply` | Step 12.8: a write of new contents to the file a name holds, through its writable open (passthrough; `ENOENT` if the name holds none), then the reply. It changes the file's data only, which no record of D's covers (the open's phase 1 and release are the file's, not modelled); it gives the crash regimes data to reorder | | `fuse_ops.cc` WRITE through passthrough |
 | `InterruptArrives` | With `Interrupts` (step 22.5): the kernel's FUSE_INTERRUPT for a request in flight arrives, at any step, once (in the safety configurations, only where its next step reads it: `CanArriveWhereItMatters`). Nothing changes but the request's `intr`; it goes on to its next interruption point | Cancellation | libfuse's `do_interrupt` (`SessionLoop::Drain`) |
 | `Interrupt` | An interruption point, just before a backing syscall (`RN_probe`, `PD_read`, `PD_commit`: the population's reads abandoned, `PD_commit` standing for the checks between probe batches only; `GA_stat`: the refresh not taken; `C_sys`, `U_sys`, `R_sys`, `A_sys`; F's `FC_sys`, `FS_sys`, `FG_stat`, `FG_rstat`, a write's `W_sys`), finds the request's interrupt arrived: the request replies `EINTR`; a mutation past phase 1 `End`s (D's, or F's for F's setattr) without phase 3, its names and attributes left unknown and dirty, the backing unchanged. An obligation (step 22.5): at an interruption point an interrupted request has no other step (`Proceeds`, in `At`). Never between a syscall and its phase 3 | Cancellation | `CheckInterrupted` (`dcfs/interruption_point.h`), `SessionLoop` |
@@ -591,7 +591,7 @@ directory changes persist in order as under `"metaprefix"`.
 **Barriers.** A completed barrier makes durable what it orders. Every
 sync point of dcfs (the periodic one) runs `syncfs` (`SyncBarrier` =
 `Syncfs`: the sequence becomes `<<bCur>>`, in every regime). The kernel's
-`FSYNC` and `FSYNCDIR` are no sync point (step 25.28b): dcfs passes the
+`FSYNC` and `FSYNCDIR` are sync points that run no `syncfs` (step 25.28b): dcfs passes the
 fsync through, and `FsyncOnly` is what it makes durable, what a program
 running on the backing filesystem directly gets from its own fsync. (A
 configuration that puts it in as a sync point's barrier,
@@ -732,15 +732,15 @@ with the kernel's lock only a getattr can. Step 12.11's attribute change
 from 935,825 to 1,479,307, recovery from 25,861 to 39,635, liveness from
 101,898 to 146,504 and interrupt from 230,662 to 280,869 (run of
 2026-10-08); the large configurations leave it out and are unchanged.
-Step 25.28b's `CacheDurable` (every configuration but `MC_large.cfg` and
-`MC_nolock.cfg`, which leave it out: `MC.tla`'s `NoCacheDurable` says
-why it cannot hide a violation) took small from 1,479,307 to 1,869,733,
-recovery from 39,635 to 42,479, liveness from 146,504 to 244,552,
-interrupt from 280,869 to 388,382, interrupt_muts2 from 892,708 to
-1,325,533 and interrupt_nolock from 1,036,982 to 1,500,767. The counts
-and times below for the configurations that have it, and
-`MC_durability.cfg`'s, are from the runs of 2026-10-17 (load 7-12);
-`MC_large.cfg`'s and `MC_nolock.cfg`'s are unchanged by it.
+Step 25.28b's `CacheDurable` (every configuration but `MC_large.cfg`,
+`MC_nolock.cfg`, `MC_interrupt_nolock.cfg` and `MC_interrupt_muts2.cfg`,
+which leave it out: `MC.tla`'s `NoCacheDurable` says why it cannot hide
+a violation) took small from 1,479,307 to 1,869,733, recovery from
+39,635 to 42,479 and liveness from 146,504 to 244,552. The counts and
+times in the tables below are from the full run of `bazel test
+//formal/...` on 2026-10-18, at load 19 (all 250 tests passed); the
+earlier values some rows quote ("on the earlier base") date from before
+steps 22.5 and 25.28b and the rebase onto 25.34.
 
 `LongNames` (step 12.24) is the set of names longer than the backing's
 `f_namelen` (`Context::name_max`). A lookup of one never reads the cache:
@@ -749,22 +749,22 @@ populated. Every configuration but `MC_long_names.cfg` sets it to `{}`.
 
 | Configuration | Test (tier) | Bounds | States | Time |
 |---|---|---|---|---|
-| `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds (the attribute change included, step 12.11), all invariants, the three effect-point properties (step 12.7; also in `MC_recovery.cfg`, `MC_liveness.cfg` and `MC_interrupt.cfg`, and in `Trace.cfg`: every recorded trace is checked for them) and `ReplyObservable` (step 12.7b; also in `MC_recovery.cfg`, `MC_large.cfg`, `MC_nolock.cfg`, every `MC_interrupt*.cfg` and `Trace.cfg`) | 1,869,733 | 4.2 min (12 min at load 13 for 1,479,307, 2026-10-08) |
+| `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds (the attribute change included, step 12.11), all invariants, the three effect-point properties (step 12.7; also in `MC_recovery.cfg`, `MC_liveness.cfg` and `MC_interrupt.cfg`, and in `Trace.cfg`: every recorded trace is checked for them) and `ReplyObservable` (step 12.7b; also in `MC_recovery.cfg`, `MC_large.cfg`, `MC_nolock.cfg`, every `MC_interrupt*.cfg` and `Trace.cfg`) | 1,869,733 | 6.1 min at load 19 (4.2 min before; 12 min at load 13 for 1,479,307, 2026-10-08) |
 | `MC_recovery.cfg` | `recovery_test` (medium) | 1 name, 1 slot, 2 mutations, 2 crashes (one can come during the recovery of a dirty database: steps 12.6, 12.6b), all request kinds, all invariants and properties | 42,479 | ~12 s |
 | `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates`. It checks the invariants, the three effect-point properties and `RecoveryTerminates` (TLC reads both of its `PROPERTIES` sections), but not `ReplyObservable`: the reply ghost is off (`RecordReply <- ForgetReply`), since without a VIEW the idle slot's last reply tripled the states (338,790) | 244,552 | ~2 min |
 | `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes; `ReplyObservable` | 10,239,570 | ~20 min unloaded (CI 634 s on 2026-10-08 before step 12.6b's daemon crash; 27 min alone at load 11 without `ReplyObservable`, 64 min with it at load 9-12, 2026-10-08) |
 | `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; the three effect-point properties (since step 12.12a) and `ReplyObservable` (lookups and listings overlap mutations here) | 8,224,822 | ~6 min unloaded (CI 506 s before step 12.6b's daemon crash, for 6.37M states; 19 min alone at load 11, 2026-10-08) |
-| `MC_nolock_small.cfg` | `nolock_small_test` (medium) | step 12.12a (the audit's G4): as nolock with no crash and only `NolockGuardRequests` (lookups, listings, creates, unlinks, renames), so that `Mutation::Owns`, the phase-1 verification and the fill guards meeting a mutation bite before the large tier (`known_bug_rename_stale_source_nolock_small_test` finds R4 in these bounds); all invariants and the four action properties | 343,294 | ~1.5 min (load 8-14, 2026-10-10); with every kind but readdirplus 1,990,812 (6 min), with sync points added 1,185,567 |
+| `MC_nolock_small.cfg` | `nolock_small_test` (medium) | step 12.12a (the audit's G4): as nolock with no crash and only `NolockGuardRequests` (lookups, listings, creates, unlinks, renames), so that `Mutation::Owns`, the phase-1 verification and the fill guards meeting a mutation bite before the large tier (`known_bug_rename_stale_source_nolock_small_test` finds R4 in these bounds); all invariants and the four action properties | 350,330 (343,294 on the earlier base) | 51 s at load 19 (2026-10-18; ~1.5 min at load 8-14, 2026-10-10); with every kind but readdirplus 1,990,812 (6 min), with sync points added 1,185,567 |
 | `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` and `InterruptBound` (step 22.5) | 757,278 (547,645 before step 25.28b; 280,869 before step 22.5; 1,134,929 with arrival anywhere and round 1's interruption points) | ~2 min at load 2, 3.4 min at load 60 (2026-10-18) |
-| `MC_long_names.cfg` | `long_names_test` (medium) | as small with `LongNames = {"b"}`, 1 mutation | 429,426 | ~1 min |
+| `MC_long_names.cfg` | `long_names_test` (medium) | as small with `LongNames = {"b"}`, 1 mutation | 535,805 (429,426 on the earlier base) | 1.8 min at load 19 (2026-10-18) |
 | `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one); `ReplyObservable`, `InterruptBound` | 1,755,235 (892,708; 3,908,815 with arrival anywhere) | 18.9 min at load 65 (2026-10-18) |
 | `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable`, `InterruptBound` | 2,622,519 (1,036,982; 4,207,066 with arrival anywhere) | 33.7 min at load 65 (2026-10-18) |
-| `MC_interrupt_liveness.cfg` | `interrupt_liveness_test` (medium) | step 22.5: `FairSpec`, no VIEW; 2 names, 1 slot, every kind, 1 mutation, 1 crash; `InterruptBound`, `InterruptedReplies`, `InterruptActedOn` (the reply ghost keeps only `EINTR`: `RecordReply <- RecordEintr`) | 65,261 | ~1.3 min at load 2, 2 min at load 60 |
-| `MC_interrupt_liveness_slots.cfg` | `interrupt_liveness_slots_test` (large) | as `MC_interrupt_liveness.cfg` with 2 slots (another request can hold the thread), 1 name (so no rename), no crash | 110,435 | 14.5 min at load 55 (2026-10-18) |
-| `MC_interrupt_files.cfg`, `MC_interrupt_borndirty.cfg` | `interrupt_files_test`, `interrupt_borndirty_test` (medium) | step 22.5: as `MC_atime.cfg` (with writes and FSYNCs) and `MC_borndirty.cfg` with `Interrupts`, 2 changes, no crash: F's interruption points (`FC_sys`, `FS_sys`) and a write's (`W_sys`), with `InterruptBound` and every invariant of the two | 55,625; 9,678 (78,402 and 13,642 with arrival anywhere) | 15 s; 9 s (load 2, 2026-10-18) |
+| `MC_interrupt_liveness.cfg` | `interrupt_liveness_test` (medium) | step 22.5: `FairSpec`, no VIEW; 2 names, 1 slot, every kind, 1 mutation, 1 crash; `InterruptBound`, `InterruptedReplies`, `InterruptActedOn` (the reply ghost keeps only `EINTR`: `RecordReply <- RecordEintr`) | 93,959 (65,261 on the earlier base) | 1.6 min at load 19 (2026-10-18; ~1.3 min at load 2, 2 min at load 60 before) |
+| `MC_interrupt_liveness_slots.cfg` | `interrupt_liveness_slots_test` (large) | as `MC_interrupt_liveness.cfg` with 2 slots (another request can hold the thread), 1 name (so no rename), no crash | 196,629 (110,435 on the earlier base) | 6.1 min at load 19 (2026-10-18; 14.5 min at load 55) |
+| `MC_interrupt_files.cfg`, `MC_interrupt_borndirty.cfg` | `interrupt_files_test`, `interrupt_borndirty_test` (medium) | step 22.5: as `MC_atime.cfg` (with writes and FSYNCs) and `MC_borndirty.cfg` with `Interrupts`, 2 changes, no crash: F's interruption points (`FC_sys`, `FS_sys`) and a write's (`W_sys`), with `InterruptBound` and every invariant of the two | 69,840; 14,114 (55,625 and 9,678 on the earlier base; 78,402 and 13,642 with arrival anywhere) | 14 s; 6 s (load 19, 2026-10-18) |
 | `MC_atime.cfg`, `MC_atime_concurrent.cfg`, `MC_atime_crash.cfg` | `atime_test`, `atime_concurrent_test`, `atime_crash_test` (medium) | the file F (step 23.8; [Access times of a file](#access-times-of-a-file-step-238)) | 334,826; 373,534; 29,322 (step 23.11: F's setattrs also move the ghost `fs`; 260,871, 292,824, 29,322 at step 23.8b's corrected `View`; before it 263,848, 297,308, 29,950, the first two depending on TLC's workers) | ~2.5 min; ~3.5 min; ~15 s (load 10-17, 2026-10-09) |
-| `MC_borndirty.cfg`, `_ext4`; `MC_borndirty_nolock.cfg`, `_nolock_ext4`; `MC_borndirty_recovery.cfg` | `borndirty_*_test` (medium) | step 23.11 ([Born-dirty create](#born-dirty-create-step-2311)) | 275,962; 382,710; 89,998; 108,724; 3,054 | 39 s; 2.2 min; 33 s; 46 s; 7 s (by hand, load 14, 2026-10-09) |
-| `MC_crash_ext4.cfg`, `MC_crash_metaprefix.cfg` | `crash_ext4_test`, `crash_metaprefix_test` (medium) | step 12.8: the two weaker backing regimes; 2 names, 1 slot, 3 mutations, 1 crash, lookups, getattrs, creates, unlinks, renames, attribute changes of D and syncs (the litmus configurations have the writes and FSYNCs); all invariants, `CrashRefines`, the effect-point properties and `ReplyObservable` | 356,954 (ext4), 292,044 (metaprefix) | ~3 min, ~1.5 min |
+| `MC_borndirty.cfg`, `_ext4`; `MC_borndirty_nolock.cfg`, `_nolock_ext4`; `MC_borndirty_recovery.cfg` | `borndirty_*_test` (medium) | step 23.11 ([Born-dirty create](#born-dirty-create-step-2311)) | 326,482; 444,106; 116,224; 138,762; 3,288 (275,962; 382,710; 89,998; 108,724; 3,054 on the earlier base) | 39 s; 1.4 min; 32 s; 44 s; 7 s (load 19, 2026-10-18) |
+| `MC_crash_ext4.cfg`, `MC_crash_metaprefix.cfg` | `crash_ext4_test`, `crash_metaprefix_test` (medium) | step 12.8: the two weaker backing regimes; 2 names, 1 slot, 3 mutations, 1 crash, lookups, getattrs, creates, unlinks, renames, attribute changes of D and syncs (the litmus configurations have the writes and FSYNCs); all invariants, `CrashRefines`, the effect-point properties and `ReplyObservable` | 402,796 (ext4), 335,050 (metaprefix) (356,954 and 292,044 on the earlier base) | 1.1 min, 41 s (load 19, 2026-10-18) |
 | `MC_litmus_*.cfg` | `litmus_*_test` (small) | step 12.8: the litmus tests that must hold (`MClitmus.tla`; [the table](#the-backing-filesystems-crash-consistency)); 1 slot, 1-2 names, a fixed program of 2-3 mutations and an fsync or FSYNCDIR, 1 crash; every invariant and property besides | 761-1,874 each | seconds |
 | `no_stronger/*.cfg` | `no_stronger_than_*_test` (small) | step 25.28b: what those fsyncs do not guarantee, pinned ([Changing the model](#changing-the-model)); the same bounds, `LitmusOK` alone, the counterexample expected | 761-1,037 each | seconds |
 | `MC_durability.cfg` | `durability_test` (small) | step 25.28b: [The durability model](#the-durability-model) | 764 (440 before the sticky `failed` and `fsynced`, 2026-10-18) | seconds |
@@ -841,7 +841,7 @@ FALSE in the real configurations.
 | `interrupt_not_replied` | not historical (step 22.5): an interruption point that stops the request, which never replies (`InterruptReplies <- InterruptNeverReplies`; the kernel waits for a reply even for a SIGKILLed caller); deadlock checking off (`CHECK_DEADLOCK FALSE`): every request can end up stuck, getattrs included since 22.5 made their refreshes interruption points; no `VIEW` | `InterruptedReplies` (temporal) | a create's phase 1; its interrupt arrives; at its interruption point it has no step left, while getattrs go on in the other slot |
 | `attr_change_end_skipped` | 8.2's mutation survivors (step 12.11): a deleted `Mutation::End` after an attribute change (`AttrChangeEnd <- AttrChangeEndSkipped`) | `GuardsBalanced` | an attribute change of D: phase 1, its syscall; its end leaves `FillGuards::inflight` raised with no request in flight (its refresh, and every later fill of D, is then refused) |
 | `borndirty_*` | step 23.11 | `CrashSafe` | see [Born-dirty create](#born-dirty-create-step-2311) |
-| `sync_by_file_fsync` | not historical (step 12.8): a sync point after FSYNC (`FsyncSyncPoint <- Yes`; since step 25.28b an FSYNC is none) whose only barrier is the file's fsync (`SyncBarrier <- FsyncOnly`), under the `"ext4"` regime (`MClitmus.tla`'s implied-directory-fsync program) | `CrashSafe` | create f: phase 1, its syscall, phase 3 (f recorded present); write f; FSYNC of f: its fsync makes f's data durable, not its entry in D (Ferrite's Definition 7), and `ClearDirty` takes D out of the dirty set: a power loss may now lose the create while the database says f is present and recovery has nothing to forget. Under `"seq"` the same configuration finds nothing |
+| `sync_by_file_fsync` | not historical (step 12.8): a sync point after FSYNC (`FsyncSyncPoint <- Yes`; since step 25.28b an FSYNC runs no `syncfs`) whose only barrier is the file's fsync (`SyncBarrier <- FsyncOnly`), under the `"ext4"` regime (`MClitmus.tla`'s implied-directory-fsync program) | `CrashSafe` | create f: phase 1, its syscall, phase 3 (f recorded present); write f; FSYNC of f: its fsync makes f's data durable, not its entry in D (Ferrite's Definition 7), and `ClearDirty` takes D out of the dirty set: a power loss may now lose the create while the database says f is present and recovery has nothing to forget. Under `"seq"` the same configuration finds nothing |
 | `fsync_skips_durable_point` | not historical (the 25.28b Opus review's S3): an FSYNC that replies without the cache's durable point (`FsyncSkipsDurablePoint <- Yes`), in `MClitmus.tla`'s implied-directory-fsync program under `"ext4"`. Every invariant still holds (a lost normal commit costs only a re-read); the reply's promise does not | `FsyncedCacheDurable` | create f (phase 3 a normal commit), write f, FSYNC of f replies with phase 3's commit still losable |
 
 ### Premises: every property bites (step 12.12a)
@@ -1592,9 +1592,9 @@ restart that file's access time can be behind with no power loss (README
 
 | Configuration or variant | Test | Expected | |
 |---|---|---|---|
-| `MC_atime.cfg` | `atime_test` (medium) | no error | 1 name, 1 slot, 3 changes (reads, setattrs, D's create), 1 crash; every invariant, `FileExact`, `ReplyObservable`, and step 23.11's three conditions per inode. 334,826 distinct states (260,871 at step 23.8b, before the ghost `fs`; 1,457,405 with no `VIEW` then), ~2.5 min at load 15 (2026-10-09) |
-| `MC_atime_concurrent.cfg` | `atime_concurrent_test` (medium) | no error | 2 slots, 2 changes, no crash: F's requests and sync points interleaving. 373,534 distinct states (292,824 at step 23.8b), ~3.5 min. (2 slots with the crash and D's create passed a million states without finishing) |
-| `MC_atime_crash.cfg` | `atime_crash_test` (medium) | no error | `atime_held_fill_no_touch`'s bounds: 2 slots, opens, releases and sync points, 1 read, 1 crash. 29,322 distinct states (step 23.8b) |
+| `MC_atime.cfg` | `atime_test` (medium) | no error | 1 name, 1 slot, 3 changes (reads, setattrs, D's create), 1 crash; every invariant, `FileExact`, `ReplyObservable`, and step 23.11's three conditions per inode. 373,304 distinct states at step 25.28b, 37 s at load 19, 2026-10-18 (334,826 on the earlier base; 260,871 at step 23.8b, before the ghost `fs`; 1,457,405 with no `VIEW` then), ~2.5 min at load 15 (2026-10-09) |
+| `MC_atime_concurrent.cfg` | `atime_concurrent_test` (medium) | no error | 2 slots, 2 changes, no crash: F's requests and sync points interleaving. 488,270 distinct states at step 25.28b, 1.6 min at load 19, 2026-10-18 (373,534 on the earlier base; 292,824 at step 23.8b). (2 slots with the crash and D's create passed a million states without finishing) |
+| `MC_atime_crash.cfg` | `atime_crash_test` (medium) | no error | `atime_held_fill_no_touch`'s bounds: 2 slots, opens, releases and sync points, 1 read, 1 crash. 35,362 distinct states at step 25.28b, 15 s at load 19, 2026-10-18 (29,322 on the earlier base, step 23.8b) |
 | `known_bugs/atime_held_fill_no_touch` | `known_bug_atime_held_fill_no_touch_test` | `CrashSafe` | the held fill records and marks the row dirty, but does not touch F's guard (`HeldFillMark <- HeldFillMarkNoTouch`): a sync point that took its snapshot before the release clears the row |
 | `known_bugs/atime_fill_no_touch` | `known_bug_atime_fill_no_touch_test` (large: 634,354 states, ~7 min) | `CrashSafe` | a refresh that records an open F's attributes marks the row but does not touch the guard (`FillF <- FillFNoTouch`): open, a read, the refresh, a release with nothing new to record, and the sync point clears the row |
 | `known_bugs/atime_sync_clears_held` | `known_bug_atime_sync_clears_held_test` | `FileExact` | a sync point clears a held file's row (`SyncKeepsHeld <- SyncKeepsNotHeld`): a read, then a daemon crash before any held fill, and the restart serves the old access time |
@@ -2620,7 +2620,7 @@ directories), the birth time (`btime`); 0 is "unknown", as in the code.
 | `Access(r)` | a request on a nodeid the kernel or a handle names reaches the backing filesystem and resolves to an `ESTALE` the parent check confirms (`Confirmed`: only while the server answers): the row goes | `OpenNode`, `VerifyBackingIdentity`, `ForgetStale` (and through `OpenNode`: `ParentOf`, refreshes, opens) |
 | `DotLookup(h)` | the client presents a handle the kernel has no matching inode for: `LOOKUP(id, ".")`, answered from the row (Phase 14 without a row: by inode number); the kernel makes its inode and compares generations | `Lookup` of `"."`, `EntryFor` |
 | `NfsTake(r)`, `Evict(r)` | the client takes a handle of an inode the kernel holds; the kernel evicts an inode (its removed record goes) | `fuse_encode_fh`; `Forget` |
-| `Sync`, `Persist` | a sync point empties the dirty set (not durable by itself); a durable commit (a phase 1 elsewhere, a WAL checkpoint) | `SyncBacking`, `ClearDirty` |
+| `Sync`, `Persist` | a sync point empties the dirty set (not durable by itself); a durable commit (a phase 1 elsewhere, a durable point, a WAL checkpoint) | `SyncBacking`, `ClearDirty` |
 | `OobUnlink(n)`, `OobCreate(n)`, `OobRename(n, m)` | with `OutOfBand`, changes behind dcfs's back, running or not (a create may recycle an inode number, or mount a filesystem at a name) | |
 | `Crash`, `PowerLoss`, `Stop`, `Wipe`, `Start` | the daemon dies (the database keeps its commits) or the power goes (it rolls back to `dur`; the backing filesystem keeps what it did); a clean stop; the database deleted while stopped; the start, which after an unclean shutdown probes the dirty rows by handle | `StartRun`, `ProbeRecoveredRows`, `FinishRun` |
 | `ProbeStat(n)`, `ProbeRead` | with `ProbeByName` (not the code): the statx, then the handle and the generation in `ProbeOrder`, each read resolving the name again | |
@@ -2669,7 +2669,7 @@ workers, other lanes running).
 | `MC_ident_power_oob.cfg` | `ident_power_oob_test` (medium) | identity resolution under out-of-band changes with generation-only evidence (`MC_ident_power.cfg` with `OutOfBand`); every property but `ServedWhileLive`. Added when a named-open design was shown to break it (Phase 13 review, 2026-10-09) | 721,557 | ~100 s |
 | `MC_ident_btime.cfg` | `ident_btime_test` (medium) | the birth time the only evidence, changes behind dcfs's back; every property | 49,833 | ~25 s |
 | `MC_ident_stubs.cfg` | `ident_stubs_test` (medium) | filesystems mounted at a and b, 2 stub ids, mounts and unmounts behind dcfs's back, a power loss; every property but `ServedWhileLive` | 217,366 | ~70 s |
-| `MC_ident_target.cfg` | `ident_target_test` (medium) | Phase 14's identity, a crash, a power loss and a cache wipe; every property | 145,136 | ~60 s |
+| `MC_ident_target.cfg` | `ident_target_test` (medium) | Phase 14's identity, a crash, a power loss and a cache wipe; every property | 147,616 (145,136 on the earlier base) | 55 s (load 19, 2026-10-18) |
 | `MC_ident_net.cfg` | `ident_net_test` (medium) | step 14.10: today's identity on an NFS client (`NfsEvidence`), a server outage answering a transient `ESTALE`, a crash, and the backing swapped between runs for one with another identity whose o4 has o1's handle bytes (refused, then cold); every property (run of 2026-10-17, lane-4) | 53,574 | ~20 s |
 | `MC_ident_target_net.cfg` | `ident_target_net_test` (medium) | step 14.10: Phase 14's identity on an NFS client (no open by number), a crash, a server outage; every property (run of 2026-10-17) | 8,961 | ~17 s |
 
@@ -2819,7 +2819,7 @@ a discrete clock and keeps only what the question needs:
 | `Phase1` | A kSync commit that marks a row dirty: everything so far durable (`Durable`: unless a durable point failed before it) | `cache::BeginMutation` |
 | `AutoCheckpoint` | SQLite's own checkpoint, every 1000 pages (`Durable` too) | SQLite |
 | `Start` | A request starts: the periodic sync point's backing half first, once `Interval` ticks have passed since the last (`SyncNow`) | `DirCacheFS::MaybeSyncNow` |
-| `Fsync` | An FSYNC or FSYNCDIR (step 25.28b): no sync point (the clock and the dirty set stay), but the cache's durable point before its reply | `DirCacheFS::Fsync`, `Fsyncdir`, `MakeCacheDurable` |
+| `Fsync` | An FSYNC or FSYNCDIR (step 25.28b): a sync point of a file that runs no `syncfs` (the clock and the dirty set stay), but the cache's durable point before its reply | `DirCacheFS::Fsync`, `Fsyncdir`, `MakeCacheDurable` |
 | `FsyncFails` | The same with a durable point that fails: the request replies `EIO` | the same |
 | `Finish` | The request ends: its reply, then the durable point if one is due | `DirCacheFS::FinishSyncPoint` |
 | `DurablePointFails` | The same with a durable point that fails (an I/O error of the cache disk) | its WARNING |
@@ -2887,7 +2887,7 @@ point's durable point in `dcfs.tla` and its traces (the
 disks with a fill on each side of a periodic sync point, with a dirty set
 and without: the one before survives, the one after does not; and
 `sqlite_durability_test` judges the crash states of the durable points
-(an FSYNCDIR's, the periodic sync point's).
+(an FSYNC's, the periodic sync point's).
 
 ```sh
 bazel test //formal:durability_test //formal:known_bug_durability_never_checkpoint_test \

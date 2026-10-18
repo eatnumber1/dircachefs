@@ -362,10 +362,12 @@ absl::Status Connection::MakeDurable() {
   // restart rewrites was fsynced when written (sqlite3.c walFrames,
   // syncHeader). So once this fsync returns, every commit so far is
   // recovered after a power loss, as long as no earlier fsync of the WAL
-  // failed: Linux reports a writeback error once and later fsyncs return 0,
-  // while the pages it could not write may never reach the disk
-  // (Documentation/filesystems/vfs.rst:718, Linux v7.3-rc7), and recovery
-  // stops at that gap. SQLITE_SYNC_NORMAL is what SQLite's own WAL syncs
+  // failed: Linux reports a writeback error once and later fsyncs return 0
+  // (Documentation/filesystems/vfs.rst:718, Linux v7.3-rc7), while the pages
+  // it could not write may never reach the disk (ext4 records the error and
+  // ends the folio's writeback without dirtying it again:
+  // fs/ext4/page-io.c:114 and :137, Linux v7.3-rc7), and recovery stops at
+  // that gap. SQLITE_SYNC_NORMAL is what SQLite's own WAL syncs
   // pass at synchronous=NORMAL or FULL.
   if (int rc = wal->pMethods->xSync(wal, SQLITE_SYNC_NORMAL); rc != SQLITE_OK) {
     return absl::StatusBuilder(Sqlite3ErrorCodeToStatus(rc))

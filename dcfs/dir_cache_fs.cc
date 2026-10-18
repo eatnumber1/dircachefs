@@ -683,12 +683,15 @@ void DirCacheFS::FinishSyncPoint() {
   durable_point_due_ = false;
   absl::Status durable = MakeCacheDurable();
   // Carries on, though a later durable point does not repair this: Linux
-  // reports a writeback error to one fsync and returns 0 to later ones,
-  // while the pages it could not write may never reach the disk
-  // (Documentation/filesystems/vfs.rst:718, Linux v7.3-rc7), and SQLite's
-  // recovery stops at the first missing WAL frame. So until the next start
-  // a power loss may take every later commit too, kSync ones and their dirty
-  // marks included (step 25.28d poisons the cache instead).
+  // reports a writeback error to one fsync and returns 0 to later ones
+  // (Documentation/filesystems/vfs.rst:718, Linux v7.3-rc7), while the pages
+  // it could not write may never reach the disk (ext4 ends their writeback
+  // without dirtying them again: fs/ext4/page-io.c:114 and :137, Linux
+  // v7.3-rc7), and SQLite's recovery stops at the first missing WAL frame.
+  // So until a power loss or a clean shutdown's TRUNCATE checkpoint (a
+  // same-boot crash and restart keeps the on-disk gap) a power loss may take
+  // every later commit too, kSync ones and their dirty marks included (step
+  // 25.28d poisons the cache instead).
   LOG_IF(WARNING, !durable.ok())
       << "sync point: fsync of the cache's WAL failed; the cache's commits "
          "since its last durable point may not survive a power loss: "
@@ -2216,12 +2219,15 @@ absl::Status DirCacheFS::Fsync(FuseRequest &req, fuse_ino_t ino, int datasync,
   // Backing durability is the backing filesystem's own job; passing the
   // sync through is still correct (and cheap) regardless of `writable`.
   // An interruption point before the fsync (dcfs/interruption_point.h):
-  // an fsync replied EINTR may have run; repeating it is harmless.
-  RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("an fsync")));
+  // an fsync replied EINTR did not run; after it only the cache's durable
+  // point and the reply follow.
+  RETURN_IF_ERROR(
+      CheckInterrupted(ctx_, InterruptionPoint("an fsync's sync point")));
   BackingCall("FsyncFd");
   RETURN_IF_ERROR(backing::FsyncFd(fd, datasync != 0));
   // The fsync makes durable what the backing filesystem's fsync does, no
-  // more (no syncfs: not a sync point, the dirty set stays; step 25.28b).
+  // more (a sync point that runs no syncfs, so the dirty set stays; step
+  // 25.28b).
   // What dcfs cached about the file (its inode number, the handle an NFS
   // client holds) is made durable with it.
   RETURN_IF_ERROR(MakeCacheDurable());
@@ -2523,7 +2529,8 @@ absl::Status DirCacheFS::Fsyncdir(FuseRequest &req, fuse_ino_t ino,
   // Missing row -> ESTALE; see RequireAttr(). There is no phase 1/3 here:
   // the syscall, then the cache's durable point, as in Fsync().
   RETURN_IF_ERROR(RequireAttr(id).status());
-  RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("an fsyncdir")));
+  RETURN_IF_ERROR(
+      CheckInterrupted(ctx_, InterruptionPoint("an fsyncdir's sync point")));
   RETURN_IF_ERROR(backing::FsyncDir(ctx_, id, datasync != 0));
   RETURN_IF_ERROR(MakeCacheDurable());
   return req.ReplyErrno(0);

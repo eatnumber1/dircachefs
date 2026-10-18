@@ -3472,10 +3472,10 @@ class ReplyAndDurableOrder : public ProtocolEvents {
   std::vector<std::string> order;
 };
 
-// An FSYNC or FSYNCDIR is not a sync point (step 25.28b): it makes durable
-// what the backing filesystem's fsync does and the cache, before its reply,
-// with no syncfs; the dirty set stays, and the periodic sync point keeps its
-// cadence (an fsync does not restart the interval).
+// An FSYNC or FSYNCDIR is a sync point that runs no syncfs (step 25.28b): it
+// makes durable what the backing filesystem's fsync does and the cache,
+// before its reply, with no syncfs; the dirty set stays, and the periodic
+// sync point keeps its cadence (an fsync does not restart the interval).
 TEST_F(ClockTest, FsyncAndFsyncdirMakeTheCacheDurableBeforeTheReply) {
   WriteFile(Path("f"));
   Start();
@@ -3497,7 +3497,7 @@ TEST_F(ClockTest, FsyncAndFsyncdirMakeTheCacheDurableBeforeTheReply) {
   ASSERT_EQ(Fsyncdir(d).error, 0);
   EXPECT_THAT(order.order, ElementsAre("durable", "reply")) << "FSYNCDIR";
   EXPECT_THAT(Dirty(), ::testing::IsSupersetOf({kRootInode, f, d}))
-      << "no sync point: the dirty set stays";
+      << "no syncfs: the dirty set stays";
 
   clock_.AdvanceTime(absl::Seconds(1));
   order.order.clear();
@@ -8721,7 +8721,7 @@ class InterruptRun : public DirCacheFSTest {
       return -Rename(kRootInode, "f", kRootInode, "g").error;
     }
     if (scenario == "setattr") return -Chmod(f_, S_IFREG | 0600).error;
-    return -Fsyncdir(kRootInode).error;  // "sync"
+    return -Fsyncdir(kRootInode).error;  // "fsyncdir"
   }
 
   void TestBody() override {}
@@ -8746,7 +8746,7 @@ struct InterruptCase {
 // statx and ReadGeneration; a refresh is an OpenNode and a statx): the code's
 // form of the model's Run(kind). 0: a population (the rest of its OpenNode
 // and statx), a getattr, an opendir, a held getattr (the rest of a refresh
-// or held fill), a write and a sync point (fstatvfs after syncfs). 1: a
+// or held fill) and a write. 1: an fsyncdir (the fsync after its open), a
 // readdirplus (its first entry's refresh), a release (its held fill) and a
 // mutation past its syscall (the opens before it, the syscall, the refreshes
 // after). A lookup's reply entry may take a whole refresh: it cannot reply
@@ -8770,7 +8770,7 @@ const InterruptCase kInterruptCases[] = {
     {.scenario = "setattr", .run = 11},
     {.scenario = "write", .run = 0},
     {.scenario = "release", .run = 1},
-    {.scenario = "sync", .run = 1},
+    {.scenario = "fsyncdir", .run = 1},
 };
 
 // What `c`'s request did after an interrupt that arrived at its `at`-th

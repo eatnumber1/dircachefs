@@ -22,8 +22,9 @@
 (* have passed since the last one (DirCacheFS::MaybeSyncNow: the backing   *)
 (* half), and the request ends with the durable point, after its reply and *)
 (* before the next request is served (DirCacheFS::FinishSyncPoint). An     *)
-(* FSYNC or FSYNCDIR is no sync point, but makes the durable point before  *)
-(* its reply (Fsync). There is no timer (docs/style.md, "No timers"): an   *)
+(* FSYNC or FSYNCDIR is a sync point that runs no syncfs: it makes the     *)
+(* durable point before its reply (Fsync). There is no timer               *)
+(* (docs/style.md, "No timers"): an                                        *)
 (* idle daemon runs nothing, so the bound is at requests                   *)
 (* (LostWithinInterval, the same bound at every moment, does not hold:     *)
 (* limitations/durability_idle.cfg).                                       *)
@@ -157,8 +158,9 @@ Start ==
        ELSE UNCHANGED <<since, oldest, dirty, due, fsynced>>
     /\ UNCHANGED failed /\ ended' = FALSE
 
-\* An FSYNC or FSYNCDIR (step 25.28b): no sync point (the clock and the
-\* dirty set stay), but the cache's durable point before its reply.
+\* An FSYNC or FSYNCDIR (step 25.28b): a sync point that runs no syncfs (the
+\* clock and the dirty set stay), with the cache's durable point before its
+\* reply.
 Fsync ==
     /\ busy
     /\ oldest' = IF BugFsyncSkipsDurablePoint THEN oldest ELSE Durable(oldest)

@@ -79,7 +79,8 @@ FileKinds == {"fopen", "frelease", "fgetattr", "fset", "fcreate", "flookup"}
 DataKinds == {"write", "fsync", "fsyncdir"}
 \* The requests that sync: the periodic sync point ("sync"), and the
 \* kernel's FSYNC of a file and FSYNCDIR of D, each the backing filesystem's
-\* fsync and the cache's durable point (step 25.28b: not sync points).
+\* fsync and the cache's durable point (step 25.28b: sync points that run no
+\* syncfs).
 SyncKinds == {"sync", "fsync", "fsyncdir"}
 Regimes == {"seq", "metaprefix", "ext4"}
 
@@ -592,8 +593,8 @@ Syscall(p, r) == ps' = [ps EXCEPT ![p] = r] /\ running' = None
 \* The slot after a backing syscall step: one more since its interrupt
 \* arrived, if it has (InterruptBound counts them). Every step that is a
 \* backing syscall of the slot's goes through AfterSyscall or MutSyscall;
-\* the two that are a request's first step (S1From's syncfs, FLookupFrom's
-\* probe) come before any arrival can (InterruptArrives).
+\* the three that are a request's first step (S1From's syncfs, FLookupFrom's
+\* probe, FsyncFrom's fsync) come before any arrival can (InterruptArrives).
 Counted(r) == IF r.intr THEN [r EXCEPT !.nsys = @ + 1] ELSE r
 \* This step was a syscall.
 AfterSyscall(p, r) == ps' = [ps EXCEPT ![p] = Counted(r)] /\ UNCHANGED running
@@ -1188,13 +1189,13 @@ CacheDurable ==
 (* The kernel's FSYNC of the file a name of D holds ("fsync") and its      *)
 (* FSYNCDIR of D ("fsyncdir") (step 25.28b; DirCacheFS::Fsync, Fsyncdir):  *)
 (* the fsync it asked for, passed through (FsyncOnly), then the cache's    *)
-(* durable point and the reply. Not a sync point: no syncfs, and the dirty *)
-(* set stays. A power loss after the reply may still lose what the backing *)
+(* durable point and the reply. A sync point with no syncfs: the dirty set *)
+(* stays. A power loss after the reply may still lose what the backing     *)
 (* filesystem's fsync does not make durable (the no_stronger litmus        *)
 (* configurations, MClitmus.tla).                                          *)
 (***************************************************************************)
 
-\* Whether an FSYNC is a sync point instead (before step 25.28b it was:
+\* Whether an FSYNC runs a syncfs as well (before step 25.28b it did:
 \* its fsync, then syncfs and the dirty set's clearing). Not the code;
 \* known_bugs/sync_by_file_fsync overrides it, with the fsync as the sync
 \* point's only barrier (SyncBarrier <- FsyncOnly).
@@ -1283,7 +1284,7 @@ QuietPcs ==
      "C_fail", "U1", "U3", "U_fill", "U_fail", "R0", "R1", "R3", "R_fill",
      "R_fail", "R_fail2", "A3", "A_fill", "S2", "W_reply", "FR_fill",
      "FG_fill", "FG_rfill", "FS_end", "FS_fill", "FC_rec", "FC_mark",
-     "FC_fail", "FL_commit"}
+     "FC_fail", "FL_commit", "Y_reply"}
 ASSUME QuietPcs \cap InterruptPcs = {}
 \* The safety configurations' arrival (MC_interrupt.cfg and the others:
 \* CanArrive <- CanArriveWhereItMatters; step 22.5): only where the

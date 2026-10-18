@@ -2,8 +2,8 @@
 ------------------------- MODULE sync_by_file_fsync -------------------------
 (***************************************************************************)
 (* Not the code, and not historical (step 12.8): a sync point after the    *)
-(* kernel's FSYNC (FsyncSyncPoint <- Yes; since step 25.28b an FSYNC is no *)
-(* sync point) that takes the file's fsync as its barrier instead of       *)
+(* kernel's FSYNC (FsyncSyncPoint <- Yes; since step 25.28b an FSYNC runs  *)
+(* no syncfs) that takes the file's fsync as its barrier instead of        *)
 (* running syncfs (SyncBarrier <- FsyncOnly), and clears the dirty set     *)
 (* after it, under the ext4 regime. Ferrite's Definition 7 orders before   *)
 (* an fsync of f only the updates of f: the create of f in D (its entry)   *)
