@@ -13,13 +13,11 @@ class ReviewFindingsTest(unittest.TestCase):
 
   def setUp(self):
     self.temp_dir = tempfile.TemporaryDirectory()
+    self.addCleanup(self.temp_dir.cleanup)
     self.repo_dir = self.temp_dir.name
     self.tsv_dir = os.path.join(self.repo_dir, "docs", "plan")
     os.makedirs(self.tsv_dir, exist_ok=True)
     self.tsv_path = os.path.join(self.tsv_dir, "review-findings.tsv")
-
-  def tearDown(self):
-    self.temp_dir.cleanup()
 
   def test_find_main_repo(self):
     self.assertEqual(

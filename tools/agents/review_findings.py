@@ -72,7 +72,6 @@ def parse_finding_line(line, line_num):
   # so adjacent empty fields (e.g. 'none | | | | summary | no | open') work.
   parts = [p.strip() for p in line.strip().split(" | ")]
   if len(parts) != 7:
-    import re
     alt_parts = [p.strip() for p in re.split(r"\s*\|\s*", line.strip())]
     if len(alt_parts) == 7:
       parts = alt_parts

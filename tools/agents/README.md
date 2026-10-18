@@ -355,7 +355,7 @@ bazel run //tools/agents:review_findings -- summary
 ```
 
 The findings block format has one finding per line, separated by ` | `:
-```
+```text
 severity | category | rule | file | summary | mechanizable | outcome
 ```
 
