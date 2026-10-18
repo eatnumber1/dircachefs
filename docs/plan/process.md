@@ -290,6 +290,17 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
 - When russ is away, keep going with whatever does not need russ, and
   collect what does.
 
+## The orchestrator's context is the expensive one (russ, 2026-10-17)
+
+Every orchestrator tool call re-sends its whole conversation. So: the
+orchestrator keeps judgement (reviewing diffs, deciding, talking to russ)
+and hands mechanical bookkeeping (merge records in log.md and the phase
+files, ledger rows, the census, plan text edits) to a dcfs-mechanical
+clerk (Haiku, effort low) in one batched dispatch with exact instructions
+(russ: "Agreed. But make it so you won't forget to do that." Also a memory
+note). A self-handoff note in `docs/plan/notes/` lets russ compress the
+orchestrator's context without losing the working state.
+
 ## Questions for russ, and rulings (russ, 2026-10-17)
 
 russ: "you can make rulings on cases that are very obvious, and also you

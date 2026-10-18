@@ -4068,3 +4068,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   worker made 355 calls re-sending ~145k tokens of context each; the
   22.6 rename (274 calls) fell partly in the same quota window. Four rules
   agreed (russ) and put in process.md rule 4a.
+- 2026-10-17 evening, russ: compress the orchestrator's context (a
+  self-handoff note: notes/handoff-2026-10-17.md); the dashboard hook to
+  ask for uploads only on step starts/finishes and quota changes, with
+  paused/waiting states (Gemini job); bookkeeping to a Haiku clerk, made
+  hard to forget (process.md, memory).
