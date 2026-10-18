@@ -337,6 +337,12 @@ time appears only as a hang guard.
 
 Owner: dcfs-implementer, lane 4.
 
+Ruling (russ, 2026-10-18: "technically we don't need them. I like having the
+proof that it works though"): the kernel-facts pins test the kernel, not dcfs.
+`kernel_facts_test` runs only in the weekly workflow, never in fast, presubmit
+or per-push CI. That moves in 25.34's rebase if it is small, else as a
+follow-up.
+
 ## 17.6b Pin fanotify and dnotify behaviour on the mount (russ, 2026-10-18: "what about fsnotify?"; after 17.6)
 
 17.6 covered only inotify. This step pins the rest of fsnotify, native
@@ -358,3 +364,6 @@ cases are pinned as they are, not fixed.
 
 Owner: Gemini Flash via foreman when its pool allows, else dcfs-implementer.
 After 25.34 merges, if the glue moves to `qemu_cc_test`.
+
+Ruling (russ, 2026-10-18): the 17.6b pins join `kernel_facts_test` in the
+weekly workflow only, never in fast, presubmit or per-push CI (see 17.6).

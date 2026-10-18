@@ -288,6 +288,10 @@ use it as design guidance rather than firm rules."
   are hidden friends: defined inside the class they belong to, in that
   class's namespace, never in another namespace or file
   (`FileHandle::AbslHashValue`, `file_handle.h:33`).
+- **Prefer composition over inheritance; inherit only from pure virtual
+  interfaces** (russ, 2026-10-18). A fake or decorator implements the
+  interface and holds what it wraps by reference, rather than deriving from
+  a concrete class.
 - **Test-only code** goes in `*_test.cc` or `dcfs/testonly/` (BUILD
   `default_testonly = 1`), never in a production file; production code has
   no test hooks.
