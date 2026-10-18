@@ -64,3 +64,24 @@ Owner: dcfs-investigator for 1-3 (musl wrappers, modules), dcfs-implementer
 for 4-6. Order: as soon as possible (russ, 2026-10-07: the tests get much
 faster); it runs alongside the guest-memory step and rebases over it
 (both touch run-qemu.sh and the macros).
+
+## 24.1 SELinux under Fedora's default policy (russ, 2026-10-18; backlog, not started, low priority, not in a milestone)
+
+russ, 2026-10-18: "Let's add to the backlog somewhere some SELinux testing
+with Fedora's ruleset. It's not a feature I need, but Fedora ships it by
+default and Fedora is popular."
+
+Scope: a guest test configuration that boots an SELinux-enabled kernel with
+Fedora's targeted policy (selinux-policy-targeted) in enforcing mode, and runs
+dcfs's mount, xattr (security.selinux labels through dcfs: getxattr, setxattr,
+listxattr; the `context=` mount option; file creation labels), credentials and
+passthrough tests under it. Known touch points: security_capget can deny
+capget (17.2e restored its error path); the security.* xattrs; FUSE's handling
+of security labels (fuse_init_security, FUSE_SECURITY_CTX); the daemon's own
+domain (unconfined, or a confined type).
+
+First sub-step: find whether an Alpine or hermetic Fedora policy build is
+feasible in the QEMU harness, and what the test kernel config needs
+(CONFIG_SECURITY_SELINUX, and the policy's userspace tools if any).
+
+Owner: dcfs-investigator for the first sub-step; the implementer after that.

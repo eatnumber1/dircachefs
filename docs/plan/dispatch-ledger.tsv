@@ -152,3 +152,10 @@ a7b1c2c44cb93db42	2026-10-18T22:42:20Z	Rank mechanizable review findings		Explor
 a33a7764dc1c9fd20	2026-10-18T22:42:46Z	Upload quota and budget datasets	mechanical	dcfs-mechanical	haiku	low									
 a434a974f638733a1	2026-10-18T22:43:35Z	Upload ci dataset	mechanical	dcfs-mechanical	haiku	low									
 a1f165fb580a2475f	2026-10-18T22:49:37Z	Clerk batch 24	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+aee3cf71ab75ea415	2026-10-18T22:56:20Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low									
+ac10d9958afdc46f5	2026-10-18T22:57:37Z	docs-testing	mechanical	dcfs-mechanical	haiku	low									
+ad523ea98096a32d3	2026-10-18T22:58:48Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low									
+addc4ad8c7feed4fa	2026-10-18T23:06:45Z	Upload ci dataset	mechanical	dcfs-mechanical	haiku	low									
+af652b0f6c5e57d6f	2026-10-18T23:08:10Z	rename-fsync-points	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
+a3251be86543197e4	2026-10-18T23:08:36Z	Clerk batch 25	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+a609057edf051304d	2026-10-18T23:10:05Z	Upload lanes via new skill	mechanical	dcfs-mechanical	haiku	low									

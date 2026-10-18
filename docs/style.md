@@ -156,10 +156,13 @@ use it as design guidance rather than firm rules."
   invalidate the other libc deviations we've already done (such as changing
   pointer+len to std::span, or changing char* to string_view)."). Every
   `syscalls::` free function pulls the right Syscalls interface out of the
-  Context, and calls that interface's CamelCase member (`Write`). The members of the injected syscall interfaces
-  (`BackingSyscalls`, `LocalSyscalls`, `ProcessSyscalls`) follow the normal
-  CamelCase rule and are called only by the `syscalls::` free functions
-  (russ, 2026-10-18: "for the change to use a dependency-injected syscalls
+  Context, and calls that interface's CamelCase member (`Write`). The members
+  of the injected syscall interfaces (`BackingSyscalls`, `LocalSyscalls`,
+  `ProcessSyscalls`) follow the normal CamelCase rule and are private, with the
+  `syscalls::` free functions as friends, so only they can call them (russ,
+  2026-10-18: "Private with friends."). Fakes override the private virtual
+  members, which is legal C++, and are still called only through the free
+  functions. The earlier decision (russ, 2026-10-18: "for the change to use a dependency-injected syscalls
   wrapper, keep the global free functions (so call sites look like
   syscalls::write(...)), but pass in the Context or Syscalls object. Then the
   wrapper can call syscalls.Write(...) (and note I'm removing the function
@@ -169,9 +172,11 @@ use it as design guidance rather than firm rules."
   Context. It can pull Syscalls from inside it, and it provides a uniform
   surface for the API (syscalls functions look and feel mostly like libc, with
   an additional Context argument)."). These replace the exemption for the member
-  methods that russ gave on 2026-10-18 ("that's a rule here"). `ioctl<OP>` and
-  `fcntl<OP>` stay free function templates that dispatch to per-op CamelCase
-  members (`IoctlGetFsUuid`).
+  methods that russ gave on 2026-10-18 ("that's a rule here"). `syscalls::ioctl<OP>(ctx, ...)`
+  and `syscalls::fcntl<OP>(ctx, ...)` are free function templates taking
+  `Context` like every `syscalls::` function, and dispatch to a per-op CamelCase
+  member of the Syscalls interface (`IoctlGetFsUuid`) (russ, 2026-10-18: "Yes,
+  ioctl and fcntl become free function templates.").
 - **Every pointer says whether it may be null; a pointer that may not be
   null is usually a reference** (russ, 2026-10-10: "all pointers need
   either `absl_nullable` or `absl_nonnull`, including both raw pointers
