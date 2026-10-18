@@ -1,167 +1,170 @@
-id	dispatched	step	task_class	agent	model	effort	tokens	duration_s	rounds	blockers	shoulds	nits	escapes	verdict	notes
-bf-26.34	2026-10-17	26.34	investigation	dcfs-investigator	claude-sonnet-5-5	high	244850		2	0	9	0	0	merged	fix round from the style review; effort probably a notch high
-bf-26.34-sr	2026-10-17	26.34	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	116254							useful	9 findings, 3 questions
-bf-26.35	2026-10-17	26.35	investigation	dcfs-investigator	claude-sonnet-5-5	high	95229		2	0	2	0	0	merged	two small orchestrator asks
-bf-25.28b-rr	2026-10-17	25.28b	review	dcfs-reviewer	claude-opus-5-5	xhigh	256951			0	7	6		useful	S1 (held-back checkpoint) later judged moot by russ
-bf-style-rulings	2026-10-17	25	mechanical	dcfs-mechanical	claude-haiku-5-5	low	62745		1	0	0	0	1	merged	one rule later reversed by russ (host-tool style), the orchestrator's brief, not the agent's
-bf-25.32	2026-10-17	25.32	implementation	dcfs-implementer	claude-sonnet-5-5	medium	65473		1	0	10	0	10	merged	merged without style review; post-merge review found 10 rule violations
-bf-25.32-sr	2026-10-17	25.32	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	131523							useful	post-merge
-bf-25.34	2026-10-17	25.34	implementation	dcfs-implementer	claude-sonnet-5-5	medium	397512		3					in review	rounds: wrappers, directory move
-bf-26.37	2026-10-17	26.37	investigation	dcfs-investigator	claude-sonnet-5-5	high	280863		1	0	8	0	0	merged	post-merge Flash review: 8 style findings
-bf-26.36	2026-10-17	26.36	investigation	dcfs-investigator	claude-sonnet-5-5	high	433280		2	0	3	9	3	merged	3 tests could pass without the change, found by Flash review; effort probably a notch high
-bf-25.33	2026-10-17	25.33	implementation	dcfs-implementer	claude-sonnet-5-5	medium	190415				12			in progress	Flash review 12 findings
-bf-17.2e	2026-10-17	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high	576896		2	1				in progress	security regression (uid-0 setuid) self-reported; uid-0 exemption bug from 17.2b caught by russ
-bf-22.5	2026-10-17	22.5	protocol	dcfs-protocol	claude-opus-5-5	high	522489		1					in review	two code findings self-reported
-bf-25.28b	2026-10-17	25.28b	protocol	dcfs-protocol	claude-opus-5-5	high	955492		3					in progress	round 3: FSYNC redesign
-bf-g-25.32b	2026-10-17	25.32b	mechanical	agy	gemini-3.8-flash	high			1					merged	3 runs: 2 lost to agy's 30-minute limit in a cold lane
-bf-g-26.37b	2026-10-17	26.37b	mechanical	agy	gemini-3.8-flash	high			1					merged	
-bf-g-26.36fix	2026-10-17	26.36	mechanical	agy	gemini-3.8-flash	high			1					merged	fixed the 3 weak tests
-bf-g-sloc	2026-10-17	dashboard	implementation	agy	gemini-3.8-flash	high			1					merged	2 runs: first lost to a baseline Bazel run
-bf-g-flash-exp	2026-10-17	26.31	review	agy	gemini-3.8-flash	medium								measured	broad 4/34 recall, narrow 11/34; 0 known-wrong
-bf-g-inval	2026-10-17	26.39	investigation	agy	gemini-3.8-flash	medium								useful	38 candidates; 29 were kernel-handled (false positives)
-bf-g-inval-verify	2026-10-17	26.39	review	agy	gemini-4-argon	medium								useful	classified 38; citations spot-checked correct
-bf-g-budgets	2026-10-17	26.41	investigation	agy	gemini-3.8-flash	high								useful	hashes real; GitHub links invented
-bf-agy-opus-25.34	2026-10-17	25.34	review	agy	claude-opus-5-5	high								failed	quota exhausted before any output (56% of agy's Claude week)
-bf-22.5-rev	2026-10-17	22.5	review	dcfs-reviewer	claude-opus-5-5	high	136018	493		1	4	5		useful	found B1 (bound blind to 6 of 7 checkpoints) and a third code finding (readdir refreshes); high was enough
-a295f17a3169f6d3f	2026-10-17T23:08:53Z	17.2e	review	dcfs-reviewer	claude-opus-5-5	high									
-bf-25.28b-r3	2026-10-17	25.28b	protocol	dcfs-protocol	claude-opus-5-5	high	680883		3					in review	FSYNC redesign done; raised fsyncgate design question
-bf-17.2e-r2	2026-10-17	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high	600651	9031	2				1	in review	round 2 closed the uid-0 regression; uid-0 exemption was an escape from 17.2b caught by russ
-bf-17.2e-rev	2026-10-17	17.2e	review	dcfs-reviewer	claude-opus-5-5	high				0	2	6		useful	S3 design simplification (drop CapEff); S2 ptrace dependency the author missed
-ad91bd81ceae5a166	2026-10-18T01:16:11Z	dashboard-quota	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a38bc40f320c181ad	2026-10-18T01:21:21Z	Investigate long-running agy control	investigation	dcfs-investigator	claude-sonnet-5-5	medium									
-afebb8f7ccabd7770	2026-10-18T02:31:46Z	Clerk: record tonight's merges	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-agy-1017-lane8-worker	2026-10-17	dashboard-quota-meters		agy	gemini-3.8-flash	medium								merged	lane-8 quota meters worker
-agy-1017-lane8-review	2026-10-17	dashboard-quota-meters		agy	gemini-3.8-flash	medium									verdict NONE (no findings)
-agy-1017-lane8-fix	2026-10-17	dashboard-quota-meters		agy	gemini-3.8-flash	medium								merged	lane-8 quota meters fix round
-agy-1017-lane6-states	2026-10-17	dashboard-lane-states		agy	gemini-3.8-flash	medium								merged	lane-6 foreman
-agy-1017-lane6-budget	2026-10-17	dashboard-budget-fix		agy	gemini-3.8-flash	medium								merged	lane-6 foreman budget fix
-agy-1017-25.33-worker	2026-10-17	25.33		agy	gemini-3.8-flash	medium								merged	lane-5 25.33 + 25.33b worker
-agy-1017-25.33-review	2026-10-17	25.33		agy	gemini-3.8-flash	high									verdict NONE (no findings)
-agy-1017-25.33-rebase	2026-10-17	25.33		agy	gemini-3.8-flash	medium								merged	lane-5 25.33 rebase
-agy-1017-25.34-review	2026-10-17	25.34		agy	gemini-4-argon	high								awaiting style review	lane-7 25.34 API review, read-only, 18 findings
-85fe52fd	2026-10-17	25.34		agy	gemini-3.8-flash	high									lane-7 25.34 fix round
-0e543361	2026-10-17	25.34		agy	gemini-3.8-flash	medium									lane-7 25.34 fix round 2
-a9f01c8885415eb2d	2026-10-18T02:53:41Z	agents-foreman	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a3a78df4b9b858486	2026-10-18T02:59:11Z	agents-foreman	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-ae86d19e85bf27e58	2026-10-18T03:01:45Z	Show nested quotas on dashboard	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-ab510690988d478b9	2026-10-18T03:05:57Z	dashboard-fixes	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a03dfabbe6686518c	2026-10-18T03:30:10Z	Clerk: dashboard upload trial	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-ab0246cc1bca6a883	2026-10-18T03:31:08Z	dashboard-ci	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-abd4e7bd93ff5f41a	2026-10-18T03:40:59Z	22.5		Explore	claude-opus-5-5										
-a47449b13fb6a0c81	2026-10-18T03:48:07Z	22.5	protocol	dcfs-protocol	claude-opus-5-5	high									
-a219e533ef939b333	2026-10-18T04:07:56Z	Plan step: streamed population	implementation	dcfs-implementer	claude-sonnet-5-5	high									
-af8c08c18c7a25717	2026-10-18T04:13:34Z	Write up: behave like the backing	implementation	dcfs-implementer	claude-sonnet-5-5	high									
-a8f1b4d7b657c6b7b	2026-10-18T04:13:34Z	Audit written backing contracts	investigation	dcfs-investigator	claude-sonnet-5-5	medium									
-a273df0c9a51edf38	2026-10-18T04:18:04Z	25.33b-waitexit	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a449541b0c3199208	2026-10-18T04:19:15Z	Clerk: add questions to dashboard	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-aed9c10514239de29	2026-10-18T04:26:28Z	25.33b-waitexit	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-aa72187c82fd773ed	2026-10-18T04:41:32Z	Docs: per-name lookups, find tip	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-ab9821baa9120fc7a	2026-10-18T04:49:53Z	Kernel xattr limits per filesystem		Explore	claude-opus-5-5										
-a0e88eeae6b50842c	2026-10-18T04:52:20Z	xattr-kernel-limits	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-afe90c16ec5bc390f	2026-10-18T04:53:25Z	Clerk: record xattr limits findings	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a2001a94ed011f4e0	2026-10-18T04:58:53Z	OpenZFS xattr limits		Explore	claude-opus-5-5										
-af67100304513ad7b	2026-10-18T04:59:32Z	Clerk: update dashboard questions	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a5bf6adf474ddb63e	2026-10-18T05:02:41Z	Clerk: 22.7 listed state, ZFS note	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a680ce9d15e09645d	2026-10-18T05:23:49Z	Survey ZFS test suite for dcfs	investigation	dcfs-investigator	claude-sonnet-5-5	medium									
-ae4479cb174b94d4b	2026-10-18T05:25:56Z	Clerk: record ZFS test survey	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a0c703e45156e9d38	2026-10-18T05:37:04Z	namelen-hybrid	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
-a54b1d9688992dc82	2026-10-18T05:54:30Z	Clerk: two style.md rulings	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-ab965331248b16bcc	2026-10-18T06:04:23Z	dashboard-quota	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a690b2f5e63a2733d	2026-10-18T06:24:29Z	clerk-queue	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-aab769422f7a9eaf4	2026-10-18T06:48:41Z	Plan: start-time submount/subvolume stubs	implementation	dcfs-implementer	claude-sonnet-5-5	high									
-a89d46a5dd91932bf	2026-10-18T06:56:41Z	Clerk batch: queued plan edits	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a340b3386c92b02cd	2026-10-18T07:06:29Z	Who added FUSE_ATTR_SUBMOUNT		Explore	haiku										
-a911cd1decdbf8d3d	2026-10-18T07:16:47Z	22.5	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
-a95c7ed532d4e6758	2026-10-18T07:16:47Z	22.5	review	dcfs-reviewer	claude-opus-5-5	high									
-aecce12ba8b34b7fe	2026-10-18T07:22:23Z	Clerk batch 2 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-ae14e5987861aeb4a	2026-10-18T07:39:17Z	Clerk batch 3 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a6e9c1ea93b713647	2026-10-18T08:03:38Z	Clerk batch 4 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a50edd33122354c6f	2026-10-18T08:13:51Z	Clerk batch 5 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-ac1f0862d02afdcac	2026-10-18T08:26:31Z	Clerk batch 6 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-ad311e34acb9a37fa	2026-10-18T08:39:31Z	Clerk batch 7 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-ac3870df757ba0c87	2026-10-18T08:46:54Z	25.28b	review	dcfs-reviewer	claude-opus-5-5	high									
-ac6bb57820ee50862	2026-10-18T08:46:54Z	25.34	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
-adb422a088d7f1280	2026-10-18T08:59:38Z	25.28b	protocol	dcfs-protocol	claude-opus-5-5	high									
-a7871d41cccbe073f	2026-10-18T09:00:54Z	25.34	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-ab20596a0b52e66be	2026-10-18T09:01:51Z	Clerk batch 8	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a389b59547e36b4d1	2026-10-18T09:11:25Z	Research O_DIRECT and inotify support		Explore	claude-opus-5-5										
-a465cbd3df7718e4b	2026-10-18T09:12:34Z	review-findings	investigation	dcfs-investigator	claude-sonnet-5-5	high									
-a31ce13399fec88e9	2026-10-18T09:16:33Z	26.36	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-a215beed3a8e2314d	2026-10-18T09:18:09Z	Clerk batch 9	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-af18e51eba041743a	2026-10-18T09:26:16Z	xattr64-differential	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a6e8557b0384a0374	2026-10-18T10:49:06Z	17.2e round 3	protocol	dcfs-protocol	claude-opus-5-5	high									
-ad2a28436ad6131e8	2026-10-18T11:35:51Z	Clerk batch 10	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a132135fc32669c01	2026-10-18T11:39:48Z	22.5	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
-a275f6773223d808a	2026-10-18T11:44:33Z	22.5	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-abef08bc059073a83	2026-10-18T12:05:18Z	17.6	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
-a49dbaf22c21d2507	2026-10-18T12:22:58Z	22.5	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-a8cc95d36f05fa3cb	2026-10-18T13:22:09Z	Clerk batch 11	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-ad604ee9f850b6612	2026-10-18T14:59:51Z	Clerk batch 12	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-aae00d3a3aaa2dfe6	2026-10-18T15:22:11Z	Clerk batch 13	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-ab630c0c993aa990b	2026-10-18T15:30:56Z	25.34	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-a342812217938e5c4	2026-10-18T15:30:56Z	25.28b	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-a0dd7db48d87cff4c	2026-10-18T15:41:45Z	Clerk batch 14	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-ad91a3a1a6cff3c90	2026-10-18T16:01:26Z	Clerk batch 15	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-ac25a1b33b14b88fc	2026-10-18T16:04:40Z	25.34	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
-ab07b1ef7a7e5b484	2026-10-18T16:16:06Z	style-statustostring	investigation	dcfs-investigator	claude-sonnet-5-5	high									
-a60886a14f37538d6	2026-10-18T16:36:37Z	Fix known_bug deadlock config	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a7e3fadefe5992fe6	2026-10-18T16:40:13Z	Clerk batch 16	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-ade9fe5f47d5d91ee	2026-10-18T16:51:47Z	25.28b	review	dcfs-reviewer	claude-opus-5-5	xhigh									
-a2ccf1990cfb1287a	2026-10-18T17:11:58Z	25.28b	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-a9c98228fc6730532	2026-10-18T17:15:52Z	Clerk batch 17	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-aa10417d0c8b52039	2026-10-18T18:17:51Z	fix-interrupt-not-replied	investigation	dcfs-investigator	claude-sonnet-5-5	high									
-a25ce50686d4b5bc8	2026-10-18T18:20:46Z	Clerk batch 18	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a13d31e772dcb6b3f	2026-10-18T19:15:22Z	25.28b	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a60e4fe93a64aef6e	2026-10-18T19:19:19Z	Clerk batch 19	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a1578cae30a7c40da	2026-10-18T19:41:15Z	Refresh dashboard data files	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a2e51fdd96109a0df	2026-10-18T19:44:05Z	Clerk batch 20	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a90c2ee9475c6d67a	2026-10-18T19:55:58Z	17.2e	review	dcfs-reviewer	claude-opus-5-5	xhigh									
-aefbda8588d252f11	2026-10-18T19:57:01Z	Close Q-26/27 on dashboard	mechanical	dcfs-mechanical	haiku	low									
-af715cf63dd7627c0	2026-10-18T19:58:29Z	Fix dashboard open-questions display	investigation	dcfs-investigator	claude-sonnet-5-5	high									
-ab7c0f36184e3f3e0	2026-10-18T20:08:29Z	Audit osv dependency coverage		Explore	sonnet										
-a55230b798e902460	2026-10-18T20:10:25Z	Clerk batch 21	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-ac090560f2f467bbb	2026-10-18T20:22:45Z	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high									
-a6676543e91567fd1	2026-10-18T20:23:10Z	Upload dashboard datasets	mechanical	dcfs-mechanical	haiku	low									
-a812c49337fc6fc24	2026-10-18T20:32:56Z	5.13	investigation	dcfs-investigator	claude-sonnet-5-5	high									
-a88061b034f8c222d	2026-10-18T20:33:10Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low									
-af42268f661e304e0	2026-10-18T20:33:41Z	Upload ci dataset	mechanical	dcfs-mechanical	haiku	low									
-a366efbdbf3b5a25b	2026-10-18T20:41:30Z	Disk-read budget headroom	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-a6155a01e41ec90da	2026-10-18T20:41:44Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low									
-aba4039a908740995	2026-10-18T20:45:33Z	25.34	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-a152f39933e7de162	2026-10-18T20:45:33Z	tlc-measure	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-a2995d2168e4f6c9f	2026-10-18T20:45:50Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low									
-aaa8bd0188633ee00	2026-10-18T20:52:06Z	Clerk batch 22	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a478d05149bf9fe02	2026-10-18T20:54:43Z	22.5	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-af301165769abe5e5	2026-10-18T20:55:38Z	docs-testing	review	dcfs-reviewer	claude-opus-5-5	xhigh									
-afaf669c594d4f644	2026-10-18T20:55:53Z	Style review 26.17c (post-merge)	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
-a9eaaefe870bda8dc	2026-10-18T20:56:10Z	Upload lanes and sloc datasets	mechanical	dcfs-mechanical	haiku	low									
-a908ec489db2937b7	2026-10-18T20:56:42Z	docs-maintainability	review	dcfs-reviewer	claude-opus-5-5	xhigh									
-aa124e63c646ac641	2026-10-18T20:57:18Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low									
-ac1c86d74ae69038e	2026-10-18T21:10:38Z	rules-index	style-review	dcfs-style-reviewer	opus	high									
-af4827fad5679654c	2026-10-18T21:15:42Z	Upload sloc/quota/budget datasets	mechanical	dcfs-mechanical	haiku	low									
-a0504854946da4ac3	2026-10-18T21:16:27Z	Correct quota dataset reading	mechanical	dcfs-mechanical	haiku	low									
-aa36da7ee7dec764b	2026-10-18T21:20:12Z	Effort-decision data audit		Explore	sonnet										
-af0bdc86f54db0d31	2026-10-18T21:21:42Z	Clerk batch 23	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-aa17d9d354f546e43	2026-10-18T21:24:11Z	rules-index	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
-a5185f58c3796c3a5	2026-10-18T21:27:38Z	Upload ci dataset	mechanical	dcfs-mechanical	haiku	low									
-a3af6f71e6e68108b	2026-10-18T21:40:25Z	Upload sloc and ci datasets	mechanical	dcfs-mechanical	haiku	low									
-abea83bf2c986ea22	2026-10-18T22:00:00Z	17.2e	review	dcfs-reviewer	claude-opus-5-5	high									
-a2f125ed2382bd6b9	2026-10-18T22:00:00Z	17.2e	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
-acad7f2863d179f6a	2026-10-18T22:37:47Z	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high									
-a7b1c2c44cb93db42	2026-10-18T22:42:20Z	Rank mechanizable review findings		Explore	sonnet										
-a33a7764dc1c9fd20	2026-10-18T22:42:46Z	Upload quota and budget datasets	mechanical	dcfs-mechanical	haiku	low									
-a434a974f638733a1	2026-10-18T22:43:35Z	Upload ci dataset	mechanical	dcfs-mechanical	haiku	low									
-a1f165fb580a2475f	2026-10-18T22:49:37Z	Clerk batch 24	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-aee3cf71ab75ea415	2026-10-18T22:56:20Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low									
-ac10d9958afdc46f5	2026-10-18T22:57:37Z	docs-testing	mechanical	dcfs-mechanical	haiku	low									
-ad523ea98096a32d3	2026-10-18T22:58:48Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low									
-addc4ad8c7feed4fa	2026-10-18T23:06:45Z	Upload ci dataset	mechanical	dcfs-mechanical	haiku	low									
-af652b0f6c5e57d6f	2026-10-18T23:08:10Z	rename-fsync-points	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
-a3251be86543197e4	2026-10-18T23:08:36Z	Clerk batch 25	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-a609057edf051304d	2026-10-18T23:10:05Z	Upload lanes via new skill	mechanical	dcfs-mechanical	haiku	low									
-ac848b1767251a111	2026-10-18T23:12:36Z	fix-2617c-style	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-aca2a2dc31550d293	2026-10-18T23:13:02Z	Upload lanes and ci via skill	mechanical	dcfs-mechanical	haiku	low									
-a4d4ab26c62cdb915	2026-10-18T23:18:52Z	Clerk batch 26	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
-aada4e7d946dcb587	2026-10-18T23:19:17Z	Refresh stale plan dataset	mechanical	dcfs-mechanical	sonnet	low									
-a6bc4384d1279c470	2026-10-18T23:26:13Z	Audit KVM-required claims		Explore	sonnet										
-a0d9acea70630589f	2026-10-18T23:28:40Z	Clerk batch 27	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+id	dispatched	step	task_class	agent	model	effort	tokens	duration_s	rounds	blockers	shoulds	nits	escapes	verdict	notes	input_tokens	output_tokens	cache_read_tokens	cache_creation_tokens
+bf-26.34	2026-10-17	26.34	investigation	dcfs-investigator	claude-sonnet-5-5	high	244850		2	0	9	0	0	merged	fix round from the style review; effort probably a notch high				
+bf-26.34-sr	2026-10-17	26.34	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	116254							useful	9 findings, 3 questions				
+bf-26.35	2026-10-17	26.35	investigation	dcfs-investigator	claude-sonnet-5-5	high	95229		2	0	2	0	0	merged	two small orchestrator asks				
+bf-25.28b-rr	2026-10-17	25.28b	review	dcfs-reviewer	claude-opus-5-5	xhigh	256951			0	7	6		useful	S1 (held-back checkpoint) later judged moot by russ				
+bf-style-rulings	2026-10-17	25	mechanical	dcfs-mechanical	claude-haiku-5-5	low	62745		1	0	0	0	1	merged	one rule later reversed by russ (host-tool style), the orchestrator's brief, not the agent's				
+bf-25.32	2026-10-17	25.32	implementation	dcfs-implementer	claude-sonnet-5-5	medium	65473		1	0	10	0	10	merged	merged without style review; post-merge review found 10 rule violations				
+bf-25.32-sr	2026-10-17	25.32	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	131523							useful	post-merge				
+bf-25.34	2026-10-17	25.34	implementation	dcfs-implementer	claude-sonnet-5-5	medium	397512		3					in review	rounds: wrappers, directory move				
+bf-26.37	2026-10-17	26.37	investigation	dcfs-investigator	claude-sonnet-5-5	high	280863		1	0	8	0	0	merged	post-merge Flash review: 8 style findings				
+bf-26.36	2026-10-17	26.36	investigation	dcfs-investigator	claude-sonnet-5-5	high	433280		2	0	3	9	3	merged	3 tests could pass without the change, found by Flash review; effort probably a notch high				
+bf-25.33	2026-10-17	25.33	implementation	dcfs-implementer	claude-sonnet-5-5	medium	190415				12			in progress	Flash review 12 findings				
+bf-17.2e	2026-10-17	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high	576896		2	1				in progress	security regression (uid-0 setuid) self-reported; uid-0 exemption bug from 17.2b caught by russ				
+bf-22.5	2026-10-17	22.5	protocol	dcfs-protocol	claude-opus-5-5	high	522489		1					in review	two code findings self-reported				
+bf-25.28b	2026-10-17	25.28b	protocol	dcfs-protocol	claude-opus-5-5	high	955492		3					in progress	round 3: FSYNC redesign				
+bf-g-25.32b	2026-10-17	25.32b	mechanical	agy	gemini-3.8-flash	high			1					merged	3 runs: 2 lost to agy's 30-minute limit in a cold lane				
+bf-g-26.37b	2026-10-17	26.37b	mechanical	agy	gemini-3.8-flash	high			1					merged					
+bf-g-26.36fix	2026-10-17	26.36	mechanical	agy	gemini-3.8-flash	high			1					merged	fixed the 3 weak tests				
+bf-g-sloc	2026-10-17	dashboard	implementation	agy	gemini-3.8-flash	high			1					merged	2 runs: first lost to a baseline Bazel run				
+bf-g-flash-exp	2026-10-17	26.31	review	agy	gemini-3.8-flash	medium								measured	broad 4/34 recall, narrow 11/34; 0 known-wrong				
+bf-g-inval	2026-10-17	26.39	investigation	agy	gemini-3.8-flash	medium								useful	38 candidates; 29 were kernel-handled (false positives)				
+bf-g-inval-verify	2026-10-17	26.39	review	agy	gemini-4-argon	medium								useful	classified 38; citations spot-checked correct				
+bf-g-budgets	2026-10-17	26.41	investigation	agy	gemini-3.8-flash	high								useful	hashes real; GitHub links invented				
+bf-agy-opus-25.34	2026-10-17	25.34	review	agy	claude-opus-5-5	high								failed	quota exhausted before any output (56% of agy's Claude week)				
+bf-22.5-rev	2026-10-17	22.5	review	dcfs-reviewer	claude-opus-5-5	high	136018	493		1	4	5		useful	found B1 (bound blind to 6 of 7 checkpoints) and a third code finding (readdir refreshes); high was enough				
+a295f17a3169f6d3f	2026-10-17T23:08:53Z	17.2e	review	dcfs-reviewer	claude-opus-5-5	high	3381586	716								62	416	3223698	157410
+bf-25.28b-r3	2026-10-17	25.28b	protocol	dcfs-protocol	claude-opus-5-5	high	680883		3					in review	FSYNC redesign done; raised fsyncgate design question				
+bf-17.2e-r2	2026-10-17	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high	600651	9031	2				1	in review	round 2 closed the uid-0 regression; uid-0 exemption was an escape from 17.2b caught by russ				
+bf-17.2e-rev	2026-10-17	17.2e	review	dcfs-reviewer	claude-opus-5-5	high				0	2	6		useful	S3 design simplification (drop CapEff); S2 ptrace dependency the author missed				
+ad91bd81ceae5a166	2026-10-18T01:16:11Z	dashboard-quota	mechanical	dcfs-mechanical	claude-haiku-5-5	low	132904	18								10	408	103401	29085
+a38bc40f320c181ad	2026-10-18T01:21:21Z	Investigate long-running agy control	investigation	dcfs-investigator	claude-sonnet-5-5	medium	1552454	2780								58	353	1274096	277947
+afebb8f7ccabd7770	2026-10-18T02:31:46Z	Clerk: record tonight's merges	mechanical	dcfs-mechanical	claude-haiku-5-5	low	473701	67								26	2991	423162	47522
+agy-1017-lane8-worker	2026-10-17	dashboard-quota-meters		agy	gemini-3.8-flash	medium								merged	lane-8 quota meters worker				
+agy-1017-lane8-review	2026-10-17	dashboard-quota-meters		agy	gemini-3.8-flash	medium									verdict NONE (no findings)				
+agy-1017-lane8-fix	2026-10-17	dashboard-quota-meters		agy	gemini-3.8-flash	medium								merged	lane-8 quota meters fix round				
+agy-1017-lane6-states	2026-10-17	dashboard-lane-states		agy	gemini-3.8-flash	medium								merged	lane-6 foreman				
+agy-1017-lane6-budget	2026-10-17	dashboard-budget-fix		agy	gemini-3.8-flash	medium								merged	lane-6 foreman budget fix				
+agy-1017-25.33-worker	2026-10-17	25.33		agy	gemini-3.8-flash	medium								merged	lane-5 25.33 + 25.33b worker				
+agy-1017-25.33-review	2026-10-17	25.33		agy	gemini-3.8-flash	high									verdict NONE (no findings)				
+agy-1017-25.33-rebase	2026-10-17	25.33		agy	gemini-3.8-flash	medium								merged	lane-5 25.33 rebase				
+agy-1017-25.34-review	2026-10-17	25.34		agy	gemini-4-argon	high								awaiting style review	lane-7 25.34 API review, read-only, 18 findings				
+85fe52fd	2026-10-17	25.34		agy	gemini-3.8-flash	high									lane-7 25.34 fix round				
+0e543361	2026-10-17	25.34		agy	gemini-3.8-flash	medium									lane-7 25.34 fix round 2				
+a9f01c8885415eb2d	2026-10-18T02:53:41Z	agents-foreman	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1471823	212								48	341	1387952	83482
+a3a78df4b9b858486	2026-10-18T02:59:11Z	agents-foreman	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1282282	122								46	1331	1215474	65431
+ae86d19e85bf27e58	2026-10-18T03:01:45Z	Show nested quotas on dashboard	implementation	dcfs-implementer	claude-sonnet-5-5	medium	94015	32								6	124	56684	37201
+ab510690988d478b9	2026-10-18T03:05:57Z	dashboard-fixes	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1060218	127								26	432	951847	107913
+a03dfabbe6686518c	2026-10-18T03:30:10Z	Clerk: dashboard upload trial	mechanical	dcfs-mechanical	claude-haiku-5-5	low	287719	30								14	101	242421	45183
+ab0246cc1bca6a883	2026-10-18T03:31:08Z	dashboard-ci	mechanical	dcfs-mechanical	claude-haiku-5-5	low	2311173	121								62	5411	2223784	81916
+abd4e7bd93ff5f41a	2026-10-18T03:40:59Z	22.5		Explore	claude-opus-5-5		240179	63								18	134	200047	39980
+a47449b13fb6a0c81	2026-10-18T03:48:07Z	22.5	protocol	dcfs-protocol	claude-opus-5-5	high	149811388	28272								784	46974	135129059	14634571
+a219e533ef939b333	2026-10-18T04:07:56Z	Plan step: streamed population	implementation	dcfs-implementer	claude-sonnet-5-5	high	908037	250								30	145	812526	95336
+af8c08c18c7a25717	2026-10-18T04:13:34Z	Write up: behave like the backing	implementation	dcfs-implementer	claude-sonnet-5-5	high	1088567	185								42	6300	1026147	56078
+a8f1b4d7b657c6b7b	2026-10-18T04:13:34Z	Audit written backing contracts	investigation	dcfs-investigator	claude-sonnet-5-5	medium	1977693	238								60	13087	1863037	101509
+a273df0c9a51edf38	2026-10-18T04:18:04Z	25.33b-waitexit	mechanical	dcfs-mechanical	claude-haiku-5-5	low	466585	54								28	2225	420748	43584
+a449541b0c3199208	2026-10-18T04:19:15Z	Clerk: add questions to dashboard	mechanical	dcfs-mechanical	claude-haiku-5-5	low	427179	42								20	121	385829	41209
+aed9c10514239de29	2026-10-18T04:26:28Z	25.33b-waitexit	mechanical	dcfs-mechanical	claude-haiku-5-5	low	316187	43								20	2360	277147	36660
+aa72187c82fd773ed	2026-10-18T04:41:32Z	Docs: per-name lookups, find tip	implementation	dcfs-implementer	claude-sonnet-5-5	medium	221015	43								14	2411	182439	36151
+ab9821baa9120fc7a	2026-10-18T04:49:53Z	Kernel xattr limits per filesystem		Explore	claude-opus-5-5		1117796	181								68	400	1065472	51856
+a0e88eeae6b50842c	2026-10-18T04:52:20Z	xattr-kernel-limits	implementation	dcfs-implementer	claude-sonnet-5-5	medium	15895031	23375								250	4525	10131235	5759021
+afe90c16ec5bc390f	2026-10-18T04:53:25Z	Clerk: record xattr limits findings	mechanical	dcfs-mechanical	claude-haiku-5-5	low	141885	19								10	2142	107874	31859
+a2001a94ed011f4e0	2026-10-18T04:58:53Z	OpenZFS xattr limits		Explore	claude-opus-5-5		328392	82								20	329	285489	42554
+af67100304513ad7b	2026-10-18T04:59:32Z	Clerk: update dashboard questions	mechanical	dcfs-mechanical	claude-haiku-5-5	low	451236	51								20	486	398258	52472
+a5bf6adf474ddb63e	2026-10-18T05:02:41Z	Clerk: 22.7 listed state, ZFS note	mechanical	dcfs-mechanical	claude-haiku-5-5	low	313191	63								20	6299	269207	37665
+a680ce9d15e09645d	2026-10-18T05:23:49Z	Survey ZFS test suite for dcfs	investigation	dcfs-investigator	claude-sonnet-5-5	medium	393045	105								18	559	334387	58081
+ae4479cb174b94d4b	2026-10-18T05:25:56Z	Clerk: record ZFS test survey	mechanical	dcfs-mechanical	claude-haiku-5-5	low	236880	29								16	1322	202811	32731
+a0c703e45156e9d38	2026-10-18T05:37:04Z	namelen-hybrid	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	3272109	307								62	596	3127911	143540
+a54b1d9688992dc82	2026-10-18T05:54:30Z	Clerk: two style.md rulings	mechanical	dcfs-mechanical	claude-haiku-5-5	low	232401	27								16	1080	199533	31772
+ab965331248b16bcc	2026-10-18T06:04:23Z	dashboard-quota	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1505240	196								30	123	1383635	121452
+a690b2f5e63a2733d	2026-10-18T06:24:29Z	clerk-queue	implementation	dcfs-implementer	claude-sonnet-5-5	medium	13892891	4880								208	24932	13503225	364526
+aab769422f7a9eaf4	2026-10-18T06:48:41Z	Plan: start-time submount/subvolume stubs	implementation	dcfs-implementer	claude-sonnet-5-5	high	3744757	417								78	14259	3595227	135193
+a89d46a5dd91932bf	2026-10-18T06:56:41Z	Clerk batch: queued plan edits	mechanical	dcfs-mechanical	claude-haiku-5-5	low	555153	70								28	6251	499556	49318
+a340b3386c92b02cd	2026-10-18T07:06:29Z	Who added FUSE_ATTR_SUBMOUNT		Explore	haiku		64573	148								10	1176	45228	18159
+a911cd1decdbf8d3d	2026-10-18T07:16:47Z	22.5	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	3217621	290								54	13082	3016453	188032
+a95c7ed532d4e6758	2026-10-18T07:16:47Z	22.5	review	dcfs-reviewer	claude-opus-5-5	high	6339563	728								102	13615	6138177	187669
+aecce12ba8b34b7fe	2026-10-18T07:22:23Z	Clerk batch 2 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low	608049	75								28	7827	542143	58051
+ae14e5987861aeb4a	2026-10-18T07:39:17Z	Clerk batch 3 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low	250712	56								14	8174	198963	43561
+a6e9c1ea93b713647	2026-10-18T08:03:38Z	Clerk batch 4 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low	625094	91								28	11256	560041	53769
+a50edd33122354c6f	2026-10-18T08:13:51Z	Clerk batch 5 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1158875	107								46	14435	1084929	59465
+ac1f0862d02afdcac	2026-10-18T08:26:31Z	Clerk batch 6 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low	707285	299								30	8103	636255	62897
+ad311e34acb9a37fa	2026-10-18T08:39:31Z	Clerk batch 7 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low	735823	112								30	11224	654508	70061
+ac3870df757ba0c87	2026-10-18T08:46:54Z	25.28b	review	dcfs-reviewer	claude-opus-5-5	high	6722779	714								108	5191	6524652	192828
+ac6bb57820ee50862	2026-10-18T08:46:54Z	25.34	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	7283240	1261								88	18910	6789144	475098
+adb422a088d7f1280	2026-10-18T08:59:38Z	25.28b	protocol	dcfs-protocol	claude-opus-5-5	high	41984384	21567								458	62557	34229139	7692230
+a7871d41cccbe073f	2026-10-18T09:00:54Z	25.34	implementation	dcfs-implementer	claude-sonnet-5-5	medium	35248808	18379								374	63993	28421624	6762817
+ab20596a0b52e66be	2026-10-18T09:01:51Z	Clerk batch 8	mechanical	dcfs-mechanical	claude-haiku-5-5	low	3676865	261								84	29196	3525533	122052
+a389b59547e36b4d1	2026-10-18T09:11:25Z	Research O_DIRECT and inotify support		Explore	claude-opus-5-5		839003	194								38	5371	777332	56262
+a465cbd3df7718e4b	2026-10-18T09:12:34Z	review-findings	investigation	dcfs-investigator	claude-sonnet-5-5	high	30217399	14867								328	79799	28022880	2114392
+a31ce13399fec88e9	2026-10-18T09:16:33Z	26.36	implementation	dcfs-implementer	claude-sonnet-5-5	medium	18811085	16948								238	62287	14305766	4442794
+a215beed3a8e2314d	2026-10-18T09:18:09Z	Clerk batch 9	mechanical	dcfs-mechanical	claude-haiku-5-5	low	525172	122								22	11628	452156	61366
+af18e51eba041743a	2026-10-18T09:26:16Z	xattr64-differential	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1727780	7717								70	10156	1065561	651993
+a6e8557b0384a0374	2026-10-18T10:49:06Z	17.2e round 3	protocol	dcfs-protocol	claude-opus-5-5	high	104000966	15886								632	122527	95492164	8385643
+ad2a28436ad6131e8	2026-10-18T11:35:51Z	Clerk batch 10	mechanical	dcfs-mechanical	claude-haiku-5-5	low	2674727	220								64	29900	2542608	102155
+a132135fc32669c01	2026-10-18T11:39:48Z	22.5	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	2488406	238								42	5562	2324722	158080
+a275f6773223d808a	2026-10-18T11:44:33Z	22.5	mechanical	dcfs-mechanical	claude-haiku-5-5	low	3480008	2277								116	18393	3121250	340249
+abef08bc059073a83	2026-10-18T12:05:18Z	17.6	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	3890867	431								74	21656	3725828	143309
+a49dbaf22c21d2507	2026-10-18T12:22:58Z	22.5	implementation	dcfs-implementer	claude-sonnet-5-5	medium	1447234	4069								60	2568	1019667	424939
+a8cc95d36f05fa3cb	2026-10-18T13:22:09Z	Clerk batch 11	mechanical	dcfs-mechanical	claude-haiku-5-5	low	3274345	241								74	27924	3133161	113186
+ad604ee9f850b6612	2026-10-18T14:59:51Z	Clerk batch 12	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1142436	177								32	25920	1009839	106645
+aae00d3a3aaa2dfe6	2026-10-18T15:22:11Z	Clerk batch 13	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1433903	112								64	9873	1362940	61026
+ab630c0c993aa990b	2026-10-18T15:30:56Z	25.34	implementation	dcfs-implementer	claude-sonnet-5-5	medium	18601575	4744								268	4805	17638290	958212
+a342812217938e5c4	2026-10-18T15:30:56Z	25.28b	implementation	dcfs-implementer	claude-sonnet-5-5	medium	4765648	4834								122	878	3885235	879413
+a0dd7db48d87cff4c	2026-10-18T15:41:45Z	Clerk batch 14	mechanical	dcfs-mechanical	claude-haiku-5-5	low	372506	43								18	4213	317694	50581
+ad91a3a1a6cff3c90	2026-10-18T16:01:26Z	Clerk batch 15	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1715712	173								54	14542	1618452	82664
+ac25a1b33b14b88fc	2026-10-18T16:04:40Z	25.34	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	6984093	658								82	3104	6719304	261603
+ab07b1ef7a7e5b484	2026-10-18T16:16:06Z	style-statustostring	investigation	dcfs-investigator	claude-sonnet-5-5	high	5368411	1202								116	927	5237254	130114
+a60886a14f37538d6	2026-10-18T16:36:37Z	Fix known_bug deadlock config	mechanical	dcfs-mechanical	claude-haiku-5-5	low	255006	85								14	671	210758	43563
+a7e3fadefe5992fe6	2026-10-18T16:40:13Z	Clerk batch 16	mechanical	dcfs-mechanical	claude-haiku-5-5	low	791097	109								28	4763	713289	73017
+ade9fe5f47d5d91ee	2026-10-18T16:51:47Z	25.28b	review	dcfs-reviewer	claude-opus-5-5	xhigh	19727226	1177								196	814	19397526	328690
+a2ccf1990cfb1287a	2026-10-18T17:11:58Z	25.28b	implementation	dcfs-implementer	claude-sonnet-5-5	medium	16361166	7093								260	6767	14417278	1936861
+a9c98228fc6730532	2026-10-18T17:15:52Z	Clerk batch 17	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1447658	170								34	19558	1310455	117611
+aa10417d0c8b52039	2026-10-18T18:17:51Z	fix-interrupt-not-replied	investigation	dcfs-investigator	claude-sonnet-5-5	high	930824	547								40	215	867086	63483
+a25ce50686d4b5bc8	2026-10-18T18:20:46Z	Clerk batch 18	mechanical	dcfs-mechanical	claude-haiku-5-5	low	701838	100								28	13457	624067	64286
+a13d31e772dcb6b3f	2026-10-18T19:15:22Z	25.28b	mechanical	dcfs-mechanical	claude-haiku-5-5	low	265177	150								18	450	229357	35352
+a60e4fe93a64aef6e	2026-10-18T19:19:19Z	Clerk batch 19	mechanical	dcfs-mechanical	claude-haiku-5-5	low	641071	87								26	6703	576058	58284
+a1578cae30a7c40da	2026-10-18T19:41:15Z	Refresh dashboard data files	mechanical	dcfs-mechanical	claude-haiku-5-5	low	830157	122								28	92	748850	81187
+a2e51fdd96109a0df	2026-10-18T19:44:05Z	Clerk batch 20	mechanical	dcfs-mechanical	claude-haiku-5-5	low	819663	102								34	12105	750513	57011
+a90c2ee9475c6d67a	2026-10-18T19:55:58Z	17.2e	review	dcfs-reviewer	claude-opus-5-5	xhigh	13883097	4430								170	1212	13263200	618515
+aefbda8588d252f11	2026-10-18T19:57:01Z	Close Q-26/27 on dashboard	mechanical	dcfs-mechanical	haiku	low	393977	26								16	745	338619	54597
+af715cf63dd7627c0	2026-10-18T19:58:29Z	Fix dashboard open-questions display	investigation	dcfs-investigator	claude-sonnet-5-5	high	320685	48								14	202	268413	52056
+ab7c0f36184e3f3e0	2026-10-18T20:08:29Z	Audit osv dependency coverage		Explore	sonnet		387240	82								18	83	323016	64123
+a55230b798e902460	2026-10-18T20:10:25Z	Clerk batch 21	mechanical	dcfs-mechanical	claude-haiku-5-5	low	562696	68								24	3410	501158	58104
+ac090560f2f467bbb	2026-10-18T20:22:45Z	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high	72428882	5802								528	16455	71122198	1289701
+a6676543e91567fd1	2026-10-18T20:23:10Z	Upload dashboard datasets	mechanical	dcfs-mechanical	haiku	low	260995	25								12	67	211640	49276
+a812c49337fc6fc24	2026-10-18T20:32:56Z	5.13	investigation	dcfs-investigator	claude-sonnet-5-5	high	506506	260								28	142	463441	42895
+a88061b034f8c222d	2026-10-18T20:33:10Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low	195625	20								10	41	151497	44077
+af42268f661e304e0	2026-10-18T20:33:41Z	Upload ci dataset	mechanical	dcfs-mechanical	haiku	low	194747	16								10	65	158831	35841
+a366efbdbf3b5a25b	2026-10-18T20:41:30Z	Disk-read budget headroom	implementation	dcfs-implementer	claude-sonnet-5-5	medium	2239863	1226								86	533	2166815	72429
+a6155a01e41ec90da	2026-10-18T20:41:44Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low	195771	16								10	65	152042	43654
+aba4039a908740995	2026-10-18T20:45:33Z	25.34	implementation	dcfs-implementer	claude-sonnet-5-5	medium	17860317	2212								220	2712	17372563	484822
+a152f39933e7de162	2026-10-18T20:45:33Z	tlc-measure	implementation	dcfs-implementer	claude-sonnet-5-5	medium	15955218	2271								200	899	15440786	513333
+a2995d2168e4f6c9f	2026-10-18T20:45:50Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low	194456	16								10	87	158650	35709
+aaa8bd0188633ee00	2026-10-18T20:52:06Z	Clerk batch 22	mechanical	dcfs-mechanical	claude-haiku-5-5	low	658795	77								24	10722	578612	69437
+a478d05149bf9fe02	2026-10-18T20:54:43Z	22.5	implementation	dcfs-implementer	claude-sonnet-5-5	medium	26650292	2104								294	5763	26346247	297988
+af301165769abe5e5	2026-10-18T20:55:38Z	docs-testing	review	dcfs-reviewer	claude-opus-5-5	xhigh	34148930	1467								334	2532	33809598	336466
+afaf669c594d4f644	2026-10-18T20:55:53Z	Style review 26.17c (post-merge)	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	133908	42								8	47	97419	36434
+a9eaaefe870bda8dc	2026-10-18T20:56:10Z	Upload lanes and sloc datasets	mechanical	dcfs-mechanical	haiku	low	197213	17								10	76	160343	36784
+a908ec489db2937b7	2026-10-18T20:56:42Z	docs-maintainability	review	dcfs-reviewer	claude-opus-5-5	xhigh	31512434	1228								330	3142	31221463	287499
+aa124e63c646ac641	2026-10-18T20:57:18Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low	194477	14								10	90	158653	35724
+ac1c86d74ae69038e	2026-10-18T21:10:38Z	rules-index	style-review	dcfs-style-reviewer	opus	high	2010157	259								52	309	1895083	114713
+af4827fad5679654c	2026-10-18T21:15:42Z	Upload sloc/quota/budget datasets	mechanical	dcfs-mechanical	haiku	low	245679	21								12	69	200031	45567
+a0504854946da4ac3	2026-10-18T21:16:27Z	Correct quota dataset reading	mechanical	dcfs-mechanical	haiku	low	279524	28								14	220	237294	41996
+aa36da7ee7dec764b	2026-10-18T21:20:12Z	Effort-decision data audit		Explore	sonnet		163759	43								14	92	131362	32291
+af0bdc86f54db0d31	2026-10-18T21:21:42Z	Clerk batch 23	mechanical	dcfs-mechanical	claude-haiku-5-5	low	783148	85								36	7311	725620	50181
+aa17d9d354f546e43	2026-10-18T21:24:11Z	rules-index	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	1649206	180								42	128	1546351	102685
+a5185f58c3796c3a5	2026-10-18T21:27:38Z	Upload ci dataset	mechanical	dcfs-mechanical	haiku	low	194971	19								10	69	158974	35918
+a3af6f71e6e68108b	2026-10-18T21:40:25Z	Upload sloc and ci datasets	mechanical	dcfs-mechanical	haiku	low	276273	20								14	116	232837	43306
+abea83bf2c986ea22	2026-10-18T22:00:00Z	17.2e	review	dcfs-reviewer	claude-opus-5-5	high	5513973	551								98	458	5355312	158105
+a2f125ed2382bd6b9	2026-10-18T22:00:00Z	17.2e	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	3422252	238								64	590	3252169	169429
+acad7f2863d179f6a	2026-10-18T22:37:47Z	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high	52181828	4371								402	24150	50736099	1421177
+a7b1c2c44cb93db42	2026-10-18T22:42:20Z	Rank mechanizable review findings		Explore	sonnet		142321	48								12	50	109841	32418
+a33a7764dc1c9fd20	2026-10-18T22:42:46Z	Upload quota and budget datasets	mechanical	dcfs-mechanical	haiku	low	340294	32								18	729	292160	47387
+a434a974f638733a1	2026-10-18T22:43:35Z	Upload ci dataset	mechanical	dcfs-mechanical	haiku	low	213141	17								12	136	177117	35876
+a1f165fb580a2475f	2026-10-18T22:49:37Z	Clerk batch 24	mechanical	dcfs-mechanical	claude-haiku-5-5	low	2406966	197								74	16473	2299443	90976
+aee3cf71ab75ea415	2026-10-18T22:56:20Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low	147048	17								8	49	110607	36384
+ac10d9958afdc46f5	2026-10-18T22:57:37Z	docs-testing	mechanical	dcfs-mechanical	haiku	low	352389	50								22	511	319339	32517
+ad523ea98096a32d3	2026-10-18T22:58:48Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low	187690	12								10	69	151901	35710
+addc4ad8c7feed4fa	2026-10-18T23:06:45Z	Upload ci dataset	mechanical	dcfs-mechanical	haiku	low	188321	12								10	370	145923	42018
+af652b0f6c5e57d6f	2026-10-18T23:08:10Z	rename-fsync-points	implementation	dcfs-implementer	claude-sonnet-5-5	medium	363286	97								20	151	320709	42406
+a3251be86543197e4	2026-10-18T23:08:36Z	Clerk batch 25	mechanical	dcfs-mechanical	claude-haiku-5-5	low	2553793	148								72	10876	2461906	80939
+a609057edf051304d	2026-10-18T23:10:05Z	Upload lanes via new skill	mechanical	dcfs-mechanical	haiku	low	295407	31								16	85	256196	39110
+ac848b1767251a111	2026-10-18T23:12:36Z	fix-2617c-style	mechanical	dcfs-mechanical	claude-haiku-5-5	low	316882	65								20	313	286467	30082
+aca2a2dc31550d293	2026-10-18T23:13:02Z	Upload lanes and ci via skill	mechanical	dcfs-mechanical	haiku	low	330834	32								16	943	285981	43894
+a4d4ab26c62cdb915	2026-10-18T23:18:52Z	Clerk batch 26	mechanical	dcfs-mechanical	claude-haiku-5-5	low	867345	126								30	4061	790310	72944
+aada4e7d946dcb587	2026-10-18T23:19:17Z	Refresh stale plan dataset	mechanical	dcfs-mechanical	sonnet	low	201707	25								10	81	159440	42176
+a6bc4384d1279c470	2026-10-18T23:26:13Z	Audit KVM-required claims		Explore	sonnet		153701	41								12	53	117654	35982
+a0d9acea70630589f	2026-10-18T23:28:40Z	Clerk batch 27	mechanical	dcfs-mechanical	claude-haiku-5-5	low	2014978	184								64	10777	1924082	80055
+a13e7bbdef45b1b32	2026-10-18T23:44:53Z	Upload quota/budget/ci via skill	mechanical	dcfs-mechanical	haiku	low	345372	33								18	239	295230	49885
+a4e6c25792178e14f	2026-10-18T23:48:16Z	bazel-agent-config	implementation	dcfs-implementer	claude-sonnet-5-5	medium	860942	141								36	201	799974	60731
+a7549c5cf2ee2a5f4	2026-10-18T23:48:29Z	Upload lanes via skill	mechanical	dcfs-mechanical	haiku	low	305937	20								16	291	267990	37640
