@@ -7693,6 +7693,24 @@ TEST_F(DirCacheFSTest, TraceScenarioInterruptedUnlink) {
   ctx_.interrupts = &NoInterrupts();
 }
 
+// A readdir of an uncached directory interrupted at its population's first
+// interruption point, traced (as InterruptedPopulationIsTraced, without its
+// expectations: a fault test runs it with a caller that ignores the
+// interruption point's EINTR, //dcfs:trace_fault_interruption_point_ignored_
+// population_test).
+TEST_F(DirCacheFSTest, TraceScenarioInterruptedListing) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  WriteFile(Path("d/a"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  StartTrace();
+  interrupts.at = 1;
+  (void)List(d, false);
+  ctx_.interrupts = &NoInterrupts();
+}
+
 // End to end: the kernel's FUSE_INTERRUPT for the request being served,
 // read from the device by SessionLoop at an interruption point (as the
 // daemon's loop does), stops a population.

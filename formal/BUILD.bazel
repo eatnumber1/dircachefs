@@ -888,7 +888,9 @@ TRACE_TESTS = {
     # ... the unlinkat taken after that line instead is rejected at it ...
     "interrupt_syscall_after_arrival": "\"ev\":\"syscall\"",
     # ... while an interrupt that arrives after the syscall lets the unlink
-    # finish (phase 3, the refresh) and reply success: valid.
+    # finish (phase 3, the refresh) and reply success: valid. (The code's
+    # behavior, checked against Trace.tla; not the known bug of the same
+    # name, BugInterruptAfterSyscall, which acts on it there.)
     "interrupt_after_syscall": None,
 }
 

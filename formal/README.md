@@ -1270,6 +1270,7 @@ renames with flags and syscall failures.
   | `swallow_syscall_error`: an unlink's syscall reports EBUSY, which the request ignores, replying OK | `TraceScenarioUnlink` | `unexplained` at the request's reply: a syscall error the model does not have, and its request replied OK |
   | `create_syscall_before_phase1`: a create's syscall started before its phase 1, inside a readdir's population of the same directory | `TraceScenarioMkdirDuringListing` | `unexplained` at `MutationSyscallStarting`, written although the directory's lines were held for the listing |
   | `interruption_point_ignored` (step 22.5): an interruption point sees the request's interrupt, and its caller carries on to the syscall | `TraceScenarioInterruptedUnlink` | the unlink's `syscall` line, after its `interrupt_arrives` line: at an interruption point the model's interrupted request may only take `Interrupt`. Before step 22.5 the recorder wrote nothing at that interruption point (the interrupt's line waited for the `End`), and the trace was valid |
+  | `interruption_point_ignored_population` (step 22.5): the same in a readdir's population, which carries on to its reads | `TraceScenarioInterruptedListing` | the population's `populate_read` line, after its `interrupt` line made the readdir idle |
 
   For example:
 

@@ -1355,6 +1355,8 @@ test_suite(
 #   interruption_point_ignored: an interruption point sees the request's
 #       interrupt, and its caller (an unlink's) carries on to its syscall
 #       (step 22.5).
+#   interruption_point_ignored_population: the same, where the caller is
+#       a readdir's population, which carries on to its reads (step 22.5).
 # Mangled with libc++ (std::__1::basic_string_view): the toolchain's standard
 # library. `llvm-nm` on the object shows the names to wrap.
 BEGIN_REMOVE = "_ZN4dcfs5cache11BeginRemoveERNS_7ContextElNSt3__117basic_string_viewIcNS3_11char_traitsIcEEEElNS0_12FillSnapshotE"
@@ -1417,6 +1419,15 @@ DIR_CACHE_FS_FAULTS = {
         # interrupted request may only take Interrupt.
         event = "\"c\":\"MutationSyscall\",\"ev\":\"syscall\"",
     ),
+    "interruption_point_ignored_population": dict(
+        wraps = [CHECK_INTERRUPTED],
+        lib = "interruption_point_ignored",
+        test = "TraceScenarioInterruptedListing",
+        dir = "2",  # d
+        # The population's reads, after its interrupt line made the
+        # readdir idle.
+        event = "\"c\":\"PopulateRead\",\"ev\":\"populate_read\"",
+    ),
 }
 
 [
@@ -1428,7 +1439,7 @@ DIR_CACHE_FS_FAULTS = {
         args = ["--gtest_filter=DirCacheFSTest." + spec["test"]],
         disks = [("vdb", "ext4", "32M")],
         linkopts = DIR_CACHE_FS_TEST_WRAPS + ["-Wl,--wrap=" + w for w in spec["wraps"]],
-        deps = DIR_CACHE_FS_TEST_DEPS + ["//dcfs/testonly:" + fault],
+        deps = DIR_CACHE_FS_TEST_DEPS + ["//dcfs/testonly:" + spec.get("lib", fault)],
     )
     for fault, spec in DIR_CACHE_FS_FAULTS.items()
 ]
