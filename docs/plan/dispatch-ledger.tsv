@@ -159,3 +159,7 @@ addc4ad8c7feed4fa	2026-10-18T23:06:45Z	Upload ci dataset	mechanical	dcfs-mechani
 af652b0f6c5e57d6f	2026-10-18T23:08:10Z	rename-fsync-points	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
 a3251be86543197e4	2026-10-18T23:08:36Z	Clerk batch 25	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
 a609057edf051304d	2026-10-18T23:10:05Z	Upload lanes via new skill	mechanical	dcfs-mechanical	haiku	low									
+ac848b1767251a111	2026-10-18T23:12:36Z	fix-2617c-style	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+aca2a2dc31550d293	2026-10-18T23:13:02Z	Upload lanes and ci via skill	mechanical	dcfs-mechanical	haiku	low									
+a4d4ab26c62cdb915	2026-10-18T23:18:52Z	Clerk batch 26	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+aada4e7d946dcb587	2026-10-18T23:19:17Z	Refresh stale plan dataset	mechanical	dcfs-mechanical	sonnet	low									

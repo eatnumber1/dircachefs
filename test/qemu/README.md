@@ -228,6 +228,11 @@ and `qemu_cc_test` requires an explicit `size` and `timeout` (the macros
 | medium | `bazel test --config=presubmit //...` (small + medium) | xfs and btrfs variants, readdir_boundary, release_leak | a few minutes |
 | large / enormous | `bazel test //...` (everything except `manual`; CI) | nfs_test and mount_dcfs_systemd_test (large), xfstests' generic tests on three filesystems (enormous: six shards each, `xfstests_<n>_test_<fstype>`; tag `xfstests`, run by their own CI job, not by `full`, `asan` or `ubsan`: see "xfstests (Phase 17)"), pjdfstest on three filesystems (enormous; about 10 minutes alone, about 18 when two run side by side) | about 36 minutes without xfstests; xfstests adds about 20 minutes per backing file system |
 
+The rows above are the tiers, not an agent's inner loop: an edit-compile-debug
+loop runs only the changed targets, and the tiers once before reporting
+(`docs/plan/process.md`, "Keep build and test output out of the context
+window", rule-quiet-output).
+
 `size` also sets Bazel's resource estimate (small assumes about 20 MB), so
 each QEMU test declares its real needs with tags: `cpu:<vCPUs>` (`-smp`: 1,
 or 2 for the tests that keep two, "A quiet kernel") and `resources:memory:<guest allowance + 100>`

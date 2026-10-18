@@ -20,7 +20,8 @@ repository.
 2. **Copy** each NAME.json with `cp -f` into the session scratchpad (or
    `mktemp -d`). Never write into the repository.
 3. **Upload** each copy: Artifact tool, action `publish`, the url above,
-   `asset: true`. Note each `/_blob/<id>`.
+   `asset: true`; pass no label with `asset: true` (the publish refuses it).
+   Note each `/_blob/<id>`.
 4. **Read versions**: `ArtifactData` get, or list collection `datasets`, for
    each doc's current version.
 5. **Write all datasets in ONE `ArtifactData` batch**: collection

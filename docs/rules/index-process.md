@@ -29,6 +29,11 @@ reasoning. `AGENTS.md` says which indexes to read for which task.
   [process](/docs/plan/process.md#rule-report-design-decisions),
   [process](/docs/plan/process.md#rule-lane-bazel-server-stays),
   [process](/docs/plan/process.md#rule-foreground-commands)
+- Keep build and test output out of the context window: lanes run Bazel with
+  `--config=agent`, the inner loop tests only changed targets, logs are read by
+  grep, a subagent returns a summary (russ, 2026-10-18: "In general both pieces
+  of advice are to keep bazel & test output out of the context window.").
+  [process](/docs/plan/process.md#rule-quiet-output)
 - Run Bazel with `/dev/kvm`, never pipe it through `tail` or `head` in an `&&`
   chain, and shut down servers you started in temporary worktrees.
   [process](/docs/plan/process.md#rule-bazel-kvm),

@@ -158,11 +158,21 @@ use it as design guidance rather than firm rules."
   `syscalls::` free function pulls the right Syscalls interface out of the
   Context, and calls that interface's CamelCase member (`Write`). The members
   of the injected syscall interfaces (`BackingSyscalls`, `LocalSyscalls`,
-  `ProcessSyscalls`) follow the normal CamelCase rule and are private, with the
-  `syscalls::` free functions as friends, so only they can call them (russ,
-  2026-10-18: "Private with friends."). Fakes override the private virtual
-  members, which is legal C++, and are still called only through the free
-  functions. The earlier decision (russ, 2026-10-18: "for the change to use a dependency-injected syscalls
+  `ProcessSyscalls`) are public and follow the normal CamelCase rule. Only the
+  `syscalls::` free functions call them, and the build graph enforces it (russ,
+  2026-10-18: "maybe we keep the Syscalls functions public, but control access
+  via BUILD visibility? That's also a little easier (I think?) to mechanically
+  enforce that only Context and syscalls.h have access."; then "Yes" to the
+  orchestrator's conditions): (1) each interface is its own `cc_library` whose
+  visibility admits only `//dcfs:syscalls` (the free functions) and the
+  `testonly` fakes; (2) `//dcfs:syscalls` depends on it through
+  `implementation_deps`, not `deps`, so its header never propagates
+  (`layering_check` is off until step 7.7); (3) `context.h` only
+  forward-declares the interface, since `Context` holds a reference and never
+  calls its members, so `Context`'s users cannot reach them. A genquery test
+  (like `//dcfs:linked_deps`) pins the interface's reverse dependencies to that
+  set. Fakes override the virtual members and are still called only through
+  the free functions. The earlier decision (russ, 2026-10-18: "for the change to use a dependency-injected syscalls
   wrapper, keep the global free functions (so call sites look like
   syscalls::write(...)), but pass in the Context or Syscalls object. Then the
   wrapper can call syscalls.Write(...) (and note I'm removing the function

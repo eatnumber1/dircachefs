@@ -350,6 +350,28 @@ What every agent that works a step does, wherever its brief is silent:
   orchestrator's exceptions are the background `bazel fetch` of a lane's
   first command (see above) and agy jobs (`run_in_background`, see "Using
   Gemini through `agy`").
+- <a id="rule-quiet-output"></a>
+  **Keep build and test output out of the context window** (russ, 2026-10-18:
+  "In general both pieces of advice are to keep bazel & test output out of the
+  context window."). The two suggestions below are from an outside review russ
+  shared on 2026-10-18.
+  - Lanes run Bazel with `--config=agent`, so agents see only warnings,
+    errors, failing tests and the exit status
+    ([`docs/style.md`](/docs/style.md#rule-everything-through-bazel)).
+  - The edit-compile-debug loop builds and tests only the targets it changes
+    (`bazel test --config=agent //dcfs:foo_test`, or the one guest test), never
+    `bazel test //...` or a repo-wide clang-tidy or style-checks run. Once before
+    reporting, it runs the tiers its brief names (usually `--config=fast` for
+    the affected packages plus `//tools/...`, and `--config=presubmit` for the
+    affected targets); the full `//...` and the coverage run are CI's unless
+    the brief asks. The README test-tier rows describe the tiers, not this loop
+    ([`test/qemu/README.md`](/test/qemu/README.md#test-tiers)).
+  - Read a test log or a CI log with `grep` or `tail` on the failing target,
+    never `cat` a whole `test.log`, the `bazel-testlogs` tree or a `gh run log`
+    (`gh run view --log-failed | grep ...`).
+  - Never pipe Bazel through `tail` or `head` in an `&&` chain
+    ([`rule-no-pipe-bazel`](#rule-no-pipe-bazel)).
+  - A subagent returns a summary, not raw output.
 
 <a id="rule-orchestrator-context"></a>
 ## The orchestrator's context is the expensive one (russ, 2026-10-17)
