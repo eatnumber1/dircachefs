@@ -13,8 +13,9 @@
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
 #include <fcntl.h>
-#include <linux/fs.h>      // FS_IOC_GETVERSION
-#include <linux/limits.h>  // PATH_MAX, XATTR_*
+#include <linux/capability.h>  // CAP_FSETID
+#include <linux/fs.h>          // FS_IOC_GETVERSION
+#include <linux/limits.h>      // PATH_MAX, XATTR_*
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/statvfs.h>
@@ -317,6 +318,37 @@ std::invoke_result_t<Op> AsCaller(const Credentials &caller, Op &&op) {
     RestoreRoot(saved);
   };
   return std::forward<Op>(op)();
+}
+
+// Puts CAP_FSETID back into the calling thread's effective set, from its
+// permitted set, after a switch to a nonzero fsuid took it away; switching
+// back to fsuid 0 raises every filesystem capability from the permitted set
+// again (cap_task_fix_setuid, security/commoncap.c:1178-1188 (Linux
+// v7.3-rc7)), so nothing undoes this. EPERM if the daemon lacks it.
+absl::Status RaiseCapFsetid() {
+  ASSIGN_OR_RETURN(syscalls::CapabilitySets sets, syscalls::capget());
+  sets.effective |= uint64_t{1} << CAP_FSETID;
+  return syscalls::capset(sets);
+}
+
+// AsCaller, keeping CAP_FSETID: for a backing write, fallocate,
+// copy_file_range or truncate, whose own removal of setuid and setgid
+// (file_remove_privs, fs/inode.c:2371-2404, and do_truncate's
+// dentry_needs_remove_privs, fs/open.c:57 (Linux v7.3-rc7)) would decide by
+// the fsuid's capabilities, none for a nonzero one, and so clear bits where
+// the kernel's own decision on the FUSE side kept them. That decision, made
+// with the caller's real capabilities, is the only one: the SETATTR that
+// sets nothing before a write, fallocate or copy_file_range, and a
+// truncate's FATTR_KILL_SUIDGID (DirCacheFS::Setattr). A passthrough write
+// reaches the backing file with the daemon's credentials, CAP_FSETID
+// included, and removes nothing either.
+template <typename Op>
+std::invoke_result_t<Op> AsCallerKeepingCapFsetid(const Credentials &caller,
+                                                  Op &&op) {
+  return AsCaller(caller, [&]() -> std::invoke_result_t<Op> {
+    RETURN_IF_ERROR(RaiseCapFsetid());
+    return std::forward<Op>(op)();
+  });
 }
 
 // The mount id statx reported, or nullopt if it reported none. The unique
@@ -2418,7 +2450,8 @@ absl::Status ApplySize(const Credentials &caller, int opath_fd, mode_t type,
                          "truncate on a non-regular, non-directory file");
   }
   ASSIGN_OR_RETURN(FileDescriptor fd, ReopenFd(opath_fd, O_WRONLY | O_CLOEXEC));
-  return AsCaller(caller, [&] { return syscalls::ftruncate(*fd, size); });
+  return AsCallerKeepingCapFsetid(
+      caller, [&] { return syscalls::ftruncate(*fd, size); });
 }
 
 // FUSE_SET_ATTR_ATIME/MTIME(_NOW): the regular/dir-vs-other-types split as
@@ -2470,15 +2503,17 @@ absl::Status SetAttrFd(const Credentials &caller, int fd,
     }));
   }
 
+  // Setuid and setgid cleared where a write by the caller, without
+  // CAP_FSETID, clears them, from the mode read above (a truncate before
+  // this, with CAP_FSETID, clears nothing); no chmod where none is set,
+  // the mode every truncate by such a caller asks this for.
+  const mode_t mode = stx.stx_mode & 07777;
+  const mode_t cleared =
+      mode & SuidgidClearedByWrite(caller, mode, stx.stx_gid);
   if (to_set & FUSE_SET_ATTR_MODE) {
     RETURN_IF_ERROR(ApplyMode(fd, type, attr.st_mode));
-  } else if ((to_set & FUSE_SET_ATTR_KILL_PRIV) != 0) {
-    // Setuid and setgid cleared where a write by the caller, without
-    // CAP_FSETID, clears them, from the mode read above: a truncate before
-    // this, as the caller, clears no more than that.
-    const mode_t mode = stx.stx_mode & 07777;
-    RETURN_IF_ERROR(ApplyMode(
-        fd, type, mode & ~SuidgidClearedByWrite(caller, mode, stx.stx_gid)));
+  } else if ((to_set & FUSE_SET_ATTR_KILL_PRIV) != 0 && cleared != 0) {
+    RETURN_IF_ERROR(ApplyMode(fd, type, mode & ~cleared));
   }
 
   if (to_set & (FUSE_SET_ATTR_ATIME | FUSE_SET_ATTR_MTIME |

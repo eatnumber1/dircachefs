@@ -144,6 +144,8 @@ nftw
 mkdtemp
 getpid
 gettid
+capget
+capset
 fopen
 freopen
 pause

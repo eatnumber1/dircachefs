@@ -2,6 +2,7 @@
 #include "dcfs/syscalls.h"
 
 #include <fcntl.h>
+#include <linux/capability.h>
 #include <poll.h>
 #include <sys/file.h>
 #include <sys/fsuid.h>
@@ -18,6 +19,7 @@
 #include <syslog.h>
 #include <unistd.h>
 
+#include <array>
 #include <cerrno>
 #include <climits>
 #include <cstddef>
@@ -96,6 +98,49 @@ absl::StatusOr<int> getgroups(int size, gid_t *list) {
   int n = ::getgroups(size, list);
   if (n == -1) return ErrnoToStatus(errno, "getgroups");
   return n;
+}
+
+namespace {
+
+// The header naming the calling thread, in the 64-bit layout.
+__user_cap_header_struct ThisThread() {
+  return {.version = _LINUX_CAPABILITY_VERSION_3, .pid = 0};
+}
+
+using CapabilityData =
+    std::array<__user_cap_data_struct, _LINUX_CAPABILITY_U32S_3>;
+
+}  // namespace
+
+absl::StatusOr<CapabilitySets> capget() {
+  __user_cap_header_struct header = ThisThread();
+  CapabilityData data{};
+  // capget(2) fails only for a header or buffer this function got wrong
+  // (EFAULT, EINVAL) or a pid that is not the caller's (ESRCH).
+  RET_CHECK_EQ(::syscall(SYS_capget, &header, data.data()), 0)
+      << "capget(2) of the calling thread";
+  auto join = [](uint32_t low, uint32_t high) {
+    return uint64_t{high} << 32 | low;
+  };
+  return CapabilitySets{
+      .effective = join(data[0].effective, data[1].effective),
+      .permitted = join(data[0].permitted, data[1].permitted),
+      .inheritable = join(data[0].inheritable, data[1].inheritable)};
+}
+
+absl::Status capset(const CapabilitySets &sets) {
+  __user_cap_header_struct header = ThisThread();
+  CapabilityData data{};
+  for (size_t i = 0; i < data.size(); ++i) {
+    const size_t shift = 32 * i;
+    data[i] = {.effective = static_cast<uint32_t>(sets.effective >> shift),
+               .permitted = static_cast<uint32_t>(sets.permitted >> shift),
+               .inheritable = static_cast<uint32_t>(sets.inheritable >> shift)};
+  }
+  if (::syscall(SYS_capset, &header, data.data()) == -1) {
+    return ErrnoToStatus(errno, "capset");
+  }
+  return absl::OkStatus();
 }
 
 absl::StatusOr<std::string> mkdtemp(std::string_view pattern) {

@@ -37,6 +37,7 @@
 #include "dcfs/dir_cache_fs.h"
 
 #include <fcntl.h>
+#include <linux/capability.h>
 #include <linux/fs.h>
 #include <linux/fuse.h>
 #include <sys/ioctl.h>  // IWYU pragma: keep (FS_IOC_* macros)
@@ -69,6 +70,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -7341,15 +7343,14 @@ TEST_F(DirCacheFSTest,
   EXPECT_EQ(Release(f, fh).error, 0);
 }
 
-// Step 17.2e: a truncate arrives as a SETATTR of the size, with
-// FATTR_KILL_SUIDGID from a caller without CAP_FSETID (fuse_do_setattr,
-// FUSE_CAP_HANDLE_KILLPRIV_V2) and never with a mode. The truncate, as the
-// caller, removes privileges by the current rule: a caller outside the
-// group loses both bits, a group member setuid alone, root (whose truncate
-// carries no FATTR_KILL_SUIDGID) neither. Root's with the flag (root without
-// CAP_FSETID, though /proc, this process's, shows it) loses both too: the
-// truncate as fsuid 0 keeps them, so Setattr clears them after it.
-TEST_F(DirCacheFSTest, TruncateRemovesPrivilegesAsTheCaller) {
+// Step 17.2e: a truncate arrives as a SETATTR of the size, never with a
+// mode, and with FATTR_KILL_SUIDGID exactly when the caller lacks
+// CAP_FSETID (fuse_do_setattr's !capable(CAP_FSETID), fs/fuse/dir.c:2241-2243
+// (Linux v7.3-rc7)). The flag decides, whatever the uid: with it, a caller
+// outside the group loses both bits and a group member setuid alone, as root
+// without CAP_FSETID does (though /proc, this process's, shows it); without
+// it, root and a non-root caller holding CAP_FSETID keep both.
+TEST_F(DirCacheFSTest, TruncateRemovesPrivilegesByTheKernelsFlag) {
   struct Case {
     std::string name;
     uid_t uid;
@@ -7374,6 +7375,11 @@ TEST_F(DirCacheFSTest, TruncateRemovesPrivilegesAsTheCaller) {
        .gid = 1000,
        .kill = FATTR_KILL_SUIDGID,
        .want = 0666},
+      {.name = "outside_with_cap_fsetid",
+       .uid = 1000,
+       .gid = 1000,
+       .kill = 0,
+       .want = 06666},
   };
   for (const Case &c : cases) {
     WriteFile(Path(c.name), "data");
@@ -7409,22 +7415,30 @@ TEST_F(DirCacheFSTest, TruncateRemovesPrivilegesAsTheCaller) {
   EXPECT_EQ(st.st_mode & 07777, 02666u);
 }
 
-// Step 17.2e: the clear after a truncate with FATTR_KILL_SUIDGID is uid 0's
-// alone. Any other caller's truncate, run as that caller, has cleared what
-// its write would already, so the flag costs it nothing over the same
-// truncate without it: no reopen and fchmod, and no access ACL to read back
-// (XattrsChangedBySetattr).
-TEST_F(DirCacheFSTest, TruncateKillCostsANonRootCallerNothingMore) {
-  for (std::string_view name : {"kill", "plain"}) {
-    WriteFile(Path(name), "data");
-    CHECK_OK(syscalls::fchmodat(AT_FDCWD, Path(name), 06666, 0));
+// Step 17.2e: every truncate by a caller without CAP_FSETID carries
+// FATTR_KILL_SUIDGID, whatever the file's mode (fs/fuse/dir.c:2241-2243
+// (Linux v7.3-rc7)). On a file with neither setuid nor setgid it costs
+// nothing over the same truncate without it, from root or anyone else: no
+// reopen and fchmod, and no access ACL to read back (a chmod that changes
+// only setuid and setgid leaves the ACL as it was, fs/posix_acl.c:516-556
+// (Linux v7.3-rc7), so the clear's is no side effect to read back).
+TEST_F(DirCacheFSTest, TruncateKillCostsAFileWithoutSetidBitsNothing) {
+  const uid_t uids[] = {0, 1000};
+  for (uid_t uid : uids) {
+    for (std::string_view flag : {"kill", "plain"}) {
+      const std::string name = absl::StrCat(flag, uid);
+      WriteFile(Path(name), "data");
+      CHECK_OK(syscalls::fchmodat(AT_FDCWD, Path(name), 0666, 0));
+    }
   }
   auto restore_groups = WithThreadGroups({1000});
   Start();
-  ASSERT_OK_AND_ASSIGN(InodeId flagged, Id("kill"));
-  ASSERT_OK_AND_ASSIGN(InodeId plain, Id("plain"));
-  // The costs of a truncate of `f` from 1000:1000 whose valid has `flags`.
-  auto costs_of_truncate = [&](InodeId f, uint32_t flags) {
+  // The costs of a truncate of `name` from `uid`:1000 whose valid has
+  // `flags`.
+  auto costs_of_truncate = [&](const std::string &name, uid_t uid,
+                               uint32_t flags) {
+    absl::StatusOr<InodeId> f = Id(name);
+    CHECK_OK(f.status());
     struct fuse_setattr_in in = {};
     in.valid = FATTR_SIZE | flags;
     in.size = 2;
@@ -7432,20 +7446,47 @@ TEST_F(DirCacheFSTest, TruncateKillCostsANonRootCallerNothingMore) {
     AppendBytes(body, in);
     counter_.Reset();
     EXPECT_EQ(
-        Send(FUSE_SETATTR, static_cast<uint64_t>(f), body, 1000, 1000).error,
+        Send(FUSE_SETATTR, static_cast<uint64_t>(*f), body, uid, 1000).error,
         0);
     return counter_.counts();
   };
-  const testonly::CostCounter::Counts with =
-      costs_of_truncate(flagged, FATTR_KILL_SUIDGID);
-  const testonly::CostCounter::Counts without = costs_of_truncate(plain, 0);
-  EXPECT_EQ(with.backing_calls, without.backing_calls);
-  EXPECT_EQ(with.steps, without.steps);
-  for (std::string_view name : {"kill", "plain"}) {
-    ASSERT_OK_AND_ASSIGN(struct stat st,
-                         syscalls::fstatat(AT_FDCWD, Path(name)));
-    EXPECT_EQ(st.st_mode & 07777, 0666u) << name;
+  for (uid_t uid : uids) {
+    SCOPED_TRACE(uid);
+    const testonly::CostCounter::Counts with =
+        costs_of_truncate(absl::StrCat("kill", uid), uid, FATTR_KILL_SUIDGID);
+    const testonly::CostCounter::Counts without =
+        costs_of_truncate(absl::StrCat("plain", uid), uid, 0);
+    EXPECT_EQ(with.backing_calls, without.backing_calls);
+    EXPECT_EQ(with.steps, without.steps);
   }
+}
+
+// Step 17.2e: a truncate's ftruncate runs as the caller with CAP_FSETID
+// raised again from the daemon's permitted set. A daemon without it there
+// (a thread that dropped it) fails the truncate with capset's EPERM, and the
+// file is as it was.
+TEST_F(DirCacheFSTest, ATruncateFailsWhereTheDaemonLacksCapFsetid) {
+  WriteFile(Path("f"), "data");
+  auto restore_groups = WithThreadGroups({1000});
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  std::thread([&] {
+    constexpr uint64_t kFsetid = uint64_t{1} << CAP_FSETID;
+    ASSERT_OK_AND_ASSIGN(syscalls::CapabilitySets sets, syscalls::capget());
+    sets.effective &= ~kFsetid;
+    sets.permitted &= ~kFsetid;
+    ASSERT_THAT(syscalls::capset(sets), IsOk());
+    struct fuse_setattr_in in = {};
+    in.valid = FATTR_SIZE;
+    in.size = 2;
+    std::string body;
+    AppendBytes(body, in);
+    EXPECT_EQ(
+        Send(FUSE_SETATTR, static_cast<uint64_t>(f), body, 1000, 1000).error,
+        -EPERM);
+  }).join();
+  ASSERT_OK_AND_ASSIGN(struct stat st, syscalls::fstatat(AT_FDCWD, Path("f")));
+  EXPECT_EQ(st.st_size, 4);
 }
 
 // Step 17.2e: a write that does not go through passthrough carries

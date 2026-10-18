@@ -441,6 +441,10 @@ expect_stat sgid-group-member-keeps '%a' pub/sgid_ops/f_grp 2666
 #   setattr_should_drop_suidgid's capable() asks for), clear what bob
 #   would: the kernel sends the SETATTR for a write only for a writer
 #   without CAP_FSETID, or for a file with security.capability.
+# - bob holding CAP_FSETID ("fsetid") keeps both bits on a write, fallocate,
+#   copy_file_range, truncate and O_TRUNC open, as root does: the kernel
+#   sends no SETATTR before the first three and no FATTR_KILL_SUIDGID with
+#   the other two, and dcfs runs their backing calls with CAP_FSETID.
 # - "capwrite" sets security.capability first, so the kernel removes it
 #   (a REMOVEXATTR) and sends that SETATTR for any writer: then dcfs asks
 #   /proc whether the writer holds CAP_FSETID, in dcfs's user namespace and
@@ -471,6 +475,9 @@ nofsetid() { "$TESTUTIL" dropcap 4 -- "$@"; }
 # Root of a user namespace mapping only uid and gid 0: its CAP_FSETID does
 # not cover a file of group 2000, so it clears what bob would.
 userns() { "$TESTUTIL" userns -- "$@"; }
+# bob (outside group 2000) holding CAP_FSETID (4), an ambient capability that
+# every command it runs keeps: clears what root would, nothing.
+fsetid() { "$TESTUTIL" runascap 4 1001 1001 1001 -- "$@"; }
 
 # sgid_op USER OP DIR FILE: OP on DIR/FILE as USER; prints its exit status,
 # 0 or 1.
@@ -569,6 +576,10 @@ sgid-nofsetid-write 0:2000 2666 nofsetid write 0:666
 sgid-nofsetid-otrunc 0:2000 2666 nofsetid otrunc 0:666
 setuid-userns-write 0:2000 4666 userns write 0:666
 suid-userns-write 0:2000 6666 userns write 0:666
+suid-fsetid-write 0:2000 6666 fsetid write 0:6666
+suid-fsetid-truncate 0:2000 6666 fsetid truncate 0:6666
+suid-fsetid-otrunc 0:2000 6666 fsetid otrunc 0:6666
+sgid-fsetid-truncate 0:2000 2666 fsetid truncate 0:2666
 setuid-root-capwrite 0:2000 4666 root capwrite 0:4666
 setuid-other-capwrite 0:2000 4666 bob capwrite 0:666
 setuid-nofsetid-capwrite 0:2000 4666 nofsetid capwrite 0:666

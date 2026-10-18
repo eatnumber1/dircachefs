@@ -164,6 +164,14 @@
  *       this needs none, and sets the exact group list a test wants. Used
  *       by credentials.sh to act on the dcfs mount as an unprivileged user.
  *       On failure prints "ERR <errno-name>" and exits 127 (execvp) or 1.
+ *   testutil runascap <capability number> <uid> <gid> <groups> -- <cmd> ...
+ *       As runas, but <cmd> keeps that one capability: kept across the
+ *       setuid(2) (prctl(PR_SET_KEEPCAPS)), made the only permitted,
+ *       effective and inheritable one (capset(2)), and raised as an ambient
+ *       capability (prctl(PR_CAP_AMBIENT)), which an execve(2) of a program
+ *       without file capabilities keeps. Used by credentials.sh (step
+ *       17.2e): CAP_FSETID (4) makes a non-root caller whose writes and
+ *       truncates keep setuid and setgid.
  *   testutil dropcap <capability number> -- <cmd> [args...]
  *       Drops the capability from the bounding set (prctl(PR_CAPBSET_DROP))
  *       and execvp(3)s <cmd>, which, run as root, then has every capability
@@ -322,6 +330,7 @@
 #include <ftw.h>
 #include <grp.h>
 #include <libgen.h>
+#include <linux/capability.h>
 #include <linux/fiemap.h>
 #include <linux/fs.h>
 #include <linux/perf_event.h>
@@ -1081,7 +1090,24 @@ static int cmd_sqlite_lock(const char *db_path, const char *seconds_str) {
   return 0;
 }
 
-static int cmd_runas(char *argv[]) {
+// Keeps capability `cap` alone, as an ambient capability, after a setuid(2)
+// that prctl(PR_SET_KEEPCAPS) let keep the permitted set; -1 with errno set on
+// failure.
+static int keep_ambient_capability(unsigned long cap) {
+  struct __user_cap_header_struct header = {
+      .version = _LINUX_CAPABILITY_VERSION_3, .pid = 0};
+  struct __user_cap_data_struct data[_LINUX_CAPABILITY_U32S_3];
+  memset(data, 0, sizeof(data));
+  data[cap / 32].effective = 1u << (cap % 32);
+  data[cap / 32].permitted = 1u << (cap % 32);
+  data[cap / 32].inheritable = 1u << (cap % 32);
+  if (syscall(SYS_capset, &header, data) == -1) return -1;
+  return prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, cap, 0, 0);
+}
+
+// runas with argv[2..] its <uid> <gid> <groups> -- <cmd>, keeping capability
+// `cap` (-1 for none, runas itself) as runascap does.
+static int run_as(char *argv[], long cap) {
   uid_t uid = (uid_t)strtoul(argv[2], NULL, 10);
   gid_t gid = (gid_t)strtoul(argv[3], NULL, 10);
   gid_t groups[64];
@@ -1109,14 +1135,22 @@ static int cmd_runas(char *argv[]) {
     fprintf(stderr, "testutil runas: expected -- before the command\n");
     return 1;
   }
-  if (setgroups(ngroups, groups) == -1 || setgid(gid) == -1 ||
-      setuid(uid) == -1) {
+  if ((cap >= 0 && prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0) == -1) ||
+      setgroups(ngroups, groups) == -1 || setgid(gid) == -1 ||
+      setuid(uid) == -1 ||
+      (cap >= 0 && keep_ambient_capability((unsigned long)cap) == -1)) {
     print_err(errno);
     return 1;
   }
   execvp(argv[6], &argv[6]);
   print_err(errno);
   return 127;
+}
+
+static int cmd_runas(char *argv[]) { return run_as(argv, -1); }
+
+static int cmd_runascap(char *argv[]) {
+  return run_as(&argv[1], strtol(argv[2], NULL, 10));
 }
 
 static int cmd_dropcap(char *argv[]) {
@@ -2868,6 +2902,7 @@ int main(int argc, char *argv[]) {
   if (argc == 4 && strcmp(argv[1], "sqlite-lock") == 0)
     return cmd_sqlite_lock(argv[2], argv[3]);
   if (argc >= 7 && strcmp(argv[1], "runas") == 0) return cmd_runas(argv);
+  if (argc >= 8 && strcmp(argv[1], "runascap") == 0) return cmd_runascap(argv);
   if (argc >= 5 && strcmp(argv[1], "dropcap") == 0) return cmd_dropcap(argv);
   if (argc >= 4 && strcmp(argv[1], "userns") == 0) return cmd_userns(argv);
   if (argc == 3 && strcmp(argv[1], "opath-hold") == 0)
@@ -2960,6 +2995,8 @@ int main(int argc, char *argv[]) {
       "       testutil sql <db-path> <query>\n"
       "       testutil sqlite-lock <db-path> <hold-seconds>\n"
       "       testutil runas <uid> <gid> <gid,...|-> -- <cmd> [args...]\n"
+      "       testutil runascap <capability number> <uid> <gid> "
+      "<gid,...|-> -- <cmd> [args...]\n"
       "       testutil dropcap <capability number> -- <cmd> [args...]\n"
       "       testutil userns -- <cmd> [args...]\n"
       "       testutil readdir-ino <dir> [small-first]\n"

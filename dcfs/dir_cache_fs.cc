@@ -73,9 +73,11 @@ void NoteBestEffort(std::string_view what, const absl::Status &status) {
 //
 //  - system.posix_acl_access: any chmod of a file with an access ACL
 //    rewrites the ACL to match the new mode (posix_acl_chmod: ext4, xfs,
-//    btrfs). dcfs chmods for FUSE_SET_ATTR_MODE and also for
-//    KILL_PRIV (backing::SetAttr). system.posix_acl_default is
-//    never touched by a chmod.
+//    btrfs), for FUSE_SET_ATTR_MODE. The chmod dcfs makes for KILL_PRIV
+//    (backing::SetAttr) changes setuid and setgid alone, which the ACL does
+//    not hold (__posix_acl_chmod_masq takes the owner, group and other
+//    bits, fs/posix_acl.c:516-556 (Linux v7.3-rc7)), so it rewrites the
+//    ACL as it was. system.posix_acl_default is never touched by a chmod.
 //  - security.capability: removed by chown/chgrp (even chown(-1, -1)) and
 //    truncate (ATTR_KILL_PRIV, fs/open.c, fs/attr.c) and by any write or
 //    fallocate
@@ -93,9 +95,7 @@ constexpr std::string_view kXattrsChangedByWrite[] = {kCapabilityXattr};
 // The side-effect xattrs of a Setattr with `to_set`.
 std::vector<std::string_view> XattrsChangedBySetattr(int to_set) {
   std::vector<std::string_view> names;
-  if (to_set & (FUSE_SET_ATTR_MODE | FUSE_SET_ATTR_KILL_PRIV)) {
-    names.push_back(kAclAccessXattr);
-  }
+  if (to_set & FUSE_SET_ATTR_MODE) names.push_back(kAclAccessXattr);
   // An otherwise empty setattr is a chown(path, -1, -1) (see
   // backing::SetAttr).
   if ((to_set & (FUSE_SET_ATTR_UID | FUSE_SET_ATTR_GID | FUSE_SET_ATTR_SIZE)) ||
@@ -836,14 +836,14 @@ absl::Status DirCacheFS::Setattr(FuseRequest &req, fuse_ino_t ino,
   // setgid go as its write would take them, not by a chown, which a
   // non-owner may not make.
   if (write_removal) to_set |= FUSE_SET_ATTR_KILL_PRIV;
-  // A truncate with FATTR_KILL_SUIDGID (libfuse's FUSE_SET_ATTR_KILL_SUID):
-  // the kernel found the caller without CAP_FSETID. As uid 0 the truncate,
-  // run as the caller, keeps the bits all the same (AsCaller keeps
-  // CAP_FSETID for fsuid 0), so they go as for that caller's write; any
-  // other uid's truncate clears them itself, and the check of the uid
-  // spares it the clear's reopen and fchmod.
+  // A truncate carries FATTR_KILL_SUIDGID (libfuse's FUSE_SET_ATTR_KILL_SUID)
+  // exactly when the caller lacks CAP_FSETID, the kernel's own
+  // capable(CAP_FSETID) (fuse_do_setattr, fs/fuse/dir.c:2241-2243 (Linux
+  // v7.3-rc7)): then setuid and setgid go as that caller's write would take
+  // them, whatever its uid. The truncate itself keeps them
+  // (backing::SetAttr runs it with CAP_FSETID).
   constexpr int kTruncateKill = FUSE_SET_ATTR_SIZE | FUSE_SET_ATTR_KILL_SUID;
-  if ((to_set & kTruncateKill) == kTruncateKill && caller.uid == 0) {
+  if ((to_set & kTruncateKill) == kTruncateKill) {
     to_set |= FUSE_SET_ATTR_KILL_PRIV;
   }
   if (auto it = removed_.find(id); it != removed_.end()) {

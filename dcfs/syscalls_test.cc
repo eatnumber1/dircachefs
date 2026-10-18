@@ -2,6 +2,7 @@
 #include "dcfs/syscalls.h"
 
 #include <fcntl.h>
+#include <linux/capability.h>
 #include <linux/fs.h>
 #include <linux/stat.h>
 #include <sys/file.h>
@@ -24,6 +25,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -589,6 +591,32 @@ TEST(SyscallsCredentialsTest, TheQuerySentinelIsNotAnId) {
   EXPECT_EQ(StatusToErrno(syscalls::setfsgid(static_cast<gid_t>(-1))), EINVAL);
   EXPECT_EQ(syscalls::fsuid(), 0u);
   EXPECT_EQ(syscalls::fsgid(), 0u);
+}
+
+// A nonzero fsuid takes the filesystem capabilities, CAP_FSETID among them,
+// out of the effective set (cap_task_fix_setuid); capset raises one from the
+// permitted set again, and fails with EPERM for one the thread no longer
+// has. In a thread of its own, which nothing uses after it drops one.
+TEST(SyscallsCredentialsTest, CapsetRaisesOnlyAPermittedCapability) {
+  constexpr uint64_t kFsetid = uint64_t{1} << CAP_FSETID;
+  std::thread([] {
+    ASSERT_OK_AND_ASSIGN(syscalls::CapabilitySets root, syscalls::capget());
+    EXPECT_NE(root.effective & kFsetid, 0u);
+    ASSERT_THAT(syscalls::setfsuid(1000), IsOk());
+    ASSERT_OK_AND_ASSIGN(syscalls::CapabilitySets sets, syscalls::capget());
+    EXPECT_EQ(sets.effective & kFsetid, 0u);
+    EXPECT_EQ(sets.permitted, root.permitted);
+    EXPECT_EQ(sets.inheritable, root.inheritable);
+    sets.effective |= kFsetid;
+    ASSERT_THAT(syscalls::capset(sets), IsOk());
+    ASSERT_OK_AND_ASSIGN(syscalls::CapabilitySets raised, syscalls::capget());
+    EXPECT_NE(raised.effective & kFsetid, 0u);
+    sets.effective &= ~kFsetid;
+    sets.permitted &= ~kFsetid;
+    ASSERT_THAT(syscalls::capset(sets), IsOk());
+    sets.effective |= kFsetid;
+    EXPECT_EQ(StatusToErrno(syscalls::capset(sets)), EPERM);
+  }).join();
 }
 
 // --- The mount.dcfs wrapper's calls (phase 15) ----------------------------

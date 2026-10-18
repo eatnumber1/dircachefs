@@ -60,6 +60,20 @@ absl::Status setgroups(std::span<const gid_t> groups);
 // the count.
 absl::StatusOr<int> getgroups(int size, gid_t *list);
 
+// A thread's capability sets, a bit per capability (uint64_t{1} <<
+// CAP_FSETID, ...).
+struct CapabilitySets {
+  uint64_t effective = 0;
+  uint64_t permitted = 0;
+  uint64_t inheritable = 0;
+};
+
+// capget(2) and capset(2) of the CALLING THREAD alone (pid 0, version 3).
+// capset fails with EPERM for an effective capability outside the
+// permitted set, or a permitted one the thread does not have.
+absl::StatusOr<CapabilitySets> capget();
+absl::Status capset(const CapabilitySets &sets);
+
 // mkdtemp(3): creates the directory and returns its name; `pattern` ends in
 // XXXXXX. mkstemp(3): creates and opens the file, and `pattern` (ending in
 // XXXXXX) becomes its name. O_CLOEXEC is added to the file.
