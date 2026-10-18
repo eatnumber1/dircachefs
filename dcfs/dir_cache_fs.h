@@ -25,6 +25,7 @@
 #include "dcfs/context.h"
 #include "dcfs/fd.h"
 #include "dcfs/fuse_request.h"
+#include "dcfs/interruption_point.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/mount_options.h"
 #include "dcfs/protocol_events.h"
@@ -352,12 +353,13 @@ class DirCacheFS : private events::Bookkeeping {
   // timeouts from opts_. See RequireAttr() for the NotFound -> ESTALE
   // conversion. `interruption_point`: as for FreshAttr.
   absl::StatusOr<fuse_entry_param> EntryFor(
-      InodeId id, std::string_view interruption_point = {});
+      InodeId id,
+      std::optional<InterruptionPoint> interruption_point = std::nullopt);
   // EntryFor with `id`'s row already read (`attr`): the same reply, the
   // same getattr events, without the second read.
   absl::StatusOr<fuse_entry_param> EntryForAttr(
       InodeId id, cache::CachedAttr attr,
-      std::string_view interruption_point = {});
+      std::optional<InterruptionPoint> interruption_point);
 
   // Refreshes `id`'s cached attributes when they are not valid: from the
   // shared backing fd if `id` is open (a statx on an fd already open -- no
@@ -411,7 +413,7 @@ class DirCacheFS : private events::Bookkeeping {
   // (`reply`: GETATTR, LOOKUP, READDIRPLUS entries...) is always a held
   // fill of it (backing::FillHeldAttrs), answered from its statx: the
   // kernel's reads since the last record moved the access time.
-  // `interruption_point`, if not empty, names the interruption point
+  // `interruption_point`, if any, is the interruption point
   // (CheckInterrupted, dcfs/interruption_point.h) before either's backing
   // reads, for a request whose refresh is its own work (GETATTR, OPENDIR, a
   // LOOKUP of "." or "..", READDIRPLUS's entries); empty for one that must
@@ -419,7 +421,7 @@ class DirCacheFS : private events::Bookkeeping {
   // model request has replied before it (a LOOKUP's reply entry).
   absl::StatusOr<cache::CachedAttr> FreshAttr(
       InodeId id, cache::CachedAttr attr, bool reply = false,
-      std::string_view interruption_point = {});
+      std::optional<InterruptionPoint> interruption_point = std::nullopt);
 
   // Step 23.8: a held fill of `id` through `fd` at a FLUSH or RELEASE (`op`,
   // for the log), whose failure is logged, never replied: the close must

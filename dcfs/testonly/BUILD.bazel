@@ -301,6 +301,7 @@ cc_library(
     visibility = ["//dcfs:__pkg__"],
     deps = [
         "//dcfs:context",
+        "//dcfs:interruption_point",
         "@absl//absl/status",
     ],
 )

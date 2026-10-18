@@ -481,14 +481,15 @@ absl::Status DirCacheFS::RefuseStub(FuseRequest &req, InodeId id,
 }
 
 absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(
-    InodeId id, std::string_view interruption_point) {
+    InodeId id, std::optional<InterruptionPoint> interruption_point) {
   if (cache::IsStub(id)) return StubEntry(id);
   ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
   return EntryForAttr(id, attr, interruption_point);
 }
 
 absl::StatusOr<fuse_entry_param> DirCacheFS::EntryForAttr(
-    InodeId id, cache::CachedAttr attr, std::string_view interruption_point) {
+    InodeId id, cache::CachedAttr attr,
+    std::optional<InterruptionPoint> interruption_point) {
   ASSIGN_OR_RETURN(attr,
                    FreshAttr(id, attr, /*reply=*/true, interruption_point));
 
@@ -560,12 +561,12 @@ absl::StatusOr<fuse_entry_param> DirCacheFS::EntryAfterPhase2(
 
 absl::StatusOr<cache::CachedAttr> DirCacheFS::FreshAttr(
     InodeId id, cache::CachedAttr attr, bool reply,
-    std::string_view interruption_point) {
+    std::optional<InterruptionPoint> interruption_point) {
   // The caller's interruption point, if it has one, before a backing read.
   const auto stop_if_interrupted = [&]() -> absl::Status {
-    return interruption_point.empty()
-               ? absl::OkStatus()
-               : CheckInterrupted(ctx_, interruption_point);
+    return interruption_point.has_value()
+               ? CheckInterrupted(ctx_, *interruption_point)
+               : absl::OkStatus();
   };
   // Model: a getattr's first step (GAFrom), served or refreshed. Every
   // caller read `attr` from the cache with no syscall since.
@@ -710,7 +711,8 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   // An interruption point before the backing syscall
   // (dcfs/interruption_point.h; formal/dcfs.tla's Interrupt): interrupted,
   // phase 1's unknown records stay.
-  if (absl::Status interrupted = CheckInterrupted(ctx_, "a create's syscall");
+  if (absl::Status interrupted =
+          CheckInterrupted(ctx_, InterruptionPoint("a create's syscall"));
       !interrupted.ok()) {
     mutation.End();
     return interrupted;
@@ -778,7 +780,8 @@ absl::Status DirCacheFS::Getattr(FuseRequest &req, fuse_ino_t ino,
   // An interruption point before the refresh, if one is needed
   // (formal/dcfs.tla's Interrupt at GA_stat).
   ASSIGN_OR_RETURN(fuse_entry_param entry,
-                   EntryFor(static_cast<InodeId>(ino), "a getattr's refresh"));
+                   EntryFor(static_cast<InodeId>(ino),
+                            InterruptionPoint("a getattr's refresh")));
   return req.ReplyAttr(entry.attr,
                        AttrTimeoutFor(static_cast<InodeId>(entry.ino)));
 }
@@ -832,7 +835,8 @@ absl::Status DirCacheFS::Setattr(FuseRequest &req, fuse_ino_t ino,
   // An interruption point before the backing syscall
   // (dcfs/interruption_point.h; formal/dcfs.tla's Interrupt): interrupted,
   // phase 1's unknown records stay.
-  if (absl::Status interrupted = CheckInterrupted(ctx_, "a setattr's syscall");
+  if (absl::Status interrupted =
+          CheckInterrupted(ctx_, InterruptionPoint("a setattr's syscall"));
       !interrupted.ok()) {
     mutation.End();
     return interrupted;
@@ -882,22 +886,26 @@ absl::Status DirCacheFS::Lookup(FuseRequest &req, fuse_ino_t parent_ino,
   // needed (for ".", formal/dcfs.tla's Interrupt at GA_stat), and before
   // ParentOf's backing reads.
   if (name == ".") {
-    ASSIGN_OR_RETURN(fuse_entry_param entry,
-                     EntryFor(parent, "a lookup of \".\"'s refresh"));
+    ASSIGN_OR_RETURN(
+        fuse_entry_param entry,
+        EntryFor(parent, InterruptionPoint("a lookup of \".\"'s refresh")));
     return ReplyEntry(req, entry);
   }
   if (cache::IsStub(parent)) {
     if (name != "..") return RefuseStub(req, parent, "lookup");
     RETURN_IF_ERROR(RequireAttr(parent).status());  // ESTALE if gone
     ASSIGN_OR_RETURN(cache::StubRow stub, cache::GetStub(ctx_, parent));
-    ASSIGN_OR_RETURN(fuse_entry_param entry,
-                     EntryFor(stub.parent, "a lookup of \"..\"'s refresh"));
+    ASSIGN_OR_RETURN(
+        fuse_entry_param entry,
+        EntryFor(stub.parent,
+                 InterruptionPoint("a lookup of \"..\"'s refresh")));
     return ReplyEntry(req, entry);
   }
   if (name == "..") {
     ASSIGN_OR_RETURN(InodeId up, backing::ParentOf(ctx_, parent));
-    ASSIGN_OR_RETURN(fuse_entry_param entry,
-                     EntryFor(up, "a lookup of \"..\"'s refresh"));
+    ASSIGN_OR_RETURN(
+        fuse_entry_param entry,
+        EntryFor(up, InterruptionPoint("a lookup of \"..\"'s refresh")));
     return ReplyEntry(req, entry);
   }
 
@@ -1212,7 +1220,8 @@ absl::Status DirCacheFS::RemoveChild(FuseRequest &req, InodeId parent,
   // An interruption point before the backing syscall
   // (dcfs/interruption_point.h; formal/dcfs.tla's Interrupt): interrupted,
   // phase 1's unknown records stay.
-  if (absl::Status interrupted = CheckInterrupted(ctx_, "an unlink's syscall");
+  if (absl::Status interrupted =
+          CheckInterrupted(ctx_, InterruptionPoint("an unlink's syscall"));
       !interrupted.ok()) {
     mutation.End();
     return interrupted;
@@ -1362,7 +1371,8 @@ absl::Status DirCacheFS::Rename(FuseRequest &req, fuse_ino_t parent_ino,
   // An interruption point before the backing syscall
   // (dcfs/interruption_point.h; formal/dcfs.tla's Interrupt): interrupted,
   // phase 1's unknown records stay.
-  if (absl::Status interrupted = CheckInterrupted(ctx_, "a rename's syscall");
+  if (absl::Status interrupted =
+          CheckInterrupted(ctx_, InterruptionPoint("a rename's syscall"));
       !interrupted.ok()) {
     mutation->End();
     return interrupted;
@@ -1534,7 +1544,8 @@ absl::Status DirCacheFS::LinkRemoved(FuseRequest &req, InodeId src,
   std::vector<std::string> names = {std::string(newname)};
   ASSIGN_OR_RETURN(cache::Mutation mutation,
                    cache::BeginCreate(ctx_, newparent, newname));
-  if (absl::Status interrupted = CheckInterrupted(ctx_, "a link's syscall");
+  if (absl::Status interrupted =
+          CheckInterrupted(ctx_, InterruptionPoint("a link's syscall"));
       !interrupted.ok()) {
     mutation.End();
     return interrupted;
@@ -1608,7 +1619,8 @@ absl::Status DirCacheFS::Link(FuseRequest &req, fuse_ino_t ino,
   // An interruption point before the backing syscall
   // (dcfs/interruption_point.h; formal/dcfs.tla's Interrupt): interrupted,
   // phase 1's unknown records stay.
-  if (absl::Status interrupted = CheckInterrupted(ctx_, "a link's syscall");
+  if (absl::Status interrupted =
+          CheckInterrupted(ctx_, InterruptionPoint("a link's syscall"));
       !interrupted.ok()) {
     mutation.End();
     return interrupted;
@@ -1733,7 +1745,7 @@ absl::Status DirCacheFS::OpenInode(FuseRequest &req, InodeId id,
   const bool shared = backing_it != backing_files_.end();
   if (!shared) {
     // A cold open reopens the object by handle (dcfs/interruption_point.h).
-    RETURN_IF_ERROR(CheckInterrupted(ctx_, "an open"));
+    RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("an open")));
     // Step 23.8: from the reply on, the kernel may read the file through
     // passthrough, and the backing filesystem then changes its access time
     // in memory and writes it back lazily. Its row is dirty (atime only)
@@ -1912,7 +1924,8 @@ absl::Status DirCacheFS::Write(FuseRequest &req, fuse_ino_t ino,
   // An interruption point before the backing syscall
   // (dcfs/interruption_point.h; formal/dcfs.tla's Interrupt): interrupted,
   // phase 1's unknown records stay.
-  if (absl::Status interrupted = CheckInterrupted(ctx_, "a write's syscall");
+  if (absl::Status interrupted =
+          CheckInterrupted(ctx_, InterruptionPoint("a write's syscall"));
       !interrupted.ok()) {
     if (mutation.has_value()) mutation->End();
     return interrupted;
@@ -2200,13 +2213,13 @@ absl::Status DirCacheFS::Fsync(FuseRequest &req, fuse_ino_t ino, int datasync,
   // Interruption points before the fsync and before the sync point
   // (dcfs/interruption_point.h): an fsync replied EINTR may have run;
   // repeating it is harmless.
-  RETURN_IF_ERROR(CheckInterrupted(ctx_, "an fsync"));
+  RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("an fsync")));
   BackingCall("FsyncFd");
   RETURN_IF_ERROR(backing::FsyncFd(fd, datasync != 0));
   // The caller wants what it did durable, and that includes what dcfs
   // cached about it: a sync point makes the backing filesystems durable
   // and then empties the dirty set (a no-op if it is already empty).
-  RETURN_IF_ERROR(CheckInterrupted(ctx_, "a sync point"));
+  RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("a sync point")));
   SyncBackingNow("fsync");
   return req.ReplyErrno(0);
 }
@@ -2222,8 +2235,8 @@ absl::Status DirCacheFS::Opendir(FuseRequest &req, fuse_ino_t ino,
   ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttrOrRemoved(id));
   // An interruption point before a refresh, if one is needed
   // (formal/dcfs.tla's Interrupt at GA_stat).
-  ASSIGN_OR_RETURN(
-      attr, FreshAttr(id, attr, /*reply=*/false, "an opendir's refresh"));
+  ASSIGN_OR_RETURN(attr, FreshAttr(id, attr, /*reply=*/false,
+                                   InterruptionPoint("an opendir's refresh")));
   if (!S_ISDIR(attr.st.st_mode)) return req.ReplyErrno(ENOTDIR);
   return req.ReplyOpen(fi);
 }
@@ -2422,20 +2435,21 @@ absl::Status DirCacheFS::Readdirplus(FuseRequest &req, fuse_ino_t ino,
   const absl::Status built = [&]() -> absl::Status {
     if (off < 1) {
       ASSIGN_OR_RETURN(fuse_entry_param entry,
-                       EntryFor(dir, "refreshing \".\""));
+                       EntryFor(dir, InterruptionPoint("refreshing \".\"")));
       entries.push_back({.name = ".", .entry = entry, .off = 1});
     }
     if (off < 2) {
       ASSIGN_OR_RETURN(InodeId parent, backing::ParentOf(ctx_, dir));
-      ASSIGN_OR_RETURN(fuse_entry_param entry,
-                       EntryFor(parent, "refreshing \"..\""));
+      ASSIGN_OR_RETURN(
+          fuse_entry_param entry,
+          EntryFor(parent, InterruptionPoint("refreshing \"..\"")));
       entries.push_back({.name = "..", .entry = entry, .off = 2});
     }
     // EntryFor may refresh an entry's attributes (syscalls; a fill, guarded
     // on its own). Only entries that fit the reply were listed, so nothing
     // is refreshed for an entry the reply then drops.
     for (const Listed &e : listed) {
-      constexpr std::string_view kRefresh = "refreshing an entry";
+      constexpr InterruptionPoint kRefresh("refreshing an entry");
       ASSIGN_OR_RETURN(fuse_entry_param entry,
                        e.attr.has_value()
                            ? EntryForAttr(e.child, *e.attr, kRefresh)
@@ -2483,9 +2497,9 @@ absl::Status DirCacheFS::Fsyncdir(FuseRequest &req, fuse_ino_t ino,
   // Missing row -> ESTALE; see RequireAttr(). There is no phase 1/3 here:
   // the syscall, then a sync point, as in Fsync().
   RETURN_IF_ERROR(RequireAttr(id).status());
-  RETURN_IF_ERROR(CheckInterrupted(ctx_, "an fsyncdir"));
+  RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("an fsyncdir")));
   RETURN_IF_ERROR(backing::FsyncDir(ctx_, id, datasync != 0));
-  RETURN_IF_ERROR(CheckInterrupted(ctx_, "a sync point"));
+  RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("a sync point")));
   SyncBackingNow("fsyncdir");
   return req.ReplyErrno(0);
 }
@@ -2529,8 +2543,8 @@ absl::Status DirCacheFS::Setxattr(FuseRequest &req, fuse_ino_t ino,
   // An interruption point before the backing syscall
   // (dcfs/interruption_point.h; formal/dcfs.tla's Interrupt): interrupted,
   // phase 1's unknown records stay.
-  if (absl::Status interrupted =
-          CheckInterrupted(ctx_, "an xattr change's syscall");
+  if (absl::Status interrupted = CheckInterrupted(
+          ctx_, InterruptionPoint("an xattr change's syscall"));
       !interrupted.ok()) {
     mutation.End();
     return interrupted;
@@ -2678,8 +2692,8 @@ absl::Status DirCacheFS::Removexattr(FuseRequest &req, fuse_ino_t ino,
   // An interruption point before the backing syscall
   // (dcfs/interruption_point.h; formal/dcfs.tla's Interrupt): interrupted,
   // phase 1's unknown records stay.
-  if (absl::Status interrupted =
-          CheckInterrupted(ctx_, "an xattr change's syscall");
+  if (absl::Status interrupted = CheckInterrupted(
+          ctx_, InterruptionPoint("an xattr change's syscall"));
       !interrupted.ok()) {
     mutation.End();
     return interrupted;
@@ -2835,7 +2849,7 @@ absl::Status DirCacheFS::Fallocate(FuseRequest &req, fuse_ino_t ino, int mode,
   // An interruption point before the backing syscall
   // (dcfs/interruption_point.h; formal/dcfs.tla's Interrupt): interrupted,
   // phase 1's unknown records stay.
-  RETURN_IF_ERROR(CheckInterrupted(ctx_, "a fallocate"));
+  RETURN_IF_ERROR(CheckInterrupted(ctx_, InterruptionPoint("a fallocate")));
 
   // Phase 2. The shared fd is O_RDONLY only when this inode could not be
   // opened O_RDWR (see MakeBackingFile); fallocate on it then fails EBADF,
@@ -2896,7 +2910,8 @@ absl::Status DirCacheFS::CopyFileRange(FuseRequest &req, fuse_ino_t ino_in,
   // An interruption point before the backing syscall
   // (dcfs/interruption_point.h; formal/dcfs.tla's Interrupt): interrupted,
   // phase 1's unknown records stay.
-  if (absl::Status interrupted = CheckInterrupted(ctx_, "a copy_file_range");
+  if (absl::Status interrupted =
+          CheckInterrupted(ctx_, InterruptionPoint("a copy_file_range"));
       !interrupted.ok()) {
     if (mutation.has_value()) mutation->End();
     return interrupted;
@@ -3017,7 +3032,8 @@ absl::Status DirCacheFS::Ioctl(FuseRequest &req, fuse_ino_t ino,
   // An interruption point before the backing syscall
   // (dcfs/interruption_point.h; formal/dcfs.tla's Interrupt): interrupted,
   // phase 1's unknown records stay.
-  if (absl::Status interrupted = CheckInterrupted(ctx_, "an ioctl's syscall");
+  if (absl::Status interrupted =
+          CheckInterrupted(ctx_, InterruptionPoint("an ioctl's syscall"));
       !interrupted.ok()) {
     if (mutation.has_value()) mutation->End();
     return interrupted;

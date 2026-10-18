@@ -2,7 +2,6 @@
 #include "dcfs/interruption_point.h"
 
 #include <cerrno>
-#include <string_view>
 
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
@@ -12,11 +11,11 @@
 
 namespace dcfs {
 
-absl::Status CheckInterrupted(Context &ctx, std::string_view where) {
+absl::Status CheckInterrupted(Context &ctx, InterruptionPoint point) {
   if (!ctx.interrupts->Interrupted()) return absl::OkStatus();
   // Model: Interrupt.
   ctx.events->Interrupted(ctx);
-  return ErrnoToStatus(EINTR, absl::StrCat("Interrupted before ", where));
+  return ErrnoToStatus(EINTR, absl::StrCat("Interrupted before ", point));
 }
 
 }  // namespace dcfs

@@ -462,7 +462,8 @@ absl::StatusOr<std::vector<std::string>> ReadDirNames(Context &ctx,
     // the population stops here and records nothing (formal/dcfs.tla's
     // PopulateRead is all of the population's reads in one step, between
     // its PD_read and PD_commit interruption points).
-    RETURN_IF_ERROR(CheckInterrupted(ctx, "a directory's names"));
+    RETURN_IF_ERROR(
+        CheckInterrupted(ctx, InterruptionPoint("a directory's names")));
     BackingCall(ctx, "getdents64");
     ASSIGN_OR_RETURN(ssize_t nbytes,
                      syscalls::getdents64(dir_fd, buf.data(),
@@ -1425,7 +1426,8 @@ absl::StatusOr<InodeId> RecordChild(Context &ctx, cache::FillSnapshot snapshot,
 absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
   // Before the population's I/O, a lookup's or a readdir's alike
   // (formal/dcfs.tla's Interrupt at PD_read).
-  RETURN_IF_ERROR(CheckInterrupted(ctx, "listing a directory"));
+  RETURN_IF_ERROR(
+      CheckInterrupted(ctx, InterruptionPoint("listing a directory")));
   // Phase A: all the I/O, no transaction.
   ASSIGN_OR_RETURN(FileDescriptor dir_fd,
                    OpenNode(ctx, dir, O_RDONLY | O_DIRECTORY));
@@ -1458,7 +1460,8 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
     // an interrupted population stops here and records nothing.
     constexpr size_t kProbesPerInterruptionPoint = 16;
     if (i % kProbesPerInterruptionPoint == 0) {
-      RETURN_IF_ERROR(CheckInterrupted(ctx, "a directory's probes"));
+      RETURN_IF_ERROR(
+          CheckInterrupted(ctx, InterruptionPoint("a directory's probes")));
     }
     const std::string &name = names[i];
     std::optional<struct statx> refused;
@@ -1613,7 +1616,8 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
     if (resolve_alone) {
       // Before the probe (formal/dcfs.tla's Interrupt at RN_probe); a
       // population has its own (PD_read).
-      RETURN_IF_ERROR(CheckInterrupted(ctx, "resolving a name"));
+      RETURN_IF_ERROR(
+          CheckInterrupted(ctx, InterruptionPoint("resolving a name")));
       ASSIGN_OR_RETURN(result, ResolveName(ctx, parent, name));
       return WithStub(result, parent, name);
     }
@@ -1658,7 +1662,8 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
   // `dir`'s own dentry is unknown (audit F6): ask the backing filesystem.
   // A fill of the parent's row, as PopulateDirectory records a child, with
   // an interruption point before its backing reads.
-  RETURN_IF_ERROR(CheckInterrupted(ctx, "a directory's parent"));
+  RETURN_IF_ERROR(
+      CheckInterrupted(ctx, InterruptionPoint("a directory's parent")));
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   ctx.events->ParentLookupStarted(ctx, dir);
   ASSIGN_OR_RETURN(FileDescriptor dir_fd,
