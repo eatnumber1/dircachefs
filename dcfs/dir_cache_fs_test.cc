@@ -7450,9 +7450,8 @@ class CountBackingCalls final : public ProtocolEvents {
 };
 
 // A readdir's population has the lookup's interruption point before its
-// reads. Interrupted there, a readdir of an uncached empty
-// directory (whose population has no probe batch) replies EINTR without
-// opening it.
+// reads. Interrupted there, a readdir of an uncached empty directory (whose
+// population has no probe batch) replies EINTR without opening it.
 TEST_F(DirCacheFSTest, ReaddirOfAnUncachedEmptyDirectoryIsInterruptible) {
   ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   Start();
@@ -7536,9 +7535,9 @@ TEST_F(DirCacheFSTest, GetattrIsInterruptedBeforeItsRefresh) {
   ctx_.interrupts = &NoInterrupts();
 }
 
-// (docs/style.md 1.12) A READDIR stopped by an interruption
-// point after it built some entries replies those, a short listing; here
-// ParentOf's, before it asks the backing filesystem for "..", after ".".
+// A READDIR stopped by an interruption point after it built some entries
+// replies those, a short listing; here ParentOf's, before it asks the backing
+// filesystem for "..", after ".". (docs/style.md 1.12)
 TEST_F(DirCacheFSTest, ReaddirInterruptedAtItsParentRepliesTheEntriesBefore) {
   ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/f"));
@@ -7561,7 +7560,7 @@ TEST_F(DirCacheFSTest, ReaddirInterruptedAtItsParentRepliesTheEntriesBefore) {
 }
 
 // A READDIRPLUS refreshes its first entry whatever comes (the kernel's
-// getdents checks for a signal only once it has an entry: fs/readdir.c,
+// getdents checks for a signal only once it has an entry: fs/readdir.c:366,
 // filldir64), and has an interruption point before each later entry's
 // refresh: interrupted there, it replies the entries before, a short
 // listing.
@@ -8323,8 +8322,7 @@ INSTANTIATE_TEST_SUITE_P(
       return info.param.name;
     });
 
-// --- The interrupt sweep
-// ------------------------------------------------------
+// --- The interrupt sweep -----------------------------------------------------
 //
 // The code's form of formal/dcfs.tla's InterruptBound, swept: each
 // scenario's request, on a fresh tree and cache, is interrupted from each
@@ -8512,17 +8510,14 @@ struct InterruptCase {
 };
 
 // The runs, in hooks (an OpenNode is three: open_by_handle_at, its identity
-// statx and ReadGeneration; a refresh is an OpenNode and a statx). Each is
-// the code's form of the model's Run(kind): 0 for a population (the rest of
-// its OpenNode and statx after the point at its start), a getattr, an
-// opendir and a held getattr (the rest of one refresh or held fill), a
-// write and a sync point (fstatvfs after syncfs); 1 for a readdirplus (its
-// first entry's whole refresh), a release (its held fill) and a mutation
-// past its syscall (the opens before the syscall, the syscall and the
-// refreshes after: a create's probe too, a file's create its open's too,
-// an attribute change's side-effect xattr read too). A lookup's reply entry,
-// outside the model's lookup, may take a whole refresh: it cannot reply short
-// (formal/README.md).
+// statx and ReadGeneration; a refresh is an OpenNode and a statx): the code's
+// form of the model's Run(kind). 0: a population (the rest of its OpenNode
+// and statx), a getattr, an opendir, a held getattr (the rest of a refresh
+// or held fill), a write and a sync point (fstatvfs after syncfs). 1: a
+// readdirplus (its first entry's refresh), a release (its held fill) and a
+// mutation past its syscall (the opens before it, the syscall, the refreshes
+// after). A lookup's reply entry may take a whole refresh: it cannot reply
+// short (formal/README.md).
 const InterruptCase kInterruptCases[] = {
     {.scenario = "lookup", .run = 3},
     {.scenario = "lookup_refresh", .run = 4},

@@ -1326,7 +1326,9 @@ TRACE_GROUP_FILTERS = {
     tla_trace_test(
         name = "dir_cache_fs_trace_%s_test" % group,
         size = "medium",
-        timeout = "long",
+        # A timeout guards against hangs only: these passed in 413-844 s at
+        # load 50 and exceed "long" (900 s) at higher load.
+        timeout = "eternal",
         # The harness's binary (dir_cache_fs_test's asan_mem); at the
         # default 384 MiB the ASan run ran out of memory.
         asan_mem = 1088,

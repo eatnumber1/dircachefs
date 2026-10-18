@@ -2246,6 +2246,8 @@ absl::Status DirCacheFS::Opendir(FuseRequest &req, fuse_ino_t ino,
 
 namespace {
 
+constexpr InterruptionPoint kListingParent("a listing's \"..\"");
+
 // The "." or ".." entry of a plain READDIR reply: the directory's (or its
 // parent's) backing inode number, as every other entry reports, never its
 // nodeid.
@@ -2261,8 +2263,8 @@ struct stat DotStat(const cache::CachedAttr &attr) {
 // interruption point's EINTR, which comes only once some entries are built
 // (OnceListingHasEntries), is OK, those entries being a short listing, a
 // valid getdents result (the kernel's own getdents returns one when a
-// signal comes after its first entry: fs/readdir.c:360, filldir64; Linux
-// v7.3-rc4), which the next call continues from its last offset. Any
+// signal comes after its first entry: fs/readdir.c:366, filldir64; Linux
+// v7.3-rc7), which the next call continues from its last offset. Any
 // other error, a backing syscall's own EINTR before the first entry
 // included, is the reply.
 absl::Status ShortListingOnInterrupt(const absl::Status &built, size_t count) {
@@ -2386,10 +2388,8 @@ absl::Status DirCacheFS::AppendDirEntries(InodeId dir, off_t off,
     // above --source is not part of the tree dcfs serves.
     ASSIGN_OR_RETURN(
         InodeId parent,
-        backing::ParentOf(
-            ctx_, dir,
-            OnceListingHasEntries(entries,
-                                  InterruptionPoint("a listing's \"..\""))));
+        backing::ParentOf(ctx_, dir,
+                          OnceListingHasEntries(entries, kListingParent)));
     ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(parent));
     entries.push_back({.name = "..", .stbuf = DotStat(attr), .off = 2});
   }
@@ -2420,10 +2420,8 @@ absl::Status DirCacheFS::AppendDirEntriesPlus(
   if (off < 2) {
     ASSIGN_OR_RETURN(
         InodeId parent,
-        backing::ParentOf(
-            ctx_, dir,
-            OnceListingHasEntries(entries,
-                                  InterruptionPoint("a listing's \"..\""))));
+        backing::ParentOf(ctx_, dir,
+                          OnceListingHasEntries(entries, kListingParent)));
     ASSIGN_OR_RETURN(
         fuse_entry_param entry,
         EntryFor(parent, OnceListingHasEntries(entries, kRefresh)));
@@ -2463,8 +2461,8 @@ absl::Status DirCacheFS::Readdir(FuseRequest &req, fuse_ino_t ino, size_t size,
   std::vector<FuseDirEntry> entries;
   // Between the failure and the reply: an interrupt after some entries
   // were built replies those.
-  RETURN_IF_ERROR(ShortListingOnInterrupt(
-      AppendDirEntries(dir, off, listed, entries), entries.size()));
+  absl::Status built = AppendDirEntries(dir, off, listed, entries);
+  RETURN_IF_ERROR(ShortListingOnInterrupt(built, entries.size()));
   return req.ReplyDirs(entries, size);
 }
 
@@ -2487,8 +2485,8 @@ absl::Status DirCacheFS::Readdirplus(FuseRequest &req, fuse_ino_t ino,
   std::vector<FuseDirEntryPlus> entries;
   // Between the failure and the reply: an interrupt after some entries
   // were built replies those.
-  RETURN_IF_ERROR(ShortListingOnInterrupt(
-      AppendDirEntriesPlus(dir, off, listed, entries), entries.size()));
+  absl::Status built = AppendDirEntriesPlus(dir, off, listed, entries);
+  RETURN_IF_ERROR(ShortListingOnInterrupt(built, entries.size()));
   RETURN_IF_ERROR(req.ReplyDirsPlus(entries, size));
   // The kernel counts a lookup for every entry in the reply with a nonzero
   // nodeid except "." and ".." (fuse_direntplus_link), whether or not it

@@ -296,7 +296,7 @@ decided under russ's rulings):
   harness.
 - Behave like the backing (S2): a listing builds its first entry whatever
   comes and honours an interruption point only once it has one, as the
-  kernel's getdents (fs/readdir.c:360, filldir64); so it never replies
+  kernel's getdents (fs/readdir.c:366, filldir64); so it never replies
   EINTR from an interruption point, only a short listing. `ParentOf` takes
   its interruption point from the caller. `RDP_stat` is not an
   interruption point; a readdirplus's Run is 1. Populations keep theirs.

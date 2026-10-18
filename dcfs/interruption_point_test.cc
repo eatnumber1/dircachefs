@@ -7,12 +7,8 @@
 namespace dcfs {
 namespace {
 
-// Built at compile time from its literal.
-static_assert(InterruptionPoint("a create's syscall").where() ==
-              "a create's syscall");
-
 // Not run, for the repository has no compile-fail harness, but checked by
-// hand (2026-10-18): InterruptionPoint("") fails its static_assert ("an
+// hand: InterruptionPoint("") fails its static_assert ("an
 // interruption point needs a name"), and one from a char array that is not
 // a constant ("call to consteval function ... is not a constant
 // expression").

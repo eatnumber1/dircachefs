@@ -837,10 +837,10 @@ test checks another property first; four needed a new variant.
 Step 22.5's properties bite on their own known bugs or premises, each of
 which checks that property alone (`InterruptPrompt` on `interrupt_ignored`,
 `QuietStepsUncounted` on `quiet_pc_counted`, `QuietPcs` with a syscall
-step's pc; and `known_bug_<bug>_reduced_test` finds `interruption_point_
-removed_create`, `_unlink` and `interrupt_after_syscall` under
-`CanArriveWhereItMatters` too): `InterruptBound` on `interruption_point_removed_create`
-and `interruption_point_removed_unlink`,
+step's pc; and `known_bug_<bug>_reduced_test` finds
+`interruption_point_removed_create`, `_unlink` and `interrupt_after_syscall`
+under `CanArriveWhereItMatters` too): `InterruptBound` on
+`interruption_point_removed_create` and `interruption_point_removed_unlink`,
 `InterruptActedOn` on `interrupt_ignored`, `InterruptedReplies` on
 `interrupt_not_replied`.
 
@@ -1803,9 +1803,10 @@ The bound bites: `known_bugs/interruption_point_removed_create` deletes the
 interruption point before a create's syscall, and the create takes 3;
 `known_bugs/interruption_point_removed_unlink` deletes an unlink's, which
 then takes 2 (its syscall and its refresh), past an unlink's 1, where the
-single bound of 2 found nothing. `PD_commit` stands for the code's interruption points between a
-population's probe batches only (the review of round 2 decided it): no
-count of the model's syscalls can see it removed, since nothing follows it
+single bound of 2 found nothing. `PD_commit` stands for the code's
+interruption points between a population's probe batches only (the review of
+round 2 decided it): no count of the model's syscalls can see it removed,
+since nothing follows it
 but a commit and the reply, or the next `PD_read`; in the code it bounds
 the probes after an interrupt to the rest of a batch, which
 `InterruptSweepTest` counts. `InterruptPrompt` adds that a request at an
@@ -1870,7 +1871,7 @@ and the review found a third:
   `GA_stat` (and F's `FG_stat`, `FG_rstat`) are interruption points. A
   listing builds its first entry whatever comes (round 3: the kernel's
   getdents checks for a signal only after its first entry,
-  `fs/readdir.c:360`), so `RDP_stat` is not one; stopped later, it replies
+  `fs/readdir.c:366`), so `RDP_stat` is not one; stopped later, it replies
   the entries it has, a short listing (russ: the most useful result,
   `docs/style.md` 1.12). The recorder writes no interrupt for a request
   whose model request has replied, so the trace's reply is the model's.

@@ -426,9 +426,10 @@ class DirCacheFS : private events::Bookkeeping {
   // `interruption_point`, if any, is the interruption point
   // (CheckInterrupted, dcfs/interruption_point.h) before either's backing
   // reads, for a request whose refresh is its own work (GETATTR, OPENDIR, a
-  // LOOKUP of "." or "..", READDIRPLUS's entries); empty for one that must
-  // not stop there (a mutation past its syscall: EntryAfterPhase2) or whose
-  // model request has replied before it (a LOOKUP's reply entry).
+  // LOOKUP of "." or "..", READDIRPLUS's entries after the first); none
+  // (std::nullopt) for one that must not stop there (a mutation past its
+  // syscall: EntryAfterPhase2) or whose model request has replied before it
+  // (a LOOKUP's reply entry).
   absl::StatusOr<cache::CachedAttr> FreshAttr(
       InodeId id, cache::CachedAttr attr, bool reply = false,
       std::optional<InterruptionPoint> interruption_point = std::nullopt);

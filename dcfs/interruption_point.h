@@ -28,8 +28,6 @@ class InterruptionPoint {
     static_assert(N > 1, "an interruption point needs a name");
   }
 
-  constexpr std::string_view where() const { return where_; }
-
   template <typename Sink>
   friend void AbslStringify(Sink &sink, const InterruptionPoint &point) {
     sink.Append(point.where_);

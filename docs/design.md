@@ -1870,8 +1870,8 @@ would be rejected (`trace_fault_interruption_point_ignored_test`,
 most useful result, `docs/style.md` 1.12; behave like the backing, the
 orchestrator for russ, 2026-10-18). The kernel's own `getdents` never
 fails with `EINTR` for a signal before it has delivered an entry: it
-checks for one only after the first (`fs/readdir.c:360`, `filldir64`;
-Linux v7.3-rc4), and a short batch is then a valid result. So a `READDIR`
+checks for one only after the first (`fs/readdir.c:366`, `filldir64`;
+Linux v7.3-rc7), and a short batch is then a valid result. So a `READDIR`
 or `READDIRPLUS` builds its first entry whatever comes, honours an
 interruption point only once it has one, and stopped there replies the
 entries it has, which the next call continues from their last offset.

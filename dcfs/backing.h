@@ -296,6 +296,9 @@ absl::Status RemoveXattr(Context &ctx, const Credentials &caller, InodeId id,
 // fd -- no handle open of `id` itself is needed.
 absl::StatusOr<struct statvfs> StatFilesystem(Context &ctx, InodeId id);
 
+// A batch bounds the probes taken after an interrupt.
+inline constexpr size_t kProbesPerInterruptionPoint = 16;
+
 // Lists directory `dir` on the backing filesystem and caches all of it:
 // every child's inode row (attributes, handle, generation, symlink target,
 // xattrs), its dentry, and any filesystem mounted on a child; forgets
@@ -314,7 +317,6 @@ absl::StatusOr<struct statvfs> StatFilesystem(Context &ctx, InodeId id);
 // its first backing read, before each getdents64 and before each batch of
 // kProbesPerInterruptionPoint probes; interrupted, it records nothing and
 // fails with EINTR.
-inline constexpr size_t kProbesPerInterruptionPoint = 16;
 struct Populated {
   // Whether `dir`'s listing was recorded (and `dir` is now complete).
   bool cached = false;
