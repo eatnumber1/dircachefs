@@ -1292,7 +1292,7 @@ trees plus the real tree) are the checks. The archive has 85 published
 taken) and TotW 132 unpublished, not 86. The tree cites TotW 42 and 103 only;
 both are published, so the check finds nothing today.
 
-## 25.33b Three kinds of message, and waitexit tested exactly (russ, 2026-10-17; queued)
+## 25.33b Three kinds of message, and waitexit tested exactly (russ, 2026-10-17; first part done 2026-10-17, the waitexit test remains queued)
 
 russ: "there's three types of messages: 1. I succeeded in doing the thing 2.
 I failed in doing the thing 3. The infrastructure underneath me failed ...

@@ -4073,3 +4073,20 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   ask for uploads only on step starts/finishes and quota changes, with
   paused/waiting states (Gemini job); bookkeeping to a Haiku clerk, made
   hard to forget (process.md, memory).
+- 2026-10-17 evening, dashboard tool: the quota meters (lane-8, Gemini
+  Flash medium, Flash review, fix round; merged 1fe8ec9, 548dd13, final
+  clerk fix b17fb7e) read the usage meters hourly in the background, an
+  approved timer exception. Lane states and uploads are sent only on
+  material change. Budget readings keep the plan. Cause of the duplicate
+  budget readings: the tests launched real readers; fixed (lane-6 foreman,
+  merged 12f3e3e and 7c2d603).
+- 2026-10-17 evening, 25.33 and 25.33b merged (486772f, lane-5, Gemini
+  Flash medium, Flash high review, rebase): three kinds of message,
+  FindingText for domain answers. The waitexit unit test stays queued.
+- 2026-10-17 evening, 25.34 API review on Argon (lane-7, read-only, 18
+  findings) with two Flash fix rounds (85fe52fd, 0e543361). Not merged;
+  waits for the style review (Sonnet high, Sunday).
+- 2026-10-17 evening, agy long sessions (notes/agy-long-sessions.md):
+  adopt a stream-json foreman held open by a FIFO with a JOB-COMPLETE
+  marker, to move into tools/agents/foreman.py. Provisional ruling by the
+  orchestrator; russ to confirm.

@@ -27,3 +27,17 @@ a295f17a3169f6d3f	2026-10-17T23:08:53Z	17.2e	review	dcfs-reviewer	claude-opus-5-
 bf-25.28b-r3	2026-10-17	25.28b	protocol	dcfs-protocol	claude-opus-5-5	high	680883		3					in review	FSYNC redesign done; raised fsyncgate design question
 bf-17.2e-r2	2026-10-17	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high	600651	9031	2				1	in review	round 2 closed the uid-0 regression; uid-0 exemption was an escape from 17.2b caught by russ
 bf-17.2e-rev	2026-10-17	17.2e	review	dcfs-reviewer	claude-opus-5-5	high				0	2	6		useful	S3 design simplification (drop CapEff); S2 ptrace dependency the author missed
+ad91bd81ceae5a166	2026-10-18T01:16:11Z	dashboard-quota	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+a38bc40f320c181ad	2026-10-18T01:21:21Z	Investigate long-running agy control	investigation	dcfs-investigator	claude-sonnet-5-5	medium									
+afebb8f7ccabd7770	2026-10-18T02:31:46Z	Clerk: record tonight's merges	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+agy-1017-lane8-worker	2026-10-17	dashboard-quota-meters		agy	gemini-3.8-flash	medium								merged	lane-8 quota meters worker
+agy-1017-lane8-review	2026-10-17	dashboard-quota-meters		agy	gemini-3.8-flash	none									lane-8 quota meters Flash review
+agy-1017-lane8-fix	2026-10-17	dashboard-quota-meters		agy	gemini-3.8-flash	medium								merged	lane-8 quota meters fix round
+agy-1017-lane6-states	2026-10-17	dashboard-lane-states		agy	gemini-3.8-flash	medium								merged	lane-6 foreman
+agy-1017-lane6-budget	2026-10-17	dashboard-budget-fix		agy	gemini-3.8-flash	medium								merged	lane-6 foreman budget fix
+agy-1017-25.33-worker	2026-10-17	25.33		agy	gemini-3.8-flash	medium								merged	lane-5 25.33 + 25.33b worker
+agy-1017-25.33-review	2026-10-17	25.33		agy	gemini-3.8-flash	none									lane-5 25.33 review; model gemini-3.8-flash-high, effort recorded NONE per the spec (to confirm)
+agy-1017-25.33-rebase	2026-10-17	25.33		agy	gemini-3.8-flash	medium								merged	lane-5 25.33 rebase
+agy-1017-25.34-review	2026-10-17	25.34		agy	gemini-4-argon	high								awaiting style review	lane-7 25.34 API review, read-only, 18 findings
+85fe52fd	2026-10-17	25.34		agy	gemini-3.8-flash	high									lane-7 25.34 fix round
+0e543361	2026-10-17	25.34		agy	gemini-3.8-flash	medium									lane-7 25.34 fix round 2
