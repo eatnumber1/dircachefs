@@ -1533,6 +1533,8 @@ recovery protocol, concurrency, and the test strategy.
 ## Further reading
 
 - [`docs/design.md`](docs/design.md): the detailed design.
+- [`docs/maintainability.md`](docs/maintainability.md): how style and code
+  quality are enforced, and what is not yet.
 - [`docs/conformance.md`](docs/conformance.md): pjdfstest results.
 - [`docs/testing.md`](docs/testing.md): how dcfs's correctness is
   established (every test and verification regime, and what is not covered).
