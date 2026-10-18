@@ -47,3 +47,9 @@ ae86d19e85bf27e58	2026-10-18T03:01:45Z	Show nested quotas on dashboard	implement
 ab510690988d478b9	2026-10-18T03:05:57Z	dashboard-fixes	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
 a03dfabbe6686518c	2026-10-18T03:30:10Z	Clerk: dashboard upload trial	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
 ab0246cc1bca6a883	2026-10-18T03:31:08Z	dashboard-ci	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+abd4e7bd93ff5f41a	2026-10-18T03:40:59Z	22.5		Explore	claude-opus-5-5										
+a47449b13fb6a0c81	2026-10-18T03:48:07Z	22.5	protocol	dcfs-protocol	claude-opus-5-5	high									
+a219e533ef939b333	2026-10-18T04:07:56Z	Plan step: streamed population	implementation	dcfs-implementer	claude-sonnet-5-5	high									
+af8c08c18c7a25717	2026-10-18T04:13:34Z	Write up: behave like the backing	implementation	dcfs-implementer	claude-sonnet-5-5	high									
+a8f1b4d7b657c6b7b	2026-10-18T04:13:34Z	Audit written backing contracts	investigation	dcfs-investigator	claude-sonnet-5-5	medium									
+a273df0c9a51edf38	2026-10-18T04:18:04Z	25.33b-waitexit	mechanical	dcfs-mechanical	claude-haiku-5-5	low									

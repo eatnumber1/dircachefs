@@ -4101,3 +4101,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   lands first. It also amends style 1.12's "one snapshot" readdir sentence.
 - 2026-10-17 evening, 25.33b part 2: waitexit tested exactly in
   //test/qemu:waitexit_test with link-time `--wrap` fakes of pidfd_open and poll.
+- 2026-10-17, backing-contract audit (notes/contract-audit-2026-10-17.md,
+  first pass, about 45 of 200 claims): one FALSE, two STRONGER, seven
+  UNSOURCED, eight behaviour flags. Queued as 12.24 (M1), with the
+  follow-ups and questions for russ (B5, B6).

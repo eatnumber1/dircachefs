@@ -742,3 +742,32 @@ interface (models or devirtualisation). If it works, a differential check
 in CI: a diff that raises a function's complexity fails. Owner:
 dcfs-investigator.
 
+## 12.24 Backing-contract audit follow-ups (russ, 2026-10-17; queued, M1)
+
+The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
+200 claims). Items below cite its ids.
+
+- Finish the audit: the remaining ~155 claims, `formal/limitations/` and
+  `formal/no_stronger/`. Verify the POSIX readdir sentence (F1) against the
+  POSIX text itself, not the man page.
+- F1 and S1 (listing snapshot, FALSE/STRONGER): fixed by cf4a100 and 22.7.
+- S2: `formal/README.md:641-643` says fsync is followed by syncfs. That
+  contradicts russ's ruling that FSYNC is the backing fsync plus a WAL
+  fsync, with no syncfs. Check whether the text predates 25.28b and
+  correct it.
+- B1, B2 (invented EAGAIN and the retry loop in ListCached): removed by 22.7.
+- B3, B4 (first stat pays for the whole directory; "all I/O, then one
+  transaction"): 22.7.
+- B5 (one thread serves one request, so a stalled backing blocks cache
+  hits): question for russ.
+- B6 (FUSE_CAP_ATOMIC_O_TRUNC off, so open(O_TRUNC) takes two backing
+  steps where the backing takes one): question for russ.
+- B8 (unreachable same-inode rename branch): remove it or make it a
+  RET_CHECK that names the invariant (style 1.10a).
+- Unbounded working memory M1-M12: 22.7 covers ReadDirNames and
+  PopulateDirectory. Still open: PruneDentriesNotIn (M3), ListDirty,
+  BeginSync and ClearDirty paging (M6), `stubs_logged_` (M7), and the
+  per-inode maps (M7).
+- UNSOURCED U1-U7: each gets the native differential test named in the
+  note, run without dcfs, before any claim it backs is kept.
+
