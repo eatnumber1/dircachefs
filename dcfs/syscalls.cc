@@ -3,12 +3,15 @@
 
 #include <fcntl.h>
 #include <linux/capability.h>
+#include <linux/prctl.h>
 #include <poll.h>
+#include <sched.h>
 #include <sys/file.h>
 #include <sys/fsuid.h>
 #include <sys/inotify.h>
 #include <sys/mman.h>
 #include <sys/poll.h>
+#include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -148,6 +151,25 @@ absl::Status capset(const CapabilitySets &sets) {
   }
   if (::capset(&header, data.data()) == -1) {
     return ErrnoToStatus(errno, "capset");
+  }
+  return absl::OkStatus();
+}
+
+template <>
+absl::Status prctl<PR_CAPBSET_DROP>(int arg) {
+  // prctl(2) reads each argument as a whole register: no int may go in
+  // unwidened.
+  if (::prctl(PR_CAPBSET_DROP, static_cast<uint64_t>(arg), uint64_t{0},
+              uint64_t{0}, uint64_t{0}) == -1) {
+    return ErrnoToStatus(errno,
+                         absl::StrCat("prctl(PR_CAPBSET_DROP, ", arg, ")"));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status unshare(int flags) {
+  if (::unshare(flags) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("unshare(", flags, ")"));
   }
   return absl::OkStatus();
 }

@@ -177,9 +177,8 @@
  *       and execvp(3)s <cmd>, which, run as root, then has every capability
  *       but that one. Used by credentials.sh (step 17.2e): CAP_FSETID (4)
  *       makes a uid 0 caller whose writes and truncates clear setuid and
- *       setgid; CAP_SYS_PTRACE (19) a daemon that cannot follow another
- *       user's /proc/<pid>/ns links (Docker's default set has none). On
- *       failure prints "ERR <errno-name>" and exits 127 (execvp) or 1.
+ *       setgid. On failure prints "ERR <errno-name>" and exits 127
+ *       (execvp) or 1.
  *   testutil userns -- <cmd> [args...]
  *       Moves into a new user namespace (unshare(CLONE_NEWUSER)) that maps
  *       uid 0 and gid 0 to themselves and nothing else, and execvp(3)s

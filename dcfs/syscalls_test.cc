@@ -4,7 +4,9 @@
 #include <fcntl.h>
 #include <linux/capability.h>
 #include <linux/fs.h>
+#include <linux/prctl.h>
 #include <linux/stat.h>
+#include <sched.h>
 #include <sys/file.h>
 #include <sys/inotify.h>
 #include <sys/mman.h>
@@ -623,6 +625,17 @@ TEST(SyscallsCredentialsTest, CapsetRaisesOnlyAPermittedCapability) {
     sets.effective.Add(CAP_FSETID);
     EXPECT_EQ(StatusToErrno(syscalls::capset(sets)), EPERM);
   }).join();
+}
+
+// What each refuses (the calls themselves are irreversible for the process,
+// so test/qemu/guest/caller_capabilities_test makes them in children): a
+// capability past CAP_LAST_CAP (cap_prctl_drop's cap_valid,
+// security/commoncap.c:1276 (Linux v7.3-rc7)), and a flag unshare(2) does
+// not know (check_unshare_flags, kernel/fork.c:3168-3171 (Linux v7.3-rc7)).
+TEST(SyscallsCredentialsTest, PrctlAndUnshareRefuseWhatTheKernelDoes) {
+  EXPECT_EQ(StatusToErrno(syscalls::prctl<PR_CAPBSET_DROP>(CAP_LAST_CAP + 1)),
+            EINVAL);
+  EXPECT_EQ(StatusToErrno(syscalls::unshare(CLONE_PARENT)), EINVAL);
 }
 
 // --- The mount.dcfs wrapper's calls (phase 15) ----------------------------

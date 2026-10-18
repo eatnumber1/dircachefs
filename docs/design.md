@@ -2525,7 +2525,8 @@ Caller identity comes from the FUSE request (`fuse_req_ctx`), and the
 supplementary groups from `/proc/<pid>/task/<pid>/status` for the
 request's pid (`ReadProcCredentials`, `dcfs/proc_status.h`), which any
 process may read: dcfs needs no `CAP_SYS_PTRACE` for them (Docker's
-default capability set has none; `credentials.sh` runs a daemon without
+default capability set has none; `caller_capabilities_test`'s
+`ADaemonWithoutCapSysPtraceReadsGroupsButNotCaps` runs a daemon without
 it). Only requests a process makes (the mutations above) read them; the
 kernel's own requests (`FORGET`, `BATCH_FORGET`, `INTERRUPT`) carry no
 caller and never do. A pid of 0 reaches the reader only for a caller
@@ -2550,7 +2551,8 @@ status file that gave the groups). The kernel's question is
 the init namespace: `mount.dcfs` refuses to start in any other
 (`RequireInitUserNamespace`, by `/proc/self/ns/user`'s inode,
 `USER_NS_INIT_INO`, include/uapi/linux/nsfs.h:50 (Linux v7.3-rc7);
-`credentials.sh`'s `userns-mount-refused`), where root's capabilities
+`caller_capabilities_test`'s `MountDcfsRefusesAChildUserNamespace`), where
+root's capabilities
 would not count where the kernel asks for them. Following the `ns/user`
 link takes ptrace read access (`proc_ns_get_link`,
 fs/proc/namespaces.c:63 (Linux v7.3-rc7)), which a daemon without
@@ -2694,13 +2696,14 @@ kernel sends with it:
   owner check (fs/attr.c:205 (Linux v7.3-rc7)) could refuse it, so the
   REMOVEXATTR comes, and then the chown fails with `EPERM`, where the
   native chown fails before the capability is touched
-  (`capchown-other-strips-then-fails`). A writer of a file with
+  (`caller_capabilities_test`'s
+  `ANonOwnersChownStripsTheCapabilityThenFails`). A writer of a file with
   `security.capability` whose `CAP_FSETID` `/proc` cannot vouch for loses
   the bits where the native filesystem might keep
   them: a kernel caller with overridden credentials that keeps
   `CAP_FSETID`, a caller outside dcfs's pid namespace, and, with a daemon
   without `CAP_SYS_PTRACE`, root and any writer of another uid
-  (`credentials.sh`'s `setuid-root-capwrite-noptrace`); and one whose
+  (`ADaemonWithoutCapSysPtraceReadsGroupsButNotCaps`); and one whose
   `/proc` entry shows a `CAP_FSETID` it does not write with keeps them
   where the native filesystem clears them: an io_uring worker created
   before its process dropped `CAP_FSETID` runs a later request with the

@@ -2228,6 +2228,34 @@ qemu_cc_test(
     ],
 )
 
+# Setuid, setgid and file capabilities where the answer turns on capabilities:
+# the daemon's (without CAP_SYS_PTRACE or CAP_FSETID, in a child user
+# namespace) and a namespaced caller's, natively and through dcfs
+# (guest/caller_capabilities_test.cc; credentials.sh keeps the tables).
+qemu_cc_test(
+    name = "caller_capabilities_test",
+    size = "small",
+    timeout = "moderate",
+    srcs = ["guest/caller_capabilities_test.cc"],
+    dcfs = True,
+    disks = [("vdb", "ext4", "320M")],
+    deps = [
+        ":guest",
+        "//dcfs:status",
+        "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
+        "//dcfs/testonly:assert_ok_and_assign",
+        "@absl//absl/base:no_destructor",
+        "@absl//absl/status",
+        "@absl//absl/status:status_macros",
+        "@absl//absl/status:status_matchers",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+        "@absl//absl/strings:str_format",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # Objects removed while still referenced (a removed working directory, an
 # O_PATH descriptor on an unlinked file) behave as on the backing filesystem
 # instead of failing with ESTALE; the port of guest/removed.sh, on each backing

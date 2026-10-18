@@ -695,38 +695,6 @@ done <<EOF
 $CAP_CASES
 EOF
 
-# --- step 17.2e: a non-owner's chown of a file with a capability ----------
-#
-# chown(path, -1, -1) by bob of root's setuid file with security.capability.
-# Natively the chown fails with EPERM before the capability is touched:
-# setuid's removal is a mode change (notify_change, fs/attr.c:499-504 (Linux
-# v7.3-rc7)), which setattr_prepare refuses a non-owner (fs/attr.c:205
-# (Linux v7.3-rc7)) before it removes the capability (fs/attr.c:229 (Linux
-# v7.3-rc7)). Through the mount fuse_setattr drops that mode change first
-# (fs/fuse/dir.c:2340-2342 (Linux v7.3-rc7)), so
-# setattr_prepare removes the capability with a REMOVEXATTR, and the SETATTR
-# that follows fails with EPERM: pinned, with the capability's state in the
-# field after the mode (README, "Setuid, setgid and file capabilities").
-sgid_make capchown-other 0:2000 4666
-for d in "$NAT2" "$MNT/$P2"; do
-  "$TESTUTIL" setxattrhex "$d/capchown-other" security.capability "$CAPHEX"
-done
-capchown_state() {
-  echo "$(stat -c '%a' "$1"):$("$TESTUTIL" getxattrhex "$1" security.capability)"
-}
-nat="$(sgid_op bob chown "$NAT2" capchown-other):$(capchown_state "$NAT2/capchown-other")"
-mnt="$(sgid_op bob chown "$MNT/$P2" capchown-other):$(capchown_state "$MNT/$P2/capchown-other")"
-src="${mnt%%:*}:$(capchown_state "$SRC/$P2/capchown-other")"
-want_nat="1:4666:$CAPHEX"
-want_mnt="1:4666:ERR ENODATA"
-if [ "$nat" = "$want_nat" ] && [ "$mnt" = "$want_mnt" ] &&
-  [ "$src" = "$want_mnt" ]; then
-  pass capchown-other-strips-then-fails
-else
-  fail capchown-other-strips-then-fails \
-    "want $want_nat|$want_mnt, native $nat, mount $mnt, src $src"
-fi
-
 # --- the daemon is root again afterwards ----------------------------------
 
 touch "$MNT/pub/rf"
@@ -739,35 +707,5 @@ if [ "$status_after" = "$status_before" ]; then
 else
   fail daemon-credentials-restored "before: $status_before; after: $status_after"
 fi
-
-# --- without CAP_SYS_PTRACE (step 17.2e) ----------------------------------
-#
-# The daemon again, without CAP_SYS_PTRACE (19), as in Docker's default
-# capability set. A caller's groups come from its /proc status file, which
-# anyone may read, so alice still reaches grp through group 2000. Its
-# /proc/<pid>/ns links need ptrace access (proc_ns_get_link), which a
-# reader without CAP_SYS_PTRACE lacks for a process holding a capability
-# the reader does not (cap_ptrace_access_check): root's write of a setuid
-# file with security.capability then clears setuid where the native
-# filesystem keeps it, the safe side.
-
-COST_EXEC="${COST_EXEC:-} $TESTUTIL dropcap 19 --"
-restart_daemon noptrace "$LOG"
-expect_ok noptrace-group-write-as-alice alice mkdir "$MNT/grp/noptrace"
-expect_stat noptrace-group-write-owner '%u:%g' grp/noptrace 1000:1000
-sgid_make noptrace-capwrite 0:2000 4666
-sgid_check sgid2b-setuid-root-capwrite-noptrace noptrace-capwrite root \
-  capwrite "0:4666|0:666"
-
-# --- in a user namespace (step 17.2e) -------------------------------------
-#
-# The root of a child user namespace passes the root check, but its
-# capabilities, and those its callers' /proc entries show, count only in
-# that namespace: mount.dcfs refuses to start (dcfs/main.cc's
-# RequireInitUserNamespace).
-mkdir -p /tmp/userns_mnt
-expect_fail userns-mount-refused "must run in the init user namespace" \
-  userns "${MOUNT_DCFS:-/sbin/mount.dcfs}" -o "$(dcfs_options)" "$SRC" \
-  /tmp/userns_mnt
 
 exit "$FAILED"

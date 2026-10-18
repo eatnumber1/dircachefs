@@ -2,6 +2,7 @@
 #ifndef DCFS_SYSCALLS_H_
 #define DCFS_SYSCALLS_H_
 
+#include <linux/prctl.h>
 #include <poll.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
@@ -75,6 +76,16 @@ struct CapabilitySets {
 // permitted one the thread does not have.
 absl::StatusOr<CapabilitySets> capget();
 absl::Status capset(const CapabilitySets &sets);
+
+// prctl(2), one option per template argument: PR_CAPBSET_DROP
+// (PR_CAPBSET_DROP(2const)) takes capability `arg` out of the calling
+// thread's bounding set, so that no program it executes gets it.
+template <int kOption>
+  requires(kOption == PR_CAPBSET_DROP)
+absl::Status prctl(int arg);
+
+// unshare(2).
+absl::Status unshare(int flags);
 
 // mkdtemp(3): creates the directory and returns its name; `pattern` ends in
 // XXXXXX. mkstemp(3): creates and opens the file, and `pattern` (ending in
