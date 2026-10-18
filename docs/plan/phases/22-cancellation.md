@@ -179,47 +179,110 @@ Owner: dcfs-protocol. Docs: `formal/README.md` (actions and properties
 tables), `docs/design.md` "Cancellation", README's EINTR paragraph if
 the guarantee is user-visible.
 
-### As built (2026-10-17, step-22.5, pending review)
+### As built (step-22.5; round 1 2026-10-17, round 2 2026-10-18, pending review)
+
+Round 1 (the names below follow 22.6 and round 2):
 
 - `InterruptArrives(p)` sets the slot's `intr` at any step of a request in
-  flight; at a checkpoint pc (`InterruptPcs`) `At` requires `Proceeds(p)`,
-  so `Interrupt` is the only step there. "Queued before dispatch" is the
-  same as arriving right after the first step (no D request's first step
-  makes a backing syscall but a sync point's syncfs, which the model takes
-  in its first step and the code checkpoints before).
-- K = 2: `InterruptBound == \A p \in Procs : ps[p].nsys <= 2` (the ghost
-  `nsys` counted in `AfterSyscall`/`MutSyscall`). The run: a create's
-  `C_probe` then `C_stat`; every other run is at most 1 (`C_stat` after
-  `C_rec`, `U_stat`, `R_stat`, `A_stat`, `GA_stat`, `RDP_stat`).
+  flight; at an interruption point pc (`InterruptPcs`) `At` requires
+  `Proceeds(p)`, so `Interrupt` is the only step there. "Queued before
+  dispatch" is the same as arriving right after the first step (no D
+  request's first step makes a backing syscall but a sync point's syncfs,
+  which the model takes in its first step and the code has an
+  interruption point before).
 - Liveness under `FairSpec` (`RequestFairness == \A p :
-  WF_vars(RequestStep(p))`): `InterruptedReplies` (`intr ~> idle`) and `InterruptActedOn` (at a
-  checkpoint: `~>` idle with an `EINTR` reply, or the daemon down).
-- Known bugs: `interrupt_checkpoint_removed` (the create's, C_sys:
-  `InterruptBound`, 3 syscalls), `interrupt_ignored` (`Sees <-
-  SeesNothing`: `InterruptActedOn`), `interrupt_not_replied`
-  (`InterruptedReplies`). Deviation: the brief's "checkpoint ignores the
-  arrival must violate liveness" holds only for `InterruptActedOn`; a
-  request that ignores its interrupt still replies, so plain `intr ~>
-  idle` cannot see it, hence the second variant. Removing a checkpoint in
-  readdir's probe loop or a rename's second name does not exceed K (their
-  runs stay within 2), so the bound's variant removes the create's.
-- Configs: `MC_interrupt` 1,134,929 (was 280,869), `MC_interrupt_muts2`
-  3,908,815 (892,708), `MC_interrupt_nolock` 4,207,066 (1,036,982), new
-  `MC_interrupt_liveness` 64,111 (medium) and `_slots` 126,731 (large).
-  Timeouts raised (interrupt_test long, muts2 and nolock eternal: 26 min
-  each at load 30).
+  WF_vars(RequestStep(p))`): `InterruptedReplies` (`intr ~> idle`) and
+  `InterruptActedOn` (at an interruption point: `~>` idle with an `EINTR`
+  reply, or the daemon down). Known bugs `interrupt_ignored` (`Sees <-
+  SeesNothing`: `InterruptActedOn`) and `interrupt_not_replied`
+  (`InterruptedReplies`). Deviation: the brief's "ignores the arrival must
+  violate liveness" holds only for `InterruptActedOn`; a request that
+  ignores its interrupt still replies, hence the second variant.
 - Trace validation: the recorder writes `interrupt_arrives` where a
-  mutation's checkpoint sees the interrupt (its `interrupt` line waits for
-  `End`); `T_InterruptArrives`. `trace_fault_checkpoint_ignored_test`
-  (a `--wrap` of `Checkpoint` that ignores its EINTR) is rejected at the
-  unlink's syscall line; before the recorder change it was valid. Three
+  mutation's interruption point sees the interrupt (its `interrupt` line
+  waits for `End`); `T_InterruptArrives`.
+  `trace_fault_interruption_point_ignored_test` (a `--wrap` of
+  `CheckInterrupted` that ignores its EINTR) is rejected at the unlink's
+  syscall line; before the recorder change it was valid. Three
   `trace_tests/interrupt_*.log`.
-- Findings for russ (code, not changed): the getdents64 loop in
-  `ReadDirNames` has no checkpoint (unbounded in directory size); a
-  readdir's population (`ListCached` -> `PopulateDirectory`) has no
-  checkpoint before its reads, and an empty directory's none at all.
 - The mechanical check is proposed (formal/README.md, "Timely
-  interrupts"), not built.
+  interrupts"), not built; `InterruptSweepTest` (round 2) is that check
+  for the scenarios it lists.
+
+Round 2, from the review (B1, S1-S4, three findings, nits) and russ's
+rulings:
+
+- B1: the bound is per request kind, at no state cost: `InterruptBound ==
+  \A p : ps[p].nsys <= Run(ps[p].kind)`, `Run` 2 for a create (`C_probe`,
+  `C_stat`), 1 for every other mutation past its syscall (`C_stat`,
+  `U_stat`, `R_stat`, `A_stat`, F's `FC_probe`, `FS_stat`) and F's release
+  (`FR_stat`), 0 for the rest (lookup, readdir, readdirplus, getattr,
+  write, sync point, F's open and lookup). Round 1's single K = 2 saw only
+  the create's interruption point removed: the new
+  `known_bugs/interruption_point_removed_unlink` (an unlink then takes 2)
+  found nothing under it. `interrupt_checkpoint_removed` is now
+  `interruption_point_removed_create`. `PD_commit`'s interruption point is
+  invisible to any count of the model's syscalls (said at the property;
+  in the code it bounds the probes, which the sweep counts).
+- S3: F's interruption points are the model's too (`FC_sys`, `FS_sys`, a
+  write's `W_sys`; with round 2's code, `FG_stat`, `FG_rstat`), checked by
+  two new medium configs, `MC_interrupt_files.cfg` and
+  `MC_interrupt_borndirty.cfg`. They found two gaps in the model, fixed:
+  an interrupted setattr of F must End F's mutation (`FEndMutation`;
+  `GuardsBalanced` otherwise), and an interrupted file request's EINTR was
+  no reply `ReplyObservable` allowed.
+- S4, adopted: the safety configs take the arrival only where it can
+  matter (`CanArrive <- CanArriveWhereItMatters`: a pc whose step reads
+  `intr`, the slot free to step, the daemon up; the excluded `QuietPcs` is
+  wrong only in the safe direction); the liveness configs keep arrival
+  anywhere. Exact by the argument in `dcfs.tla`, and every safety known
+  bug of the interrupts still finds its counterexample under it. Distinct
+  states, anywhere -> where it matters (before round 2's new
+  interruption points): `MC_interrupt` 1,134,929 -> 677,637, `_muts2`
+  3,908,815 -> 2,252,176, `_nolock` 4,207,066 -> 2,774,256, `_files`
+  78,402 -> 59,680, `_borndirty` 13,642 -> 10,266. After round 2's
+  interruption points: `MC_interrupt` 533,393, `_muts2` 1,718,997 (8.7 min
+  at load 40), `_nolock` 2,498,246 (13.2 min at load 40), `_liveness`
+  64,417, `_liveness_slots` 107,473, `_files` 55,625, `_borndirty` 9,678.
+  `_muts2` and `_nolock` keep "eternal" (`_nolock` is close to "long" at
+  load 40).
+- The three code findings, fixed (tests first, failing output in the
+  commits): an interruption point before each getdents64 in
+  `ReadDirNames`; one at the start of `PopulateDirectory` (a readdir's
+  population and an empty directory's too; `LookupOrPopulate` keeps its
+  own only before a probe); one in `ParentOf` before its backing reads and
+  one in `FreshAttr`, by name, before a refresh that is the request's own
+  work (`GETATTR`, `OPENDIR`, a `LOOKUP` of "." or "..", each
+  `READDIRPLUS` entry), not after a mutation's syscall nor for a
+  `LOOKUP`'s reply entry, which the model's lookup has replied before.
+  The model's `GA_stat` and `RDP_stat` (F's `FG_stat`, `FG_rstat`) are
+  interruption points. An interrupted `READDIR`/`READDIRPLUS` that built
+  entries replies them, a short listing (russ, style 1.12); with none,
+  `EINTR`. The recorder writes no interrupt for a request whose model
+  request has replied (`Req::terminal`, set but never read before, now set
+  for a lookup's answer only when the request is a lookup).
+- The per-child probe loop (russ's question via the orchestrator,
+  2026-10-18): it has an interruption point before each batch of 16
+  probes (since 22.3), so at most 15 probes, about 4-6 syscalls each,
+  follow an interrupt; the sweep counts them. Not made per child: each
+  interruption point is a `poll` of `/dev/fuse` and may read one request
+  ahead, so per child would add one syscall per probe; russ's call.
+- `InterruptSweepTest` (its own target, small): the review's harness test,
+  each scenario's request interrupted from each of its backing calls on
+  (an empty directory and one of more than 64 KiB of names among them),
+  counted against the case's run in the code's calls.
+- S1 (docs): the bound is stated as model steps on D, with what follows
+  the model's request listed (README, formal/README.md, docs/design.md).
+- Nits: a population scenario for the ignored-interruption-point fault
+  (`trace_fault_interruption_point_ignored_population_test`, rejected at
+  `populate_read`); `interrupt_reach_<pc>_test` (`InterruptReach.tla`):
+  every interruption point is reached by an interrupted request; the
+  known-bug-only overrides live in their known_bugs modules; a probe is
+  not a fixed number of syscalls; the `interrupt_after_syscall` trace
+  test's comment.
+- Not done: the test-name leftovers of 22.6 (`FakeInterrupts::
+  checkpoints`, `CheckpointTest`, the cancel.sh check name, the
+  `SessionLoop` log prefix), left for the follow-up the log names.
 
 ## 22.6 Interruption points: the cancellation checkpoint renamed (russ, 2026-10-17; merged 2026-10-17, b838960, Gemini Flash)
 

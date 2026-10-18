@@ -1285,16 +1285,15 @@ recovery protocol, concurrency, and the test strategy.
   signal to a process waiting on dcfs (Ctrl+C, `timeout`, even `kill -9`)
   ends the wait with `EINTR` at dcfs's next interruption point, just
   before its next backing syscall: within about a second while dcfs lists a
-  large uncached directory on a slow disk. A request past its last
-  interruption point answers after at most two more short backing
-  operations (a new name's probe, a refresh of attributes: the formal
-  model's bound). A backing syscall already blocked in
-  the kernel (a disk spinning up, a hung network mount, a long `fsync`)
-  is waited out first, and so is the reading of a directory's names
-  (getdents64, one call per 64 KiB of entries), which dcfs finishes
-  before it checks: for a huge uncached directory on a slow disk that can
-  take seconds. A change that already reached the backing
-  filesystem is completed and reported as done, never as `EINTR`. The
+  large uncached directory on a slow disk. A change past its backing
+  syscall takes at most a few more short backing operations (a new name's
+  probe, a refresh of attributes); a lookup may still refresh its answer's
+  attributes; a listing in progress may finish its current batch of up to
+  16 names. An interrupted `ls` that already has some entries gets those,
+  a short listing (the next `getdents` continues). A backing syscall
+  already blocked in the kernel (a disk spinning up, a hung network mount,
+  a long `fsync`) is waited out first. A change that already reached the
+  backing filesystem is completed and reported as done, never as `EINTR`. The
   exception is `fsync`: interrupted after its backing `fsync` and before
   the sync point that makes it durable in dcfs's cache, it replies `EINTR`
   although the file's data was synced; repeating it is harmless. See

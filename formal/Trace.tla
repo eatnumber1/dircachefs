@@ -554,10 +554,11 @@ T_Syncfs ==
 T_SyncClearDirty ==
     /\ Ev("sync_clear") /\ SyncClearDirty(P) /\ Matches(E, {})
 
-\* A checkpoint found the request interrupted (FUSE_INTERRUPT): it replies
-\* EINTR, ending a mutation past phase 1 without phase 3. The interrupt's
-\* arrival is that same event (CanArrive, then the act: two model steps
-\* with nothing between), unless an interrupt_arrives line came first.
+\* An interruption point found the request interrupted (FUSE_INTERRUPT):
+\* it replies EINTR, ending a mutation past phase 1 without phase 3. The
+\* interrupt's arrival is that same event (CanArrive, then the act: two
+\* model steps with nothing between), unless an interrupt_arrives line
+\* came first.
 T_Interrupt ==
     /\ Ev("interrupt")
     /\ \/ Interrupt(P)
@@ -566,8 +567,8 @@ T_Interrupt ==
 
 \* Step 22.5: the interrupt became visible before the request acts on it
 \* (a mutation's, whose interrupt line waits for its End): from here on, at
-\* a checkpoint the model allows only Interrupt, so a backing syscall the
-\* code takes there instead is rejected at its line.
+\* an interruption point the model allows only Interrupt, so a backing
+\* syscall the code takes there instead is rejected at its line.
 T_InterruptArrives ==
     Ev("interrupt_arrives") /\ InterruptArrives(P) /\ Matches(E, {})
 

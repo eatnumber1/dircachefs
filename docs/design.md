@@ -1772,10 +1772,14 @@ syscall already issued; dcfs looks for one at interruption points
 (`CheckInterrupted`, `dcfs/interruption_point.h`), each just before a backing
 syscall:
 
-- before `LookupOrPopulate`'s probe of a name or population of a
-  directory, and every 16 probes inside `PopulateDirectory` (the slow
+- before `LookupOrPopulate`'s probe of a name; in `PopulateDirectory`
+  (a lookup's or a readdir's), before its first read, before each
+  getdents64 call (64 KiB of entries each), and every 16 probes (the slow
   case: one request of 14-20 s for 20,000 entries at 10 ms per I/O,
   `cancel_inventory_test`);
+- before a refresh of attributes that is the request's own work (a
+  `GETATTR`, an `OPENDIR`, a `LOOKUP` of "." or "..", each `READDIRPLUS`
+  entry), and before `ParentOf` asks the backing filesystem for "..";
 - before every mutation's phase-2 syscall (create, unlink, rename, link,
   setattr, the xattr changes, a fallback write, fallocate,
   copy_file_range, ioctl);
@@ -1837,28 +1841,35 @@ that never Ends: `GuardsBalanced`).
 
 **How soon, counted in work** (step 22.5; `formal/README.md`, "Timely
 interrupts"). The model makes acting on an interrupt an obligation: the
-interrupt arrives at any moment of a request (`InterruptArrives`), and at a
-checkpoint an interrupted request can only reply `EINTR`. It then proves
-that after the arrival a request takes at most two more backing syscalls
-before it replies (`InterruptBound`): the longest run with no checkpoint
-between is a create's, whose syscall was done: the probe of its new name,
-then, after phase 3, the refresh of the parent's attributes; every other
-run is at most one (a mutation's refresh after its phase 3, a getattr's or
-readdirplus's statx of an unknown directory). And that an interrupted
-request eventually replies, `EINTR` if it reaches a checkpoint, provided no
-request is postponed forever by the others (`InterruptedReplies`,
-`InterruptActedOn`). The count is of the model's steps, each a short fixed
-sequence of syscalls on one object; it leaves out work with no backing
-syscall (cache queries and commits) and the syscall a request is blocked
-in when the interrupt comes (below). Two places in the code have fewer
-checkpoints than the model, both inside a population, one step of the
-model: the listing's getdents64 calls (one per 64 KiB of entries) have
-none between them, so an interrupt that arrives while dcfs reads a large
-directory's names waits for the rest of them; and a readdir's population
-(not a lookup's) has none before its reads, and an empty directory's
-none at all. Trace validation holds the code to the obligation where the
-code sees the interrupt: a mutation's checkpoint that saw it and then took
-the syscall would be rejected (`trace_fault_interruption_point_ignored_test`).
+interrupt arrives at any moment of a request (`InterruptArrives`), and at
+an interruption point an interrupted request can only reply `EINTR`. It
+then proves a bound per kind of request on the backing syscalls it takes
+after the arrival (`InterruptBound`): two for a create whose syscall was
+done (the probe of its new name, then, after phase 3, the refresh of the
+parent's attributes), one for any other mutation past its syscall (its
+refresh after phase 3), none for a lookup, a readdir, a readdirplus, a
+getattr or a sync point. And that an interrupted request eventually
+replies, `EINTR` if it reaches an interruption point, provided no request is
+postponed forever by the others (`InterruptedReplies`, `InterruptActedOn`).
+The count is of the model's steps, each a few syscalls on one object; it
+leaves out work with no backing syscall (cache queries and commits), the
+syscall a request is blocked in when the interrupt comes (below), and the
+probes of one batch of a population (at most 15 after the interrupt). One
+backing read follows the model's request on another object with no
+interruption point: a `LOOKUP`'s reply entry, refreshed when its
+attributes are unknown (after the model's lookup has answered).
+`InterruptSweepTest` holds the code to the bound in its own calls: every
+request interrupted from each of its backing calls on. Trace validation
+holds the code to the obligation where it sees the interrupt: an
+interruption point that saw it and let its caller go on would be rejected
+(`trace_fault_interruption_point_ignored_test`, `..._population_test`).
+
+**An interrupted listing replies what it has** (russ, 2026-10-17, the
+most useful result: `docs/style.md` 1.12). A `READDIR` or `READDIRPLUS`
+stopped by an interruption point after it built some entries (".", "..",
+the listed ones whose attributes it had) replies those: a short listing,
+a valid `getdents` result, which the next call continues from its last
+offset. With none built it replies `EINTR`.
 
 **What cannot be interrupted yet**: a backing syscall already blocked in
 the kernel: the first I/O to a disk spinning up (seconds), a hung network
