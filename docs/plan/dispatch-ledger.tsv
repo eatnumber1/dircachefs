@@ -31,12 +31,12 @@ ad91bd81ceae5a166	2026-10-18T01:16:11Z	dashboard-quota	mechanical	dcfs-mechanica
 a38bc40f320c181ad	2026-10-18T01:21:21Z	Investigate long-running agy control	investigation	dcfs-investigator	claude-sonnet-5-5	medium									
 afebb8f7ccabd7770	2026-10-18T02:31:46Z	Clerk: record tonight's merges	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
 agy-1017-lane8-worker	2026-10-17	dashboard-quota-meters		agy	gemini-3.8-flash	medium								merged	lane-8 quota meters worker
-agy-1017-lane8-review	2026-10-17	dashboard-quota-meters		agy	gemini-3.8-flash	none									lane-8 quota meters Flash review
+agy-1017-lane8-review	2026-10-17	dashboard-quota-meters		agy	gemini-3.8-flash	medium									verdict NONE (no findings)
 agy-1017-lane8-fix	2026-10-17	dashboard-quota-meters		agy	gemini-3.8-flash	medium								merged	lane-8 quota meters fix round
 agy-1017-lane6-states	2026-10-17	dashboard-lane-states		agy	gemini-3.8-flash	medium								merged	lane-6 foreman
 agy-1017-lane6-budget	2026-10-17	dashboard-budget-fix		agy	gemini-3.8-flash	medium								merged	lane-6 foreman budget fix
 agy-1017-25.33-worker	2026-10-17	25.33		agy	gemini-3.8-flash	medium								merged	lane-5 25.33 + 25.33b worker
-agy-1017-25.33-review	2026-10-17	25.33		agy	gemini-3.8-flash	none									lane-5 25.33 review; model gemini-3.8-flash-high, effort recorded NONE per the spec (to confirm)
+agy-1017-25.33-review	2026-10-17	25.33		agy	gemini-3.8-flash	high									verdict NONE (no findings)
 agy-1017-25.33-rebase	2026-10-17	25.33		agy	gemini-3.8-flash	medium								merged	lane-5 25.33 rebase
 agy-1017-25.34-review	2026-10-17	25.34		agy	gemini-4-argon	high								awaiting style review	lane-7 25.34 API review, read-only, 18 findings
 85fe52fd	2026-10-17	25.34		agy	gemini-3.8-flash	high									lane-7 25.34 fix round
