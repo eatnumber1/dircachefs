@@ -780,4 +780,10 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
 - Per-filesystem xattr limits: deferred by russ ("Let's circle back on
   that"). The kernel's macros (linux/limits.h) stay the only source until
   then.
-
+- NAME_MAX (found 2026-10-17, missed by the audit): `LookupOrPopulate`
+  (dcfs/backing.cc:1549-1564) rejects names over NAME_MAX, citing it as "the
+  generic Linux VFS limit"; the kernel says otherwise (fs/readdir.c:146-148:
+  PATH_MAX is "the real kernel limit on a possible path component, not
+  NAME_MAX"; FUSE allows FUSE_NAME_MAX = PATH_MAX - 1, fs/fuse/fuse_i.h:45).
+  Behave like the backing: use the backing's own limit, statfs(2) f_namelen,
+  read at mount. Part of the deferred per-filesystem limits question.

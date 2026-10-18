@@ -53,3 +53,5 @@ a219e533ef939b333	2026-10-18T04:07:56Z	Plan step: streamed population	implementa
 af8c08c18c7a25717	2026-10-18T04:13:34Z	Write up: behave like the backing	implementation	dcfs-implementer	claude-sonnet-5-5	high									
 a8f1b4d7b657c6b7b	2026-10-18T04:13:34Z	Audit written backing contracts	investigation	dcfs-investigator	claude-sonnet-5-5	medium									
 a273df0c9a51edf38	2026-10-18T04:18:04Z	25.33b-waitexit	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+a449541b0c3199208	2026-10-18T04:19:15Z	Clerk: add questions to dashboard	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+aed9c10514239de29	2026-10-18T04:26:28Z	25.33b-waitexit	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
