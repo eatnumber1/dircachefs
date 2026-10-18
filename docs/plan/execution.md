@@ -10,8 +10,9 @@ merge); this file orders the steps.
 - **Lanes.** The dev machine has 8 cores and 62 GB since the reboot of
   2026-10-10 (4 CPUs, 11 GB before). Tokens are the limit now
   (`process.md`, budget paragraph: about three lanes), not the machine:
-  every lane's `user.bazelrc` caps it at `--jobs=4`, `--local_test_jobs=4`
-  and 20 GB of build memory, which three lanes share comfortably; raise
+  every lane's `user.bazelrc` caps it at `--jobs=4`, `--local_test_jobs=2`
+  and 20 GB of build memory, and the build at `--local_resources=cpu=4`
+  (2026-10-18), which three lanes share comfortably; raise
   the caps before the lane count. The binding budget is guests, not
   lanes (2026-10-17: load 120 on 8 cores with three lanes running guest
   tests at `--local_test_jobs=4` each): the lanes' `--local_test_jobs`

@@ -336,3 +336,25 @@ Ordered and load-agnostic: each verdict counts events, with no sleeps;
 time appears only as a hang guard.
 
 Owner: dcfs-implementer, lane 4.
+
+## 17.6b Pin fanotify and dnotify behaviour on the mount (russ, 2026-10-18: "what about fsnotify?"; after 17.6)
+
+17.6 covered only inotify. This step pins the rest of fsnotify, native
+against the mount, each claim cited (path:line, Linux v7.3-rc7). Unsupported
+cases are pinned as they are, not fixed.
+
+1. fanotify permission events (FAN_OPEN_PERM, FAN_ACCESS_PERM) on the mount.
+   A permission watcher on the backing does not see passthrough I/O: backing
+   files carry FMODE_NONOTIFY_PERM (fs/file_table.c:208).
+2. FAN_REPORT_FID and FAN_MARK_FILESYSTEM on a dcfs mount: does it work, and
+   whose handles are reported (the FUSE export operations decide this).
+3. FAN_MARK_MOUNT on the mount against the same mark on the backing.
+4. dnotify F_NOTIFY, one case.
+
+- Extends `kernel_facts_test` (C++ on the syscall wrappers): add
+  `fanotify_init` and `fanotify_mark` wrappers. Each verdict counts events,
+  with no sleeps; time appears only as a hang guard.
+- Each case runs natively and on the mount, and the difference is the pin.
+
+Owner: Gemini Flash via foreman when its pool allows, else dcfs-implementer.
+After 25.34 merges, if the glue moves to `qemu_cc_test`.

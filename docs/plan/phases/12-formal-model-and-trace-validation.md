@@ -950,6 +950,10 @@ counted each as 1 CPU. That drove the load to 55 on 8 cores.
   per JVM) and honest CPU accounting in Bazel. CI wall is unchanged: large
   keeps 4 workers, equal to a CI runner's vCPUs.
 - No test is weakened: the same configs and the same state counts.
+- Measure on a quiet machine before choosing classes (russ, 2026-10-18):
+  states per second at 1, 2, 4 and 8 workers, and run time with and without
+  the `-Xmx` limits. Fewer workers per checker is wanted even at equal CPU
+  per state, because Bazel can then run more checkers in parallel (russ).
 
 Owner: dcfs-implementer. The time analysis reported on 2026-10-18; the numbers
 above are its measurements.

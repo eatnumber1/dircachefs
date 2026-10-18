@@ -1458,9 +1458,14 @@ options).
 Every rule in this step gets a mechanical check: a clang-tidy or
 clang-query matcher, or a type that makes the wrong code not compile.
 
-## 25.39 Mechanize every style rule (russ, 2026-10-17; queued, M2)
+## 25.39 Mechanize every style rule (russ, 2026-10-17; queued, M2; raised in priority 2026-10-18)
 
 Dependencies: after 25.38.
+
+Priority (test-placement analysis 2026-10-18): about 60 % of should and
+blocker review findings are style, docs, comment or citation findings that
+only readers catch today, so this is the bigger lever on review cost. It
+goes first in the M2 queue.
 
 Russ: "remember to add mechanical enforcement for all the style rules we
 can!"
@@ -1489,6 +1494,10 @@ Steps:
    - TLA+ comment length (1.9 applied to `formal/`).
    - Kernel citations naming a version and no host paths: grep for
      `~/Sources` in code comments.
+   - Kernel-citation checker (test-placement analysis 2026-10-18): every
+     `path:line (Linux vX)` in code and docs is checked against that tag in
+     the pinned kernel source. Wrong line numbers were review findings in
+     22.5, 17.6 and 25.28b.
 4. Items for this step, not done by the clerk:
    - `tools/agents/foreman.py`'s review prompt (`run_review`) takes the
      findings block format from the reviewer agents
