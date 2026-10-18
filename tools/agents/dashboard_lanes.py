@@ -5,8 +5,9 @@
 Claude Code hooks call this tool with the hook's JSON on stdin; it records
 which subagents run on which lane, computes code size (SLOC) over the main
 checkout, writes the dashboard files, and tells the orchestrator when they
-differ from the last uploaded copies. It is driven by events only: no timers,
-no polling. See README.md in this directory for the hook configuration.
+differ from the last uploaded copies. Everything is event-driven except the
+hourly meter reading, an approved timer exception: no polling. See README.md in
+this directory for the hook configuration.
 
     dashboard_lanes.py post-agent      PostToolUse hook, matcher "Agent"
     dashboard_lanes.py post-message    PostToolUse hook, matcher "SendMessage"
@@ -21,9 +22,10 @@ no polling. See README.md in this directory for the hook configuration.
 State lives in $DCFS_DASHBOARD_DIR (default ~/.cache/dcfs-dashboard):
 running.json, finished.json, lanes.json, uploaded.sha256, sloc.json,
 sloc.head, sloc.uploaded.sha256, quota.json, quota.uploaded.sha256,
-budget.json, budget.uploaded.sha256, and an optional config.json with "model"
-and "effort" for the orchestrator row. Dispatch ledger is kept in
-docs/plan/dispatch-ledger.tsv under the main repository checkout.
+quota.read_at, quota.log, budget.json, budget.uploaded.sha256, and an
+optional config.json with "model" and "effort" for the orchestrator row.
+Dispatch ledger is kept in docs/plan/dispatch-ledger.tsv under the main
+repository checkout.
 """
 
 import dataclasses
@@ -86,6 +88,7 @@ class Env:
     now: object = None
     stderr: object = sys.stderr
     runner: object = None
+    launcher: object = None
     environ: dict = dataclasses.field(default_factory=dict)
 
     @classmethod
@@ -324,54 +327,47 @@ POOL_ORDER = [
 ]
 
 
+def parse_iso_datetime(t):
+    if t.endswith("Z"):
+        t = t[:-1] + "+00:00"
+    return datetime.datetime.fromisoformat(t)
+
+
 def get_current_datetime(env):
-    if env is not None:
-        t = env.current_time()
-        if isinstance(t, str):
-            if t.endswith("Z"):
-                t = t[:-1] + "+00:00"
-            return datetime.datetime.fromisoformat(t)
-        elif isinstance(t, datetime.datetime):
-            if t.tzinfo is None:
-                return t.replace(tzinfo=datetime.timezone.utc)
-            return t
-    return datetime.datetime.now(datetime.timezone.utc)
+    return parse_iso_datetime(env.current_time())
 
 
 def get_now_timestamp(env):
     return get_current_datetime(env).timestamp()
 
 
-def local_timezone(env):
-    tz_name = None
-    if env and getattr(env, "environ", None):
-        tz_name = env.environ.get("TZ")
-    if not tz_name:
-        tz_name = os.environ.get("TZ")
-    if tz_name:
-        try:
-            return zoneinfo.ZoneInfo(tz_name)
-        except Exception:
-            pass
-    try:
-        return zoneinfo.ZoneInfo("America/Los_Angeles")
-    except Exception:
-        return datetime.datetime.now().astimezone().tzinfo
+def local_timezone(env=None):
+    return datetime.datetime.now().astimezone().tzinfo
 
 
 def resolve_claude_reset(raw_time, tz_str, env):
-    now_dt = get_current_datetime(env)
-    try:
-        tz = zoneinfo.ZoneInfo(
-            tz_str.strip() if tz_str else "America/Los_Angeles"
+    if not tz_str:
+        env.stderr.write(
+            "dashboard_lanes: missing timezone in reset time %r\n" % raw_time
         )
-    except Exception:
-        tz = zoneinfo.ZoneInfo("America/Los_Angeles")
+        return None
+    try:
+        tz = zoneinfo.ZoneInfo(tz_str.strip())
+    except (zoneinfo.ZoneInfoNotFoundError, KeyError, ValueError) as e:
+        env.stderr.write(
+            "dashboard_lanes: unknown timezone %r: %s\n" % (tz_str, e)
+        )
+        return None
+
+    now_dt = get_current_datetime(env)
     now_local = now_dt.astimezone(tz)
 
     m = RESET_TIME_RE.match(raw_time.strip())
     if not m:
-        return now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        env.stderr.write(
+            "dashboard_lanes: unparseable reset time: %r\n" % raw_time
+        )
+        return None
 
     hour = int(m.group("hour"))
     minute = int(m.group("minute") or 0)
@@ -382,20 +378,48 @@ def resolve_claude_reset(raw_time, tz_str, env):
         hour = 0
 
     if m.group("month"):
-        month = MONTHS.get(m.group("month").lower()[:3], now_local.month)
-        day = int(m.group("day"))
-        candidate = datetime.datetime(
-            now_local.year, month, day, hour, minute, tzinfo=tz
-        )
-        if candidate < now_local:
-            candidate = datetime.datetime(
-                now_local.year + 1, month, day, hour, minute, tzinfo=tz
+        month_name = m.group("month").lower()[:3]
+        if month_name not in MONTHS:
+            env.stderr.write(
+                "dashboard_lanes: unparseable month in reset time: %r\n"
+                % raw_time
             )
+            return None
+        month = MONTHS[month_name]
+        day = int(m.group("day"))
+        try:
+            candidate = datetime.datetime(
+                now_local.year, month, day, hour, minute, tzinfo=tz
+            )
+        except ValueError as e:
+            env.stderr.write(
+                "dashboard_lanes: invalid date in reset time %r: %s\n"
+                % (raw_time, e)
+            )
+            return None
+        if candidate < now_local:
+            try:
+                candidate = datetime.datetime(
+                    now_local.year + 1, month, day, hour, minute, tzinfo=tz
+                )
+            except ValueError as e:
+                env.stderr.write(
+                    "dashboard_lanes: invalid date in reset time %r: %s\n"
+                    % (raw_time, e)
+                )
+                return None
     else:
-        candidate = datetime.datetime(
-            now_local.year, now_local.month, now_local.day, hour, minute,
-            tzinfo=tz
-        )
+        try:
+            candidate = datetime.datetime(
+                now_local.year, now_local.month, now_local.day, hour, minute,
+                tzinfo=tz
+            )
+        except ValueError as e:
+            env.stderr.write(
+                "dashboard_lanes: invalid date in reset time %r: %s\n"
+                % (raw_time, e)
+            )
+            return None
         if candidate < now_local:
             candidate += datetime.timedelta(days=1)
 
@@ -405,6 +429,8 @@ def resolve_claude_reset(raw_time, tz_str, env):
 
 
 def parse_claude_usage(text, env=None):
+    if env is None:
+        env = Env.from_environ(os.environ)
     rows = []
     current_pool = None
     used_pct = None
@@ -425,13 +451,14 @@ def parse_claude_usage(text, env=None):
         )
         if reset_match and current_pool and used_pct is not None:
             raw_time = reset_match.group(1).strip()
-            tz_str = reset_match.group(2) or "America/Los_Angeles"
+            tz_str = reset_match.group(2)
             resets = resolve_claude_reset(raw_time, tz_str, env)
-            rows.append({
-                "pool": current_pool,
-                "used_pct": used_pct,
-                "resets": resets,
-            })
+            if resets is not None:
+                rows.append({
+                    "pool": current_pool,
+                    "used_pct": used_pct,
+                    "resets": resets,
+                })
             current_pool = None
             used_pct = None
     return rows
@@ -476,15 +503,38 @@ def parse_agy_usage(text):
     return rows
 
 
-def run_meter(cmd, runner, **kwargs):
+def run_meter(cmd, runner, env, **kwargs):
+    cmd_name = " ".join(cmd)
     try:
         res = runner(cmd, **kwargs)
         if isinstance(res, subprocess.CompletedProcess):
             if res.returncode == 0:
                 return res.stdout
+            err = (res.stderr or "").strip()
+            env.stderr.write(
+                "dashboard_lanes: %s exited %d: %s\n"
+                % (cmd_name, res.returncode, err)
+            )
             return None
         return res
-    except (subprocess.SubprocessError, OSError):
+    except subprocess.CalledProcessError as e:
+        err = (e.stderr or "").strip() if hasattr(e, "stderr") and e.stderr else str(e)
+        env.stderr.write(
+            "dashboard_lanes: %s exited %d: %s\n"
+            % (cmd_name, e.returncode, err)
+        )
+        return None
+    except subprocess.TimeoutExpired as e:
+        env.stderr.write(
+            "dashboard_lanes: %s timed out after %ss\n"
+            % (cmd_name, e.timeout)
+        )
+        return None
+    except OSError as e:
+        env.stderr.write(
+            "dashboard_lanes: %s failed: %s\n"
+            % (cmd_name, e)
+        )
         return None
 
 
@@ -493,6 +543,7 @@ def quota(env):
     claude_out = run_meter(
         ["python3", "-I", "tools/agents/claude_usage.py"],
         runner,
+        env,
         cwd=env.main_repo,
         timeout=90,
         stdout=subprocess.PIPE,
@@ -502,6 +553,7 @@ def quota(env):
     agy_out = run_meter(
         ["agy", "-p", "/usage"],
         runner,
+        env,
         timeout=120,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -519,14 +571,14 @@ def quota(env):
         try:
             for r in parse_claude_usage(claude_out, env):
                 by_pool[r["pool"]] = r
-        except Exception as e:
+        except (ValueError, KeyError, IndexError) as e:
             env.stderr.write("dashboard_lanes: parse claude: %r\n" % e)
 
     if agy_out is not None:
         try:
             for r in parse_agy_usage(agy_out):
                 by_pool[r["pool"]] = r
-        except Exception as e:
+        except (ValueError, KeyError, IndexError) as e:
             env.stderr.write("dashboard_lanes: parse agy: %r\n" % e)
 
     ordered_rows = []
@@ -539,11 +591,6 @@ def quota(env):
 
     quota_text = json.dumps(ordered_rows, indent=2) + "\n"
     write_atomic(env.path("quota.json"), quota_text)
-    now_ts = get_now_timestamp(env)
-    try:
-        os.utime(env.path("quota.json"), (now_ts, now_ts))
-    except OSError:
-        pass
 
     claude_week = by_pool.get("Claude week")
     if claude_week is not None:
@@ -563,22 +610,36 @@ def quota(env):
         write_atomic(
             env.path("budget.json"), json.dumps(budget, indent=2) + "\n"
         )
-        try:
-            os.utime(env.path("budget.json"), (now_ts, now_ts))
-        except OSError:
-            pass
 
     return ""
+
+
+DATASETS = ["lanes", "sloc", "quota", "budget"]
+
+
+def dataset_paths(env, name):
+    json_path = env.path("%s.json" % name)
+    sha_file = "uploaded.sha256" if name == "lanes" else "%s.uploaded.sha256" % name
+    return json_path, env.path(sha_file)
+
+
+def file_digest(path):
+    return hashlib.sha256(read_text(path).encode("utf-8")).hexdigest()
+
+
+def dataset_changed(env, name):
+    json_path, sha_path = dataset_paths(env, name)
+    if not os.path.exists(json_path):
+        return False
+    uploaded = read_text(sha_path).strip() if os.path.exists(sha_path) else None
+    return file_digest(json_path) != uploaded
 
 
 def file_changed(path, uploaded_path):
     if not os.path.exists(path):
         return False
-    current_digest = hashlib.sha256(read_text(path).encode()).hexdigest()
-    uploaded = None
-    if os.path.exists(uploaded_path):
-        uploaded = read_text(uploaded_path).strip()
-    return current_digest != uploaded
+    uploaded = read_text(uploaded_path).strip() if os.path.exists(uploaded_path) else None
+    return file_digest(path) != uploaded
 
 
 def load_json(path, default):
@@ -811,7 +872,7 @@ def resolve_step(env, prompt, description):
             if branch:
                 return step_of(branch)
         except OSError:
-            pass
+            return description
     return description
 
 
@@ -992,7 +1053,7 @@ def post_agent(env, event):
     record_agent(env, event)
     try:
         record_ledger_dispatch(env, event)
-    except Exception as e:
+    except (OSError, ValueError, KeyError) as e:
         env.stderr.write("dashboard_lanes: ledger: %r\n" % e)
     return upload_context(env)
 
@@ -1029,9 +1090,31 @@ def subagent_stop(env, event):
     regenerate(env)
     try:
         record_ledger_stop(env, event)
-    except Exception as e:
+    except (OSError, ValueError, KeyError) as e:
         env.stderr.write("dashboard_lanes: ledger: %r\n" % e)
     return ""
+
+
+def launch_quota(env):
+    cmd = [sys.executable, "-I", os.path.abspath(__file__), "quota"]
+    launcher = getattr(env, "launcher", None) or subprocess.Popen
+    log_path = env.path("quota.log")
+    try:
+        with open(os.devnull, "r") as devnull, open(
+            log_path, "a", encoding="utf-8"
+        ) as log_file:
+            try:
+                launcher(
+                    cmd,
+                    stdin=devnull,
+                    stdout=log_file,
+                    stderr=log_file,
+                    start_new_session=True,
+                )
+            except TypeError:
+                launcher(cmd)
+    except (OSError, subprocess.SubprocessError) as e:
+        env.stderr.write("dashboard_lanes: launch quota: %r\n" % e)
 
 
 def stop(env, event):
@@ -1041,27 +1124,29 @@ def stop(env, event):
     if "agent_id" in event or event.get("stop_hook_active"):
         return ""
 
-    # Timer exception approved by russ, 2026-10-17: credits are spent out of
-    # band, so the meters can only be known by reading them.
-    quota_path = env.path("quota.json")
-    if os.path.exists(quota_path):
-        now_ts = get_now_timestamp(env)
-        if now_ts - os.path.getmtime(quota_path) >= 3600:
-            try:
-                quota(env)
-            except Exception as e:
-                env.stderr.write("dashboard_lanes: quota: %r\n" % e)
+    regenerate(env)
+    regenerate_sloc(env)
+
+    # "I approve this exception *because* I'm sometimes spending credits out-of-band" (russ, 2026-10-17).
+    read_at_path = env.path("quota.read_at")
+    should_read = True
+    if os.path.exists(read_at_path):
+        try:
+            read_at_dt = parse_iso_datetime(read_text(read_at_path).strip())
+            now_dt = get_current_datetime(env)
+            if (now_dt - read_at_dt).total_seconds() < 3600:
+                should_read = False
+        except (ValueError, OSError) as e:
+            env.stderr.write("dashboard_lanes: parse read_at: %r\n" % e)
+
+    if should_read:
+        write_atomic(read_at_path, env.current_time() + "\n")
+        launch_quota(env)
 
     changed = []
-    if regenerate(env):
-        changed.append(("lanes", env.path("lanes.json")))
-    if regenerate_sloc(env):
-        changed.append(("sloc", env.path("sloc.json")))
-    if file_changed(env.path("quota.json"), env.path("quota.uploaded.sha256")):
-        changed.append(("quota", env.path("quota.json")))
-    if file_changed(env.path("budget.json"),
-                    env.path("budget.uploaded.sha256")):
-        changed.append(("budget", env.path("budget.json")))
+    for name in DATASETS:
+        if dataset_changed(env, name):
+            changed.append((name, env.path("%s.json" % name)))
 
     if not changed:
         return ""
@@ -1087,32 +1172,14 @@ def stop(env, event):
 
 
 def mark_uploaded(env):
-    lanes_path = env.path("lanes.json")
-    sloc_path = env.path("sloc.json")
-    quota_path = env.path("quota.json")
-    budget_path = env.path("budget.json")
-    if (not os.path.exists(lanes_path) and not os.path.exists(sloc_path)
-            and not os.path.exists(quota_path)
-            and not os.path.exists(budget_path)):
+    marked = False
+    for name in DATASETS:
+        json_path, sha_path = dataset_paths(env, name)
+        if os.path.exists(json_path):
+            write_atomic(sha_path, file_digest(json_path) + "\n")
+            marked = True
+    if not marked:
         raise FileNotFoundError("no dashboard files to mark uploaded")
-    if os.path.exists(lanes_path):
-        digest = hashlib.sha256(read_text(lanes_path).encode())
-        write_atomic(env.path("uploaded.sha256"), digest.hexdigest() + "\n")
-    if os.path.exists(sloc_path):
-        digest = hashlib.sha256(read_text(sloc_path).encode())
-        write_atomic(
-            env.path("sloc.uploaded.sha256"), digest.hexdigest() + "\n"
-        )
-    if os.path.exists(quota_path):
-        digest = hashlib.sha256(read_text(quota_path).encode())
-        write_atomic(
-            env.path("quota.uploaded.sha256"), digest.hexdigest() + "\n"
-        )
-    if os.path.exists(budget_path):
-        digest = hashlib.sha256(read_text(budget_path).encode())
-        write_atomic(
-            env.path("budget.uploaded.sha256"), digest.hexdigest() + "\n"
-        )
     return ""
 
 
@@ -1165,7 +1232,16 @@ def main(argv, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
                 if not isinstance(event, dict):
                     raise ValueError("hook input is not a JSON object")
                 stdout.write(HOOKS[argv[0]](env, event))
-    except Exception as e:
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        IndexError,
+        TypeError,
+        AttributeError,
+        json.JSONDecodeError,
+        subprocess.SubprocessError,
+    ) as e:
         stderr.write("dashboard_lanes: %s: %r\n" % (argv[0] if argv else "", e))
     return 0
 

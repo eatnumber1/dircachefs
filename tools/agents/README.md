@@ -75,8 +75,9 @@ Keeps the "lanes" table and "Code size" panel of the private claude.ai
 dashboard current. Claude Code hooks call it with the hook's JSON on stdin;
 it records which subagents run on which lane, computes code size (SLOC) over
 the main checkout, writes `lanes.json` and `sloc.json`, and tells the
-orchestrator when either file differs from the last uploaded copy. It is driven
-by events only: nothing polls and nothing runs on a timer.
+orchestrator when either file differs from the last uploaded copy. Everything
+is event-driven except the hourly meter reading, an approved timer exception:
+nothing polls.
 
 Subcommands (all read the hook JSON from stdin, all exit 0):
 
@@ -98,10 +99,10 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
   `finished.json`, the most recent 50, so `post-message` can resume it),
   regenerates, prints nothing.
 - `stop` (the main session's Stop): regenerates lanes and, when main's HEAD
-  differs from the last recorded HEAD, regenerates `sloc.json`; runs `quota`
-  at most once per hour; if any file changed since the last upload it blocks
-  with a reason naming the files, unless `stop_hook_active` is true (no loops)
-  or the caller is a subagent.
+  differs from the last recorded HEAD, regenerates `sloc.json`; launches the
+  detached `quota` reader at most once per hour; if any file changed since the
+  last upload it blocks with a reason naming the files, unless `stop_hook_active`
+  is true (no loops) or the caller is a subagent.
 - `mark-uploaded`: records the current files' sha256 checksums as uploaded
   (`uploaded.sha256`, `sloc.uploaded.sha256`, `quota.uploaded.sha256`, and
   `budget.uploaded.sha256`). The orchestrator runs it after uploading.
@@ -194,16 +195,17 @@ The `quota` command runs the external usage meters for Claude Code and `agy`
 (`claude_usage.py` in the main checkout with a 90 s timeout and
 `agy -p /usage` with a 120 s timeout), records pool limits and reset
 timestamps in `quota.json`, and appends the Claude week usage entry to
-`budget.json`. The `stop` hook runs `quota` at most once per hour when checking
-for dashboard changes. This is an approved timer exception (approved by russ,
-2026-10-17): credits are spent out of band, so the meters can only be known by
-reading them. If a meter fails or times out, previous rows are kept.
+`budget.json`. The `stop` hook launches the detached `quota` reader in the
+background at most once per hour when checking for dashboard changes. This is
+an approved timer exception (approved by russ, 2026-10-17: credits are spent out
+of band, so the meters can only be known by reading them). If a meter fails or
+times out, previous rows are kept and the failure is reported to stderr.
 
 State is in `$DCFS_DASHBOARD_DIR` (default `~/.cache/dcfs-dashboard/`):
 `running.json`, `finished.json`, `lanes.json`, `uploaded.sha256`, `sloc.json`,
 `sloc.head`, `sloc.uploaded.sha256`, `quota.json`, `quota.uploaded.sha256`,
-`budget.json`, `budget.uploaded.sha256`, and an optional config.json
-(`{"model": ..., "effort": ...}`) for the orchestrator row.
+`quota.read_at`, `quota.log`, `budget.json`, `budget.uploaded.sha256`, and an
+optional config.json (`{"model": ..., "effort": ...}`) for the orchestrator row.
 A malformed input or an unreadable state file prints one line to stderr and
 exits 0, because a failing hook can wedge the session.
 

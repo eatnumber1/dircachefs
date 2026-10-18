@@ -57,6 +57,7 @@ class Fixture(unittest.TestCase):
             agents_dir=self.agents,
             proc_root=self.proc,
             main_repo=self.main_repo,
+            launcher=lambda cmd, **kwargs: None,
         )
 
     def write(self, path, text):
@@ -1090,6 +1091,26 @@ class UsageParsersTest(unittest.TestCase):
         rows = dashboard_lanes.parse_agy_usage(text)
         self.assertEqual(len(rows), 5)
 
+    def test_parse_claude_usage_unparseable_reset_skipped_and_reported(self):
+        err = io.StringIO()
+        env = dashboard_lanes.Env.from_environ({"HOME": "/tmp"})
+        env.now = lambda: "2026-10-17T15:00:00Z"
+        env.stderr = err
+        fixture_bad_reset = (
+            "Currentsession\n"
+            "▌ 1%used\n"
+            "Resets sometime soon (America/Los_Angeles)\n"
+            "Currentweek(allmodels)\n"
+            "████████████████████████████▍ 57%used\n"
+            "ResetsOct23,1am(Invalid/Zone)\n"
+        )
+        rows = dashboard_lanes.parse_claude_usage(fixture_bad_reset, env)
+        self.assertEqual(rows, [])
+        err_lines = [l for l in err.getvalue().splitlines() if l.strip()]
+        self.assertEqual(len(err_lines), 2)
+        self.assertIn("dashboard_lanes", err_lines[0])
+        self.assertIn("dashboard_lanes", err_lines[1])
+
 
 class QuotaCommandTest(Fixture):
 
@@ -1144,10 +1165,14 @@ class QuotaCommandTest(Fixture):
 
         with open(self.env.path("budget.json"), encoding="utf-8") as f:
             budget_data = json.load(f)
+        now_dt = dashboard_lanes.get_current_datetime(self.env)
+        expected_label = now_dt.astimezone(
+            dashboard_lanes.local_timezone(self.env)
+        ).strftime("%a %H:%M")
         self.assertEqual(len(budget_data), 1)
         self.assertEqual(budget_data[0], {
             "when": "2026-10-17T15:00:00Z",
-            "label": "Sat 08:00",
+            "label": expected_label,
             "target": None,
             "actual": 57,
         })
@@ -1163,9 +1188,10 @@ class QuotaCommandTest(Fixture):
         self.agy_output = (
             "Gemini Models\tWeekly Limit Remaining\t50%\t2026-10-24T03:07:32Z\n"
         )
+        err = io.StringIO()
         dashboard_lanes.main(
             ["quota"], stdin=io.StringIO(""), stdout=io.StringIO(),
-            stderr=io.StringIO(), env=self.env
+            stderr=err, env=self.env
         )
         with open(self.env.path("quota.json"), encoding="utf-8") as f:
             quota_data = {r["pool"]: r for r in json.load(f)}
@@ -1174,6 +1200,10 @@ class QuotaCommandTest(Fixture):
         self.assertEqual(quota_data["Claude week"]["used_pct"], 57)
         # agy updated.
         self.assertEqual(quota_data["Gemini week"]["used_pct"], 50)
+        # Error is reported to stderr naming the command.
+        err_output = err.getvalue()
+        self.assertIn("dashboard_lanes", err_output)
+        self.assertIn("claude_usage.py", err_output)
 
 
 class QuotaStopAndUploadTest(Fixture):
@@ -1182,12 +1212,11 @@ class QuotaStopAndUploadTest(Fixture):
         super().setUp()
         self.current_time_str = "2026-10-17T15:00:00Z"
         self.env.now = lambda: self.current_time_str
-        self.env.environ = {"TZ": "America/Los_Angeles"}
-        self.quota_calls = 0
+        self.launched = []
+        self.env.launcher = lambda cmd, **kwargs: self.launched.append((cmd, kwargs))
 
         def fake_runner(cmd, **kwargs):
             if cmd == ["python3", "-I", "tools/agents/claude_usage.py"]:
-                self.quota_calls += 1
                 return subprocess.CompletedProcess(
                     cmd, 0, stdout=CLAUDE_USAGE_FIXTURE, stderr=""
                 )
@@ -1199,23 +1228,32 @@ class QuotaStopAndUploadTest(Fixture):
 
         self.env.runner = fake_runner
 
-    def test_stop_runs_quota_hourly(self):
-        # Initial run of quota command creates quota.json.
-        dashboard_lanes.main(
-            ["quota"], stdin=io.StringIO(""), stdout=io.StringIO(),
-            stderr=io.StringIO(), env=self.env
-        )
-        self.assertEqual(self.quota_calls, 1)
+    def test_stop_launches_reader_when_read_at_missing_or_hourly(self):
+        # Env runner should never be called by stop hook.
+        self.env.runner = lambda *args, **kwargs: self.fail("stop() must never call meters directly")
 
-        # 30 minutes later: within the 1-hour window, quota must not run.
+        # 1. read_at is missing: stop() launches reader and writes read_at.
+        out, _ = self.run_hook("stop", {"stop_hook_active": False})
+        self.assertEqual(len(self.launched), 1)
+        cmd, kwargs = self.launched[0]
+        self.assertIn("quota", cmd)
+        self.assertTrue(kwargs.get("start_new_session"))
+        read_at_path = self.env.path("quota.read_at")
+        self.assertTrue(os.path.exists(read_at_path))
+        with open(read_at_path, encoding="utf-8") as f:
+            self.assertEqual(f.read().strip(), "2026-10-17T15:00:00Z")
+
+        # 2. 30 minutes later: read_at is recent (< 1 hour), no launch.
         self.current_time_str = "2026-10-17T15:30:00Z"
         self.run_hook("stop", {"stop_hook_active": False})
-        self.assertEqual(self.quota_calls, 1)
+        self.assertEqual(len(self.launched), 1)
 
-        # 61 minutes later: past 1 hour, quota runs.
+        # 3. 61 minutes later: read_at is >= 1 hour old, launches reader.
         self.current_time_str = "2026-10-17T16:01:00Z"
         self.run_hook("stop", {"stop_hook_active": False})
-        self.assertEqual(self.quota_calls, 2)
+        self.assertEqual(len(self.launched), 2)
+        with open(read_at_path, encoding="utf-8") as f:
+            self.assertEqual(f.read().strip(), "2026-10-17T16:01:00Z")
 
     def test_stop_upload_message_includes_quota_and_budget(self):
         # Run quota directly to create quota.json and budget.json.
