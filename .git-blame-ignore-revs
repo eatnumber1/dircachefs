@@ -1,2 +1,5 @@
 # 7.6a: the one-time clang-format reformat of the C and C++ tree.
 a7a3e7126c0d16354dbe479c1f573ccc6e9e8967
+# 25.34: shfmt -i 2 of guest/init and scripts/mkinitramfs.sh.
+34fa44b9cf29cf7a5cfbb0e2b72e87485bd57f2d
+67f7230fa5698d3232242fa83fca2c86fc55b1f5
