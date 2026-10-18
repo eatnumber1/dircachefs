@@ -19,6 +19,7 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/time/time.h"
 #include "dcfs/fd.h"
 
 namespace dcfs::syscalls {
@@ -91,12 +92,13 @@ absl::Status flock(int fd, int operation);
 absl::StatusOr<short> poll(int fd, short events, int timeout_ms);
 
 // poll(2) of several descriptors: how many have events; each `fds[i].revents`
-// says which (0 for all of them if `timeout_ms` passed).
-absl::StatusOr<int> poll(std::span<struct pollfd> fds, int timeout_ms);
+// says which (0 for all of them if `timeout` passed). `timeout` is not
+// negative and at most 2^31-1 ms (about 24 days), or InfiniteDuration() to
+// wait for an event.
+absl::StatusOr<int> poll(std::span<struct pollfd> fds, absl::Duration timeout);
 
 // pidfd_open(2) of `pid` (no flags): a descriptor that polls readable once the
-// process has exited, the event to wait on for a child (or a daemon) instead
-// of a timer.
+// process has exited.
 absl::StatusOr<FileDescriptor> pidfd_open(pid_t pid);
 
 // setresuid(2)/setresgid(2) for the whole process, as glibc does. A process

@@ -112,7 +112,7 @@ licence file was read there.
 | googletest | 1.18.0.bcr.1 | BSD-3-Clause (`LICENSE`, "Neither the name of Google Inc.") | test binaries only |
 | mboworks_bzl | 0.5.1 | Apache-2.0 | build rules (via toolchains_llvm) |
 | platforms | 1.1.0 | Apache-2.0 | build configuration |
-| protobuf | 35.0 | BSD-3-Clause (`LICENSE`) | dependency of gloop and rules_python; fetched, not linked |
+| protobuf | 36.2 | BSD-3-Clause (`LICENSE`) | direct dependency (`MODULE.bazel`) for `dcfs/testonly:status_wire`, linked into test binaries only; also a dependency of gloop and rules_python |
 | re2 | 2025-11-05.bcr.1 | BSD-3-Clause (`LICENSE`) | dependency of gloop; fetched, not linked |
 | rules_cc | 0.2.25 | Apache-2.0 | build rules |
 | rules_distroless | 0.9.4 | Apache-2.0 | build rules: the `apt` extension and the rootfs |

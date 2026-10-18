@@ -1669,13 +1669,16 @@ Owner: dcfs-implementer. Dependencies: none.
 ### 25.34 as built (dcfs-implementer, 2026-10-17)
 
 - Helpers: `test/qemu/guest/guest.h` (`DcfsMount::{Start,Unmount,Crash,Log}`,
-  `InChild` with an optional `Identity`, `ListNames`, `Snapshot`,
-  `ExpectSameTree`, `ExpectSameAsBacking`); a command runs through the new
-  `syscalls::system` (argv, no shell, `dcfs/syscalls_process.h`). Tested by
+  `InChild` with an optional `Identity`, `Snapshot`, `CompareTrees`,
+  `ExpectSameAsBacking`, `Mkdir`, `Touch`); a command runs through
+  `testonly::RunCommand` (argv, no shell, `dcfs/testonly/process.h`, built on
+  the `syscalls::` fork/execv/waitpid wrappers). `InChild` carries the child's
+  Status whole (payloads included) with `testonly::SerializeStatus` and
+  `ParseStatus` (`dcfs/testonly/status_wire`, a protobuf). Tested by
   `//test/qemu:guest_test`.
 - `qemu_cc_test` gained `dcfs = True` (the dcfs binary at `/test/data/dcfs`)
-  and a disk's filesystem type (`/test/disk0` is `vdb:xfs`; guest/init
-  mounts that type), so a port can run on ext4, xfs and btrfs.
+  and a disk's filesystem type (`/test/disk0` holds `vdb:xfs`, device and type;
+  guest/init mounts that type), so a port can run on ext4, xfs and btrfs.
 - First port: `guest/removed.sh` (197 lines) is
   `//test/qemu:removed_test_{ext4,xfs,btrfs}` (`removed_test` aliases
   ext4). The testutil subcommands only it used were deleted; `removed-link`

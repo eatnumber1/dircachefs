@@ -2,10 +2,10 @@
 """The style checks over our C++ (plan step 25.21).
 
 Reads the clang-tidy and clang-query outputs that //tools:style_checks.bzl
-produced for dcfs/, dcfs/testonly/, bench/, tools/ and test/qemu/guest/ and fails on a finding
-that tools/style_checks_allow.txt does not list, and on a listed one that is
-gone (the list only shrinks), and on a NOLINT with no named check or no
-reason (25.30). The report of every rule, report-only ones
+produced for dcfs/, dcfs/testonly/, bench/, tools/ and test/qemu/guest/ and
+fails on a finding that tools/style_checks_allow.txt does not list, and on a
+listed one that is gone (the list only shrinks), and on a NOLINT with no named
+check or no reason (25.30). The report of every rule, report-only ones
 included, is printed. See style_checks.py.
 
 Arguments: allowlist=PATH tidy_config=PATH, then the output files.

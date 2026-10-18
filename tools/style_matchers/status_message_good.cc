@@ -1,8 +1,9 @@
 // Known-good input of status_message.query: a Status is put into a message
 // whole (it implements AbslStringify), and absl::string_view::size and other
 // classes' message() are not the Status's; and
-// StatusToString(const absl::Status&) is the one exempt helper for domain
-// answers.
+// StatusToString(const absl::Status&) and SerializeStatus(const
+// absl::Status&) are the exempt helpers: the first for domain answers, the
+// second serializes the whole Status.
 #include <string>
 #include <string_view>
 
@@ -19,6 +20,10 @@ struct Greeting {
 
 std::string_view StatusToString(const absl::Status &status) {
   return status.message();
+}
+
+std::string SerializeStatus(const absl::Status &status) {
+  return std::string(status.message());
 }
 
 std::string Describe(const Greeting &greeting) {

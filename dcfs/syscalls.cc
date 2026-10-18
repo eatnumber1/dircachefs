@@ -19,6 +19,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -32,8 +33,10 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/time/time.h"
 #include "dcfs/escape.h"
 #include "dcfs/fd.h"
+#include "dcfs/ret_check.h"
 #include "dcfs/status.h"
 
 namespace dcfs::syscalls {
@@ -180,7 +183,17 @@ absl::StatusOr<short> poll(int fd, short events, int timeout_ms) {
   return n == 0 ? static_cast<short>(0) : pfd.revents;
 }
 
-absl::StatusOr<int> poll(std::span<struct pollfd> fds, int timeout_ms) {
+absl::StatusOr<int> poll(std::span<struct pollfd> fds,
+                         absl::Duration timeout) {
+  // poll(2) takes milliseconds in an int, and a negative one waits for ever.
+  RET_CHECK_GE(timeout, absl::ZeroDuration());
+  RET_CHECK(timeout == absl::InfiniteDuration() ||
+            timeout <= absl::Milliseconds(INT_MAX))
+      << "poll timeout " << timeout;
+  const int timeout_ms =
+      timeout == absl::InfiniteDuration()
+          ? -1
+          : static_cast<int>(absl::ToInt64Milliseconds(timeout));
   int n = ::poll(fds.data(), fds.size(), timeout_ms);
   if (n == -1) {
     return ErrnoToStatus(errno, absl::StrCat("poll of ", fds.size(), " fds"));

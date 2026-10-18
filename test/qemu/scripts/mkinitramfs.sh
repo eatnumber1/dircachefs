@@ -28,10 +28,10 @@
 #       <test-binary> <disk0-device:fstype-or-'-'> <args> [name:path...]
 #       Per-test initramfs for qemu_cc_test: busybox, guest/init, guest/
 #       cost_lib.sh (at /tests/, where init sources it), the test
-#       binary at /test/run, /test/disk0 ("<device>:<fstype>", e.g. "vdb:ext4", iff
-#       a disks= entry was given), /test/args (<args> verbatim, guest/init
-#       word-splits it), and each `name:path` data file copied to
-#       /test/data/<name>.
+#       binary at /test/run, /test/disk0 ("<device>:<fstype>", e.g.
+#       "vdb:ext4", iff a disks= entry was given), /test/args (<args>
+#       verbatim, guest/init word-splits it), and each `name:path` data file
+#       copied to /test/data/<name>.
 #
 # In both modes, any dynamically linked binary (dcfs/fhtest/testutil/the
 # test binary; normal builds are fully static -- see qemu_cc_test.bzl -- but
@@ -192,9 +192,8 @@ if [ "$MODE" = "unit" ]; then
     mkdir -p "$(dirname "$dest")"
     cp "$src" "$dest"
     # A data file that is a program (the dcfs of qemu_cc_test's dcfs=)
-    # runs here: its libraries come with it.
+    # runs here: cp kept its mode, and its libraries come with it.
     copy_deps "$dest"
-    chmod +x "$dest"
   done
 
   chmod +x "$ROOT/init" "$ROOT/bin/"*

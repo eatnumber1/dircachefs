@@ -10,6 +10,10 @@ bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "google_benchmark", version = "1.9.5")
+# Protocol Buffers, for testonly targets only (dcfs/testonly:status_wire
+# carries a Status across a process boundary). 36.2 (BCR, 2026-09-17) is the
+# newest release that was at least two weeks old on 2026-10-18.
+bazel_dep(name = "protobuf", version = "36.2")
 
 # pjdfstest (step 4.5): github.com/pjd/pjdfstest, pinned to the current
 # master commit as of 2026-09-27. See third_party/pjdfstest/BUILD.pjdfstest

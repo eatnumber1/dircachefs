@@ -456,8 +456,10 @@ def absl_macro_sites(text):
 
 
 def absl_macro_files(root):
-    """Every .h and .cc under dcfs/, bench/, tools/ and test/qemu/guest/ (fixtures included)."""
-    for top in ("dcfs", "bench", "tools", os.path.join("test", "qemu", "guest")):
+    """Every .h and .cc under dcfs/, bench/, tools/ and test/qemu/guest/
+    (fixtures included)."""
+    for top in ("dcfs", "bench", "tools",
+                os.path.join("test", "qemu", "guest")):
         for dirpath, _, names in os.walk(os.path.join(root, top)):
             for name in sorted(names):
                 if name.endswith((".h", ".cc")):

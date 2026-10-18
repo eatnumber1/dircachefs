@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: MIT
+syntax = "proto3";
+
+package dcfs.testonly;
+
+// An absl::Status on the wire: its code, its message (bytes: a message is not
+// text) and its payloads, in the order ForEachPayload visits them.
+message StatusWire {
+  message Payload {
+    string type_url = 1;
+    bytes value = 2;
+  }
+  int32 code = 1;
+  bytes message = 2;
+  repeated Payload payloads = 3;
+}

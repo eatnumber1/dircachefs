@@ -4,6 +4,8 @@
 # drops the code and the payload (the errno), so a call of it on an
 # absl::Status (a StatusOr's status() included) is refused in dcfs/, tools/
 # and bench/, tests included; exempted only in StatusToString(const absl::Status&),
-# where a lower layer's Status is itself the domain answer.
-let inStatusToString hasAncestor(functionDecl(hasName("StatusToString")))
-match cxxMemberCallExpr(callee(cxxMethodDecl(hasName("message"), ofClass(hasName("::absl::Status")))), unless(inStatusToString), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("status_message")
+# where a lower layer's Status is itself the domain answer, and in
+# testonly::SerializeStatus, which serializes the whole Status (the message
+# is one field of it, the payloads are the others).
+let inExempt hasAncestor(functionDecl(hasAnyName("StatusToString", "SerializeStatus")))
+match cxxMemberCallExpr(callee(cxxMethodDecl(hasName("message"), ofClass(hasName("::absl::Status")))), unless(inExempt), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("status_message")

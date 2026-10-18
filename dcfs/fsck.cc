@@ -78,13 +78,9 @@ absl::StatusOr<int> RunProgram(const std::string &path,
         !syscalls::dup2(*pipe.second, STDOUT_FILENO).ok()) {
       syscalls::_exit(126);
     }
-    std::vector<char *> argv;
-    argv.push_back(const_cast<char *>(argv0.c_str()));
-    for (const std::string &word : words) {
-      argv.push_back(const_cast<char *>(word.c_str()));
-    }
-    argv.push_back(nullptr);
-    syscalls::execv(path.c_str(), argv.data()).IgnoreError();
+    std::vector<std::string> argv = {argv0};
+    argv.insert(argv.end(), words.begin(), words.end());
+    syscalls::execv(path, argv).IgnoreError();
     syscalls::_exit(127);
   }
   if (captured != nullptr) {

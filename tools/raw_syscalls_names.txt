@@ -165,4 +165,3 @@ getgid
 getegid
 getcwd
 close_range
-system

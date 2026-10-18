@@ -2,21 +2,20 @@
 #include "dcfs/syscalls_process.h"
 
 #include <signal.h>
-#include <stdlib.h>  // NOLINT(modernize-deprecated-headers): WIFEXITED lives here
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstddef>
+#include <span>
 #include <string>
-#include <vector>
+#include <string_view>
 
+#include "absl/container/fixed_array.h"
 #include "absl/status/status.h"
-#include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
-#include "absl/strings/str_join.h"
-#include "dcfs/ret_check.h"
 #include "dcfs/status.h"
 
 namespace dcfs::syscalls {
@@ -27,8 +26,15 @@ absl::StatusOr<pid_t> fork() {
   return pid;
 }
 
-absl::Status execv(const char *path, char *const argv[]) {
-  ::execv(path, argv);
+absl::Status execv(std::string_view path, std::span<const std::string> argv) {
+  const std::string path_str(path);
+  // execv(2) takes a mutable array and does not change what it points to.
+  absl::FixedArray<char *> args(argv.size() + 1);
+  for (size_t i = 0; i < argv.size(); ++i) {
+    args[i] = const_cast<char *>(argv[i].c_str());
+  }
+  args[argv.size()] = nullptr;
+  ::execv(path_str.c_str(), args.data());
   return ErrnoToStatus(errno, absl::StrCat("execv(", path, ")"));
 }
 
@@ -58,32 +64,5 @@ absl::Status pause() {
 }
 
 void _exit(int status) { ::_exit(status); }
-
-absl::Status system(const std::vector<std::string> &argv) {
-  RET_CHECK(!argv.empty()) << "system of no command";
-  std::vector<char *> args;
-  args.reserve(argv.size() + 1);
-  for (const std::string &arg : argv) {
-    args.push_back(const_cast<char *>(arg.c_str()));
-  }
-  args.push_back(nullptr);
-  ASSIGN_OR_RETURN(pid_t pid, fork());
-  if (pid == 0) {
-    // Only returns on failure; the status of that is the exit status, 127.
-    execv(args[0], args.data()).IgnoreError();
-    _exit(127);
-  }
-  int wait_status = 0;
-  RETURN_IF_ERROR(waitpid(pid, &wait_status, 0).status());
-  if (WIFEXITED(wait_status) && WEXITSTATUS(wait_status) == 0) {
-    return absl::OkStatus();
-  }
-  std::string how =
-      WIFEXITED(wait_status)
-          ? absl::StrCat("exited with status ", WEXITSTATUS(wait_status))
-          : absl::StrCat("was killed by signal ", WTERMSIG(wait_status));
-  return InternalErrorBuilder()
-         << "`" << absl::StrJoin(argv, " ") << "` " << how;
-}
 
 }  // namespace dcfs::syscalls

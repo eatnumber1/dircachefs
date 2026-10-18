@@ -2,6 +2,8 @@
 # Test-only code for dcfs (AGENTS.md: test-only code lives in *_test.cc or
 # in a testonly/ directory whose targets set testonly = 1).
 
+load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//test/qemu:qemu_cc_test.bzl", "qemu_cc_test")
 load("//tools:style_checks.bzl", "style_findings_here")
@@ -37,6 +39,96 @@ cc_library(
         "@absl//absl/algorithm:container",
         "@absl//absl/status:status_macros",
         "@absl//absl/status:statusor",
+    ],
+)
+
+# Running a command from a test, over the syscalls:: wrappers (no shell).
+cc_library(
+    name = "process",
+    srcs = ["process.cc"],
+    hdrs = ["process.h"],
+    visibility = ["//test/qemu:__pkg__"],
+    deps = [
+        "//dcfs:ret_check",
+        "//dcfs:status",
+        "//dcfs:syscalls_process",
+        "@absl//absl/status",
+        "@absl//absl/status:status_macros",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+    ],
+)
+
+qemu_cc_test(
+    name = "process_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["process_test.cc"],
+    deps = [
+        ":process",
+        "@absl//absl/status",
+        "@absl//absl/status:status_matchers",
+        "@googletest//:gtest_main",
+    ],
+)
+
+qemu_cc_test(
+    name = "files_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["files_test.cc"],
+    disks = [("vdb", "ext4", "32M")],
+    deps = [
+        ":assert_ok_and_assign",
+        ":files",
+        "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
+        "@absl//absl/status",
+        "@absl//absl/status:status_matchers",
+        "@absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
+
+proto_library(
+    name = "status_wire_proto",
+    srcs = ["status_wire.proto"],
+)
+
+cc_proto_library(
+    name = "status_wire_cc_proto",
+    deps = [":status_wire_proto"],
+)
+
+# The one place that serializes an absl::Status, payloads included (a child
+# process's answer to its parent).
+cc_library(
+    name = "status_wire",
+    srcs = ["status_wire.cc"],
+    hdrs = ["status_wire.h"],
+    visibility = ["//test/qemu:__pkg__"],
+    deps = [
+        ":status_wire_cc_proto",
+        "//dcfs:status",
+        "@absl//absl/status",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+    ],
+)
+
+qemu_cc_test(
+    name = "status_wire_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["status_wire_test.cc"],
+    deps = [
+        ":status_wire",
+        "//dcfs:status",
+        "@absl//absl/status",
+        "@absl//absl/status:status_matchers",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+        "@googletest//:gtest_main",
     ],
 )
 

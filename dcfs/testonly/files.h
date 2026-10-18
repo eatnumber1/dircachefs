@@ -20,18 +20,24 @@
 
 namespace dcfs::testonly {
 
+// Everything `fd` yields from its offset to the end of the file, or to the
+// peer's close for a socket.
+inline absl::StatusOr<std::string> ReadAll(int fd) {
+  std::string contents;
+  char buf[4096];
+  while (true) {
+    ASSIGN_OR_RETURN(size_t n, syscalls::read(fd, buf, sizeof(buf)));
+    if (n == 0) return contents;
+    contents.append(buf, n);
+  }
+}
+
 // The whole contents of the file at `path`, read through the syscalls::
 // wrappers (for /proc files and small test files).
 inline absl::StatusOr<std::string> ReadFileToString(std::string_view path) {
   ASSIGN_OR_RETURN(FileDescriptor fd,
                    syscalls::openat(AT_FDCWD, path, O_RDONLY));
-  std::string contents;
-  char buf[4096];
-  while (true) {
-    ASSIGN_OR_RETURN(size_t n, syscalls::read(*fd, buf, sizeof(buf)));
-    if (n == 0) return contents;
-    contents.append(buf, n);
-  }
+  return ReadAll(*fd);
 }
 
 // The names in the directory at `path` (without "." and ".."), sorted, read

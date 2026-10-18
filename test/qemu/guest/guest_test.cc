@@ -5,20 +5,23 @@
 #include <fcntl.h>
 #include <sys/types.h>
 
+#include <cerrno>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "absl/log/scoped_mock_log.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
-#include "absl/strings/strip.h"
+#include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/syscalls_process.h"
+#include "dcfs/testonly/process.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "dcfs/testonly/files.h"
 #include "gmock/gmock.h"
@@ -35,25 +38,17 @@ using ::testing::AllOf;
 using ::testing::ElementsAre;
 using ::testing::HasSubstr;
 using ::testing::IsEmpty;
-
-// The guest's disk (TEST_TMPDIR), without the trailing slash.
-std::string Tmp() {
-  return std::string(absl::StripSuffix(::testing::TempDir(), "/"));
-}
-
-void Mkdir(const std::string &path) {
-  ASSERT_THAT(syscalls::mkdir(path, 0755), IsOk());
-}
+using ::testing::StartsWith;
 
 // A source directory on the guest's disk, a cache database and a mount point
 // (/mnt is guest/init's).
-MountSpec NewSpec(const std::string &name) {
-  MountSpec spec = {.source = Tmp() + "/" + name + "-src",
-                    .mountpoint = "/mnt/" + name,
-                    .cache_db = "/tmp/" + name + "-cache/db"};
+MountSpec NewSpec(std::string_view name) {
+  MountSpec spec = {.source = absl::StrCat(TestTmp(), "/", name, "-src"),
+                    .mountpoint = absl::StrCat("/mnt/", name),
+                    .cache_db = absl::StrCat("/tmp/", name, "-cache/db")};
   Mkdir(spec.source);
   Mkdir(spec.mountpoint);
-  Mkdir("/tmp/" + name + "-cache");
+  Mkdir(absl::StrCat("/tmp/", name, "-cache"));
   return spec;
 }
 
@@ -101,6 +96,37 @@ TEST(InChildTest, PropagatesCallbackError) {
       StatusIs(absl::StatusCode::kPermissionDenied, HasSubstr("denied")));
 }
 
+TEST(InChildTest, AnErrnoStatusArrivesWithItsMessageAndItsErrno) {
+  absl::StatusOr<std::string> got =
+      InChild([]() -> absl::StatusOr<std::string> {
+        return ErrnoToStatus(ENOENT, "open x");
+      });
+  ASSERT_FALSE(got.ok());
+  EXPECT_EQ(got.status().message(), "open x: No such file or directory");
+  EXPECT_EQ(got.status().code(), absl::StatusCode::kNotFound);
+  EXPECT_EQ(StatusToErrno(got.status()), ENOENT);
+}
+
+TEST(InChildTest, ACallerThatCannotTakeRootBackCannotChangeUser) {
+  absl::StatusOr<std::string> got = InChild(
+      []() -> absl::StatusOr<std::string> {
+        return InChild([]() -> absl::StatusOr<std::string> { return "x"; },
+                       Identity{.uid = 2000, .gid = 2000, .groups = {}});
+      },
+      Identity{.uid = 1000, .gid = 1000, .groups = {}});
+  EXPECT_THAT(got, StatusIs(absl::StatusCode::kPermissionDenied,
+                            AllOf(HasSubstr("could not become the user"),
+                                  HasSubstr("setresgid(2000"))));
+  EXPECT_EQ(StatusToErrno(got.status()), EPERM);
+}
+
+TEST(InChildTest, AChildThatExitsWithoutAnAnswerIsAnError) {
+  EXPECT_THAT(
+      InChild([]() -> absl::StatusOr<std::string> { syscalls::_exit(0); }),
+      StatusIs(absl::StatusCode::kInternal,
+               HasSubstr("without producing an answer")));
+}
+
 TEST(InChildTest, AChildThatDiesBeforeReturningIsAnError) {
   EXPECT_THAT(
       InChild([]() -> absl::StatusOr<std::string> { syscalls::_exit(7); }),
@@ -109,7 +135,7 @@ TEST(InChildTest, AChildThatDiesBeforeReturningIsAnError) {
 }
 
 TEST(WriteFileTest, CreatesAndTruncates) {
-  std::string path = Tmp() + "/written";
+  std::string path = absl::StrCat(TestTmp(), "/written");
   ASSERT_THAT(WriteFile(path, "a longer text"), IsOk());
   ASSERT_THAT(WriteFile(path, "short"), IsOk());
   absl::StatusOr<struct stat> st = syscalls::stat(path);
@@ -117,85 +143,69 @@ TEST(WriteFileTest, CreatesAndTruncates) {
   EXPECT_EQ(st->st_size, 5);
 }
 
-TEST(ListNamesTest, NamesAreSortedBytesWithoutDots) {
-  std::string dir = Tmp() + "/names";
-  Mkdir(dir);
-  ASSERT_THAT(WriteFile(dir + "/b", ""), IsOk());
-  ASSERT_THAT(WriteFile(dir + "/a\nc", ""), IsOk());
-  ASSERT_THAT(WriteFile(dir + "/\xff", ""), IsOk());
-  EXPECT_THAT(testonly::ListDirectory(dir),
-              IsOkAndHolds(ElementsAre("a\nc", "b", "\xff")));
-}
-
-TEST(ListNamesTest, AMissingDirectoryIsAnError) {
-  EXPECT_THAT(testonly::ListDirectory(Tmp() + "/no-such"),
-              StatusIs(absl::StatusCode::kNotFound));
-}
-
 TEST(SnapshotTest, OneLinePerEntryWithTheContentsOfFiles) {
-  std::string dir = Tmp() + "/snap";
+  std::string dir = absl::StrCat(TestTmp(), "/snap");
   Mkdir(dir);
-  ASSERT_THAT(syscalls::mkdir(dir + "/d", 0700), IsOk());
-  ASSERT_THAT(WriteFile(dir + "/d/f", "abc"), IsOk());
-  ASSERT_THAT(syscalls::symlinkat("d/f", AT_FDCWD, dir + "/l"), IsOk());
-  absl::StatusOr<std::vector<std::string>> lines = Snapshot(dir);
-  ASSERT_THAT(lines, IsOk());
-  ASSERT_EQ(lines->size(), 3u);
-  EXPECT_EQ((*lines)[0], "./d d 4096 700 2");
-  EXPECT_TRUE(absl::StartsWith((*lines)[1], "./d/f f 3 644 1 "));
-  EXPECT_EQ((*lines)[2].substr(0, 5), "./l l");
+  ASSERT_THAT(syscalls::mkdir(absl::StrCat(dir, "/d"), 0700), IsOk());
+  ASSERT_THAT(WriteFile(absl::StrCat(dir, "/d/f"), "abc"), IsOk());
+  ASSERT_THAT(
+      syscalls::symlinkat("d/f", AT_FDCWD, absl::StrCat(dir, "/l")), IsOk());
+  EXPECT_THAT(Snapshot(dir),
+              IsOkAndHolds(ElementsAre("./d d 4096 700 2",
+                                       StartsWith("./d/f f 3 644 1 "),
+                                       StartsWith("./l l"))));
 }
 
-class ExpectSameTreeTest : public ::testing::Test {
+class CompareTreesTest : public ::testing::Test {
  protected:
   void SetUp() override {
     std::string test =
         ::testing::UnitTest::GetInstance()->current_test_info()->name();
-    a_ = Tmp() + "/" + test + "-a";
-    b_ = Tmp() + "/" + test + "-b";
+    a_ = absl::StrCat(TestTmp(), "/", test, "-a");
+    b_ = absl::StrCat(TestTmp(), "/", test, "-b");
     Mkdir(a_);
     Mkdir(b_);
-    ASSERT_THAT(WriteFile(a_ + "/f", "one"), IsOk());
+    ASSERT_THAT(WriteFile(absl::StrCat(a_, "/f"), "one"), IsOk());
   }
   std::string a_, b_;
 };
 
-TEST_F(ExpectSameTreeTest, EqualTreesAreOk) {
-  ASSERT_THAT(WriteFile(b_ + "/f", "one"), IsOk());
-  EXPECT_THAT(ExpectSameTree(a_, b_), IsOk());
+TEST_F(CompareTreesTest, EqualTreesAreOk) {
+  ASSERT_THAT(WriteFile(absl::StrCat(b_, "/f"), "one"), IsOk());
+  EXPECT_THAT(CompareTrees(a_, b_), IsOk());
 }
 
-TEST_F(ExpectSameTreeTest, ADifferentByteFailsAndNamesTheSide) {
-  ASSERT_THAT(WriteFile(b_ + "/f", "two"), IsOk());
-  EXPECT_THAT(ExpectSameTree(a_, b_),
+TEST_F(CompareTreesTest, ADifferentByteFailsAndNamesTheSide) {
+  ASSERT_THAT(WriteFile(absl::StrCat(b_, "/f"), "two"), IsOk());
+  EXPECT_THAT(CompareTrees(a_, b_),
               StatusIs(absl::StatusCode::kInternal,
                        AllOf(HasSubstr("< ./f f 3"), HasSubstr("> ./f f 3"))));
 }
 
-TEST_F(ExpectSameTreeTest, AMissingFileFails) {
-  EXPECT_THAT(ExpectSameTree(a_, b_),
+TEST_F(CompareTreesTest, AMissingFileFails) {
+  EXPECT_THAT(CompareTrees(a_, b_),
               StatusIs(absl::StatusCode::kInternal, HasSubstr("< ./f f 3")));
 }
 
 TEST(ExpectSameAsBackingTest, EqualAnswersPass) {
-  ExpectSameAsBacking("removed-cwd", "nlink=0", "nlink=0");
+  ExpectSameAsBacking("nlink=0", "nlink=0");
 }
 
-TEST(ExpectSameAsBackingTest, DifferentAnswersFailAndNameTheCheck) {
+TEST(ExpectSameAsBackingTest, DifferentAnswersFailAndShowBoth) {
   EXPECT_NONFATAL_FAILURE(
-      ExpectSameAsBacking("removed-cwd", "nlink=0", "ESTALE"),
-      "removed-cwd: backing filesystem: 'nlink=0'; dcfs: 'ESTALE'");
+      ExpectSameAsBacking("nlink=0", "ESTALE"),
+      "backing filesystem: 'nlink=0'; dcfs: 'ESTALE'");
 }
 
 TEST(DcfsMountTest, ServesTheBackingAndUnmountsCleanly) {
   MountSpec spec = NewSpec("serve");
-  ASSERT_THAT(WriteFile(spec.source + "/f", "data"), IsOk());
+  ASSERT_THAT(WriteFile(absl::StrCat(spec.source, "/f"), "data"), IsOk());
   absl::StatusOr<std::unique_ptr<DcfsMount>> mount = DcfsMount::Start(spec);
   ASSERT_THAT(mount, IsOk());
   EXPECT_THAT(testonly::ListDirectory(spec.mountpoint),
               IsOkAndHolds(ElementsAre("f")));
-  ASSERT_THAT(WriteFile(spec.mountpoint + "/g", "through"), IsOk());
-  EXPECT_THAT(ExpectSameTree(spec.mountpoint, spec.source), IsOk());
+  ASSERT_THAT(WriteFile(absl::StrCat(spec.mountpoint, "/g"), "through"), IsOk());
+  EXPECT_THAT(CompareTrees(spec.mountpoint, spec.source), IsOk());
   EXPECT_THAT((*mount)->Unmount(), IsOk());
   EXPECT_THAT(testonly::ListDirectory(spec.mountpoint),
               IsOkAndHolds(IsEmpty()));
@@ -205,7 +215,7 @@ TEST(DcfsMountTest, ACrashedDaemonLeavesTheBackingAndItCanBeMountedAgain) {
   MountSpec spec = NewSpec("crash");
   absl::StatusOr<std::unique_ptr<DcfsMount>> mount = DcfsMount::Start(spec);
   ASSERT_THAT(mount, IsOk());
-  ASSERT_THAT(WriteFile(spec.mountpoint + "/f", "x"), IsOk());
+  ASSERT_THAT(WriteFile(absl::StrCat(spec.mountpoint, "/f"), "x"), IsOk());
   ASSERT_THAT((*mount)->Crash(), IsOk());
   EXPECT_THAT(testonly::ListDirectory(spec.mountpoint),
               IsOkAndHolds(IsEmpty()));
@@ -230,14 +240,43 @@ TEST(DcfsMountTest, TheErrorCarriesWhatTheDaemonWrote) {
                                                HasSubstr("no_such_option")));
 }
 
-TEST(DcfsMountTest, CrashOnUnstartedMountFails) {
-  DcfsMount mount;
-  EXPECT_THAT(mount.Crash(), StatusIs(absl::StatusCode::kInternal));
+TEST(DcfsMountTest, AMountThatIsGoneCannotBeUnmountedOrCrashedAgain) {
+  MountSpec spec = NewSpec("twice");
+  absl::StatusOr<std::unique_ptr<DcfsMount>> mount = DcfsMount::Start(spec);
+  ASSERT_THAT(mount, IsOk());
+  ASSERT_THAT((*mount)->Unmount(), IsOk());
+  EXPECT_THAT((*mount)->Unmount(),
+              StatusIs(absl::StatusCode::kFailedPrecondition,
+                       HasSubstr("already unmounted or crashed")));
+  EXPECT_THAT((*mount)->Crash(),
+              StatusIs(absl::StatusCode::kFailedPrecondition,
+                       HasSubstr("already unmounted or crashed")));
 }
 
-TEST(DcfsMountTest, UnmountOnUnstartedMountFails) {
-  DcfsMount mount;
-  EXPECT_THAT(mount.Unmount(), StatusIs(absl::StatusCode::kInternal));
+TEST(DcfsMountTest, ADaemonKilledAtUnmountIsReportedWithItsLog) {
+  MountSpec spec = NewSpec("killed");
+  absl::StatusOr<std::unique_ptr<DcfsMount>> mount = DcfsMount::Start(spec);
+  ASSERT_THAT(mount, IsOk());
+  ASSERT_THAT(testonly::RunCommand({"/bin/busybox", "killall", "-9", "dcfs"}),
+              IsOk());
+  EXPECT_THAT((*mount)->Unmount(),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("was killed by signal 9 at unmount")));
+}
+
+TEST(DcfsMountTest, ADestroyedMountThatCannotBeCleanedUpSaysSo) {
+  MountSpec spec = NewSpec("leftover");
+  absl::StatusOr<std::unique_ptr<DcfsMount>> mount = DcfsMount::Start(spec);
+  ASSERT_THAT(mount, IsOk());
+  // The daemon exits by itself; the destructor's lazy umount then finds
+  // nothing mounted.
+  ASSERT_THAT(testonly::RunCommand({"/bin/umount", spec.mountpoint}), IsOk());
+  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(log, Log(absl::LogSeverity::kError, testing::_,
+                       AllOf(HasSubstr("Cleaning up the dcfs mount on"),
+                             HasSubstr("/bin/umount -l"))));
+  log.StartCapturingLogs();
+  mount->reset();
 }
 
 }  // namespace

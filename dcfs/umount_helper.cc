@@ -174,13 +174,7 @@ absl::Status UmountAndWait(const UmountArgs &args) {
   command.push_back(args.target);
   ASSIGN_OR_RETURN(pid_t child, syscalls::fork());
   if (child == 0) {
-    std::vector<char *> argv;
-    argv.reserve(command.size());
-    for (const std::string &arg : command) {
-      argv.push_back(const_cast<char *>(arg.c_str()));
-    }
-    argv.push_back(nullptr);
-    syscalls::execv(kUmountProgram, argv.data()).IgnoreError();
+    syscalls::execv(kUmountProgram, command).IgnoreError();
     syscalls::_exit(127);
   }
   int wait_status = 0;

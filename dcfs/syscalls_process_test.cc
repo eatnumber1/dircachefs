@@ -7,6 +7,8 @@
 
 #include <cerrno>
 #include <cstdlib>
+#include <string>
+#include <vector>
 
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
@@ -21,8 +23,6 @@ namespace dcfs {
 namespace {
 
 using ::absl_testing::IsOk;
-using ::absl_testing::StatusIs;
-using ::testing::HasSubstr;
 
 TEST(SyscallsProcessTest, ForkWaitpidReportsTheChildsExitStatus) {
   absl::StatusOr<pid_t> pid = syscalls::fork();
@@ -49,11 +49,24 @@ TEST(SyscallsProcessTest, KillStopsAChildAndWaitpidSeesTheSignal) {
 }
 
 TEST(SyscallsProcessTest, ExecvOfAMissingProgramIsEnoent) {
-  char arg0[] = "no_such_program";
-  char *argv[] = {arg0, nullptr};
+  const std::vector<std::string> argv = {"no_such_program"};
   absl::Status status = syscalls::execv("/no/such/program", argv);
   ASSERT_FALSE(status.ok());
   EXPECT_EQ(StatusToErrno(status), ENOENT);
+}
+
+TEST(SyscallsProcessTest, ExecvRunsTheProgramWithTheGivenArguments) {
+  absl::StatusOr<pid_t> pid = syscalls::fork();
+  ASSERT_THAT(pid, IsOk());
+  const std::vector<std::string> argv = {"sh", "-c", "exit 5"};
+  if (*pid == 0) {
+    syscalls::execv("/bin/sh", argv).IgnoreError();
+    syscalls::_exit(127);
+  }
+  int status = 0;
+  ASSERT_THAT(syscalls::waitpid(*pid, &status, 0), IsOk());
+  EXPECT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 5);
 }
 
 TEST(SyscallsProcessTest, Dup2ReplacesTheTargetDescriptor) {
@@ -75,34 +88,6 @@ TEST(SyscallsProcessTest, WaitpidOfNoChildIsEchild) {
   auto rc = syscalls::waitpid(-1, &status, WNOHANG);
   ASSERT_FALSE(rc.ok());
   EXPECT_EQ(StatusToErrno(rc.status()), ECHILD);
-}
-
-TEST(SyscallsProcessTest, SystemOfASucceedingCommandIsOk) {
-  EXPECT_THAT(syscalls::system({"/bin/true"}), IsOk());
-}
-
-TEST(SyscallsProcessTest, SystemNamesTheCommandAndItsExitStatus) {
-  EXPECT_THAT(syscalls::system({"/bin/sh", "-c", "exit 3"}),
-              StatusIs(absl::StatusCode::kInternal,
-                       HasSubstr("`/bin/sh -c exit 3` exited with status 3")));
-}
-
-TEST(SyscallsProcessTest, SystemNamesTheSignalThatEndedTheCommand) {
-  EXPECT_THAT(syscalls::system({"/bin/sh", "-c", "kill -9 $$"}),
-              StatusIs(absl::StatusCode::kInternal,
-                       HasSubstr("was killed by signal 9")));
-}
-
-TEST(SyscallsProcessTest, SystemOfAMissingProgramExitsWith127) {
-  EXPECT_THAT(syscalls::system({"/no/such/program"}),
-              StatusIs(absl::StatusCode::kInternal,
-                       HasSubstr("exited with status 127")));
-}
-
-TEST(SyscallsProcessTest, SystemOfNoCommandIsAnError) {
-  EXPECT_THAT(
-      syscalls::system({}),
-      StatusIs(absl::StatusCode::kInternal, HasSubstr("system of no command")));
 }
 
 }  // namespace

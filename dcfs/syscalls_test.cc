@@ -4,10 +4,10 @@
 #include <fcntl.h>
 #include <linux/fs.h>
 #include <linux/stat.h>
+#include <poll.h>
 #include <sys/file.h>
 #include <sys/inotify.h>
 #include <sys/mman.h>
-#include <sys/poll.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -33,6 +33,7 @@
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
+#include "absl/time/time.h"
 #include "dcfs/backing_door.h"
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
@@ -645,11 +646,27 @@ TEST(SyscallsWrapperTest, PollOfSeveralDescriptorsSaysWhichAreReady) {
                        syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
   struct pollfd fds[2] = {{.fd = *pair.first, .events = POLLIN},
                           {.fd = *pair.second, .events = POLLIN}};
-  EXPECT_THAT(syscalls::poll(fds, 0), IsOkAndHolds(0));
+  EXPECT_THAT(syscalls::poll(fds, absl::ZeroDuration()), IsOkAndHolds(0));
   ASSERT_THAT(syscalls::send(*pair.first, "x", 1, 0), IsOk());
-  EXPECT_THAT(syscalls::poll(fds, 0), IsOkAndHolds(1));
+  EXPECT_THAT(syscalls::poll(fds, absl::ZeroDuration()), IsOkAndHolds(1));
   EXPECT_EQ(fds[0].revents, 0);
   EXPECT_EQ(fds[1].revents, POLLIN);
+}
+
+TEST(SyscallsWrapperTest, PollWithAnInfiniteTimeoutWaitsForTheEvent) {
+  ASSERT_OK_AND_ASSIGN(auto pair,
+                       syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  ASSERT_THAT(syscalls::send(*pair.first, "x", 1, 0), IsOk());
+  struct pollfd fds[1] = {{.fd = *pair.second, .events = POLLIN}};
+  EXPECT_THAT(syscalls::poll(fds, absl::InfiniteDuration()), IsOkAndHolds(1));
+}
+
+TEST(SyscallsWrapperTest, PollWithATimeoutPollCannotTakeIsAnError) {
+  struct pollfd fds[1] = {};
+  EXPECT_THAT(syscalls::poll(fds, -absl::Milliseconds(1)),
+              StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(syscalls::poll(fds, absl::Hours(24 * 30)),
+              StatusIs(absl::StatusCode::kInternal));
 }
 
 TEST(SyscallsWrapperTest, PollFailsWithEinvalForMoreDescriptorsThanTheLimit) {
@@ -658,7 +675,7 @@ TEST(SyscallsWrapperTest, PollFailsWithEinvalForMoreDescriptorsThanTheLimit) {
                                   {.rlim_cur = 1, .rlim_max = saved.rlim_max}),
               IsOk());
   struct pollfd fds[4] = {};
-  absl::StatusOr<int> result = syscalls::poll(fds, 0);
+  absl::StatusOr<int> result = syscalls::poll(fds, absl::ZeroDuration());
   ASSERT_THAT(syscalls::setrlimit(RLIMIT_NOFILE, saved), IsOk());
   EXPECT_EQ(StatusToErrno(result.status()), EINVAL);
 }

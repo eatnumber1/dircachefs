@@ -263,6 +263,7 @@ cc_library(
       "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
+      "@absl//absl/time",
     ],
 )
 
@@ -280,10 +281,9 @@ cc_library(
       "//test/qemu:__pkg__",
     ],
     deps = [
-      ":ret_check",
       ":status",
+      "@absl//absl/container:fixed_array",
       "@absl//absl/status",
-      "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
     ],
@@ -380,6 +380,7 @@ qemu_cc_test(
       "@absl//absl/log",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
+      "@absl//absl/time",
       "@googletest//:gtest_main",
     ],
 )
@@ -1555,7 +1556,10 @@ qemu_cc_test(
 
 cc_library(
     name = "ret_check",
-    visibility = ["//test/qemu:__pkg__"],
+    visibility = [
+        "//dcfs/testonly:__pkg__",
+        "//test/qemu:__pkg__",
+    ],
     hdrs = ["ret_check.h"],
     deps = [
       ":status",

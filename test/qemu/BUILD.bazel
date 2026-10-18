@@ -1192,8 +1192,6 @@ qemu_test_matrix(
     tags = ["manual"],
 ) for fstype in ["ext4", "xfs", "btrfs"]]
 
-# Step 6.3 / 23.2 / 23.9: removed_test, ported to C++ (see the end of this file).
-
 # Step 23.5: a mount point or btrfs subvolume below the source is a stub
 # directory: listed, a lookup succeeds (nodeid >= 2^63), anything inside
 # gets ENOTSUP, renaming it EXDEV; stable across a restart -- see
@@ -2147,13 +2145,13 @@ py_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
-# ---- Guest tests in C++ (step 25.34) -------------------------------------
+# ---- Guest tests in C++ ----------------------------------------------------
 #
 # New guest tests are C++ (qemu_cc_test with dcfs = True and the helpers of
 # guest/guest.h), beside the scripts they replace; shell is thin glue only
-# (docs/style.md, Shell). The sources are in guest/, the targets here: a
-# BUILD file in guest/ would take every guest/ file this package's labels
-# name (guest/init, the globs) into another package.
+# (AGENTS.md). The sources are in guest/, the targets here: a BUILD file in
+# guest/ would take every guest/ file this package's labels name (guest/init,
+# the globs) into another package.
 
 cc_library(
     name = "guest",
@@ -2169,15 +2167,22 @@ cc_library(
         "//dcfs:syscalls_backing",
         "//dcfs:syscalls_process",
         "//dcfs/testonly:files",
+        "//dcfs/testonly:process",
+        "//dcfs/testonly:status_wire",
         "@absl//absl/algorithm:container",
-        "@absl//absl/container:fixed_array",
+        "@absl//absl/base:nullability",
+        "@absl//absl/cleanup",
         "@absl//absl/crc:crc32c",
         "@absl//absl/functional:function_ref",
+        "@absl//absl/log",
         "@absl//absl/status",
         "@absl//absl/status:status_macros",
+        "@absl//absl/status:status_matchers",
         "@absl//absl/status:statusor",
         "@absl//absl/strings",
         "@absl//absl/strings:str_format",
+        "@absl//absl/time",
+        "@absl//absl/types:optional_ref",
         "@googletest//:gtest",
     ],
 )
@@ -2197,6 +2202,9 @@ qemu_cc_test(
         "//dcfs:syscalls_backing",
         "//dcfs:syscalls_process",
         "//dcfs/testonly:assert_ok_and_assign",
+        "//dcfs/testonly:files",
+        "//dcfs/testonly:process",
+        "@absl//absl/log:scoped_mock_log",
         "@absl//absl/status",
         "@absl//absl/status:status_matchers",
         "@absl//absl/status:statusor",
@@ -2205,10 +2213,13 @@ qemu_cc_test(
     ],
 )
 
-# Step 6.3 (audit F10), step 23.2/23.9: objects removed while still
-# referenced (a removed working directory, an O_PATH descriptor on an unlinked
-# file) behave as on the backing filesystem instead of failing with ESTALE;
-# the port of guest/removed.sh, on each backing filesystem.
+# Objects removed while still referenced (a removed working directory, an
+# O_PATH descriptor on an unlinked file) behave as on the backing filesystem
+# instead of failing with ESTALE; the port of guest/removed.sh, on each backing
+# filesystem. A library, so that one source builds three tests (one per
+# filesystem, below); alwayslink, because a test registers itself with a
+# static initializer, which the linker drops from an archive member nothing
+# else references.
 cc_library(
     name = "removed_test_lib",
     testonly = 1,
@@ -2221,12 +2232,14 @@ cc_library(
         "//dcfs:syscalls_backing",
         "//dcfs/testonly:assert_ok_and_assign",
         "//dcfs/testonly:files",
+        "@absl//absl/base:nullability",
         "@absl//absl/status",
         "@absl//absl/status:status_macros",
         "@absl//absl/status:status_matchers",
         "@absl//absl/status:statusor",
         "@absl//absl/strings",
         "@absl//absl/strings:str_format",
+        "@absl//absl/time",
         "@googletest//:gtest",
     ],
 )
