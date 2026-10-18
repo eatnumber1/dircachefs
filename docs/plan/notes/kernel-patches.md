@@ -17,7 +17,7 @@ want to do").
 | 8 | FUSE: a `/dev/fuse` daemon opts into automatic submounts (an INIT flag setting `fc->auto_submounts`, today set only by `fs/fuse/virtio_fs.c`), so `FUSE_ATTR_SUBMOUNT` is honoured (`fs/fuse/inode.c:472`, Linux v7.3-rc4); plus libfuse support to set `fuse_attr.flags` (`lib/fuse_lowlevel.c` zeroes it today) | dcfs stubs become real submounts with their own `st_dev`, so `find -xdev`, `du -x`, `rsync -x` and `tar --one-file-system` stop at them as they do on the backing (russ, 2026-10-17) | 23.13 (question 4 of its design item 9(b)) | `ENOTSUP` inside a stub, for now (russ, 2026-10-17): the tools descend and get an error, which is loud rather than silent |
 
 Rules for the list: a reproducer in the tree for each bug (2, 3 have one;
-4 gets one with 17.2; 5 and 6 are features and get a test that detects
+4 gets one with 17.2; 5, 6 and 8 are features and get a test that detects
 the kernel's support and exercises the dcfs path both ways); the draft
 mail or patch in `docs/plan/notes/` before russ sends; after it ships,
 the dcfs step that negotiates or detects it, keeping the fallback.

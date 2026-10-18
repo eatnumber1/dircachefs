@@ -387,6 +387,26 @@ convention: the type says it may be missing, and every reader must check
 it. Ruling from the 22.5 style review, made by the orchestrator under
 russ's "Express it in the type system" above.
 
+Absence and emptiness are different states. Use `std::optional<T>` for a
+value that may be absent only when `T` has no empty or default value that
+could be mistaken for absence. Otherwise make the empty value
+unrepresentable (a strong type whose constructor rejects it, `consteval`
+for literals) or split the function, so each state the type allows is one
+the code means. If empty is itself a meaningful value distinct from
+absent, say what it means at the declaration.
+
+No in-band sentinels. A value that may be absent is `std::optional<T>`,
+and `T` cannot represent the sentinel: a strong type whose constructor
+rejects it (a node ID rejects 0, which FUSE reserves; a pid type has no
+0). Values from outside (kernel, database) enter through a factory
+returning `absl::StatusOr<T>`; constants through a `consteval`
+constructor. A type may hold a sentinel internally for storage (a
+moved-from file descriptor's -1) only if no caller can observe or
+compare against it. Convert syscall-boundary sentinels (-1, 0, pid 0)
+into types immediately. Evidence: the `DcfsMount` `pid_ = 0` bug
+(`kill(0, SIGKILL)`) found by the 25.34 review. russ, 2026-10-17: "I agree
+with your style language" (the numeric part: "Yes").
+
 ### 1.5 `syscalls.h`
 
 One thin wrapper per documented Linux syscall or libc call, named for its

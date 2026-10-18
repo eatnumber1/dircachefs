@@ -1334,3 +1334,39 @@ is the single exempt helper in `tools/style_matchers/status_message.query`; doma
 stop carrying Status where practical (benchmark skips say what could not be measured);
 Kind 3 infrastructure failures retain the whole status; `waitexit` unit test
 (`//test/qemu:waitexit_test`) with link-time `--wrap` fakes of `pidfd_open` and `poll`.
+
+## 25.35 Strong types for IDs and sentinels (russ, 2026-10-17; queued, M2)
+
+Dependencies: after the dependency-injection step, to be written.
+
+Add `dcfs/strong.h` with `StrongInt<Tag, Rep>` (explicit construction,
+`.value()`, comparisons, `AbslHashValue`, `AbslStringify`, arithmetic only
+where the tag opts in, an optional per-tag validity check run by a
+`StatusOr` factory and a `consteval` constructor) and `StrongString<Tag>`
+(owning `std::string`, same hooks, optional validity check). Each lands
+with its first users: `InodeId` (today `using InodeId = int64_t`,
+`metadata_cache.h:57`), FUSE nodeids (reject 0), backing inode numbers,
+generations, `fuse_gen`, `Populated::stub`'s id-0 sentinel,
+`LookupResult::id = 0`, pids, and file descriptors' -1.
+Note: `InterruptionPoint` (22.5) is a dedicated literal-only class and is
+not built on these.
+
+## 25.36 Codebase-wide strong-type scrub (russ, 2026-10-17; queued, M2)
+
+Dependencies: after 25.35 and the dependency-injection step, to be written.
+
+Convert the remaining typedef'd ints and sentinel-carrying values to
+strong types, starting with `syscalls::` signatures that take `uid_t`,
+`gid_t`, `mode_t`, `dev_t`, `ino_t`, `pid_t`, `off_t`, and raw fds. One
+module at a time; behaviour-neutral; the tests prove it.
+
+## 25.37 `syscalls::` buffers as spans (russ, 2026-10-17; queued, M2)
+
+Dependencies: after 25.36 and the dependency-injection step, to be written.
+
+Every `syscalls::` wrapper taking a pointer and a length (`write`,
+`pwrite`, `read`, `pread`, `getdents64`, `getxattr`, `setxattr`,
+`listxattr`, `readlinkat`, ...) takes `std::span`. The codebase's
+convention is `std::span` (102 uses, no `absl::Span`), and
+`docs/style.md` already writes it. `docs/abseil-utilities.md`'s swaps
+table says the same for `(const T *p, size_t n)`, with that reason.

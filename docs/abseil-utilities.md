@@ -80,7 +80,7 @@ the rule), `-` for none.
 | `std::map` / `std::set` (ordered) | `absl::btree_map` / `btree_set` (B-tree; insertions and erasures may invalidate pointers and iterators, unlike `std::map`) | `container/btree_map.h`, `btree_set.h` | adv. |
 | `std::vector<T> v(n)` that is filled once and never resized | `absl::FixedArray<T> v(n)` (small arrays inline, no `push_back`) | `container/fixed_array.h` | 1.2 |
 | `std::vector` that is usually tiny | `absl::InlinedVector<T, N>` | `container/inlined_vector.h` | 1.2 (named) |
-| `(const T *p, size_t n)` or `const std::vector<T> &` for a read-only parameter | `absl::Span<const T>` (mutable: `Span<T>`; `MakeSpan`, `MakeConstSpan`) | `types/span.h` | adv. |
+| `(const T *p, size_t n)` or `const std::vector<T> &` for a read-only parameter | `std::span<const T>` in dcfs (the codebase's convention: 102 `std::span` uses, no `absl::Span`; step 25.37). `absl::Span<const T>` is the Abseil equivalent (mutable: `Span<T>`; `MakeSpan`, `MakeConstSpan`) | `types/span.h` | adv. |
 | a random-access view over a non-contiguous or projected container | `absl::AnySpan<T>` (check the cost note in the header) | `types/any_span.h` | - |
 | a `const T *` parameter that is "optional" | `absl::optional_ref<const T>` (an `optional`-like view of a pointer; accepts temporaries). `docs/style.md` 1.2 prefers a reference or `absl_nullable` for a pointer; this is the third option, unruled | `types/optional_ref.h` | no ruling |
 | a `std::deque` used as a FIFO | `absl::chunked_queue<T>` (tunable blocks; no random access) | `container/chunked_queue.h` | - |
