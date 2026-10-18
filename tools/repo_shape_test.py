@@ -53,6 +53,9 @@ class RepoShapeTest(unittest.TestCase):
     def test_every_ratified_rule_is_in_exactly_one_index(self):
         self.assertEqual([], repo_shape.rule_index(ROOT["root"]))
 
+    def test_agent_files_do_not_restate_attributed_rules(self):
+        self.assertEqual([], repo_shape.agent_file_attributions(ROOT["root"]))
+
     def test_every_source_file_has_an_spdx_licence(self):
         self.assertEqual([], repo_shape.spdx_licenses(ROOT["root"]))
 

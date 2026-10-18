@@ -77,6 +77,22 @@ Non-goals:
   that dcfs deliberately does not pursue (see
   [Identity model](#identity-model)).
 - **Unprivileged operation.** dcfs runs as root, full stop.
+- <a id="rule-no-backcompat"></a>
+  **No backward compatibility until the first deployment** (russ, several
+  times, 2026-10-10/11: "we've never shipped dcfs", "we haven't shipped. No
+  need for back-compat"): a removed option, format or behaviour is simply
+  gone, with no shim, deprecation message, migration or test of the old
+  spelling. That includes the cache database schema: a schema change before
+  the first deployment bumps the version and starts fresh, no migration
+  (russ, 2026-10-11: "I don't own trial databases. I don't care about
+  migration until we ship ... back-compat is *irrelevant* right now"). The
+  migration machinery (`migrate.cc`) stays in place for the day it matters
+  and stays tested (russ: "The migration machinery should still be
+  tested though"): `migrate_test.cc` (18 cases today) keeps exercising it
+  against synthetic older-schema databases built by the test, and keeps
+  passing under the coverage gate; what pre-ship schema changes skip is
+  writing a migration for the real previous version, not the tests of the
+  mechanism.
 
 <a id="rule-behave-like-backing"></a>
 ### Behave like the backing, only faster
@@ -163,6 +179,54 @@ A claim about what the backing, the kernel or POSIX promises cites its
 source where it is written, and a native differential test backs it where
 it can be measured (`docs/style.md` 1.12).
 
+- <a id="rule-fuse-op-keeps-backing-contract"></a>
+  **Each FUSE operation keeps the backing's contract.** russ, 2026-10-10:
+  "for each fuse operation, I prefer you implement the same contract that
+  the backing fs implements. If it's ERANGE-on-races with the backing store,
+  then ERANGE-on-races for us. If the syscall is supposed to be atomic (like
+  `rename`), then ours _must_ be atomic (even if that means an infinite retry
+  loop internally)." So the question for any race is: what does the syscall
+  promise its caller on a native filesystem? `listxattr`/`getxattr` promise
+  nothing across a concurrent writer and answer ERANGE; dcfs answers ERANGE.
+  `rename` promises atomicity (rename(2): "If newpath already exists, it
+  will be atomically replaced, so that there is no point at which another
+  process attempting to access newpath will find it missing"; a rename
+  either happened or did not); dcfs's own bookkeeping may never turn that
+  into an EAGAIN or a partial answer, so an internal conflict is resolved
+  by waiting or by retrying without bound, never reported. `readdir`
+  promises no snapshot (POSIX readdir: "If a file is removed from or added
+  to the directory after the most recent call to opendir() or rewinddir(),
+  whether a subsequent call to readdir() returns an entry for that file is
+  unspecified"; getdents64(2) says nothing about consistency across calls):
+  entries added or removed during a listing may or may not appear, and dcfs
+  owes no more. `unlink` has no atomicity claim here: neither unlink(2) nor
+  POSIX promises more than that the name is removed, so a stronger claim
+  needs a source or a native differential test first. Every contract claim
+  cites its source where it is written (POSIX text, a man page, or the
+  kernel code path) and, where it can be measured, a native differential
+  test (the same operations with dcfs out of the loop) backs it: an
+  unsourced claim of atomicity is how a whole-directory snapshot got built
+  where `getdents64` streams pages. A comment at each such site names the
+  contract it keeps and where it is written. Behaving like the backing, only
+  faster, is `docs/design.md`'s "Behave like the backing, only faster"; 22.7
+  (streamed directory population) builds on this paragraph. A claim about
+  what a signal does inside one syscall (EINTR when a signal arrives during
+  the call) may rest on the kernel code path alone when no deterministic
+  native test can place the signal, since a racy test would break
+  load-agnosticism; the citation names the kernel path and its version
+  (orchestrator ruling, 2026-10-18, from the 22.5 round 3 style review).
+- <a id="rule-most-useful-result"></a>
+  **Where the contract allows more than one answer, give the most useful
+  one.** russ, 2026-10-17: "When there's ambiguity, you should be choosing
+  the most _useful_ result." A readdir interrupted after it has built
+  some entries replies them as a short listing (a valid getdents result;
+  the next call continues) rather than EINTR, which would discard them. (A
+  short batch is not the "partial answer" ruled out above: getdents
+  returns listings in batches, a short batch is a valid result, and
+  entries added or removed during the listing may or may not appear, as on
+  the backing.) A read interrupted after some bytes returns them. The same
+  test applies to any choice the backing's contract leaves open.
+
 <a id="rule-bounded-memory"></a>
 ### Bounded memory
 
@@ -196,7 +260,8 @@ the slope at zero.
   `flock(2)` on the database file for the life of the process. SQLite
   would serialize two daemons' transactions but not their three-phase
   protocols or their in-memory state.
-- <a id="rule-root-required"></a>**Root.** dcfs needs `CAP_DAC_READ_SEARCH` for `open_by_handle_at`,
+- <a id="rule-root-required"></a>
+  **Root.** dcfs needs `CAP_DAC_READ_SEARCH` for `open_by_handle_at`,
   `CAP_SYS_ADMIN` to mount and to register passthrough backing files, and
   `CAP_SETUID`/`CAP_SETGID` to take on callers' filesystem credentials.
   There are no fallback paths for running without them (for example, no
@@ -281,6 +346,7 @@ Rules that keep the layering honest:
 - **The SQLite wrapper opens connections through one factory that takes a
   VFS name,** so an io_uring `sqlite3_vfs` can be dropped in later.
 
+<a id="rule-identity-model"></a>
 ## Identity model
 
 ### Node ids
@@ -331,6 +397,7 @@ listings report the same numbers as `d_ino`, `.` and `..` included (`..`
 of the root is the root itself, as for a mount's root). `st_dev` is the
 FUSE mount's.
 
+<a id="rule-identity-match"></a>
 ### Matching a row to a backing object
 
 A row describes the same backing object only if all of these hold
@@ -1116,6 +1183,7 @@ opening a file (contents go through passthrough), any mutation, `statfs`
 superblock in memory), `fsync`, attribute refreshes of entries left
 unknown, and, by design, nothing else.
 
+<a id="rule-write-through-phases"></a>
 ## The write-through protocol
 
 Every mutation runs in three phases:
@@ -1364,6 +1432,7 @@ and btrfs by `RemovedTest.ChangingAnUnlinkedOpenFileAnswersAsTheBackingDoes`).
 
 ## Crashes, power loss and recovery
 
+<a id="rule-daemon-crash-safe"></a>
 ### A daemon crash
 
 After a daemon crash the database is exactly its last committed state
@@ -1372,6 +1441,7 @@ and every backing syscall that returned is kept. Each mutation is
 therefore safe at every commit boundary: between phase 1 and phase 3 the
 affected records read `unknown` and are re-read on demand.
 
+<a id="rule-power-loss-recovery"></a>
 ### A power loss or kernel crash
 
 This is harder. SQLite runs in WAL mode at `synchronous=NORMAL`, so an
@@ -1491,6 +1561,7 @@ another mount refuses to start, and a running one fails every sync point
 (the dirty set stays, the run ends unclean): remount it read-write again,
 or mount SOURCE read-only (step 11.5b).
 
+<a id="rule-sync-points"></a>
 ### Sync points
 
 A sync point is a point where something is made durable. The **periodic
@@ -1730,7 +1801,8 @@ readdirs per directory.
 Within one thread, nothing can interleave with a request, so today every
 request sees the cache in a consistent state between its own steps.
 
-<a id="rule-no-interim-compromises"></a>**No interim compromises toward the coroutine design** (russ, 2026-09-27,
+<a id="rule-no-interim-compromises"></a>
+**No interim compromises toward the coroutine design** (russ, 2026-09-27,
 when the project was planned): the code today is simple, synchronous and
 single-threaded, and reviewable in small chunks. It does not take on
 complexity now for the sake of the planned coroutines and io_uring

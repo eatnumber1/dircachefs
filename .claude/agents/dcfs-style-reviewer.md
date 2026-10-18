@@ -30,10 +30,10 @@ recur and the guide cannot settle.
 Read `docs/style.md` in full (it is the standard; its sections carry
 russ's words and dates), `AGENTS.md`, and the step text your prompt gives
 you. Where `docs/style.md` defers to Google's guides, check the rule in the
-pinned local copy, not from memory: run `bazel build //third_party/google_styleguide:guides` and read the relevant section of `bazel-bin/third_party/google_styleguide/{cpp,python,shell,markdown}.md` (`grep -n '^#'` lists the headings) rather than rely on memory.
-Then review the diff named in your prompt.
+pinned local copy that `docs/style.md` describes, not from memory. Then
+review the diff named in your prompt.
 
-Before you review, read `docs/rules/index-style.md`, plus the entries of `docs/rules/index-code.md` that the diff touches.
+Before you review, read `docs/rules/index-style.md` and `docs/rules/index-code.md`.
 
 **Findings** are violations of a written rule: cite the section (for
 example "1.6a, general form" or "1.10a, confession comment"), give
@@ -70,14 +70,8 @@ careful reader with the whole guide in front of them decides it: the
 code, the alternatives as code, your lean and why, and the sentence each
 answer adds. Keep the count low; five sharp questions beat twenty.
 
-Run the reviewer checklist in `docs/abseil-utilities.md` section 3 on every diff: a hand-rolled utility that the pinned Abseil provides is a finding (cite the swaps-table row).
+Run the reviewer checklist in `docs/abseil-utilities.md` section 3 on every
+diff.
 
-End every report with a findings block (russ, 2026-10-17, review-findings
-data): one finding per line, fields separated by " | ": severity
-(blocker|should|nit) | category (correctness, test-gap, model-gap,
-dead-code, comment-accuracy, contract-claim, status-handling, naming,
-test-shape, commit-hygiene, docs, style-other) | rule (style.md section or
-AGENTS.md rule, or empty) | file:line | one-line summary | mechanizable
-(checked|could|no) | open. A review with no findings ends with the single
-line: none. The orchestrator appends the block to
-`docs/plan/review-findings.tsv` with `tools/agents/review_findings.py`.
+End every report with the findings block `docs/plan/process.md` describes
+(rule "Track review findings so trends show").

@@ -63,9 +63,14 @@ def good_tree(root):
     write(root, "docs/design.md", "# Design\n")
     write(root, "docs/plan/process.md", "# Process\n")
     write(root, "CLAUDE.md", "# Claude\n")
+    write(root, ".claude/agents/dcfs-x.md", "---\nname: dcfs-x\n---\nA role.\n")
+    write(root, "tools/repo_shape_attributions.txt",
+          "# known\n.claude/agents/dcfs-known.md 1 | role-only: a fixture\n")
+    write(root, ".claude/agents/dcfs-known.md",
+          "Why this role exists (russ, 2026-10-16: the pre-commit review).\n")
     write(root, "docs/rules/index-style.md",
-          "- No timers. [style](../style.md#rule-no-timers)\n"
-          "- Test first. [style](../style.md#rule-test-first)\n")
+          "- No timers. [style](/docs/style.md#rule-no-timers)\n"
+          "- Test first. [style](/docs/style.md#rule-test-first)\n")
     write(root, "AGENTS.md",
           "# Rules\n\n| Task | Read |\n|---|---|\n"
           "| Style | [style](docs/rules/index-style.md) |\n")
@@ -95,7 +100,7 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
 
     def test_a_rule_in_two_indexes_is_reported(self):
         write(self.root, "docs/rules/index-code.md",
-              "- Test first. [style](../style.md#rule-test-first)\n")
+              "- Test first. [style](/docs/style.md#rule-test-first)\n")
         write(self.root, "AGENTS.md",
               "[a](docs/rules/index-style.md) [b](docs/rules/index-code.md)\n")
         problems = repo_shape.rule_index(self.root)
@@ -105,9 +110,9 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
 
     def test_an_index_entry_for_a_rule_that_is_gone_is_reported(self):
         write(self.root, "docs/rules/index-style.md",
-              "- No timers. [style](../style.md#rule-no-timers)\n"
-              "- Test first. [style](../style.md#rule-test-first)\n"
-              "- Gone. [process](../plan/process.md#rule-gone)\n")
+              "- No timers. [style](/docs/style.md#rule-no-timers)\n"
+              "- Test first. [style](/docs/style.md#rule-test-first)\n"
+              "- Gone. [process](/docs/plan/process.md#rule-gone)\n")
         problems = repo_shape.rule_index(self.root)
         self.assertEqual(1, len(problems), problems)
         self.assertIn("docs/rules/index-style.md links to "
@@ -120,12 +125,50 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
         self.assertIn("docs/rules/index-code.md is not linked from AGENTS.md",
                       problems[0])
 
+    def test_an_index_only_mentioned_in_agents_md_is_reported(self):
+        write(self.root, "docs/rules/index-code.md", "Nothing yet.\n")
+        write(self.root, "AGENTS.md",
+              "[a](docs/rules/index-style.md) docs/rules/index-code.md\n")
+        problems = repo_shape.rule_index(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("docs/rules/index-code.md is not linked from AGENTS.md",
+                      problems[0])
+
+    def test_a_relative_index_link_is_reported(self):
+        write(self.root, "docs/rules/index-style.md",
+              "- No timers. [style](../style.md#rule-no-timers)\n"
+              "- Test first. [style](/docs/style.md#rule-test-first)\n")
+        problems = repo_shape.rule_index(self.root)
+        self.assertEqual(2, len(problems), problems)
+        self.assertIn("docs/rules/index-style.md links to ../style.md"
+                      "#rule-no-timers with a relative path", problems[0])
+
+    def test_a_restated_attribution_in_an_agent_file_is_reported(self):
+        write(self.root, ".claude/agents/dcfs-x.md",
+              "No timers (russ,\n2026-10-09: wait on the event).\n")
+        problems = repo_shape.agent_file_attributions(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn(".claude/agents/dcfs-x.md has 1", problems[0])
+
+    def test_claude_md_attributions_are_counted_too(self):
+        write(self.root, "CLAUDE.md", "A rule (russ, 2026-10-06).\n")
+        problems = repo_shape.agent_file_attributions(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("CLAUDE.md has 1", problems[0])
+
+    def test_a_listed_attribution_count_must_match(self):
+        write(self.root, ".claude/agents/dcfs-known.md", "No attribution.\n")
+        problems = repo_shape.agent_file_attributions(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("lists 1 for .claude/agents/dcfs-known.md, which has 0",
+                      problems[0])
+
     def test_a_marker_used_twice_in_a_file_is_reported(self):
         write(self.root, "CLAUDE.md",
               '- <a id="rule-x"></a>One.\n- <a id="rule-x"></a>Two.\n')
         write(self.root, "docs/rules/index-style.md",
-              "[a](../style.md#rule-no-timers) "
-              "[b](../style.md#rule-test-first) [c](../../CLAUDE.md#rule-x)\n")
+              "[a](/docs/style.md#rule-no-timers) "
+              "[b](/docs/style.md#rule-test-first) [c](/CLAUDE.md#rule-x)\n")
         problems = repo_shape.rule_index(self.root)
         self.assertEqual(1, len(problems), problems)
         self.assertIn("CLAUDE.md marks rule x twice", problems[0])

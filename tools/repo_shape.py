@@ -32,8 +32,11 @@ Each function takes the root of a source tree and returns a list of problems
 - rule_index: every ratified rule is in exactly one rule index. A rule in
   docs/style.md, docs/design.md, docs/plan/process.md or CLAUDE.md is marked
   by an anchor `<a id="rule-NAME"></a>`; exactly one docs/rules/index-*.md
-  links to `<file>#rule-NAME` for every marker, every such link has its
-  marker, and AGENTS.md links to every index (russ, 2026-10-18).
+  links to `/<file>#rule-NAME` for every marker, every such link has its
+  marker, and AGENTS.md links to every index (russ, 2026-10-18);
+- agent_file_attributions: .claude/agents/*.md and CLAUDE.md restate no rule
+  with a "russ, 20NN-" attribution beyond the role-only ones counted in
+  tools/repo_shape_attributions.txt.
 
 (The fourth rule, commit subjects, needs git: .github/ci/commit_subjects.sh.)
 """
@@ -611,6 +614,7 @@ def spdx_licenses(root, tracked=None):
 RULE_FILES = ("docs/style.md", "docs/design.md", "docs/plan/process.md",
               "CLAUDE.md")
 RULE_MARKER = re.compile(r'<a id="rule-([a-z0-9-]+)"></a>')
+RULE_INDEX_LINK = re.compile(r"\]\(/?(docs/rules/index-[a-z0-9-]+\.md)\)")
 RULE_LINK = re.compile(r"\]\(([^)#\s]+)#rule-([a-z0-9-]+)\)")
 
 
@@ -629,9 +633,13 @@ def rule_index(root):
     indexes = rule_indexes(root)
     in_indexes = {}
     for index in indexes:
-        base = os.path.dirname(index)
         for target, name in RULE_LINK.findall(read(root, index)):
-            path = os.path.normpath(os.path.join(base, target))
+            if not target.startswith("/"):
+                problems.append(
+                    "%s links to %s#rule-%s with a relative path: use the "
+                    "repo-absolute /path" % (index, target, name))
+                continue
+            path = target[1:]
             if (path, name) not in marked:
                 problems.append(
                     "%s links to %s#rule-%s, which no file marks: fix or "
@@ -649,9 +657,9 @@ def rule_index(root):
             problems.append(
                 "rule %s of %s is in %d indexes (%s): a rule is in exactly "
                 "one" % (name, path, len(found), ", ".join(sorted(found))))
-    agents = read(root, "AGENTS.md")
+    linked_indexes = set(RULE_INDEX_LINK.findall(read(root, "AGENTS.md")))
     for index in indexes:
-        if index not in agents:
+        if index not in linked_indexes:
             problems.append(
                 "%s is not linked from AGENTS.md: add it to the table of "
                 "what to read" % index)
@@ -666,6 +674,49 @@ def rule_indexes(root):
                   if name.startswith("index-") and name.endswith(".md"))
 
 
+ATTRIBUTIONS_LIST = ("tools", "repo_shape_attributions.txt")
+ATTRIBUTION_RE = re.compile(r"russ,\s+20\d\d-")
+
+
+def agent_file_attributions(root):
+    """A rule is homed once; agent files and CLAUDE.md point to it.
+
+    A "russ, 20NN-" attribution in .claude/agents/*.md or CLAUDE.md is a
+    rule restated (or homed) outside style.md, design.md and process.md. The
+    known ones are counted per file in tools/repo_shape_attributions.txt,
+    each with the reason it is role-only; the list only shrinks.
+    """
+    known = {}
+    for line in read(root, *ATTRIBUTIONS_LIST).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        head, _, reason = line.partition("|")
+        path, count = head.split()
+        known[path] = int(count)
+    paths = ["CLAUDE.md"]
+    agents = os.path.join(root, ".claude", "agents")
+    if os.path.isdir(agents):
+        paths += [".claude/agents/" + name
+                  for name in sorted(os.listdir(agents))
+                  if name.endswith(".md")]
+    problems = []
+    for path in paths:
+        count = len(ATTRIBUTION_RE.findall(read(root, path)))
+        if count > known.get(path, 0):
+            problems.append(
+                "%s has %d 'russ, 20NN-' attribution(s), %d known: a rule "
+                "belongs in docs/style.md, docs/design.md or "
+                "docs/plan/process.md with a marker; point to it here" %
+                (path, count, known.get(path, 0)))
+        elif count < known.get(path, 0):
+            problems.append(
+                "tools/repo_shape_attributions.txt lists %d for %s, which "
+                "has %d: set the count to the file's (the list only "
+                "shrinks)" % (known[path], path, count))
+    return problems
+
+
 def all_problems(root):
     return (third_party_readmes(root) + guest_scripts_used(root) +
             guest_sleeps(root) + no_new_guest_shell(root) +
@@ -673,4 +724,4 @@ def all_problems(root):
             no_test_only_comments(root) + no_testonly_friends(root) +
             fixed_arrays(root) + project_prefix(root) +
             absl_prefixed_status_macros(root) + nodiscard_on_status(root) +
-            rule_index(root))
+            rule_index(root) + agent_file_attributions(root))

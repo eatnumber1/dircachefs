@@ -1,36 +1,35 @@
 # Index of protocol rules
 
-Read this before you touch the write-through protocol, the dirty set, recovery,
-cancellation, concurrency or `formal/`: the tri-state rule, the TLA+ model and
-the rules that keep coroutines possible. Each line is a ratified rule, in russ's
-words with the date where there is one, and links to the section that holds its
-reasoning. `AGENTS.md` says which indexes to read for which task.
+Read this before you touch the write-through protocol, identity, the dirty set,
+recovery, cancellation, concurrency or `formal/`. Each line is a ratified rule,
+in russ's words, or marked as an orchestrator ruling, with the date where there
+is one and a link to the section that holds its reasoning. `AGENTS.md` says
+which indexes to read for which task.
 
-- **Tri-state records.** Every database record that mirrors something on the
-  backing filesystem is present, absent or unknown, and a mutation sets it
-  unknown before the backing syscall and present/absent after.
-  [style 1.8](../style.md#rule-tri-state-records)
-- **The protocol has a model.** A change to the write-through protocol (mutation
-  phases, fills and their guards, completeness, the dirty set, sync points,
-  recovery) updates the TLA+ model in `formal/` in the same change, and `bazel
-  test //formal/...` passes (see `formal/README.md`, "Changing the model"). A
-  protocol bug the model can express gets a `formal/known_bugs/` variant whose
-  test expects its counterexample. Fixing a gap listed in `formal/findings/`
-  moves its configuration into the real model. From phase 12.2, trace validation
-  fails if the code does something the model does not allow.
-  [style 1.8](../style.md#rule-protocol-change-updates-model),
-  [design](../design.md#rule-design-protocol-model),
-  [style 6](../style.md#rule-tla-conventions)
-- **Requests are cancellable** (from phase 22): any operation that can take more
-  than about 100 ms on a slow backing checks for interruption at interruption
-  points (`dcfs/interruption_point.h`), each just before a backing syscall and
-  never between a mutation's syscall and its phase 3, and has a cancellation
-  test; cancellation never breaks the tri-state rule.
-  [style 1.8](../style.md#rule-requests-cancellable),
-  [design](../design.md#rule-design-cancellation)
-- **No interim compromises toward the coroutine design** (russ, 2026-09-27):
-  simple, synchronous, single-threaded, reviewable in small chunks; the rules
-  that hold now are listed in [design](../design.md#rule-coroutine-ready-rules);
-  [design](../design.md#rule-no-interim-compromises)
-- **Runtime invariant checks**: the rules the design states in prose are also
-  checked while tests run. [design](../design.md#rule-runtime-invariant-checks)
+- Tri-state records: present, absent or unknown, set unknown before the backing
+  syscall. [style 1.8](/docs/style.md#rule-tri-state-records)
+- A protocol change updates the TLA+ model in the same change.
+  [style 1.8](/docs/style.md#rule-protocol-change-updates-model),
+  [design](/docs/design.md#rule-design-protocol-model),
+  [style 6](/docs/style.md#rule-tla-conventions)
+- Requests are cancellable at interruption points (from phase 22).
+  [style 1.8](/docs/style.md#rule-requests-cancellable),
+  [design](/docs/design.md#rule-design-cancellation)
+- Rules that hold now so that coroutines need no redesign.
+  [design](/docs/design.md#rule-coroutine-ready-rules)
+- Runtime invariant checks run while tests run.
+  [design](/docs/design.md#rule-runtime-invariant-checks)
+- Identity comes from the backing filesystem, and a row matches a backing object
+  only if device, inode, generation, handle and birth time agree.
+  [design](/docs/design.md#rule-identity-model),
+  [design](/docs/design.md#rule-identity-match)
+- Every mutation is three phases: mark unknown durably, make the backing
+  syscall, record the result.
+  [design](/docs/design.md#rule-write-through-phases)
+- A daemon crash leaves the database at its last commit; a power loss leaves a
+  prefix, and recovery re-probes what the dirty set names.
+  [design](/docs/design.md#rule-daemon-crash-safe),
+  [design](/docs/design.md#rule-power-loss-recovery)
+- FSYNC and FSYNCDIR are a file's sync points and run no syncfs; the periodic
+  sync point runs syncfs (russ, 2026-10-18).
+  [design](/docs/design.md#rule-sync-points)

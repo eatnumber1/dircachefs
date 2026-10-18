@@ -1,0 +1,3 @@
+# Attributions ("russ, 20NN-") that stay in .claude/agents/*.md and CLAUDE.md: path count | reason.
+CLAUDE.md 5 | the agent-type table, the orchestrator duties, the effort conflict note, and the machine rules Docker and commit-to-main, which no other document holds
+.claude/agents/dcfs-style-reviewer.md 2 | role-only: why the style reviewer exists and the questions mandate russ gave it

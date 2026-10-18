@@ -27,9 +27,9 @@ drift. Each rule is what most of the code does, or is in `AGENTS.md`,
 <a id="rule-precedence-abseil-tips"></a>
 ## Precedence, and the Abseil Tips of the Week
 
-When rules disagree, the first applies: (1) `AGENTS.md` and this guide's own
-rules; (2) the Google C++ style guide (and Google's other style guides, as
-above); (3) Abseil's Tips of the Week (https://abseil.io/tips/) as design
+When rules disagree, the first applies: (1) `AGENTS.md`, the `docs/rules`
+indexes and every rule they link; (2) the Google C++ style guide (and Google's
+other style guides, as above); (3) Abseil's Tips of the Week (https://abseil.io/tips/) as design
 guidance. russ, 2026-10-09: "we adopt all of https://abseil.io/tips/. It's
 a 'rule', but not as strong of a rule as the Google style guide or other
 style rules I've established in the past. Coding and review agents should
@@ -46,7 +46,8 @@ use it as design guidance rather than firm rules."
 
 ### 1.1 Enforced mechanically
 
-- <a id="rule-formatting-enforced"></a>**Formatting is enforced, not requested, and it is Google's, with one
+- <a id="rule-formatting-enforced"></a>
+  **Formatting is enforced, not requested, and it is Google's, with one
   kept deviation.** `.clang-format` is `BasedOnStyle: Google` plus
   `PointerAlignment: Right` (with `DerivePointerAlignment: false`, which it
   needs) and nothing else (russ, 2026-10-11: "When we do a codebase-wide
@@ -58,10 +59,12 @@ use it as design guidance rather than firm rules."
   (Google shell style) follow in 7.6b with their pins. The one-time
   reformat is one commit, listed in `.git-blame-ignore-revs`, made when no
   lane holds an unmerged code branch, since it touches most lines.
-- <a id="rule-reformat-commit"></a>**A mechanical reformat commit** (clang-format, shfmt) may use the `style:`
+- <a id="rule-reformat-commit"></a>
+  **A mechanical reformat commit** (clang-format, shfmt) may use the `style:`
   commit prefix (section 7) and is listed in `.git-blame-ignore-revs`
   (orchestrator ruling, 2026-10-18).
-- <a id="rule-structural-style-checks"></a>**Structural style rules are checked by the pinned LLVM's own tools, in a
+- <a id="rule-structural-style-checks"></a>
+  **Structural style rules are checked by the pinned LLVM's own tools, in a
   test of tier `small`** (25.21): `//tools:style_checks_test` runs
   clang-tidy (`.clang-tidy`: the `google-`, `abseil-`, `bugprone-`, `cert-`,
   `concurrency-`, `misc-`, `modernize-`, `performance-`, `portability-` and
@@ -85,7 +88,8 @@ use it as design guidance rather than firm rules."
   breaking the guide, and it stays at the site). A bare `NOLINT`, a wildcard
   and a check name with no reason fail `//tools:style_checks_test`. The
   allowlist is legacy backlog only: it shrinks and never gains a line.
-- <a id="rule-include-what-you-use"></a>**Include what you use, enforced**: a target includes only headers of its
+- <a id="rule-include-what-you-use"></a>
+  **Include what you use, enforced**: a target includes only headers of its
   direct deps (`layering_check`) and clang-tidy's `misc-include-cleaner`
   finds missing and unused includes, both with phase 7's clang toolchain
   (F6). Until then, state each direct dep in BUILD and add no include that
@@ -94,7 +98,8 @@ use it as design guidance rather than firm rules."
   from that header.** A macro such as `WIFEXITED`, `SIGKILL` or `SEEK_SET`
   gets `NOLINTNEXTLINE(modernize-deprecated-headers)` on its include, with the
   reason in the comment directly above it (orchestrator ruling, 2026-10-18).
-- <a id="rule-no-uapi-copies"></a>**No copies of UAPI definitions.** The pinned sysroot's kernel headers
+- <a id="rule-no-uapi-copies"></a>
+  **No copies of UAPI definitions.** The pinned sysroot's kernel headers
   (`<linux/fs.h>` and the rest of trixie's linux-libc-dev, step 7.1b) are
   the only source of a kernel constant, struct or ioctl number: no
   `#ifndef FS_IOC_...` shim, no local `struct` mirroring a UAPI one. A
@@ -107,15 +112,18 @@ use it as design guidance rather than firm rules."
 - Include blocks are what clang-format's Google style produces: own header,
   C headers, C++ headers, then every other header in one sorted block
   (`"absl/..."`, `"dcfs/..."`, `"fuse_lowlevel.h"`).
-- <a id="rule-warnings-are-errors"></a>Warnings: `-Werror`, `-Wimplicit-fallthrough`, `-Wno-sign-compare`
+- <a id="rule-warnings-are-errors"></a>
+  Warnings: `-Werror`, `-Wimplicit-fallthrough`, `-Wno-sign-compare`
   today (`.bazelrc`); from phase 7 `-Weverything -Werror` with every
   disabled warning listed in `.bazelrc` with a reason. A suppression
   carries a comment saying why.
-- <a id="rule-compile-time-logic"></a>**Move logic to compile time where you can** (russ, 2026-10-17): the
+- <a id="rule-compile-time-logic"></a>
+  **Move logic to compile time where you can** (russ, 2026-10-17): the
   type system, `constexpr`, `consteval`. An operation selector known at the
   call site (fcntl's `cmd`, an ioctl request) is a template argument; a
   runtime overload exists only where the value must come from a variable.
-- <a id="rule-mechanize-rules"></a>**Mechanize every rule you can** (russ, 2026-10-09, asked whether the three
+- <a id="rule-mechanize-rules"></a>
+  **Mechanize every rule you can** (russ, 2026-10-09, asked whether the three
   syscall-wrapper libraries `syscalls.h`, `syscalls_backing.h` (with a golden
   dependents test) and `syscalls_process.h` were worth the extra headers:
   "Keep it. Mechanical invariant enforcement is more valuable."; russ,
@@ -130,9 +138,11 @@ use it as design guidance rather than firm rules."
 
 ### 1.2 Narrowing Google's rules
 
-- <a id="rule-std-optional-string-view"></a>**`std::string_view`, `std::optional`**, not the `absl::` aliases (none
+- <a id="rule-std-optional-string-view"></a>
+  **`std::string_view`, `std::optional`**, not the `absl::` aliases (none
   left in production code).
-- <a id="rule-function-names"></a>**Function names**: `syscalls::` wrappers carry their libc/manpage names
+- <a id="rule-function-names"></a>
+  **Function names**: `syscalls::` wrappers carry their libc/manpage names
   in lower case (`syscalls::setxattr`); every other function is CamelCase
   (`SetXattr`). The two layers therefore never clash by construction. The
   methods of the injected syscall interfaces (`BackingSyscalls`,
@@ -204,7 +214,8 @@ use it as design guidance rather than firm rules."
   `fuse_ops.cc`, `fuse_request.cc`), whose own entries are allowlisted
   and only shrink (25.24; 67 sites outside syscalls today, 15 of them in
   fuse_ops.cc).
-- <a id="rule-locals-non-const"></a>**Locals are non-const by default** (russ, 2026-10-11, on `const struct
+- <a id="rule-locals-non-const"></a>
+  **Locals are non-const by default** (russ, 2026-10-11, on `const struct
   rlimit limit = *current;`): "no const on local scalars (unless needed).
   Our default is non-const. Sometimes const is needed or useful to code
   readers (for instance to improve thread-safety, or when creating a
@@ -222,7 +233,8 @@ use it as design guidance rather than firm rules."
   non-pointer type, excluding `constexpr` and `static`) under 25.21's
   aspect, with today's sites allowlisted and shrinking (25.20; about 88
   in production).
-- <a id="rule-flags-in-main-only"></a>**Flags are defined only in a program's main file** (TotW #103 "Flags Are
+- <a id="rule-flags-in-main-only"></a>
+  **Flags are defined only in a program's main file** (TotW #103 "Flags Are
   Globals"; russ, 2026-10-11, on `IsDcfsFlagFile` claiming every file
   under `dcfs/`: "per https://abseil.io/tips/103 flags should only live in
   main.cc anyway. So this is overly broad."). `ABSL_FLAG` appears in
@@ -233,7 +245,8 @@ use it as design guidance rather than firm rules."
   main file, not a directory. Mechanically: `repo_shape.py` refuses
   `ABSL_FLAG(` and `absl::GetFlag(` outside files named `main.cc` (or the
   binary's own `<name>.cc`), no allowlist (25.20).
-- <a id="rule-no-function-pointers"></a>**No function pointers or pointers to members for callables** (russ,
+- <a id="rule-no-function-pointers"></a>
+  **No function pointers or pointers to members for callables** (russ,
   2026-10-11, on `Scope`'s `void (ProtocolEvents::*begin)(...)` in
   protocol_events.h: "In general function pointers should not be used,
   absl::FunctionRef or absl::AnyInvocable are almost always the better
@@ -264,18 +277,21 @@ use it as design guidance rather than firm rules."
   `tools/style_matchers/banned_std.query` (25.21) reports every use of the
   three names in `dcfs/`, `bench/` and `tools/`; the sites that existed are
   in the shrinking `tools/style_checks_allow.txt`.
-- <a id="rule-absl-time"></a>**Times are `absl::Time` and durations `absl::Duration` throughout** (russ,
+- <a id="rule-absl-time"></a>
+  **Times are `absl::Time` and durations `absl::Duration` throughout** (russ,
   2026-10-17). A time arriving in a C struct (`statx`, `timespec`) is
   converted where it is pulled out of the struct. Provisional until 25.38
   confirms the conversion is lossless.
-- <a id="rule-reach-for-abseil"></a>**Reach for Abseil before writing a helper**: `docs/abseil-utilities.md`
+- <a id="rule-reach-for-abseil"></a>
+  **Reach for Abseil before writing a helper**: `docs/abseil-utilities.md`
   (25.19) catalogues the pinned Abseil (20260817.0) with a swaps table
   (hand-written pattern → utility, each marked with the rule that demands
   it), a section per directory, the sites in our tree that still hand-roll
   one, and a ten-question reviewer checklist. Coders read the swaps table
   before writing string, container, function-object or status code;
   reviewers run the checklist on every diff.
-- <a id="rule-absl-container-algorithms"></a>**Abseil's container algorithms, not iterator pairs** (russ, 2026-10-10,
+- <a id="rule-absl-container-algorithms"></a>
+  **Abseil's container algorithms, not iterator pairs** (russ, 2026-10-10,
   on `std::copy(in.begin(), in.end(), buf.begin())` in `backing.cc`:
   "There are helper functions in absl/algorithm/container.h that let you
   do e.g. `absl::c_copy(in, buf.begin());`. Use those instead of functions
@@ -315,23 +331,28 @@ use it as design guidance rather than firm rules."
   are hidden friends: defined inside the class they belong to, in that
   class's namespace, never in another namespace or file
   (`FileHandle::AbslHashValue`, `file_handle.h:33`).
-- <a id="rule-composition-over-inheritance"></a>**Prefer composition over inheritance; inherit only from pure virtual
+- <a id="rule-composition-over-inheritance"></a>
+  **Prefer composition over inheritance; inherit only from pure virtual
   interfaces** (russ, 2026-10-18). A fake or decorator implements the
   interface and holds what it wraps by reference, rather than deriving from
   a concrete class.
 - **Test-only code** goes in `*_test.cc` or `dcfs/testonly/` (BUILD
   `default_testonly = 1`), never in a production file; production code has
   no test hooks.
-- <a id="rule-module-layout"></a>**A module** is `foo.h` + `foo.cc` + `foo_test.cc` and BUILD targets
+- <a id="rule-module-layout"></a>
+  **A module** is `foo.h` + `foo.cc` + `foo_test.cc` and BUILD targets
   `foo` and `foo_test`; header-only modules have a test only if they have
   logic. Unpaired by design: `main.cc`, `errno.cc` (the errno table behind
   `status.h`), `protocol_events_main.cc`. A module's header comment says
   what it is for and which layering rule it obeys (`dcfs/backing.h:27-52`).
-- <a id="rule-ascii-only"></a>**ASCII only** in code and prose (one micro sign in `docs/design.md`); a
+- <a id="rule-ascii-only"></a>
+  **ASCII only** in code and prose (one micro sign in `docs/design.md`); a
   comment's dash is ` -- ` (219 uses).
-- <a id="rule-no-exceptions"></a>**No exceptions** (0 `throw`/`catch`); a status dropped on purpose is
+- <a id="rule-no-exceptions"></a>
+  **No exceptions** (0 `throw`/`catch`); a status dropped on purpose is
   `.IgnoreError()` (15).
-- <a id="rule-nodiscard"></a>**`[[nodiscard]]` goes on a function whose return type is not already
+- <a id="rule-nodiscard"></a>
+  **`[[nodiscard]]` goes on a function whose return type is not already
   must-use, and never on one that returns `Status` or `StatusOr`** (russ,
   2026-10-10, on `[[nodiscard]] absl::StatusOr<FsckArgs> ParseFsckArgs`:
   "StatusOr already is marked [[nodiscard]], so putting it on the return
@@ -348,12 +369,14 @@ use it as design guidance rather than firm rules."
   `metadata_cache.h:56`), `uint64_t` node ids, generations and backing
   inode numbers, `size_t` sizes, `off_t` offsets, `int` for descriptors,
   flags and errnos.
-- <a id="rule-ownership"></a>**Ownership**: an owned descriptor is a `FileDescriptor` (`dcfs/fd.h`), a
+- <a id="rule-ownership"></a>
+  **Ownership**: an owned descriptor is a `FileDescriptor` (`dcfs/fd.h`), a
   borrowed one an `int fd` parameter; scope-exit work is `absl::Cleanup`
   (6 uses). In `dcfs/` only `syscalls.cc` calls `close()` by hand.
 - `TODO(topic): ...` names what the work waits for (4 uses, all
   `TODO(coroutines)`).
-- <a id="rule-readone-unique-lookups"></a>**`ReadOne` is for unique lookups only** (`metadata_cache.cc`): a primary
+- <a id="rule-readone-unique-lookups"></a>
+  **`ReadOne` is for unique lookups only** (`metadata_cache.cc`): a primary
   or unique key, an aggregate, or `LIMIT 1`. It stops after the first row
   (no step to find the end: one statement step less per lookup, and
   `test/qemu/guest/syscall_budgets.txt` counts steps), so a second row would
@@ -383,7 +406,8 @@ and `backing` (`ParentOf`, `SetXattr`, `RemoveXattr`) get distinguishing
 names (e.g. `BackingSetXattr`). A wrapper class is allowed only if the
 clashes turn out to be more than those three and renaming reads worse.
 
-<a id="rule-unqualified-dcfs-names"></a>**Inside `namespace dcfs`, names of `dcfs` are not qualified** (russ,
+<a id="rule-unqualified-dcfs-names"></a>
+**Inside `namespace dcfs`, names of `dcfs` are not qualified** (russ,
 2026-10-10, on `dcfs::DcfsErrnoToStatus(...)` in `backing.cc`: "We're
 already inside the dcfs namespace, so unless ambiguous, you should not
 name it"). `ErrnoToStatus(errno, "...")`, not `dcfs::ErrnoToStatus(...)`.
@@ -424,7 +448,8 @@ converted when touched. The four nested unscoped `enum Kind`s were
 converted in step 25.1. A scoped enum has no `operator<<`, so
 `RET_CHECK_EQ/NE` print its underlying value (`RetCheckStreamable`).
 
-<a id="rule-types-over-comments"></a>Express invariants in the type system, not in comments. A field meaningful
+<a id="rule-types-over-comments"></a>
+Express invariants in the type system, not in comments. A field meaningful
 only for some kinds or states is modelled with types (a distinct kind, or
 a separate type per state that carries only its own fields, such as a
 result type returned only on that path), so the compiler stops a read
@@ -500,7 +525,8 @@ keeps the fault sweep and the trace recorder complete, since both hook
 `syscalls_process.h` exists so that `bench/` and the tools get wrappers
 without dcfs's libraries.
 
-<a id="rule-pidfds-over-pids"></a>**Prefer pidfds over plain pids** (russ, 2026-10-18). A child or daemon is
+<a id="rule-pidfds-over-pids"></a>
+**Prefer pidfds over plain pids** (russ, 2026-10-18). A child or daemon is
 held as an owned pidfd (a `FileDescriptor`, from `clone3` with
 `CLONE_PIDFD` or `pidfd_open`), signalled with `pidfd_send_signal`, and
 waited on with `waitid(P_PIDFD)` or `poll`. A `pid_t` is only for printing
@@ -521,7 +547,8 @@ any other file. A proc directory has no `poll` operation, and a file with
 none reports ready at once (`include/linux/poll.h:80`). So a `/proc/<pid>`
 fd is for signalling only: wait on a `clone3` or `pidfd_open` fd.
 
-<a id="rule-no-raw-syscalls"></a>**No raw syscalls anywhere** (russ, 2026-10-07: a firm rule). Syscalls go
+<a id="rule-no-raw-syscalls"></a>
+**No raw syscalls anywhere** (russ, 2026-10-07: a firm rule). Syscalls go
 through `dcfs/syscalls.h` and `dcfs/syscalls_backing.h`, where the failure
 is handled and converted into a `Status`: no call of a libc syscall wrapper
 outside `dcfs/syscalls.cc`, `dcfs/syscalls_backing.cc` and
@@ -558,7 +585,8 @@ and lives in `dcfs/testonly/` when only tests use it, never in `dcfs::syscalls`
 
 ### 1.6 Errors
 
-<a id="rule-error-handling-one-page"></a>**Error handling on one page** (distilled 2026-10-11 from the week's rulings;
+<a id="rule-error-handling-one-page"></a>
+**Error handling on one page** (distilled 2026-10-11 from the week's rulings;
 each line points at the rule that carries it):
 1. A `Status` is a message to the caller, who may inspect it and decide; that
    is its purpose. So anything the caller must not be able to override is
@@ -604,14 +632,16 @@ filesystem reached differently) needs a different implementation behind
 the same calls: those are the conditions under which an injected object
 earns its place.
 
-<a id="rule-status-only-error-channel"></a>**`absl::Status`/`StatusOr<T>` are the only error channel**: no error
+<a id="rule-status-only-error-channel"></a>
+**`absl::Status`/`StatusOr<T>` are the only error channel**: no error
 codes, no `errno` outside the syscall wrappers. `std::optional<T>` means
 "absent is normal"; `StatusOr<std::optional<T>>` when it can also fail.
 
 A function returning an owned descriptor carries `[[nodiscard]]`; one
 returning `Status` or `StatusOr` does not, the type already is (1.2).
 
-<a id="rule-propagate-with-macros"></a>**Propagate with Abseil's macros, by their short names** (russ,
+<a id="rule-propagate-with-macros"></a>
+**Propagate with Abseil's macros, by their short names** (russ,
 2026-10-10): `RETURN_IF_ERROR` and `ASSIGN_OR_RETURN`, which
 `absl/status/status_macros.h` defines as aliases of `ABSL_RETURN_IF_ERROR`
 and `ABSL_ASSIGN_OR_RETURN` when `ABSL_DEFINE_UNQUALIFIED_STATUS_MACROS`
@@ -633,7 +663,8 @@ them). A failure a callback cannot return is handled in place, once:
 `FuseRequest::ReplyNone` (FORGET has no reply to carry an error) refuses a
 second reply and logs it. Never `assert`.
 
-<a id="rule-statusbuilder"></a>**Build a status one of three ways (russ: StatusBuilder, not `StrCat`).**
+<a id="rule-statusbuilder"></a>
+**Build a status one of three ways (russ: StatusBuilder, not `StrCat`).**
 
 1. A failed syscall or libc call: `dcfs::ErrnoToStatus(errno, what)`,
    immediately after the call, never `absl::ErrnoToStatus`: only the dcfs
@@ -701,7 +732,8 @@ added`, so start it with words, not `;` or a space.
   table (`kInternal` becomes `ELIBBAD`, `kFailedPrecondition` `EBUSY`): a
   diagnostic, not an answer.
 
-<a id="rule-status-messages"></a>**Messages (russ's rules for accumulating Status messages).** A status
+<a id="rule-status-messages"></a>
+**Messages (russ's rules for accumulating Status messages).** A status
 gathers text as it travels up the call chain, joined as `first; added;
 added`, so each function adds only what the reader above it cannot know.
 
@@ -758,7 +790,8 @@ its callers added; of `ReadContents`, `<callee's message>; while reading
 the file contents at offset 4096`. The text recurses readably without
 repeating itself, because each added piece says something new.
 
-<a id="rule-status-never-dropped"></a>**A Status is never dropped from a message** (russ, 2026-10-17: "*ALWAYS*
+<a id="rule-status-never-dropped"></a>
+**A Status is never dropped from a message** (russ, 2026-10-17: "*ALWAYS*
 include the Status if you have one in the message. Dropping a Status without
 logging or returning it silently suppresses the root cause of errors! Also an
 aside: Status implements AbslStringify. So it should be `StrCat("open ",
@@ -839,7 +872,8 @@ until 2026-10-10; this section is it.)
   helpers; libnuma) are `allow` lines in `tools/banned_symbols.txt`, each
   naming the object, why dcfs does not reach it, and russ's approval
   (2026-10-17).
-- <a id="rule-tests-may-crash"></a>**Tests may crash on what is not under test, and must not ASSERT it**
+- <a id="rule-tests-may-crash"></a>
+  **Tests may crash on what is not under test, and must not ASSERT it**
   (russ, 2026-10-09): "crashes are permitted in tests when invariants
   fail that aren't under test ... The inverse applies too. Don't
   ASSERT/EXPECT properties that aren't under test ... there's a clear
@@ -1013,7 +1047,8 @@ fails the caller with EOVERFLOW first, fs/fuse/dev.c), and
   is the one `std::move(x).Cancel()` line. Hand-written undo in an error
   branch (`if (!status.ok()) { RestoreRoot(saved); return status; }`) is
   the shape to refuse.
-- <a id="rule-signature-says-can-fail"></a>**The signature says whether a call can fail; nothing else needs to**
+- <a id="rule-signature-says-can-fail"></a>
+  **The signature says whether a call can fail; nothing else needs to**
   (russ, 2026-10-10: "If the syscall can fail it returns a Status, and
   Status cannot be silently ignored (it has `[[nodiscard]]`)"). A
   `syscalls::` wrapper for a call that can fail returns `absl::Status` or
@@ -1073,7 +1108,8 @@ fails the caller with EOVERFLOW first, fs/fuse/dev.c), and
      taking the output container by reference, not an immediately
      invoked lambda. Ruling from the 22.5 style review, made by the
      orchestrator under russ's rulings above.
-- <a id="rule-program-output"></a>**Program output is `absl::PrintF`/`FPrintF`/`SNPrintF`/`StrFormat`,
+- <a id="rule-program-output"></a>
+  **Program output is `absl::PrintF`/`FPrintF`/`SNPrintF`/`StrFormat`,
   never iostreams and never the C printf family** (russ, 2026-10-10: "I
   agree", after asking what the 19 sites do: `--version` lines,
   usage, fsck.dcfs's report routed to stdout or stderr by status, bench's
@@ -1127,7 +1163,8 @@ syslog, at or above the same `stderrthreshold` (docs/design.md,
   SQL statements and step counts. A message that builds strings is guarded
   with `VLOG_IS_ON(n)`: the hot paths stay cheap at the default level.
 
-<a id="rule-status-or-log"></a>**Return a failed Status or log, never both.** A function that returns a
+<a id="rule-status-or-log"></a>
+**Return a failed Status or log, never both.** A function that returns a
 non-OK status does not also log it: its caller, or that caller's caller,
 logs it with more context, so logging in both places prints the same
 failure twice, the inner line with less context. Two exceptions:
@@ -1151,16 +1188,19 @@ dropped from a message".
 
 The review checklist of `docs/plan/process.md`; the reviewer greps for
 each.
-- <a id="rule-context-first"></a>**`Context &ctx` first** in every function that reads or writes the
+- <a id="rule-context-first"></a>
+  **`Context &ctx` first** in every function that reads or writes the
   cache database, mount table, fill guards or dirty set (`const Context &`
   to only read, `cache::BeginFill`). Backing helpers that touch only a
   descriptor take none (`backing::ReadFile(int fd, ...)`). Exception: the
   protocol-event scopes take the recorder first (`protocol_events.h:381`).
-- <a id="rule-no-globals"></a>**No globals, singletons or `thread_local`** (0 of each, but the backing
+- <a id="rule-no-globals"></a>
+  **No globals, singletons or `thread_local`** (0 of each, but the backing
   door's poisoned flag, `backing_door.cc`: russ, 2026-10-11, 1.6b). Shared
   state lives in `Context` (`context.h:84`) or in an object the caller
   owns.
-- <a id="rule-no-paths-after-startup"></a>**No paths after startup.** Objects are reached by descriptor or file
+- <a id="rule-no-paths-after-startup"></a>
+  **No paths after startup.** Objects are reached by descriptor or file
   handle (`FileHandle::Open`); a child is `openat(dir_fd, name, ...)`, never
   a joined path. Only startup uses a path (SOURCE, the cache database).
 - **Syscalls that can reach the backing filesystem, i.e. anything given a
@@ -1189,18 +1229,23 @@ each.
   socket.
   Only the three wrapper files call libc
   directly. `cache::` is pure SQLite: it never sees a descriptor.
-- <a id="rule-no-txn-across-syscall"></a>**No transaction spans a backing syscall.** Backing I/O first, then one
+- <a id="rule-no-txn-across-syscall"></a>
+  **No transaction spans a backing syscall.** Backing I/O first, then one
   short synchronous transaction (`ctx.db.Transaction(...)`); no statement
   cursor held across a syscall; `AsCaller` wraps one syscall.
-- <a id="rule-tri-state-records"></a>**Tri-state records.** A record mirroring the backing filesystem is
+- <a id="rule-tri-state-records"></a>
+  **Tri-state records.** A record mirroring the backing filesystem is
   present, absent or unknown; a mutation sets it unknown before the
   backing syscall and present or absent after; a failure leaves it unknown.
-- <a id="rule-protocol-change-updates-model"></a>**A protocol change updates the TLA+ model** in the same change
+- <a id="rule-protocol-change-updates-model"></a>
+  **A protocol change updates the TLA+ model** in the same change
   (section 6).
-- <a id="rule-names-are-bytes"></a>**Names are bytes**: `std::string`/`string_view`, `char *` only at the
+- <a id="rule-names-are-bytes"></a>
+  **Names are bytes**: `std::string`/`string_view`, `char *` only at the
   syscall, SQLite and libfuse boundaries (1.2, "No `char *` for strings"),
   `EscapeBytes` when printed, `memcmp` order.
-- <a id="rule-requests-cancellable"></a>**Requests are cancellable** (from phase 22): an operation over about
+- <a id="rule-requests-cancellable"></a>
+  **Requests are cancellable** (from phase 22): an operation over about
   100 ms checks for interruption at safe points and has a cancellation
   test.
 
@@ -1209,14 +1254,16 @@ each.
 russ, 2026-10-12: "Comments explain invariants and the non-obvious why, never
 the obvious what or how." Apply the core principles:
 
-- <a id="rule-comments-self-explanatory"></a>**Self-explanatory code first.** Express preconditions, valid states, and
+- <a id="rule-comments-self-explanatory"></a>
+  **Self-explanatory code first.** Express preconditions, valid states, and
   argument order through the type system (`DeviceId` in dcfs/device_id.h,
   `FileHandle` in dcfs/file_handle.h), RAII wrappers (`FileDescriptor` in
   dcfs/fd.h), `static_assert`, and C++20 `requires` concepts. Zero comments on
   obvious accessors, getters, setters, or standard operators (`operator==` on
   `DeviceId` needs none). If a comment merely restates what the types, names,
   or compiler checks say, delete the comment.
-- <a id="rule-comments-invariants"></a>**Document timeless invariants, footguns, and deliberate omissions.** Comments
+- <a id="rule-comments-invariants"></a>
+  **Document timeless invariants, footguns, and deliberate omissions.** Comments
   are strictly reserved for things the type system cannot express:
   - *Deliberate design omissions*: Why an obvious method or capability was
     intentionally excluded. `ReadOne` (dcfs/metadata_cache.cc) stops after the
@@ -1236,7 +1283,8 @@ the obvious what or how." Apply the core principles:
     tracker, say what it does and what dcfs does about it: ext4 casefold
     (`chattr +F`) makes lookups case-insensitive, so dcfs refuses the
     `FS_IOC_SETFLAGS` that sets it (dcfs/dir_cache_fs.cc, step 23.7).
-- <a id="rule-no-echo-docstrings"></a>**Ban redundant method-name-echoing docstrings.** Never write a docstring
+- <a id="rule-no-echo-docstrings"></a>
+  **Ban redundant method-name-echoing docstrings.** Never write a docstring
   whose words simply mirror the function name and arguments. Bad (the real
   declarations in dcfs/backing.h, with the echoing comment that would replace
   their real ones):
@@ -1249,10 +1297,12 @@ the obvious what or how." Apply the core principles:
   Only document a method if it has non-obvious lifetime bindings
   (`ABSL_ATTRIBUTE_LIFETIME_BOUND`), transfer of ownership, side-effects, or
   concurrency preconditions.
-- <a id="rule-comments-lower-layer"></a>**A comment in a lower layer says what its function does for any caller.**
+- <a id="rule-comments-lower-layer"></a>
+  **A comment in a lower layer says what its function does for any caller.**
   Why a particular caller calls it is written at that caller (russ,
   2026-10-17: "You stated exactly the reason why.").
-- <a id="rule-comments-name-source"></a>**Code added for a reason names its source**: the plan step (`step 23.2`,
+- <a id="rule-comments-name-source"></a>
+  **Code added for a reason names its source**: the plan step (`step 23.2`,
   `dir_cache_fs.cc:532`), the audit finding (`audit-tristate F1`,
   `context.h:37`), the conformance case ("found via pjdfstest's chmod/02.t:
   a name one byte past NAME_MAX got ENOENT ... instead of ENAMETOOLONG",
@@ -1263,7 +1313,8 @@ the obvious what or how." Apply the core principles:
   kernel version it was read at (once per comment), e.g.
   `fs/ext4/namei.c:1768` (Linux v7.3-rc4); never a path on a developer's
   machine.** russ, 2026-10-17: "Yes."
-- <a id="rule-comments-length"></a>**Length**: one to three lines for a block, up to about ten for a non-local
+- <a id="rule-comments-length"></a>
+  **Length**: one to three lines for a block, up to about ten for a non-local
   invariant; longer reasoning goes in `docs/design.md` and the comment points
   to it. No restating the code, no changelog ("fixed in step N" is the
   commit's). The length limits apply to TLA+ comments too: a model's long
@@ -1284,7 +1335,8 @@ the obvious what or how." Apply the core principles:
 
 ### 1.10 One abstraction over variants; branching is discouraged
 
-- <a id="rule-one-abstraction-over-variants"></a>**One abstraction over variants, not an `if` at every use.** When a value
+- <a id="rule-one-abstraction-over-variants"></a>
+  **One abstraction over variants, not an `if` at every use.** When a value
   can come from two sources or a behavior has two forms (a filesystem's UUID
   or the mount-point-plus-fsid fallback; relatime or noatime; a kernel
   capability present or absent), build one object once from whichever
@@ -1294,7 +1346,8 @@ the obvious what or how." Apply the core principles:
   read path asks the policy, it does not re-read the options; the Phase 14
   source identity will be one object built at start-up from the UUID or the
   fallback.
-- <a id="rule-branching-discouraged"></a>**Branching is discouraged, not forbidden**: sometimes a branch is
+- <a id="rule-branching-discouraged"></a>
+  **Branching is discouraged, not forbidden**: sometimes a branch is
   necessary. Every branch is another path to understand and to test
   separately, so look for the shape that needs none before writing one:
   - **Inject dependencies and use small fakes** instead of test-only
@@ -1316,6 +1369,16 @@ the obvious what or how." Apply the core principles:
     object built once over variants (the first rule).
 - `Status` returns with `RETURN_IF_ERROR` are the normal shape of error
   handling and are not what this rule is about (section 1.6).
+- <a id="rule-one-way-to-do-each-thing"></a>
+  **One way to do each thing** (russ, 2026-10-10, after a duplicate mechanism
+  was found in backing.cc's xattr writes, which kept a `/proc` reopen beside
+  the path form that already served every file type). When a change adds a
+  mechanism (a second way to reach an object, a second code path for a case),
+  ask whether it subsumes an existing one. If it does, remove the old one in
+  the same change; if you leave both, say why in your report. A reviewer asks
+  of every diff: after it, is there still one way to do each thing it
+  touches? A new mechanism that subsumes an older one, left in place, is a
+  finding.
 
 <a id="rule-reachable-cause"></a>
 ### 1.10a Every branch names its reachable cause; no code for the impossible
@@ -1388,7 +1451,8 @@ idle 256 core supercomputer to a 1 core raspberry pi under 40 loadavg."
   removes them). A guest script waits for a process with `wait`, a fifo read, a
   lock (`flock FILE true`) or a pidfd, not a loop of `sleep 0.1`.
 
-<a id="rule-anything-goes-while-working"></a>**While working, anything goes; what is submitted obeys the rules** (russ,
+<a id="rule-anything-goes-while-working"></a>
+**While working, anything goes; what is submitted obeys the rules** (russ,
 2026-10-11: "timers _are_ allowed at all times while working on code.
 _Submitted_ code must avoid them per our current rules, but _unsubmitted_
 code can do arbitrary hacks"). A `sleep` to see whether a race is timing,
@@ -1404,7 +1468,8 @@ no Bazel without KVM, no edits outside the checkout, no background
 polling loops, and no hack that could escape the guest or the lane (a
 timer in a guest script is fine; a script that deletes host directories
 is not, submitted or not).
-- <a id="rule-timers-host-tools"></a>**No blanket exemption for host-side tools** (orchestrator's ruling,
+- <a id="rule-timers-host-tools"></a>
+  **No blanket exemption for host-side tools** (orchestrator's ruling,
   2026-10-16, from the first per-step style review): the rule applies to
   scripts and tools under `tools/` too; a poll there passes the same
   "cannot signal" test, with the comment saying what cannot signal and what
@@ -1447,51 +1512,10 @@ necessary, but if you think one is necessary, come to me."
   loop's comment names it. Without such an argument, use a mutex (wait on
   the other thread's completion) instead. A bounded retry is the worst of
   both: it fails under load exactly where it was meant to help.
-- <a id="rule-fuse-op-keeps-backing-contract"></a>**Each FUSE operation keeps the backing's contract.** russ, 2026-10-10:
-  "for each fuse operation, I prefer you implement the same contract that
-  the backing fs implements. If it's ERANGE-on-races with the backing store,
-  then ERANGE-on-races for us. If the syscall is supposed to be atomic (like
-  `rename`), then ours _must_ be atomic (even if that means an infinite retry
-  loop internally)." So the question for any race is: what does the syscall
-  promise its caller on a native filesystem? `listxattr`/`getxattr` promise
-  nothing across a concurrent writer and answer ERANGE; dcfs answers ERANGE.
-  `rename` promises atomicity (rename(2): "If newpath already exists, it
-  will be atomically replaced, so that there is no point at which another
-  process attempting to access newpath will find it missing"; a rename
-  either happened or did not); dcfs's own bookkeeping may never turn that
-  into an EAGAIN or a partial answer, so an internal conflict is resolved
-  by waiting or by retrying without bound, never reported. `readdir`
-  promises no snapshot (POSIX readdir: "If a file is removed from or added
-  to the directory after the most recent call to opendir() or rewinddir(),
-  whether a subsequent call to readdir() returns an entry for that file is
-  unspecified"; getdents64(2) says nothing about consistency across calls):
-  entries added or removed during a listing may or may not appear, and dcfs
-  owes no more. `unlink` has no atomicity claim here: neither unlink(2) nor
-  POSIX promises more than that the name is removed, so a stronger claim
-  needs a source or a native differential test first. Every contract claim
-  cites its source where it is written (POSIX text, a man page, or the
-  kernel code path) and, where it can be measured, a native differential
-  test (the same operations with dcfs out of the loop) backs it: an
-  unsourced claim of atomicity is how a whole-directory snapshot got built
-  where `getdents64` streams pages. A comment at each such site names the
-  contract it keeps and where it is written. Behaving like the backing, only
-  faster, is `docs/design.md`'s "Behave like the backing, only faster"; 22.7
-  (streamed directory population) builds on this paragraph. A claim about
-  what a signal does inside one syscall (EINTR when a signal arrives during
-  the call) may rest on the kernel code path alone when no deterministic
-  native test can place the signal, since a racy test would break
-  load-agnosticism; the citation names the kernel path and its version
-  (orchestrator ruling, 2026-10-18, from the 22.5 round 3 style review).
-- <a id="rule-most-useful-result"></a>**Where the contract allows more than one answer, give the most useful
-  one.** russ, 2026-10-17: "When there's ambiguity, you should be choosing
-  the most _useful_ result." A readdir interrupted after it has built
-  some entries replies them as a short listing (a valid getdents result;
-  the next call continues) rather than EINTR, which would discard them. (A
-  short batch is not the "partial answer" ruled out above: getdents
-  returns listings in batches, a short batch is a valid result, and
-  entries added or removed during the listing may or may not appear, as on
-  the backing.) A read interrupted after some bytes returns them. The same
-  test applies to any choice the backing's contract leaves open.
+- **Each FUSE operation keeps the backing's contract, and a choice the
+  contract leaves open gets the most useful answer** (russ, 2026-10-10 and
+  2026-10-17): moved to `docs/design.md`, "Behave like the backing, only
+  faster".
 - **Not retry loops:** restarting a syscall the kernel asked to restart
   (`EINTR` when the caller has not cancelled: `umount_helper.cc`'s blocking
   lock); the kernel's own revalidation retry of a failed open; an
@@ -1512,13 +1536,16 @@ necessary, but if you think one is necessary, come to me."
 
 ## 2. Tests
 
-- <a id="rule-test-first"></a>**Test first.** Write the test, run it on the unchanged code, quote the
+- <a id="rule-test-first"></a>
+  **Test first.** Write the test, run it on the unchanged code, quote the
   failure in the commit message, then fix. Never weaken a test to make it
   faster or pass (`AGENTS.md`).
-- <a id="rule-test-comments"></a>**A test comment does not start with its step number.** The test name
+- <a id="rule-test-comments"></a>
+  **A test comment does not start with its step number.** The test name
   states the behavior and the commit names the step (russ, 2026-10-17).
   Existing prefixes go when the test is touched.
-- <a id="rule-tests-in-qemu"></a>**Every test of dcfs runs in a QEMU guest as root**: `qemu_cc_test` for
+- <a id="rule-tests-in-qemu"></a>
+  **Every test of dcfs runs in a QEMU guest as root**: `qemu_cc_test` for
   GoogleTest binaries, `qemu_test`/`qemu_test_matrix` for guest scripts
   (`test/qemu/README.md`). Host-side tests need neither root nor a kernel
   (Python, shell smoke tests of pinned tools, TLC, `//tools:format_test`).
@@ -1527,13 +1554,15 @@ necessary, but if you think one is necessary, come to me."
   reads (a mount that only has to exist) is a `::testing::Environment`.
   Neither uses a raw `new` pointer (orchestrator ruling, 2026-10-18, from the
   25.34 round-2 style review).
-- <a id="rule-googletest"></a>**GoogleTest.** `TEST_F(<Subject>Test, ...)` with a fixture (220 of 299
+- <a id="rule-googletest"></a>
+  **GoogleTest.** `TEST_F(<Subject>Test, ...)` with a fixture (220 of 299
   tests; plain `TEST` 79); a `PascalCase` sentence for the behavior
   (`RecycledInodeNumberGetsANewRow`). No `DISABLED_` (0 uses): fix or
   delete. Check with matchers and `EXPECT_*` (the next three bullets).
   `GTEST_SKIP() << reason` when the guest filesystem lacks a capability (23
   uses).
-- <a id="rule-extend-or-new-test"></a>**Extend an existing test or write a new one.** The cost model: a guest
+- <a id="rule-extend-or-new-test"></a>
+  **Extend an existing test or write a new one.** The cost model: a guest
   boot plus setup is the expensive unit, an assertion is free, a harness
   test without a fresh mount is cheap. So write a *new* test when the
   behavior is new (an operation, a failure mode, an invariant) or the setup
@@ -1558,7 +1587,8 @@ necessary, but if you think one is necessary, come to me."
   `EXPECT_*`, so that one failure does not hide the next. (Today
   `ASSERT_THAT` is used about as often as `EXPECT_THAT` (854 and 860):
   conversion of the existing tests is 7.5/7.5b.)
-- <a id="rule-matchers-over-booleans"></a>**Matchers over booleans.** `EXPECT_THAT(value, Matcher)` with gMock
+- <a id="rule-matchers-over-booleans"></a>
+  **Matchers over booleans.** `EXPECT_THAT(value, Matcher)` with gMock
   (`Contains`, `ElementsAre`, `UnorderedElementsAre`, `HasSubstr`, `Field`,
   `Property`, `Pointee`) and the status matchers `IsOk()`, `IsOkAndHolds(m)`
   and `StatusIs(code, message_matcher)`, over `EXPECT_TRUE`/`EXPECT_EQ` on a
@@ -1583,12 +1613,14 @@ necessary, but if you think one is necessary, come to me."
   that goes missing does (`FileHandleValueTest.ToStringHasEveryField`). A
   string that is a format other code parses (a wire or database key) is a
   different thing, and its exact bytes are tested.
-- <a id="rule-fakes-not-mocks"></a>**Fakes, not mocks**: no `MOCK_METHOD` (0 uses; matchers are fine). A
+- <a id="rule-fakes-not-mocks"></a>
+  **Fakes, not mocks**: no `MOCK_METHOD` (0 uses; matchers are fine). A
   dependency is injected and a small fake stands in (`ProtocolEvents`,
   `FakeChannel` in `fuse_request_channel_test.cc`). Syscall faults are
   link-time `-Wl,--wrap=<symbol>` fakes in a test target of their own, so
   the wrap affects no other test (`dcfs/BUILD.bazel:225-246`).
-- <a id="rule-test-helper-structs"></a>**A test helper does not reuse a production struct** whose extra fields it
+- <a id="rule-test-helper-structs"></a>
+  **A test helper does not reuse a production struct** whose extra fields it
   would silently ignore (`guest.h`'s `Identity` is not `dcfs::Credentials`;
   orchestrator ruling, 2026-10-18, from the 25.34 round-2 style review).
 - **The forged-request harness** (`dir_cache_fs_test.cc`,
@@ -1609,22 +1641,26 @@ necessary, but if you think one is necessary, come to me."
   in `copy.sh`). A test about filesystem-dependent behavior is a
   `qemu_test_matrix` (ext4, xfs, btrfs) and branches on `backing_fstype`
   only for a genuine per-filesystem difference.
-- <a id="rule-test-tiers"></a>**Tiers**: Bazel `size`. `small` (about a minute in all,
+- <a id="rule-test-tiers"></a>
+  **Tiers**: Bazel `size`. `small` (about a minute in all,
   `--config=fast`), `medium` (`--config=presubmit`), `large`/`enormous`
   (CI). Every test declares `size` and `timeout` (the QEMU macros refuse a
   missing one); pick the tier from the measured duration. The soak test is
   `manual`.
-- <a id="rule-shard-count"></a>**Shard with Bazel's `shard_count`** (russ, 2026-10-18, step 5.12). Prefer
+- <a id="rule-shard-count"></a>
+  **Shard with Bazel's `shard_count`** (russ, 2026-10-18, step 5.12). Prefer
   `shard_count` for googletest tests (Bazel sets `TEST_TOTAL_SHARDS` and
   `TEST_SHARD_INDEX`; googletest splits its cases). A guest test's QEMU
   runner forwards both variables and touches `TEST_SHARD_STATUS_FILE`;
   pjdfstest splits its file list by the same variables. TLC configurations
   cannot shard (12.25), and the style checks are build actions parallelized
   by `--jobs`, not `shard_count`.
-- <a id="rule-kernel-facts-weekly"></a>**The kernel-facts pins test the kernel, not dcfs** (russ, 2026-10-18,
+- <a id="rule-kernel-facts-weekly"></a>
+  **The kernel-facts pins test the kernel, not dcfs** (russ, 2026-10-18,
   steps 17.6 and 17.6b). `kernel_facts_test` runs only in the weekly
   workflow, never in the fast, presubmit or per-push tiers.
-- <a id="rule-load-agnostic-tests"></a>**A test's verdict does not depend on host load or speed** (russ,
+- <a id="rule-load-agnostic-tests"></a>
+  **A test's verdict does not depend on host load or speed** (russ,
   2026-10-17: "in general for all our tests I'm interested in them being
   load-agnostic"). It counts events (syscalls, requests, I/O operations,
   instructions retired), waits on events (`wait`, a pidfd, `testutil waitline`,
@@ -1647,19 +1683,23 @@ necessary, but if you think one is necessary, come to me."
   with one run count in the section header of the budget file (russ,
   2026-10-17: "Agreed"). The census of the tests that still break this is
   `docs/plan/notes/load-agnostic-tests-2026-10-17.md`.
-- <a id="rule-never-lower-coverage"></a>New code arrives covered, error paths included (from phase 7/8).
+- <a id="rule-never-lower-coverage"></a>
+  New code arrives covered, error paths included (from phase 7/8).
   **Never lower the coverage baseline** (russ, 2026-10-11: "You must not lower
   the coverage baseline. That's why it exists. Only ever increase it."). CI
   fails if total coverage drops. A change that would drop coverage adds tests to
   keep or raise the baseline, never lowers `dcfs/coverage_baseline.txt`.
-- <a id="rule-ported-test-names"></a>**A test ported from a script takes a behavior sentence as its name**, like
+- <a id="rule-ported-test-names"></a>
+  **A test ported from a script takes a behavior sentence as its name**, like
   any test (orchestrator ruling, 2026-10-18); the script's check name may
   appear in a comment.
 
 ## 3. Bazel
 
-- <a id="rule-bazel-style"></a>Bazel's BUILD style guide, as buildifier enforces it (1.1).
-- <a id="rule-everything-through-bazel"></a>**Everything goes through Bazel.** Every build step, tool, image and test
+- <a id="rule-bazel-style"></a>
+  Bazel's BUILD style guide, as buildifier enforces it (1.1).
+- <a id="rule-everything-through-bazel"></a>
+  **Everything goes through Bazel.** Every build step, tool, image and test
   is a Bazel target with declared inputs; nothing is built or run by a
   script outside the graph. That is what makes Bazel's caching of builds and
   test results sound, locally and in CI (the restored disk cache lets
@@ -1678,7 +1718,8 @@ necessary, but if you think one is necessary, come to me."
   obvious `cc_library` needs none; a plan-step reference helps.
 - Dependency lists: one per line, sorted (`:local`, `//`, `@`), elements
   indented 4 spaces (buildifier, enforced by `//tools:format_test`).
-- <a id="rule-third-party-by-bazel"></a>`third_party/<name>/` holds only what we write for a pin (BUILD overlay,
+- <a id="rule-third-party-by-bazel"></a>
+  `third_party/<name>/` holds only what we write for a pin (BUILD overlay,
   patches, config, lock files) and a `README.md` with a "Pin" section
   (version, URL, sha256, how the sha256 was obtained, date) and an
   "Updating the pin" procedure (`third_party/tlaplus/README.md`).
@@ -1694,7 +1735,8 @@ necessary, but if you think one is necessary, come to me."
 
 ## 4. Shell
 
-<a id="rule-cpp-over-shell"></a>**Minimize shell; new tools are C++** (russ, 2026-10-11: "We've got
+<a id="rule-cpp-over-shell"></a>
+**Minimize shell; new tools are C++** (russ, 2026-10-11: "We've got
 quite a few tools written in shell. I'd prefer they be in C++ since we
 don't have good style or tooling built around shell code. You don't have
 to ban shell, but let's minimize its use."). Today the tree holds about
@@ -1726,11 +1768,13 @@ shfmt), run by `//tools:format_test`; shellcheck is pinned in the same step
 file" exception (russ, 2026-10-17: "the Google Shell Style Guide says two
 spaces."). A tab-indented file is converted, in one commit, by
 `shfmt -i 2` in 7.6b. Our additions and narrowings:
-- <a id="rule-host-scripts-bash"></a>**Host-side scripts are bash**: `#!/bin/bash`, then `set -euo pipefail`
+- <a id="rule-host-scripts-bash"></a>
+  **Host-side scripts are bash**: `#!/bin/bash`, then `set -euo pipefail`
   (our narrowing; the guide only says to use `set` flags sparingly). 8 do
   today (`.github/ci/*`, `formal/trace_validate.sh`,
   `third_party/alpine/tools_test.sh`, `third_party/alpine/busybox_test.sh`).
-- <a id="rule-guest-scripts-busybox-sh"></a>**One documented deviation: scripts that run inside the busybox guest**
+- <a id="rule-guest-scripts-busybox-sh"></a>
+  **One documented deviation: scripts that run inside the busybox guest**
   (`test/qemu/guest/*`, `guest/init`) are POSIX `sh` (`#!/bin/sh`: no
   `[[`, arrays, `local` or `function`; `[ ]`, `$(...)`), because the guest
   has no bash. They still follow the guide's layout, naming and quoting.
@@ -1760,7 +1804,8 @@ spaces."). A tab-indented file is converted, in one commit, by
   to the script, and no new line is tab-indented. The conversion is a
   mechanical reformat (1.1): its commit uses the `style:` prefix and is listed
   in `.git-blame-ignore-revs`.
-- <a id="rule-new-guest-script-thin-glue"></a>**A new guest script is thin glue** (orchestrator ruling, 2026-10-18, from
+- <a id="rule-new-guest-script-thin-glue"></a>
+  **A new guest script is thin glue** (orchestrator ruling, 2026-10-18, from
   the 17.6 style review): it sources `lib.sh`, uses its helpers, defines no
   functions and ends by running one C++ binary. Until 25.34's helpers land,
   that binary may go in the shared initramfs; afterwards it moves to its own
@@ -1787,7 +1832,8 @@ spaces."). A tab-indented file is converted, in one commit, by
   (orchestrator's ruling, 2026-10-16): `def f(environ=os.environ)`, a
   `now` argument; `mock.patch` only for what cannot be injected (the
   injection rule of AGENTS.md).
-- <a id="rule-host-tooling-has-style"></a>**Host tooling has a style, and it is reviewed; where the guides are
+- <a id="rule-host-tooling-has-style"></a>
+  **Host tooling has a style, and it is reviewed; where the guides are
   silent, the reviewer decides instead of asking russ** (`tools/`,
   `.github/ci`, the harness scripts). russ, 2026-10-17: "I don't care at
   all about pure style questions in host tooling", and, correcting a
@@ -1834,7 +1880,8 @@ protocol event (`dcfs/protocol_events.h`) and `Trace.tla` action;
 
 ## 7. Docs and commits
 
-- <a id="rule-where-things-go"></a>**Where things go.** Decisions and reasons: `docs/design.md`. User-facing
+- <a id="rule-where-things-go"></a>
+  **Where things go.** Decisions and reasons: `docs/design.md`. User-facing
   behavior and limitations: `README.md` (also the source of the `dcfs(8)`
   man page). Test usage: `test/qemu/README.md`. A pin: its
   `third_party/<name>/README.md`. Plan, log, status: `docs/plan/`. The
@@ -1842,25 +1889,29 @@ protocol event (`dcfs/protocol_events.h`) and `Trace.tla` action;
   step's phase file; everything else in `docs/plan/` (status, log, other
   steps, ledger) is the orchestrator's or its bookkeeping clerk's, and an
   agent reports what else it needs.
-- <a id="rule-prose-style"></a>**Prose.** Full sentences, plain and specific, no marketing; say what the
+- <a id="rule-prose-style"></a>
+  **Prose.** Full sentences, plain and specific, no marketing; say what the
   program does and does not do. Measured numbers carry units, date and
   environment ("about 1 minute (KVM)", "released 2026-05-13; the latest
   stable release as of 2026-10-05"). A decision names its maker and date
   ("(russ, 2026-10-06)"). Headings are sentence case; a list item stating
   a rule may open with it in bold (`docs/design.md`, "Architecture and
   layering").
-- <a id="rule-markdown-style"></a>**Markdown follows Google's docguide**: ATX headings (`#`), one H1 per
+- <a id="rule-markdown-style"></a>
+  **Markdown follows Google's docguide**: ATX headings (`#`), one H1 per
   file, `-` bullets, 80-column wrap (tables, links and code excepted), no
   trailing whitespace, and fenced code blocks with the language declared
   (`bash`, `text`, `c++`, `python`, `starlark`; `text` for output). The tree
   already uses ATX only (0 setext), `-` only (0 `*`), no trailing
   whitespace and no tabs in 24 docs outside `docs/plan/`; D1, D2 are the
   rest.
-- <a id="rule-commit-subject"></a>**Commit subject**: `N.M: area: what changed` for a plan step (`23.4:
+- <a id="rule-commit-subject"></a>
+  **Commit subject**: `N.M: area: what changed` for a plan step (`23.4:
   copy_file_range, the ioctl allowlist and O_TMPFILE`); `plan:`, `notes:`
   and `agents:` for orchestrator edits, notes and agent instructions, and
   `style:` for a mechanical reformat (1.1). No trailing period; about 72 columns (62 of 323 are longer).
-- <a id="rule-commit-body"></a>**Commit body**: wrapped at 72, says why. A bug fix or behavior change
+- <a id="rule-commit-body"></a>
+  **Commit body**: wrapped at 72, says why. A bug fix or behavior change
   quotes the failing-first run under a "Failing first" heading (about 30
   bodies), then the model and test results. It ends with the model's
   `Co-Authored-By` trailer naming the model that actually wrote the commit
@@ -1908,7 +1959,8 @@ for tests.
   a reason; there are none. The check cannot see a seam with a neutral
   name: the reviewer asks of every new knob "what does this do in
   production?".
-- <a id="rule-no-test-peers"></a>**No test peers** (russ, 2026-10-09: "A test peer allows test code to
+- <a id="rule-no-test-peers"></a>
+  **No test peers** (russ, 2026-10-09: "A test peer allows test code to
   reach into the private internals of a class. Don't do that."): no
   production class declares a `friend` of anything in a `testonly`
   namespace, and a test never reaches a private member. What a check or a
