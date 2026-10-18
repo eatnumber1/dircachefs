@@ -263,3 +263,38 @@ FSTYP=fuse runs a per-test hook (fresh mkfs and database), removing the
 batch-sharing dependence; one shard per backing with `checked_dcfs`; a
 tree digest of TEST_DIR through dcfs versus native at the end of each
 shard.
+
+## 17.5 Tests ported from the OpenZFS suite's ideas (russ, 2026-10-17; queued, M2)
+
+We adopt nothing from ZTS as a suite: it needs a ZFS pool throughout,
+ksh93, and its files are CDDL. We reimplement its ideas from scratch as
+C++ guest tests that compare dcfs with the backing (dcfs must behave like
+the backing), citing the ZFS source file in a comment and never copying
+CDDL code. cmd/seekflood.c is MIT and may be copied with its header.
+Survey: notes/zfs-test-suite-survey-2026-10-17.md.
+
+Iteration counts, not sleeps or time-bounded loops (load-agnostic).
+Before each item, check existing coverage: xfstests readdir-while-renames
+and t_truncate_cmtime; our rename.sh, setattr.sh, atime.sh and stress.sh.
+
+Ordered items:
+
+1. nlink under a rename, unlink and open race (ZFS
+   tests/zfs-tests/cmd/rm_lnkcnt_zero_file.c, link_count_001.ksh).
+2. Two processes renaming nested directories into each other (cmd/rename_dir.c,
+   rename_dirs_001_pos.ksh).
+3. Concurrent O_APPEND from threads with an exact final size
+   (cmd/threadsappend.c).
+4. A timestamp table for creat, write, utime, chmod, chown, link,
+   setxattr, truncate and fallocate (FALLOC_FL_KEEP_SIZE leaves times),
+   compared with the backing (cmd/ctime.c, truncate_timestamps.ksh,
+   fallocate_extend_timestamps.ksh).
+
+Then, medium:
+
+5. mmap against truncate races (mmap_ftruncate.c, mmap_read_truncate.c).
+6. xattrs at scale: N files times M xattrs up to 64 KiB, plus the mode-000
+   non-root denial (cmd/xattrtest.c, xattr_003).
+7. O_TMPFILE: O_EXCL cannot be linked; the mode honours the umask
+   (tmpfile_001..003, tmpfile_stat_mode.c).
+8. Concurrent copy_file_range with SEEK_DATA and SEEK_HOLE (cmd/seekflood.c).
