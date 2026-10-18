@@ -292,13 +292,16 @@ strace_golden() {
 # by: CPU time is deterministic to a few percent, not exact.
 # Interim headroom (step 26.17c; russ, 2026-10-18: "Count something
 # deterministic. But until that's done, add a small headroom right now"): the
-# daemon's disk read and write counts from the cgroup's io.stat move with
-# page-cache and readahead timing, hence with the host's load (a load-starved CI
-# runner counted 753 for a budget of 752), so they may exceed their budget by
-# this percentage, rounded up, and by at least 1. Every other count stays exact.
-# A count of something deterministic replaces this.
+# disk-request counts, whether the test's disks' from /sys/block (reads, writes,
+# sectors_read, sectors_written) or the daemon's from the cgroup's io.stat
+# (dcfs_reads, dcfs_writes), move with writeback and readahead timing, hence
+# with the host's load (a load-starved CI runner counted 753 for a budget of
+# 752), so they may exceed their budget by this percentage, rounded up, and by
+# at least 1. flushes (it follows the fsync calls) and the byte counts stay
+# exact, as does every other count. A count of something deterministic replaces
+# this.
 COST_DISK_COUNT_HEADROOM_PCT=2
-COST_DISK_COUNT_HEADROOM_KINDS="dcfs_reads dcfs_writes"
+COST_DISK_COUNT_HEADROOM_KINDS="reads writes sectors_read sectors_written dcfs_reads dcfs_writes"
 
 strace_budget_compare() {
 	awk -v op="$3" -v file="${4:-syscall_budgets.txt}" -v tol="${5:-0}" -v hp="$COST_DISK_COUNT_HEADROOM_PCT" -v hk="$COST_DISK_COUNT_HEADROOM_KINDS" '

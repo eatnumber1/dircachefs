@@ -56,6 +56,9 @@ EOT
 cat >"$WORK/io_budgets.txt" <<'EOT'
 # a comment
 //t:io reads 50
+//t:io writes 7
+//t:io sectors_read 400
+//t:io sectors_written 900
 //t:io flushes 30   # observed 27..28
 //t:io dcfs_write_bytes 0
 //t:io dcfs_reads 752
@@ -199,7 +202,7 @@ echo "PASS: a run at its I/O budgets passes, and says what it did"
 
 # One over, in each kind that has a budget: fails, naming both numbers; the
 # budget is not a tolerance.
-for over in reads:51 flushes:31 dcfs_write_bytes:1; do
+for over in flushes:31 dcfs_write_bytes:1; do
 	canned "COST cpu_us=400000 $(echo "$IO_OK" | sed "s/${over%%:*}=[0-9]*/${over%%:*}=${over#*:}/")"
 	run //t:io
 	[ "$RC" -ne 0 ] || fail "${over%%:*} one past its budget passed: $(cat "$WORK/stdout")"
@@ -209,16 +212,18 @@ for over in reads:51 flushes:31 dcfs_write_bytes:1; do
 done
 echo "PASS: an I/O count one past its budget fails, naming both numbers, with no tolerance"
 
-# Interim headroom (26.17c): the daemon's disk-read and disk-write counts from
-# io.stat move with the host's load, so they get +2% rounded up (at least +1);
-# every other count stays exact. dcfs_reads 752 allows 752 + ceil(15.04) = 768,
-# dcfs_writes 10 allows 11.
-IO_HEAD=$(echo "$IO_OK" | sed 's/dcfs_reads=3/dcfs_reads=768/; s/dcfs_writes=1 /dcfs_writes=11 /')
+# Interim headroom (26.17c): the disk-request counts move with the host's load
+# (writeback and readahead timing), so reads, writes, sectors_read,
+# sectors_written, dcfs_reads and dcfs_writes get +2% rounded up (at least +1);
+# every other count stays exact. Allowed: reads 50 -> 51, writes 7 -> 8,
+# sectors_read 400 -> 408, sectors_written 900 -> 918, dcfs_reads 752 -> 768,
+# dcfs_writes 10 -> 11.
+IO_HEAD=$(echo "$IO_OK" | sed 's/^reads=50/reads=51/; s/ writes=7/ writes=8/; s/sectors_read=400/sectors_read=408/; s/sectors_written=900/sectors_written=918/; s/dcfs_reads=3/dcfs_reads=768/; s/dcfs_writes=1 /dcfs_writes=11 /')
 canned "COST cpu_us=400000 $IO_HEAD"
 run //t:io
-[ "$RC" -eq 0 ] || fail "dcfs_reads/dcfs_writes at their headroom failed: $(cat "$WORK/stdout")"
-for over in dcfs_reads:769 dcfs_writes:12; do
-	canned "COST cpu_us=400000 $(echo "$IO_HEAD" | sed "s/${over%%:*}=[0-9]*/${over%%:*}=${over#*:}/")"
+[ "$RC" -eq 0 ] || fail "counts at their headroom failed: $(cat "$WORK/stdout")"
+for over in reads:52 writes:9 sectors_read:409 sectors_written:919 dcfs_reads:769 dcfs_writes:12; do
+	canned "COST cpu_us=400000 $(echo "$IO_HEAD" | sed "s/\(^\| \)${over%%:*}=[0-9]*/\1${over%%:*}=${over#*:}/")"
 	run //t:io
 	[ "$RC" -ne 0 ] || fail "${over%%:*} past its headroom passed: $(cat "$WORK/stdout")"
 	grep -q "^//t:io ${over%%:*}: count rose from [0-9]* to ${over#*:}" "$WORK/stdout" ||
@@ -227,16 +232,16 @@ done
 canned "COST cpu_us=400000 $(echo "$IO_HEAD" | sed 's/flushes=30/flushes=31/')"
 run //t:io
 [ "$RC" -ne 0 ] || fail "a deterministic count one over passed beside the headroom: $(cat "$WORK/stdout")"
-echo "PASS: dcfs_reads and dcfs_writes get 2% headroom (at least 1); other counts stay exact"
+echo "PASS: the disk-request counts get 2% headroom (at least 1); flushes and the byte counts stay exact"
 
-# A count with no line in the file is not held (writes has none here).
-canned "COST cpu_us=400000 $(echo "$IO_OK" | sed 's/writes=7/writes=7000/')"
+# A count with no line in the file is not held (dcfs_read_bytes has none here).
+canned "COST cpu_us=400000 $(echo "$IO_OK" | sed 's/dcfs_read_bytes=4096/dcfs_read_bytes=40960000/')"
 run //t:io
 [ "$RC" -eq 0 ] || fail "an I/O count without a budget line failed: $(cat "$WORK/stdout")"
 echo "PASS: only the kinds that have a line are held"
 
 # The CPU and the I/O are held separately, and both are reported.
-canned "COST cpu_us=800001 $(echo "$IO_OK" | sed 's/reads=50/reads=51/')"
+canned "COST cpu_us=800001 $(echo "$IO_OK" | sed 's/reads=50/reads=52/')"
 run //t:both
 [ "$RC" -ne 0 ] || fail "CPU and I/O both over passed"
 grep -q "^//t:both cpu_us: count rose" "$WORK/stdout" && grep -q "^//t:both reads: count rose" "$WORK/stdout" ||
@@ -338,10 +343,10 @@ grep -q "run-qemu.sh: cost: dcfs CPU 0.800 s (not held to the budgets: host load
 	fail "the cost line does not say the CPU budget is not held for the load: $(cat "$WORK/stdout")"
 run_loaded 0 1900000 //t:x
 [ "$RC" -ne 0 ] || fail "a run below the starvation threshold was not held to its CPU budget"
-canned "COST cpu_us=400000 $(echo "$IO_OK" | sed 's/reads=50/reads=51/')"
+canned "COST cpu_us=400000 $(echo "$IO_OK" | sed 's/reads=50/reads=52/')"
 run_loaded 0 3000000 //t:io
 [ "$RC" -ne 0 ] || fail "a load-starved run was not held to its I/O budget: $(cat "$WORK/stdout")"
-grep -q "^//t:io reads: count rose from 50 to 51" "$WORK/stdout" || fail "the I/O failure is not reported: $(cat "$WORK/stdout")"
+grep -q "^//t:io reads: count rose from 50 to 52" "$WORK/stdout" || fail "the I/O failure is not reported: $(cat "$WORK/stdout")"
 echo "PASS: a load-starved run is not held to its CPU budget, and is held to its I/O budgets"
 
 canned "COST cpu_us=1"
