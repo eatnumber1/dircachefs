@@ -2,7 +2,11 @@
 # OP KIND MAX, OP a Bazel label, compared by guest/strace_lib.sh's
 # strace_budget_compare against the COST line the guest prints (guest/init,
 # guest/cost_lib.sh) with no tolerance: a count above its budget fails, naming
-# both numbers. KIND is one of
+# both numbers. The one exception, interim (step 26.17c, russ 2026-10-18): the
+# daemon's dcfs_reads and dcfs_writes (from io.stat, which moves with the host's
+# load) may exceed their budget by 2% rounded up, at least 1
+# (COST_DISK_COUNT_HEADROOM_PCT in strace_lib.sh); a deterministic count will
+# replace it. Pinned numbers are not raised for it. KIND is one of
 #
 #   reads writes sectors_read sectors_written flushes
 #       the disks of the test (the virtio disks, or the loop devices that are the

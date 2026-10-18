@@ -58,6 +58,8 @@ cat >"$WORK/io_budgets.txt" <<'EOT'
 //t:io reads 50
 //t:io flushes 30   # observed 27..28
 //t:io dcfs_write_bytes 0
+//t:io dcfs_reads 752
+//t:io dcfs_writes 10
 //t:both reads 50
 //t:y reads 5
 EOT
@@ -206,6 +208,26 @@ for over in reads:51 flushes:31 dcfs_write_bytes:1; do
 		fail "the failure for ${over%%:*} does not name the counts: $(cat "$WORK/stdout")"
 done
 echo "PASS: an I/O count one past its budget fails, naming both numbers, with no tolerance"
+
+# Interim headroom (26.17c): the daemon's disk-read and disk-write counts from
+# io.stat move with the host's load, so they get +2% rounded up (at least +1);
+# every other count stays exact. dcfs_reads 752 allows 752 + ceil(15.04) = 768,
+# dcfs_writes 10 allows 11.
+IO_HEAD=$(echo "$IO_OK" | sed 's/dcfs_reads=3/dcfs_reads=768/; s/dcfs_writes=1 /dcfs_writes=11 /')
+canned "COST cpu_us=400000 $IO_HEAD"
+run //t:io
+[ "$RC" -eq 0 ] || fail "dcfs_reads/dcfs_writes at their headroom failed: $(cat "$WORK/stdout")"
+for over in dcfs_reads:769 dcfs_writes:12; do
+	canned "COST cpu_us=400000 $(echo "$IO_HEAD" | sed "s/${over%%:*}=[0-9]*/${over%%:*}=${over#*:}/")"
+	run //t:io
+	[ "$RC" -ne 0 ] || fail "${over%%:*} past its headroom passed: $(cat "$WORK/stdout")"
+	grep -q "^//t:io ${over%%:*}: count rose from [0-9]* to ${over#*:}" "$WORK/stdout" ||
+		fail "the failure for ${over%%:*} does not name the counts: $(cat "$WORK/stdout")"
+done
+canned "COST cpu_us=400000 $(echo "$IO_HEAD" | sed 's/flushes=30/flushes=31/')"
+run //t:io
+[ "$RC" -ne 0 ] || fail "a deterministic count one over passed beside the headroom: $(cat "$WORK/stdout")"
+echo "PASS: dcfs_reads and dcfs_writes get 2% headroom (at least 1); other counts stay exact"
 
 # A count with no line in the file is not held (writes has none here).
 canned "COST cpu_us=400000 $(echo "$IO_OK" | sed 's/writes=7/writes=7000/')"

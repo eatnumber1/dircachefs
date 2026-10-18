@@ -290,8 +290,18 @@ strace_golden() {
 # message (syscall_budgets.txt by default). TOLERANCE (step 26.17; 0 by
 # default, an exact count) is the percentage of a budget a count may exceed it
 # by: CPU time is deterministic to a few percent, not exact.
+# Interim headroom (step 26.17c; russ, 2026-10-18: "Count something
+# deterministic. But until that's done, add a small headroom right now"): the
+# daemon's disk read and write counts from the cgroup's io.stat move with
+# page-cache and readahead timing, hence with the host's load (a load-starved CI
+# runner counted 753 for a budget of 752), so they may exceed their budget by
+# this percentage, rounded up, and by at least 1. Every other count stays exact.
+# A count of something deterministic replaces this.
+COST_DISK_COUNT_HEADROOM_PCT=2
+COST_DISK_COUNT_HEADROOM_KINDS="dcfs_reads dcfs_writes"
+
 strace_budget_compare() {
-	awk -v op="$3" -v file="${4:-syscall_budgets.txt}" -v tol="${5:-0}" '
+	awk -v op="$3" -v file="${4:-syscall_budgets.txt}" -v tol="${5:-0}" -v hp="$COST_DISK_COUNT_HEADROOM_PCT" -v hk="$COST_DISK_COUNT_HEADROOM_KINDS" '
 	FNR == NR {
 		if ($1 == op && $1 !~ /^#/) { want[$2] = $3; n++ }
 		next
@@ -299,6 +309,8 @@ strace_budget_compare() {
 	{ got[$1] = $2 }
 	END {
 		bad = 0
+		nh = split(hk, hkinds, " ")
+		for (i = 1; i <= nh; i++) headroom[hkinds[i]] = 1
 		if (n == 0) {
 			print op ": no budget line in the budgets file"
 			exit 1
@@ -307,7 +319,7 @@ strace_budget_compare() {
 			if (!(k in got)) {
 				print op " " k ": no such count in this trace"
 				bad = 1
-			} else if (got[k] * 100 > want[k] * (100 + tol)) {
+			} else if (got[k] * 100 > want[k] * (100 + tol) + (k in headroom ? 100 * (int((want[k] * hp + 99) / 100) < 1 ? 1 : int((want[k] * hp + 99) / 100)) : 0)) {
 				past = (tol > 0) ? ", past the " tol "% tolerance" : ""
 				print op " " k ": count rose from " want[k] " to " got[k] past "; raising a budget is a deliberate edit of " file " whose commit says why"
 				bad = 1

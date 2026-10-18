@@ -1425,7 +1425,7 @@ say; its `syscr` and `syscw` are not counted, since `strace_op`'s counts of the
 daemon's syscalls (`syscall_budgets.txt`) are the budgets for those. The fsync
 counts of the traced operations stay there too (`sync`).
 
-`guest/io_budgets.txt` has the same format as the others and no tolerance: the
+`guest/io_budgets.txt` has the same format as the others and no tolerance, except an interim 2% headroom (at least 1) on `dcfs_reads` and `dcfs_writes` (step 26.17c) until a deterministic count replaces them: the
 counts that are exact are held exactly, and each budget is the highest count
 seen plus the spread seen, so those that move are not flaky. They are pinned
 per kernel like the strace goldens: a bump of the kernel may re-baseline them in
