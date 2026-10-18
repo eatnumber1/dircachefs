@@ -63,6 +63,8 @@ namespace {
 
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
+using ::absl_testing::StatusIs;
+using ::testing::_;
 using ::testing::ElementsAre;
 using ::testing::HasSubstr;
 using ::testing::IsEmpty;
@@ -120,8 +122,9 @@ TEST_F(MakeDurableTest, NormalCommitDoesNotFsync) {
   EXPECT_THAT(Fsyncs(), IsEmpty());
 }
 
-// A failed fsync is reported, and the commits stay owed to the next durable
-// point.
+// A failed fsync is reported, and CommittedSinceDurable() stays true, so the
+// next durable point fsyncs again (which does not repair the loss: see
+// MakeDurable).
 TEST_F(MakeDurableTest, FailedFsyncLeavesTheCommitsOwed) {
   FsyncFailure() = EIO;
 
@@ -130,7 +133,7 @@ TEST_F(MakeDurableTest, FailedFsyncLeavesTheCommitsOwed) {
   EXPECT_THAT(GetSqliteCodeFromStatus(status),
               IsOkAndHolds(SQLITE_IOERR_FSYNC));
   EXPECT_EQ(StatusToErrno(status), EIO);
-  EXPECT_THAT(status.message(), HasSubstr("WAL"));
+  EXPECT_THAT(status, StatusIs(_, HasSubstr("WAL")));
   EXPECT_THAT(conn_->CommittedSinceDurable(), IsOkAndHolds(true));
   FsyncFailure() = 0;
   ASSERT_THAT(conn_->MakeDurable(), IsOk());
