@@ -179,10 +179,42 @@ absl::Status FuseRequest::PassthroughClose(int backing_id) {
   return absl::OkStatus();
 }
 
-const absl::StatusOr<ProcCredentials> &FuseRequest::CallerStatus(
+namespace {
+
+// The thread that sent the request `ctx` describes, or nullopt for the pid 0
+// the kernel sends for a caller outside the pid namespace dcfs mounted in
+// (fuse_request_init's pid_nr_ns, fs/fuse/req.c:13 (Linux v7.3-rc7)), which
+// names no process.
+std::optional<pid_t> CallerPid(const fuse_ctx &ctx) {
+  if (ctx.pid == 0) return std::nullopt;
+  return ctx.pid;
+}
+
+// Whether `proc`, the status of thread `pid`, shows CAP_FSETID for `uid`, the
+// request's. /proc shows the task's objective credentials, and its
+// capabilities in its own user namespace. They are the caller's only where
+// they are the ones the request came with (a kernel caller acting with
+// overridden credentials, nfsd for a client, shows its own fsuid there, not
+// the request's), and count only in dcfs's user namespace, which is the init
+// user namespace (main.cc refuses to start in any other), where
+// setattr_should_drop_suidgid's capable(CAP_FSETID) asks for them
+// (fs/attr.c:75 (Linux v7.3-rc7)).
+absl::StatusOr<bool> CapFsetidShown(const absl::StatusOr<ProcCredentials> &proc,
+                                    pid_t pid, uid_t uid) {
+  RETURN_IF_ERROR(proc.status());
+  if (proc->fsuid != uid) return false;
+  if (!proc->cap_effective.Has(CAP_FSETID)) return false;
+  return SharesMyUserNamespace(pid);
+}
+
+}  // namespace
+
+const absl::StatusOr<ProcCredentials> &FuseRequest::CallerProcCredentials(
     pid_t pid) const {
-  if (!caller_status_.has_value()) caller_status_ = ReadProcCredentials(pid);
-  return *caller_status_;
+  if (!caller_proc_credentials_.has_value()) {
+    caller_proc_credentials_ = ReadProcCredentials(pid);
+  }
+  return *caller_proc_credentials_;
 }
 
 absl::StatusOr<Credentials> FuseRequest::Caller() const {
@@ -190,13 +222,20 @@ absl::StatusOr<Credentials> FuseRequest::Caller() const {
   const fuse_ctx *ctx = fuse_req_ctx(*req_);
   Credentials caller{
       .uid = ctx->uid, .gid = ctx->gid, .groups = {}, .umask = ctx->umask};
-  // pid 0 (a caller outside dcfs's pid namespace) has no /proc entry, and
-  // a caller that already exited has none any more.
-  const absl::StatusOr<ProcCredentials> &proc = CallerStatus(ctx->pid);
+  std::optional<pid_t> pid = CallerPid(*ctx);
+  if (!pid.has_value()) {
+    // Rate limited: one per request while it lasts.
+    LOG_EVERY_N_SEC(WARNING, 60)
+        << "A caller outside dcfs's pid namespace: no supplementary groups "
+           "known; using none";
+    return caller;
+  }
+  // A caller that already exited has no /proc entry any more.
+  const absl::StatusOr<ProcCredentials> &proc = CallerProcCredentials(*pid);
   if (!proc.ok()) {
     // Rate limited: one per request while it lasts.
     LOG_EVERY_N_SEC(WARNING, 60)
-        << "pid " << ctx->pid << ": supplementary groups unreadable ("
+        << "pid " << *pid << ": supplementary groups unreadable ("
         << proc.status() << "); using none";
     return caller;
   }
@@ -204,39 +243,27 @@ absl::StatusOr<Credentials> FuseRequest::Caller() const {
   return caller;
 }
 
-namespace {
-
-// Whether `proc`, the status of the thread that sent the request `ctx`
-// describes, shows CAP_FSETID for that request's uid. /proc shows the
-// task's objective credentials, and its capabilities in its own user
-// namespace. They are the caller's only where they are the ones the
-// request came with (a kernel caller acting with overridden credentials,
-// nfsd for a client, shows its own fsuid there, not the request's), and
-// count only in dcfs's user namespace, which is the init user namespace
-// (main.cc refuses to start in any other), where
-// setattr_should_drop_suidgid's capable(CAP_FSETID) asks for them
-// (fs/attr.c:75 (Linux v7.3-rc7)).
-absl::StatusOr<bool> CapFsetidShown(const ProcCredentials &proc,
-                                    const fuse_ctx &ctx) {
-  if (proc.fsuid != ctx.uid) return false;
-  if (!proc.cap_effective.Has(CAP_FSETID)) return false;
-  return SharesMyUserNamespace(ctx.pid);
-}
-
-}  // namespace
-
 absl::StatusOr<bool> FuseRequest::CallerHasCapFsetid() const {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
-  // An answer of the kernel's own (fuse_ctx has no capabilities) is what
-  // docs/plan/notes/kernel-patches.md row 4 asks for.
+  // The request carries no capabilities (fuse_ctx has the ids, the pid and
+  // the umask), so only /proc can vouch for CAP_FSETID; a kernel that sent
+  // its own verdict would make this exact (docs/plan/notes/kernel-patches.md,
+  // row 4).
   const fuse_ctx *ctx = fuse_req_ctx(*req_);
-  const absl::StatusOr<ProcCredentials> &proc = CallerStatus(ctx->pid);
-  absl::StatusOr<bool> shown = proc.ok() ? CapFsetidShown(*proc, *ctx)
-                                         : absl::StatusOr<bool>(proc.status());
+  std::optional<pid_t> pid = CallerPid(*ctx);
+  if (!pid.has_value()) {
+    // Rate limited: one per request while it lasts.
+    LOG_EVERY_N_SEC(WARNING, 60)
+        << "A caller outside dcfs's pid namespace: CAP_FSETID unverifiable; "
+           "taken as absent";
+    return false;
+  }
+  absl::StatusOr<bool> shown =
+      CapFsetidShown(CallerProcCredentials(*pid), *pid, ctx->uid);
   if (shown.ok()) return *shown;
   // Rate limited: one per request while it lasts.
   LOG_EVERY_N_SEC(WARNING, 60)
-      << "pid " << ctx->pid << ": CAP_FSETID unverifiable (" << shown.status()
+      << "pid " << *pid << ": CAP_FSETID unverifiable (" << shown.status()
       << "); taken as absent";
   return false;
 }

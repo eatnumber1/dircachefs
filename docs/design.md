@@ -2529,11 +2529,12 @@ default capability set has none; `caller_capabilities_test`'s
 `ADaemonWithoutCapSysPtraceReadsGroupsButNotCaps` runs a daemon without
 it). Only requests a process makes (the mutations above) read them; the
 kernel's own requests (`FORGET`, `BATCH_FORGET`, `INTERRUPT`) carry no
-caller and never do. A pid of 0 reaches the reader only for a caller
-outside the daemon's pid namespace (the kernel sends `pid_nr_ns` of the
-caller in the mount's namespace, 0 if it has none there): its uid and gid
-are real, its groups are unreadable, and the request runs with no groups,
-with a WARNING (at most one per minute for the daemon) for the
+caller and never do. A pid of 0 comes only from a caller outside the
+daemon's pid namespace (the kernel sends `pid_nr_ns` of the caller in the
+mount's namespace, 0 if it has none there, fs/fuse/req.c:13 (Linux
+v7.3-rc7)) and names no process, so `FuseRequest` holds it as no pid and
+reads nothing for it: its uid and gid are real, and the request runs with
+no groups, with a WARNING (at most one per minute for the daemon) for the
 administrator, who can run the daemon in the callers' pid namespace. The
 unit tests forge requests with their own pid, so they read real groups
 and log nothing.

@@ -80,12 +80,12 @@ class FuseRequest {
   // The caller's filesystem identity: the uid/gid the kernel sent with the
   // request (fuse_req_ctx), and the calling thread's supplementary groups
   // (ReadProcCredentials, from /proc/<tid>/task/<tid>/status -- the kernel
-  // does not send them). If they cannot be read (the caller already exited,
-  // or lives in a pid namespace the daemon cannot see, where the kernel
-  // sends pid 0), the result has NO supplementary groups: never more than
-  // the caller has, at worst a spurious EACCES for access granted only
-  // through one of them. Does not consume the request; must be called
-  // before a Reply*.
+  // does not send them). If they cannot be read (the caller already exited)
+  // or the request names no thread (a caller in a pid namespace the daemon
+  // cannot see, for which the kernel sends pid 0), the result has NO
+  // supplementary groups: never more than the caller has, at worst a
+  // spurious EACCES for access granted only through one of them. Does not
+  // consume the request; must be called before a Reply*.
   absl::StatusOr<Credentials> Caller() const;
 
   // Whether the caller holds CAP_FSETID, as far as /proc can vouch for it:
@@ -176,15 +176,16 @@ class FuseRequest {
   // ReplyNegativeEntry.
   absl::Status ReplyEntryParam(const fuse_entry_param &param);
 
-  // The status file of `pid`, the thread that sent the request
+  // What /proc says of `pid`, the thread that sent the request
   // (ReadProcCredentials), read at the first call and kept: Caller and
   // CallerHasCapFsetid answer from one read of one task, with no window
   // between two reads in which its tid could name another.
-  const absl::StatusOr<ProcCredentials> &CallerStatus(pid_t pid) const;
+  const absl::StatusOr<ProcCredentials> &CallerProcCredentials(pid_t pid) const;
 
   std::optional<fuse_req_t> req_;
   int errno_sent_ = 0;
-  mutable std::optional<absl::StatusOr<ProcCredentials>> caller_status_;
+  mutable std::optional<absl::StatusOr<ProcCredentials>>
+      caller_proc_credentials_;
 };
 
 }  // namespace dcfs

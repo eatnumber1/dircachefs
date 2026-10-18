@@ -306,9 +306,10 @@ TEST(FuseRequestChannelTest, CallerHasTheGroupsOfTheRequestsPid) {
 }
 
 // A request with pid 0 -- the kernel sends it for a caller outside the
-// daemon's pid namespace -- has no /proc entry to read the groups from:
-// the caller is served with its ids and no groups, and the administrator is
-// told (logged once per 60 s for the process, so no other test in this
+// daemon's pid namespace (fuse_request_init's pid_nr_ns, fs/fuse/req.c:13
+// (Linux v7.3-rc7)) -- names no process, so no /proc entry is looked up for
+// it: the caller is served with its ids and no groups, and the administrator
+// is told (logged once per 60 s for the process, so no other test in this
 // binary may send a pid-0 request that reads its caller).
 TEST(FuseRequestChannelTest, CallerOfPidZeroHasNoGroupsAndIsWarnedAbout) {
   FakeChannel channel;
@@ -323,8 +324,11 @@ TEST(FuseRequestChannelTest, CallerOfPidZeroHasNoGroupsAndIsWarnedAbout) {
   EXPECT_EQ((*channel.caller)->uid, 1000u);
   EXPECT_EQ((*channel.caller)->gid, 2000u);
   EXPECT_THAT((*channel.caller)->groups, testing::IsEmpty());
-  EXPECT_THAT(capture.lines, testing::ElementsAre(testing::HasSubstr(
-                                 "pid 0: supplementary groups unreadable")))
+  EXPECT_THAT(capture.lines,
+              testing::ElementsAre(testing::AllOf(
+                  testing::HasSubstr("outside dcfs's pid namespace: no "
+                                     "supplementary groups known"),
+                  testing::Not(testing::HasSubstr("/proc")))))
       << absl::StrJoin(capture.lines, "\n");
 }
 
@@ -389,9 +393,9 @@ TEST(FuseRequestChannelTest, CallerAndCapFsetidShareOneReadOfTheStatus) {
               testing::Optional(absl_testing::IsOkAndHolds(true)));
 }
 
-// pid 0 has no /proc entry to vouch for CAP_FSETID: none, and the
-// administrator is told (once per 60 s for the process, so no other test in
-// this binary may ask it of a pid-0 request).
+// pid 0 names no process whose /proc entry could vouch for CAP_FSETID: none,
+// with no lookup, and the administrator is told (once per 60 s for the
+// process, so no other test in this binary may ask it of a pid-0 request).
 TEST(FuseRequestChannelTest, CapFsetidOfPidZeroIsNoneAndIsWarnedAbout) {
   FakeChannel channel;
   channel.read_cap_fsetid = true;
@@ -402,8 +406,41 @@ TEST(FuseRequestChannelTest, CapFsetidOfPidZeroIsNoneAndIsWarnedAbout) {
   RunGetattr(channel);
   EXPECT_THAT(channel.cap_fsetid,
               testing::Optional(absl_testing::IsOkAndHolds(false)));
-  EXPECT_THAT(capture.lines, testing::ElementsAre(testing::HasSubstr(
-                                 "pid 0: CAP_FSETID unverifiable (NOT_FOUND")))
+  EXPECT_THAT(capture.lines,
+              testing::ElementsAre(testing::AllOf(
+                  testing::HasSubstr(
+                      "outside dcfs's pid namespace: CAP_FSETID unverifiable"),
+                  testing::Not(testing::HasSubstr("/proc")))))
+      << absl::StrJoin(capture.lines, "\n");
+}
+
+// A caller that exited before dcfs read its /proc entry has none: no groups,
+// no CAP_FSETID, and the administrator is told of each (once per 60 s, so no
+// other test in this binary may send a request of an exited thread). The
+// kernel hands pids out cyclically (alloc_pid's idr_alloc_cyclic,
+// kernel/pid.c:262 (Linux v7.3-rc7)), so the joined thread's tid names no
+// task for the rest of the test.
+TEST(FuseRequestChannelTest, ACallerThatExitedHasNoGroupsNorCapFsetid) {
+  std::promise<pid_t> tid;
+  std::thread([&] { tid.set_value(syscalls::gettid()); }).join();
+  FakeChannel channel;
+  channel.read_caller = true;
+  channel.read_cap_fsetid = true;
+  channel.request_pid = static_cast<uint32_t>(tid.get_future().get());
+  channel.request_uid = 0;
+  channel.request_gid = 0;
+  WarningCapture capture;
+  RunGetattr(channel);
+  EXPECT_THAT(channel.caller,
+              testing::Optional(absl_testing::IsOkAndHolds(
+                  testing::Field(&Credentials::groups, testing::IsEmpty()))));
+  EXPECT_THAT(channel.cap_fsetid,
+              testing::Optional(absl_testing::IsOkAndHolds(false)));
+  EXPECT_THAT(
+      capture.lines,
+      testing::ElementsAre(
+          testing::HasSubstr("supplementary groups unreadable (NOT_FOUND"),
+          testing::HasSubstr("CAP_FSETID unverifiable (NOT_FOUND")))
       << absl::StrJoin(capture.lines, "\n");
 }
 

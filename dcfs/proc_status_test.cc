@@ -6,7 +6,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <future>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "absl/status/status_matchers.h"
@@ -99,11 +101,16 @@ TEST(ProcStatusTest, ReadsAThreadThatDroppedCapFsetid) {
   EXPECT_THAT(SharesMyUserNamespace(thread.tid()), IsOkAndHolds(true));
 }
 
-// pid 0, what the kernel sends for a caller outside the reader's pid
-// namespace, has no /proc entry.
-TEST(ProcStatusTest, PidZeroIsUnreadable) {
-  EXPECT_THAT(ReadProcCredentials(0), Not(IsOk()));
-  EXPECT_THAT(SharesMyUserNamespace(0), Not(IsOk()));
+// A thread that exited has no /proc entry. The kernel hands pids out
+// cyclically (alloc_pid's idr_alloc_cyclic, kernel/pid.c:262 (Linux
+// v7.3-rc7)), so the joined thread's tid names no task for the rest of the
+// test.
+TEST(ProcStatusTest, AThreadThatExitedIsUnreadable) {
+  std::promise<pid_t> tid;
+  std::thread([&] { tid.set_value(syscalls::gettid()); }).join();
+  pid_t gone = tid.get_future().get();
+  EXPECT_THAT(ReadProcCredentials(gone), Not(IsOk()));
+  EXPECT_THAT(SharesMyUserNamespace(gone), Not(IsOk()));
 }
 
 }  // namespace
