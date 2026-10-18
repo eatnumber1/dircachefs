@@ -480,9 +480,21 @@ first.
   **Thursday ramp (russ, 2026-10-18: "Since quotas reset on Friday, let's
   ramp up spend on Thursday to try to get as close to 100% spent as possible
   without going over. Don't worry about me doing out-of-band spend starting
-  on Thursday.")**: the Monday to Wednesday targets stay (73.4, 76.8, 80.2),
-  Thursday ends at 97%, and spend reaches about 99% by the reset (Fri 01:00
-  PT). From Thursday on no reserve is kept for russ or for red pushes.
+  on Thursday.")**, amended (2026-10-18, russ: "I don't actually think you can
+  effectively spend that slowly. Some of the items we have to do are big."):
+  the Monday to Wednesday daily targets (73.4, 76.8, 80.2) no longer apply.
+  The week overran (63% at 00:48 Sun, 83% at 12:50 Sun; the Sunday target was
+  70), so spend comes in lumps, one whole job at a time, each measured by a
+  live reading before and after it is dispatched: Mon, 17.2e's Opus re-review
+  and its fix round; Tue, 5.13's Sonnet review and merge; Wed, nothing new
+  (russ's use and red pushes only). The ceiling is about 91 at Wed end, then
+  the Thursday ramp to 97 and about 99 by the reset (Fri 01:00 PT). A Thursday
+  job starts only if its measured cost class fits what is left. From Thursday
+  on no reserve is kept for russ or for red pushes. Cause of the overrun: Opus
+  rounds on 22.5, 25.28b and 25.34 ran overnight with no pace check before
+  each dispatch.
+  russ, 2026-10-18 13:00 PT: 17.2e's Opus re-review runs now (started at 83%),
+  not Monday.
   The orchestrator itself is the largest consumer: lean turns, hands-on work
   delegated, Opus subagents only for protocol, identity, oracle and
   security-relevant work, Sonnet for routine implementation, Haiku for
