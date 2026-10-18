@@ -776,12 +776,26 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
   per-inode maps (M7).
 - UNSOURCED U1-U7: each gets the native differential test named in the
   note, run without dcfs, before any claim it backs is kept.
-- Model "no over-fetch" (russ, 2026-10-17, from docs/design.md "Only cache
-  what the client asked for"): a ghost set of what the in-flight requests
-  asked for; every backing read targets an asked-for object or key; a
-  per-request bound. Decided (russ, 2026-10-17): lookups are included; a
-  lookup resolves one name and never populates the directory (22.7 item 8),
-  so the property covers lookups too.
+- Model "no over-fetch" (russ, 2026-10-17, from docs/design.md "Fetch the
+  minimum needed to serve the request"; russ: "Is there a way to
+  mechanically enforce don't cache what the user didn't ask for? Maybe
+  something in the model?"). A ghost demand per in-flight request: lookup
+  X demands X; readdir demands its listing pages; getxattr k demands
+  (object, k); readdirplus demands its page's entries. Invariant: every
+  backing read action targets its own request's demand, and no backing
+  read occurs outside a request (this catches background or start-time
+  probes); a fill records only what a read for that request returned.
+  Trace validation (12.2) then enforces it on the code; 26.41's exact
+  per-operation syscall counts are the backstop. Decided (russ,
+  2026-10-17): lookups are included; a lookup resolves one name and never
+  populates the directory (22.7 item 8), so the property covers lookups
+  too.
+- Costly fields (russ, 2026-10-17: "non-free field masks sounds like
+  nuance that needs to make it into the model"): backing read actions
+  carry the fields they request (e.g. statx's mask); a request's demand
+  includes the costly fields it needs. The property: a costly field (e.g.
+  STATX_DIOALIGN) is requested only when the request needs it; free fields
+  always come back and are always cached.
 - Xattr population stops prefetching: values are read on demand, and the
   name list is cached only on listxattr (russ, 2026-10-17).
 - Per-filesystem xattr limits (decided 2026-10-17 from the kernel source,

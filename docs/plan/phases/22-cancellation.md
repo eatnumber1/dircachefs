@@ -353,8 +353,9 @@ answer; dcfs-protocol decides, with the model, and records the answers in
    only when a client reads its listing to the last `getdents64` page
    (item 4's guard); no lookup drains a directory, and `PopulateDirectory`
    as a run-to-EOF drain is removed (the page engine, driven only by
-   readdir, is the one mechanism). Reason: "only cache data that the
-   client asked for. Don't over-fetch", "behave like the backing", and
+   readdir, is the one mechanism). Reason: the fetch-minimum rule
+   (docs/design.md, "Fetch the minimum needed to serve the request"),
+   "behave like the backing", and
    bounded memory (one `stat` no longer reads a million-entry directory).
    Repeated lookups of a name are cached either way, and the kernel's
    negative dentries absorb most repeats. The cost: the first lookup of

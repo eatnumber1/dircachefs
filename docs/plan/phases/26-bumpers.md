@@ -1279,8 +1279,8 @@ proposal"):
 
 1. Primary bumpers are exact counts of what dcfs's design controls, with
    zero or near-zero tolerance: FUSE requests per operation, backing
-   syscalls by kind, fsync/syncfs, SQL statements and transactions
-   (`syscall_budgets.txt`, `request_budgets.txt`).
+   operations by kind, fsync/syncfs, SQL statements and transactions
+   (`backing_budgets.txt`, `request_budgets.txt`).
 2. Complexity tests (russ: "How does this measure the complexity? It's
    two points on some unknown curve."): today's 26.4b slopes check a
    linear envelope at N = 100 and 1000 only. Instead, because the counts
@@ -1297,7 +1297,9 @@ proposal"):
 1a. Costs are vectors by kind, not a sum of "1 per syscall" (russ,
    2026-10-17: "Is cost 1 really the right number? shutdown() or
    connect() has a very different cost than gettimeofday()"): each count
-   is per syscall kind (as syscall_budgets.txt's backing/procfd/sync split
+   is per backing-operation kind, and each kind is split by its costly
+   fields: a statx with STATX_DIOALIGN counts separately from a plain
+   statx (as the backing/procfd/sync split in `syscall_budgets.txt`
    already starts), so an fsync never trades against a statx. The line at
    the kernel is drawn because a call's kernel-side cost depends on state
    dcfs does not control (the backing filesystem, its caches, the
@@ -1305,6 +1307,16 @@ proposal"):
    source is here, and where dcfs's design depends on a kernel cost (what
    syncfs flushes, getdents64's batch size) that cost is reasoned from the
    source. The A/B benchmark measures the total, kernel included.
+1c. **Rename: syscall budgets become backing-operation budgets** (russ,
+   2026-10-17: "which aren't just syscalls anymore after this"). The
+   budget counts what dcfs does to the backing, and that is no longer only
+   syscalls (FUSE_STATX and its costly fields, io_uring operations).
+   `test/qemu/guest/syscall_budgets.txt` becomes
+   `test/qemu/guest/backing_budgets.txt`; its targets in
+   `test/qemu/BUILD.bazel`, the scripts that read it (`strace_lib.sh`,
+   `syscall_traces.sh`, `mkinitramfs.sh`), their tests and
+   `test/qemu/README.md` change in this step, and so do the messages that
+   name the file.
 1b. **Query-plan check** (russ: "Yes"): a test runs `EXPLAIN QUERY PLAN`
    on every SQL statement in dcfs against the real schema and fails on a
    full-table SCAN not allowed with a reason, so each statement's cost is

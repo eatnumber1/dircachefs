@@ -890,7 +890,7 @@ served, and dcfs starts without refusing.
 **Design, with proposed answers.**
 1. **Detection: lazy, through the probe that already exists.** No start-time
    tree walk, no backing I/O at start: a boundary is found when a listing or
-   lookup first meets it (`only cache what the client asked for`), by the
+   lookup first meets it (the fetch-minimum rule, docs/design.md), by the
    `IsBoundary` code that finds runtime ones, for mounts and subvolumes
    alike. Alternative: read mountinfo at start and probe each mount point
    (touches the other disk when dcfs starts; subvolumes still need the lazy

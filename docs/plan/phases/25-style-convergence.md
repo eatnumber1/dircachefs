@@ -1451,3 +1451,29 @@ Steps:
      `docs/plan/review-findings.tsv` do not exist yet. The orchestrator
      appends findings through `review_findings.py`; the script is a step
      item here.
+
+## 25.40 Support FUSE_STATX (russ, 2026-10-17; queued, M2)
+
+Dependencies: none among the style steps; the M2 row lists it after
+25.39.
+
+The kernel (FUSE protocol 7.39, Linux 6.6; cite `include/uapi/linux/fuse.h`
+and `fs/fuse` by version and path when written) can pass the caller's
+statx mask to the daemon. dcfs requests from the backing by the rule
+"fetch the minimum needed, measured in backing operations and their
+cost": request what the reply needs, do not trim fields that come free,
+and request costly fields (e.g. STATX_DIOALIGN) only when asked. dcfs
+caches everything statx returned (`stx_mask` says which fields are valid).
+
+Steps:
+1. Check libfuse support first (the lowlevel op and the capability). If it
+   is missing, say what it takes; a libfuse patch joins the planned
+   patches list, in `docs/plan/notes/kernel-patches.md` or its libfuse
+   counterpart `docs/plan/notes/libfuse-passthrough.md`.
+2. Where the kernel sends FUSE_STATX, dcfs requests the fields the reply
+   needs, and caches every field the reply returns. Where the kernel does
+   not send FUSE_STATX, dcfs falls back to GETATTR.
+3. Tests run with and without FUSE_STATX, so both paths are covered.
+4. Compatibility (russ, 2026-10-17): support runs at least back to Linux
+   7.0, his Ubuntu 24.04 LTS HWE kernel. State the tested kernel floor in
+   `README.md`.

@@ -105,17 +105,28 @@ practice:
 - **Bounded, not small.** russ, 2026-10-17: "Bounded is not small. We don't
   need it to be small, we just need it to be bounded reasonably for the
   operation being done."
-- **Only cache what the client asked for.** russ, 2026-10-17: "Cache each
-  one as it's read. Don't prefetch all of them. ... except in the case of
-  listxattrs then cache the keys as you see them ... Basically, only cache
-  data that the client asked for. Don't over-fetch." So xattr values are
-  cached one at a time as clients read them; listxattr's name list (one
-  syscall returns it whole, with no offset: `fs/xattr.c` `listxattr`) is
-  cached as returned; population does not prefetch xattrs. Whether this
-  also applies to lookups (today a lookup populates the whole directory for
-  negative-lookup completeness) is decided (russ, 2026-10-17): it does not. A lookup resolves one name and
-  caches the answer; a directory completes only when a client reads its
-  listing to the end (plan step 22.7).
+- **Fetch the minimum needed to serve the request; cache everything you
+  fetched.** russ, 2026-10-17: "If the user asks for (hypothetically) just
+  the execute bit of a file, we've got to write the file's entire stat
+  struct. I wouldn't want you to cache only the X bit, I want you to cache
+  all the information you now have on hand. Maybe it's better phrased as
+  'fetch the minimum amount of information needed to serve the user's
+  request, and cache the data you fetched'." Earlier the same day, on
+  xattrs: "Cache each one as it's read. Don't prefetch all of them. ...
+  except in the case of listxattrs then cache the keys as you see them."
+  Minimal is measured in backing operations (which syscalls, how many),
+  not bytes: a statx returns the whole struct and all of it is cached; a
+  getdents64 page returns many names and all of them are recorded; but no
+  syscall is made that the request does not need (no prefetching of other
+  names or other xattrs, no eager probes). So xattr values are read one at
+  a time as clients read them; listxattr's name list (one syscall returns
+  it whole, with no offset: `fs/xattr.c` `listxattr`) is cached as
+  returned; population does not prefetch xattrs. This also applies to
+  lookups (today a lookup populates the whole directory for
+  negative-lookup completeness), and is decided (russ, 2026-10-17): it
+  does. A lookup resolves one name and caches the answer; a directory
+  completes only when a client reads its listing to the end (plan step
+  22.7).
 - **No stronger and no weaker guarantees.** A guarantee the backing does
   not give is not given by dcfs either (a listing is not a snapshot: POSIX
   leaves entries added or removed during it unspecified), and a guarantee
@@ -1011,8 +1022,8 @@ invalidation. A mutation never clears them; it marks only its own names
 
 ## Population policy
 
-*Plan step 22.7 replaces this policy (russ, 2026-10-17: "only cache data
-that the client asked for. Don't over-fetch"): a lookup in an incomplete
+*Plan step 22.7 replaces this policy (russ, 2026-10-17, the fetch-minimum
+rule above): a lookup in an incomplete
 directory resolves only that name and caches the answer, and a directory
 completes only when a client reads its listing to the last page. The text
 below is as built and stays until 22.7 lands.*
