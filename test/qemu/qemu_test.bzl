@@ -38,6 +38,10 @@ load("//test/qemu:modules.bzl", "modules_cpio", "test_modules")
 # size G need 2 * U + G + the kernel's reservation before the guest has run a
 # command (README.md, "Guest memory"). The largest modules set (xfs, btrfs and
 # ext4) unpacks to 155,700 kB, requiring at least 512 MiB (a 209,400 kB cap).
+#
+# Plain `bazel coverage` has a floor of its own too (step 25.34): the
+# instrumented binaries and their /cov profiles fill the same tmpfs, so
+# mem_args_for adds `plain_cov_extra` (README.md, "Guest memory").
 E2E_MEM = 256
 E2E_ASAN_MEM = 512
 
@@ -74,11 +78,12 @@ def initramfs_for(size, plain_dcfs = False, checked_dcfs = False):
         return ":initramfs_checked"
     return ":initramfs_checked" if size in ("small", "medium") else ":initramfs"
 
-def mem_args_for(mem, asan_mem, cov_extra = 256):
+def mem_args_for(mem, asan_mem, cov_extra = 256, plain_cov_extra = 64):
     """run-qemu.sh's --mem flag for the build configuration (a select())."""
     sanitizer_args = ["--mem", str(asan_mem)]
     sanitizer_cov_args = ["--mem", str(asan_mem + cov_extra)]
     return select({
+        "//test/qemu:coverage_build": ["--mem", str(mem + plain_cov_extra)],
         "//test/qemu:coverage_asan_build": sanitizer_cov_args,
         "//test/qemu:coverage_ubsan_build": sanitizer_cov_args,
         "//test/qemu:asan_build": sanitizer_args,

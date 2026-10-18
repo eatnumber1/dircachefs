@@ -508,6 +508,20 @@ at 512 the cap is 209,400 kB against 155,700 for the largest set (step 26.37).
 Raise `E2E_ASAN_MEM` (`qemu_test.bzl`), not one test's `asan_mem`, when the
 shared initramfs grows again: all of them share it.
 
+**Coverage has a floor of its own (step 25.34, CI run 39147500488).** Under
+`bazel coverage` the instrumented dcfs and test binary are larger in the
+initramfs, and every instrumented process leaves a `/cov` profile (4.4 MiB for
+dcfs) in the same tmpfs, which holds at most half of the RAM. `removed_test_xfs`
+and `_btrfs` at the unit guests' 192 MiB stopped at `peak_shmem` 65,620 kB
+(`MemTotal` 156,576 kB), so `open(/mnt/listed/x)` and the cache database
+failed with `No space left on device`; ext4 (65,808) and `guest_test` (64,700)
+passed with no room to spare (the cap depends on the size of the modules
+archive). Without coverage the same guests peak at 36-41 MiB of
+shmem. With 64 MiB more (`plain_cov_extra` in `mem_args_for`, `qemu_test.bzl`)
+the three removed tests peak at 66-71 MiB of shmem and 100-116 MiB used of 256.
+Raise `plain_cov_extra`, not one test's `mem`, when the instrumented images
+grow: every guest shares them.
+
 Measured peaks (`peak_used`, MiB; KVM, 2026-10-07; ranges are across the
 ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 `--config=asan`/`ubsan`, in `test/qemu/qemu_test.bzl`, `qemu_cc_test.bzl` and
