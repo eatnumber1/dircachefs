@@ -1069,8 +1069,14 @@ while dcfs's cache has not yet reached its durable point.
 - Before replying to an OPEN or CREATE with O_SYNC or O_DSYNC, make the
   cache durable (a WAL fsync), so the cache is no less durable than the
   backing for the writes that open allows.
+- Test (fault_power, C++ guest test): create a file with O_SYNC, and one
+  with O_DSYNC; write; cut power without FSYNC; after recovery the file's
+  NFS handle (inode identity) still resolves. Fails first on the current
+  code.
+- Model: the durable point on a sync OPEN/CREATE in `dcfs.tla`, with a
+  `formal/known_bugs/` variant that skips it.
 
-Owner: not yet set (orchestrator).
+Owner: dcfs-protocol.
 
 ## 25.28c An idle daemon reaches its sync point: a one-shot timer, modelled (russ, 2026-10-17; after 25.28b)
 

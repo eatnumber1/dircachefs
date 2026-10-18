@@ -1111,3 +1111,25 @@ dcfs restarted or dead with a bind mounted on a stub: works as natively
 (`EBUSY` to unmount, `ENOTCONN` when dead, no refusal), or the wrapper
 refuses to mount over a directory with mounts beneath it (acceptance
 criterion).
+
+## 23.15 O_DIRECT on the non-passthrough path (2026-10-18, from the Explore research on O_DIRECT and inotify; queued)
+
+The research (2026-10-18, under "behave like the backing") found that
+O_DIRECT works only where the open gets passthrough. When fi.flags has
+O_DIRECT and the open falls back from passthrough (no FUSE_CAP_PASSTHROUGH,
+or the setuid+setgid-without-group-exec decline at
+dcfs/dir_cache_fs.cc:119), dcfs serves READ and WRITE itself, and the
+backing's O_DIRECT rules are not carried through.
+
+- **Change:** on that path, serve READ and WRITE through a per-open
+  O_DIRECT backing fd with an aligned bounce buffer, and pass the backing's
+  EINVAL through unchanged.
+- **Comment fix in the same step:** dcfs/dir_cache_fs.cc:1874-1876 says
+  passthrough I/O goes through dcfs's shared fd. It goes through the
+  kernel's own per-file backing file, opened with the caller's flags.
+- **Test first:** a differential test (native vs dcfs) of O_DIRECT reads and
+  writes, including a misaligned EINVAL case, on ext4, xfs and btrfs, plus
+  the passthrough path, which already works.
+
+Owner: dcfs-implementer. Numbered 23.15 because 23.14 is named above as
+the follow-up for 23.13's sub-items (7) and (9).

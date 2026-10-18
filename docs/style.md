@@ -726,7 +726,8 @@ status was an infrastructure failure in hand. Tests assert on a status with
 `StatusIs(code, message_matcher)`, not on `.message()`. Mechanical: the
 `status_message` matcher (`tools/style_matchers/status_message.query`) refuses
 every call of `absl::Status::message()` in `dcfs/`, `tools/` and `bench/`, with
-no allowlist except `FindingText(const absl::Status&)`; `status_dropped` reports
+no allowlist except `FindingText(const absl::Status&)` and `EncodeChildResult`
+(`test/qemu/guest/guest.cc`, per the 2026-10-18 ruling); `status_dropped` reports
 a failure branch (`if (!s.ok()) return false;`) that never mentions the status
 (report only: some are legitimate domain answers, such as a predicate that is
 false when the probe failed).
@@ -1727,9 +1728,12 @@ protocol event (`dcfs/protocol_events.h`) and `Trace.tla` action;
 - **Commit body**: wrapped at 72, says why. A bug fix or behavior change
   quotes the failing-first run under a "Failing first" heading (about 30
   bodies), then the model and test results. It ends with the model's
-  `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` trailer
-  (history: Opus 5.5 x103, Sonnet 5 x90, Fable 5.1 x82, Sonnet 5.5 x34,
-  Haiku 4.5 x5). Never push.
+  `Co-Authored-By` trailer naming the model that actually wrote the commit
+  (russ, 2026-10-18): a Haiku clerk writes `Co-Authored-By: Claude Haiku 5.5
+  <noreply@anthropic.com>`, a Sonnet implementer `Claude Sonnet 5.5`. The
+  Opus line in older bodies is an example, not a default. (History: Opus
+  5.5 x103, Sonnet 5 x90, Fable 5.1 x82, Sonnet 5.5 x34, Haiku 4.5 x5.)
+  Never push.
 
 ## 8. No test-only things in production code
 

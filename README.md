@@ -1300,6 +1300,12 @@ recovery protocol, concurrency, and the test strategy.
   reveals them (when it reopens an object by handle, or lists a
   directory), then logs a warning and adopts what it sees. Anything
   answered purely from the cache notices nothing and stays stale.
+- **O_DIRECT works through passthrough.** The backing file is opened with
+  the caller's flags, so O_DIRECT is direct as natively. (The fallback
+  path, and the fcntl toggle, are tracked in the plan: 23.15 and 17.6.)
+- **inotify and fanotify on the mount see only changes made through the
+  mount.** A change made on the backing raises no event on the mount, as
+  the exclusive-access rule above implies.
 - **The kernel's caches are not invalidated** when dcfs does notice an
   out-of-band change. The kernel keeps serving attributes and dentries it
   already has until their timeouts (an hour by default) expire or it

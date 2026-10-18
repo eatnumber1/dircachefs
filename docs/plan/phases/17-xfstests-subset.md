@@ -303,3 +303,26 @@ Then, medium:
 7. O_TMPFILE: O_EXCL cannot be linked; the mode honours the umask
    (tmpfile_001..003, tmpfile_stat_mode.c).
 8. Concurrent copy_file_range with SEEK_DATA and SEEK_HOLE (cmd/seekflood.c).
+
+## 17.6 Tests that pin what the kernel and dcfs do for O_DIRECT and inotify (russ, 2026-10-18: "add tests demonstrating that fact. That way we notice if it ever changes"; dispatched 2026-10-18, lane 4)
+
+Explore research, 2026-10-18, under "behave like the backing": these are
+facts today, and the tests pin them so a change shows up.
+
+- O_DIRECT through passthrough behaves like the backing and is really
+  direct (fs/fuse/passthrough.c:169-171 opens the backing file with the
+  caller's f_flags, v7.3-rc7). Compared with native, on each filesystem
+  the guest runs.
+- `fcntl(F_SETFL, O_DIRECT)` on a passthrough FUSE file does not reach its
+  backing file (fs/fcntl.c:37; fs/backing-file.c:95-100, 164-174): a kernel
+  quirk, pinned. Recorded as a candidate in docs/plan/notes/kernel-patches.md.
+- inotify on the mount sees changes made through the mount.
+- A passthrough write raises IN_MODIFY on both inodes (the mount's and the
+  backing's).
+- A change made on the backing raises nothing on the mount: the
+  exclusive-access limitation in README.md, pinned.
+
+Ordered and load-agnostic: each verdict counts events, with no sleeps;
+time appears only as a hang guard.
+
+Owner: dcfs-implementer, lane 4.

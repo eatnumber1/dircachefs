@@ -4120,3 +4120,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   - Orchestrator rulings: the four 25.34 style questions were answered in docs/style.md (section 2: a ported test takes a behavior sentence; 1.6: `.message()` only in status serialization; 1.5: composing helpers are CamelCase in dcfs/testonly/; 1.2: `absl::optional_ref<const T>`; section 4: shfmt -i 2 conversion, no tab-indented new lines).
   - Quota: Thursday ramp recorded in docs/plan/process.md (end Thursday at 97%, about 99% by the Fri 01:00 PT reset, no reserve from Thursday).
   - Kernel citations re-verified against upstream v7.3-rc7-245-g32c52ec87d62 in 12.20 and 12.24 and the contract audit; FUSE_ATTR_GENERATION and the GETATTR/SETATTR generation claim removed (recycling is detected on LOOKUP and READDIRPLUS only).
+- 2026-10-18, clerk batch 9 (O_DIRECT and inotify, style rulings, 25.28e owner):
+  - 25.28e owner set to dcfs-protocol; its test (fault_power with O_SYNC and O_DSYNC creates, NFS handle after a cut) and its model item (durable point on a sync OPEN/CREATE, known_bugs variant) written in.
+  - New step 23.15, O_DIRECT on the non-passthrough path (dcfs-implementer; fallback serves O_DIRECT through an aligned bounce buffer; comment fix at dir_cache_fs.cc:1874-1876). Numbered 23.15, not 23.14, because 23.13 already names 23.14 as its follow-up.
+  - Kernel-patches row 9: fcntl(F_SETFL, O_DIRECT) on a passthrough file does not reach the backing (fs/fcntl.c:37; fs/backing-file.c).
+  - New step 17.6, tests that pin O_DIRECT and inotify behaviour (russ, 2026-10-18: "add tests demonstrating that fact"; dispatched to lane 4), in the status table.
+  - README limitations: O_DIRECT works through passthrough; inotify and fanotify on the mount see only changes made through it, beside the exclusive-access text.
+  - docs/style.md 1.6: the status_message matcher's allowlist names EncodeChildResult (test/qemu/guest/guest.cc), per the 2026-10-18 ruling. Section 7: the Co-Authored-By trailer names the model that wrote the commit (russ, 2026-10-18).

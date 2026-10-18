@@ -84,3 +84,7 @@ ac6bb57820ee50862	2026-10-18T08:46:54Z	25.34	style-review	dcfs-style-reviewer	cl
 adb422a088d7f1280	2026-10-18T08:59:38Z	25.28b	protocol	dcfs-protocol	claude-opus-5-5	high									
 a7871d41cccbe073f	2026-10-18T09:00:54Z	25.34	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
 ab20596a0b52e66be	2026-10-18T09:01:51Z	Clerk batch 8	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+a389b59547e36b4d1	2026-10-18T09:11:25Z	Research O_DIRECT and inotify support		Explore	claude-opus-5-5										
+a465cbd3df7718e4b	2026-10-18T09:12:34Z	review-findings	investigation	dcfs-investigator	claude-sonnet-5-5	high									
+a31ce13399fec88e9	2026-10-18T09:16:33Z	26.36	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
+a215beed3a8e2314d	2026-10-18T09:18:09Z	Clerk batch 9	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
