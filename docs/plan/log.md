@@ -4090,3 +4090,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   adopt a stream-json foreman held open by a FIFO with a JOB-COMPLETE
   marker, to move into tools/agents/foreman.py. Provisional ruling by the
   orchestrator; russ to confirm.
+- 2026-10-17, russ agrees dcfs should stream directory population instead
+  of reading a whole backing directory before answering. 22.7 written
+  (phase 22, queued; M1 placement provisional, beside 25.10, russ to
+  confirm): stream handles serve from the backing's `d_off` until EOF, the
+  listing is recorded page by page and marked complete only if no mutation
+  intervened, plain READDIR makes no per-child syscall; the model, a
+  known-bug variant and the tests come first. Owner dcfs-protocol, review
+  dcfs-reviewer; it supersedes 22.5's per-page interruption point, which
+  lands first. It also amends style 1.12's "one snapshot" readdir sentence.

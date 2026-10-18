@@ -205,3 +205,182 @@ prompt lists every file:line to change, from a review of `git grep -n
 job; the job changes only those lines, and the review checks that no
 SQLite sense changed (a grep of the diff for those names must be empty
 of edits).
+
+## 22.7 Streamed directory population (russ, 2026-10-17; queued)
+
+**Milestone M1, a provisional placement by the orchestrator, beside 25.10
+(both change what a readdir may promise); russ to confirm.** Owner:
+dcfs-protocol (Opus, high), reviewed by dcfs-reviewer. After 22.5 (which
+lands first, with a per-page interruption point in `PopulateDirectory` as
+the interim fix) and after 25.28b and 12.20 (all three edit `dcfs.tla`).
+russ (2026-10-17) agreed: dcfs should stream directory population instead
+of reading a whole backing directory before answering.
+
+**Why.** `PopulateDirectory` reads every `getdents64` page and then probes
+every child (`openat`, `statx`, the file handle, the generation, the
+symlink target, every xattr) before the first reply, so the first `ls` of
+a 20,000-entry directory waits for 20,000 probes, `ls | head` pays for all
+of it, and one FUSE request does unbounded backing work. POSIX leaves an
+entry added or removed during a `readdir` free to appear or not, and the
+backing gives callers only that, so a whole-directory snapshot is stronger
+than owed (12.19: no stronger than the backing). Streaming gives a fast
+first page, a one-page `ls | head`, and bounded backing work per FUSE
+readdir, so interrupt timeliness holds by construction rather than by an
+interruption point in a loop. It supersedes 22.5's per-page interruption
+point and the `kProbesPerCheckpoint` batching inside `PopulateDirectory`.
+Today's `docs/style.md` 1.12 text ("the listing across calls stays one
+snapshot", and `readdir` among the calls that are atomic) is stronger than
+POSIX's `readdir` and than this design; the step amends it in the same
+change (with russ's wording), and `docs/design.md` "Population policy" and
+"Cancellation", `formal/README.md` and the README's limitations follow.
+
+**Design to settle** (each is a question with the orchestrator's proposed
+answer; dcfs-protocol decides, with the model, and records the answers in
+`docs/design.md`):
+
+1. *Where does a handle's listing come from?* Proposed: a directory handle
+   whose first READDIR(PLUS) at offset 0 finds the listing incomplete
+   (a miss) is a **stream handle**: it serves from its backing directory
+   descriptor and the backing's own `d_off` values as the reply offsets,
+   until EOF. A handle that finds the listing complete is a **cache
+   handle** and serves from the cache with dcfs's offsets (rowid + 2), as
+   today. `Opendir` still makes no backing call; it now returns a
+   handle (`fi.fh`) whose state `Releasedir` frees. A handle's mode is
+   fixed at its first reply (see 6 for why).
+2. *What does a plain READDIR page cost?* Proposed: it replies from
+   `getdents64`'s name, inode number and type, with no per-child syscall
+   (the nodeid is the backing inode number, phase 14, so `d_ino` is what
+   every other reply would show). `.` and `..` keep the backing's
+   cookies and use `d_ino` (the mount's root is its own parent, as
+   `ParentOf` has it). Open: a mount point's `d_ino` is the covered
+   directory's, not the stub's, so a plain page may show a boundary entry's
+   `d_ino` differently from its later `stat`; the proposal accepts that (a
+   cosmetic difference, in `README.md`'s limitations) because the entry
+   itself, its name and type, is the backing's.
+3. *What does a READDIRPLUS page cost?* Proposed: it probes the entries
+   that go in the reply (`ProbeChild`, as today), replies, and records
+   them (`RecordChild`, one transaction per page). A request replies at
+   most N entries (a constant, today's 16), a short listing being valid
+   (the next call continues; style 1.12, most useful result), so a
+   request's backing work is `getdents64` plus at most N probes whatever
+   the reply buffer's size. How the entries past N are handled (an
+   `lseek` back to the N-th entry's `d_off`, or a buffer held in the
+   handle) is measured against the syscall budgets.
+4. *When is the listing recorded, and when is it complete?* Proposed:
+   page by page, as each page's children are probed (so only probed pages
+   are recorded: a plain page records nothing, because a child's row needs
+   its file handle and a boundary needs its `statx`), under one
+   fill snapshot and epoch taken when the stream starts (`BeginFill`,
+   `DirEpoch`, as `PopulateStarted` takes them). The listing stays
+   incomplete (tri-state) during the stream. At EOF the stream marks it
+   complete and prunes the names it did not see only if every page since
+   offset 0 was probed and recorded in order (the handle tracks "this
+   request started where the last reply ended"), and `CanFill` still holds
+   for the directory and the epoch has not moved: no mutation of the
+   directory began, ended or ran since the snapshot. Otherwise the
+   listing stays incomplete and is never wrong. The names seen are held in
+   the handle for the prune, as today's population holds them (a name
+   stamp on the dentries is the alternative if memory budgets object).
+   Consequence to state: a stream of plain pages alone completes nothing, so
+   a repeated plain `ls` re-reads the backing directory until some lookup
+   or READDIRPLUS drains it; measure the effect on spin-ups (26.x) and
+   decide if plain pages should also probe after replying.
+5. *An abandoned or interrupted stream?* Proposed: the pages recorded stay
+   (they are fills like any lookup's); the listing stays incomplete;
+   nothing is undone. A handle released (or a request interrupted: it
+   replies the short listing built so far, or `EINTR` if it has none)
+   before EOF is that case. The backing descriptor is closed at EOF and at
+   `Releasedir`.
+6. *seekdir, telldir, rewinddir.* Proposed: a request at an offset other
+   than the last reply's end (a `seekdir`) does `lseek` on the backing
+   descriptor to that cookie (reopening it if EOF closed it), is a
+   non-recording page (item 4's flag), and passes the backing's answer
+   through for a cookie it does not like (style 1.12: the backing's
+   contract). `rewinddir` on a stream handle restarts the stream at 0 with
+   a new snapshot (it may complete the listing); the handle does not turn
+   into a cache handle, because a cookie from before the `rewinddir` would
+   be read as a rowid. Cookies are the backing's: stable for the handle's
+   life, as the backing keeps them.
+7. *A second `opendir` during a stream, and handles after completion?*
+   Proposed: independent. Each stream has its own descriptor, snapshot and
+   `seen` set, records idempotently (upserts guarded by `CanFill`), and
+   each completes or not on its own guard. A handle opened after a
+   completion is a cache handle.
+8. *Lookups.* `LookupOrPopulate` on an unknown name of an incomplete
+   directory keeps its spin-up policy (one drain records the whole
+   directory, so the disk spins up once): `PopulateDirectory` becomes the
+   same page engine run to EOF, with one interruption point at each page's
+   start, instead of a second mechanism. An interrupted drain keeps its
+   recorded pages. `ListCached`'s attempt loop and its `EAGAIN` ("kept
+   changing") go in the same change (25.10 removes the retry there too;
+   whichever lands second drops what is left): a readdir no longer needs
+   the listing recorded to answer.
+9. *Out-of-band changes.* The completion guard covers dcfs's own
+   mutations. A backing directory changed or removed behind dcfs's back
+   during a stream gets what the backing gives (`getdents64`'s answer, an
+   errno passed through); the existing out-of-band policy
+   (`docs/design.md`) is unchanged.
+
+**The model first.** `formal/dcfs.tla`'s `PopulateRead` (`PDRead`) reads
+the whole listing in one step. It becomes many steps with a partial
+listing in the request's state: a cursor in the backing's name order
+(`d_off`'s abstraction), the names seen so far, the stream's snapshot and
+epoch (taken at its first page), and a flag "every page so far was
+probed". A page step reads the names after the cursor from the *current*
+backing (so a name created behind the cursor is missed and one ahead of it
+appears, the POSIX freedom), replies them, and records them if `CanFill`;
+`Abandon` ends a stream at any page boundary; the completion step at EOF
+links the seen names, prunes the rest and marks complete only if the flag
+holds, `CanFill` and the epoch is unchanged (`PDCommit`'s guard, at the
+end of the stream instead of at the end of one read).
+
+- `known_bugs/complete_despite_mutation`: the completion ignores the
+  guard, so a create behind the cursor during the stream is marked
+  complete as absent. `CacheNeverWrong` fails; the test expects the
+  counterexample.
+- A pinned non-guarantee (12.19's pattern): a configuration asserting
+  that a streamed listing is a snapshot of one instant expects TLC's
+  counterexample, so a dcfs that grew stronger than the backing (a
+  whole-directory read back at the start) fails the test.
+- Properties of the replies (new, `ListingContract`): every name replied
+  existed in the backing at some instant between the first page and the
+  reply; a name present throughout the stream is replied exactly once.
+- `InterruptBound` (22.5) holds with no interruption point inside a page's
+  probes: K is `getdents64` plus N probes' syscalls, written out, and the
+  drain's loop has one interruption point at each page's start.
+- Model state counts: the new steps only multiply the listing
+  configurations; `MC_large` and `MC_nolock` are re-measured and the
+  growth reported (the stream's page size in the model is one name).
+- Trace validation: the recorder's `populate_read` line is replaced by
+  one line per page (and the held-lines reordering note in
+  `formal/README.md` shrinks with it: a page is a short step).
+
+**Tests first** (each fails on today's code and is shown failing):
+
+- *Cancellation:* a request interrupted during a stream replies within
+  one page's work (`cancel_test`, counting backing calls after the
+  interrupt, not time: at most K); an interrupted drain keeps its pages.
+- *`ls | head` reads one backing page:* `getdents64` calls counted
+  (load-agnostic, as 26.36's rule says) are one for the first page of a
+  large directory, against all of its pages today; `probe` calls are at
+  most N for READDIRPLUS and zero for plain READDIR.
+- *A mutation during a stream leaves the listing incomplete:* a create
+  and an unlink of a name between two pages; after EOF the listing is not
+  complete, a lookup of the new name finds it, and a later full stream
+  completes. Under the model's known bug this is the failing case.
+- *Offsets resume:* two clients' interleaved streams; `seekdir` back to an
+  earlier cookie; `rewinddir`; a directory larger than one reply listed
+  across calls lists every untouched entry once (`readdir_boundary_test`
+  stays, and its CPU-tick ratio still holds).
+- *Cache handle:* a handle opened after completion serves from the cache
+  with no backing syscall; a stream and a cache handle open at once.
+- *Budgets (26.x):* `test/qemu/guest/syscall_budgets.txt` gains the first
+  page's syscalls (plain and plus, exact), and the old whole-directory
+  population's entry for a readdir goes.
+
+Docs: `docs/design.md` "Population policy" and "Cancellation",
+`formal/README.md` (actions and properties tables, the trace-validation
+notes), `docs/style.md` 1.12 (the readdir sentence), README's limitations
+(boundary `d_ino`, repeated plain `ls`). One way to do each thing: the
+whole-directory read for a readdir, `ListCached`'s retry loop, and
+`kProbesPerCheckpoint` all go; report any that stays and why.
