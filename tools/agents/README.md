@@ -100,22 +100,31 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
   regenerates, prints nothing.
 - `stop` (the main session's Stop): regenerates lanes and, when main's HEAD
   differs from the last recorded HEAD, regenerates `sloc.json`; launches the
-  detached `quota` reader at most once per hour; asks for a lanes upload only
+  detached `quota` reader at most once per hour; launches the detached `ci`
+  reader once when `origin/main` differs from `ci.read_sha` or `ci.json` has a
+  run that is `in_progress` or `queued` (recording `origin/main` in
+  `ci.read_sha`); asks for a lanes upload only
   on material changes compared with the last uploaded table (a lane's step
   changed, an agent was newly dispatched, or an override was set or cleared; a
   lane going to idle by SubagentStop alone triggers no request) or when another
   dataset changed, blocking with a reason naming the files, unless
   `stop_hook_active` is true (no loops) or the caller is a subagent.
 - `mark-uploaded DATASET...`: records the named datasets (`lanes`, `sloc`,
-  `quota`, `budget`) as uploaded at their current contents (`uploaded.sha256`,
-  `lanes.uploaded.json` and `lane_states.uploaded.json` for lanes,
-  `sloc.uploaded.sha256`, `quota.uploaded.sha256`, `budget.uploaded.sha256`).
+  `quota`, `budget`, `ci`) as uploaded at their current contents
+  (`uploaded.sha256`, `lanes.uploaded.json` and `lane_states.uploaded.json`
+  for lanes, `sloc.uploaded.sha256`, `quota.uploaded.sha256`,
+  `budget.uploaded.sha256`, `ci.uploaded.sha256`).
   Datasets not named stay changed. With no names it is a usage error. The
   orchestrator runs it with the names the Stop hook's reason gives, after
   uploading those datasets.
 - `show`: prints the table.
 - `quota`: runs the usage meters (claude_usage.py and agy /usage), writes
-  `quota.json`, and appends Claude week to `budget.json`.
+  `quota.json`, appends Claude week to `budget.json`, and refreshes `ci.json`.
+- `ci`: runs `gh run list --limit 12` in the main checkout and writes
+  `ci.json`: a list of `{"run", "workflow", "commit", "result", "trigger",
+  "started"}` (`commit` the first 8 hex digits of `headSha`; `result` the
+  conclusion, or the status while a run is unfinished). A failing `gh` prints
+  one line on stderr naming the command and keeps the previous `ci.json`.
 - `lane-state LANE STATE [NOTE]` / `lane-state LANE clear`: sets or clears a
   manual lane state override (e.g. `lane-state lane-2 paused "quota"` or
   `lane-state lane-1 waiting "review Sunday"`), stored in `lane_states.json`.
@@ -220,7 +229,8 @@ State is in `$DCFS_DASHBOARD_DIR` (default `~/.cache/dcfs-dashboard/`):
 `lanes.uploaded.json`, `lane_states.json`, `lane_states.uploaded.json`,
 `sloc.json`, `sloc.head`, `sloc.uploaded.sha256`, `quota.json`,
 `quota.uploaded.sha256`, `quota.read_at`, `quota.log`, `budget.json`,
-`budget.uploaded.sha256`, and an optional config.json
+`budget.uploaded.sha256`, `ci.json`, `ci.uploaded.sha256`, `ci.read_sha`,
+`ci.log`, and an optional config.json
 (`{"model": ..., "effort": ...}`) for the orchestrator row.
 A malformed input or an unreadable state file prints one line to stderr and
 exits 0, because a failing hook can wedge the session.

@@ -16,6 +16,7 @@ this directory for the hook configuration.
     dashboard_lanes.py mark-uploaded DATASET...  record datasets as uploaded
     dashboard_lanes.py show            print the lanes file
     dashboard_lanes.py quota           read usage meters and update quota/budget
+    dashboard_lanes.py ci              read the last CI runs into ci.json
     dashboard_lanes.py lane-state ...  set or clear lane state override
     dashboard_lanes.py ledger add ...  append row for unhooked agent job
     dashboard_lanes.py ledger set ...  fill outcome fields at merge time
@@ -25,7 +26,8 @@ running.json, finished.json, lanes.json, uploaded.sha256,
 lanes.uploaded.json, lane_states.json, lane_states.uploaded.json,
 sloc.json, sloc.head, sloc.uploaded.sha256, quota.json,
 quota.uploaded.sha256, quota.read_at, quota.log, budget.json,
-budget.uploaded.sha256, and an optional config.json with "model" and
+budget.uploaded.sha256, ci.json, ci.uploaded.sha256, ci.read_sha, ci.log,
+and an optional config.json with "model" and
 "effort" for the orchestrator row. Dispatch ledger is kept in
 docs/plan/dispatch-ledger.tsv under the main repository checkout.
 """
@@ -219,11 +221,11 @@ def count_sloc(lines, lang):
     return count
 
 
-def main_head(env):
-    """The HEAD commit hex of main_repo, or None."""
+def git_rev_parse(env, ref):
+    """The commit hex of ref in main_repo, or None."""
     try:
         res = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            ["git", "rev-parse", ref],
             cwd=env.main_repo,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -285,7 +287,7 @@ def compute_sloc_rows(main_repo):
 
 def regenerate_sloc(env):
     """Regenerates sloc.json if main HEAD changed. Returns True if changed."""
-    head = main_head(env)
+    head = git_rev_parse(env, "HEAD")
     recorded_head = None
     if os.path.exists(env.path("sloc.head")):
         recorded_head = read_text(env.path("sloc.head")).strip()
@@ -616,10 +618,60 @@ def quota(env):
             env.path("budget.json"), json.dumps(budget, indent=2) + "\n"
         )
 
+    read_ci(env)
     return ""
 
 
-DATASETS = ["lanes", "sloc", "quota", "budget"]
+CI_FIELDS = ("databaseId,headSha,conclusion,status,createdAt,workflowName,"
+             "event")
+UNFINISHED_RUNS = ("in_progress", "queued")
+
+
+def read_ci(env):
+    """Writes ci.json with the last 12 CI runs; keeps it if gh fails."""
+    runner = getattr(env, "runner", None) or subprocess.run
+    out = run_meter(
+        ["gh", "run", "list", "--limit", "12", "--json", CI_FIELDS],
+        runner,
+        env,
+        cwd=env.main_repo,
+        timeout=60,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if out is None:
+        return ""
+    runs = [
+        {
+            "run": str(r["databaseId"]),
+            "workflow": r["workflowName"],
+            "commit": r["headSha"][:8],
+            "result": r["conclusion"] or r["status"],
+            "trigger": r["event"],
+            "started": r["createdAt"],
+        }
+        for r in json.loads(out)
+    ]
+    write_atomic(env.path("ci.json"), json.dumps(runs, indent=2) + "\n")
+    return ""
+
+
+def ci_read_due(env, origin):
+    """Whether ci.json needs a read: origin/main moved since the last read
+    (ci.read_sha), or a run is still unfinished. origin is None when the
+    checkout has no origin/main, which is no reason on its own."""
+    if origin is not None:
+        recorded = None
+        if os.path.exists(env.path("ci.read_sha")):
+            recorded = read_text(env.path("ci.read_sha")).strip()
+        if origin != recorded:
+            return True
+    runs = load_json(env.path("ci.json"), [])
+    return any(r.get("result") in UNFINISHED_RUNS for r in runs)
+
+
+DATASETS = ["lanes", "sloc", "quota", "budget", "ci"]
 
 
 def dataset_paths(env, name):
@@ -1211,10 +1263,10 @@ def subagent_stop(env, event):
     return ""
 
 
-def launch_quota(env):
-    cmd = [sys.executable, "-I", os.path.abspath(__file__), "quota"]
+def launch_reader(env, command):
+    cmd = [sys.executable, "-I", os.path.abspath(__file__), command]
     launcher = getattr(env, "launcher", None) or subprocess.Popen
-    log_path = env.path("quota.log")
+    log_path = env.path("%s.log" % command)
     child_env = dict(env.environ) if env.environ else dict(os.environ)
     child_env["DCFS_DASHBOARD_DIR"] = env.dashboard_dir
     try:
@@ -1230,7 +1282,7 @@ def launch_quota(env):
                 env=child_env,
             )
     except (OSError, subprocess.SubprocessError) as e:
-        env.stderr.write("dashboard_lanes: launch quota: %r\n" % e)
+        env.stderr.write("dashboard_lanes: launch %s: %r\n" % (command, e))
 
 
 def stop(env, event):
@@ -1259,7 +1311,14 @@ def stop(env, event):
 
     if should_read:
         write_atomic(read_at_path, env.current_time() + "\n")
-        launch_quota(env)
+        launch_reader(env, "quota")
+
+    # A CI read is launched by events: origin/main moved, or a run is
+    # unfinished (then once per Stop, as the session stops).
+    origin = git_rev_parse(env, "origin/main")
+    if ci_read_due(env, origin):
+        write_atomic(env.path("ci.read_sha"), (origin or "") + "\n")
+        launch_reader(env, "ci")
 
     changed = []
     for name in DATASETS:
@@ -1343,7 +1402,7 @@ def lock(env):
 HOOKS = {"post-agent": post_agent, "post-message": post_message,
          "subagent-stop": subagent_stop, "stop": stop}
 # The others are run by hand and read no stdin.
-MANUAL = {"show": show, "quota": quota}
+MANUAL = {"show": show, "quota": quota, "ci": read_ci}
 
 
 # A table dispatch, not argparse: a hook must exit 0 with one line on

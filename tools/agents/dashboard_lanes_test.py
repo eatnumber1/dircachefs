@@ -1162,6 +1162,10 @@ class QuotaCommandTest(Fixture):
                 return subprocess.CompletedProcess(
                     cmd, 0, stdout=self.agy_output, stderr=""
                 )
+            elif cmd == GH_LIST:
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout=json.dumps(CI_RUNS), stderr=""
+                )
             raise AssertionError("unexpected command: %r" % cmd)
 
         self.env.runner = fake_runner
@@ -1314,6 +1318,10 @@ class QuotaStopAndUploadTest(Fixture):
                 return subprocess.CompletedProcess(
                     cmd, 0, stdout=AGY_USAGE_FIXTURE, stderr=""
                 )
+            elif cmd == GH_LIST:
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout=json.dumps(CI_RUNS), stderr=""
+                )
             raise AssertionError("unexpected command: %r" % cmd)
 
         self.env.runner = fake_runner
@@ -1378,7 +1386,7 @@ class QuotaStopAndUploadTest(Fixture):
         reason = json.loads(out)["reason"]
         self.assertNotIn("lanes.json", reason)
         self.assertTrue(reason.endswith(
-            "run dashboard_lanes.py mark-uploaded sloc quota budget."),
+            "run dashboard_lanes.py mark-uploaded sloc quota budget ci."),
             reason)
 
     def test_mark_uploaded_without_names_is_a_usage_error(self):
@@ -1528,6 +1536,130 @@ class MaterialUploadRequestsTest(Fixture):
         decision = json.loads(out)
         self.assertEqual(decision["decision"], "block")
         self.assertIn("lanes.json", decision["reason"])
+
+
+GH_LIST = ["gh", "run", "list", "--limit", "12", "--json",
+           "databaseId,headSha,conclusion,status,createdAt,workflowName,event"]
+
+CI_RUNS = [
+    {"databaseId": 901, "headSha": "abcdef0123456789", "conclusion": "success",
+     "status": "completed", "createdAt": "2026-10-17T14:00:00Z",
+     "workflowName": "CI", "event": "push"},
+    {"databaseId": 902, "headSha": "1234567890abcdef", "conclusion": "",
+     "status": "in_progress", "createdAt": "2026-10-17T14:30:00Z",
+     "workflowName": "Presubmit", "event": "workflow_dispatch"},
+]
+
+EXPECTED_CI = [
+    {"run": "901", "workflow": "CI", "commit": "abcdef01",
+     "result": "success", "trigger": "push",
+     "started": "2026-10-17T14:00:00Z"},
+    {"run": "902", "workflow": "Presubmit", "commit": "12345678",
+     "result": "in_progress", "trigger": "workflow_dispatch",
+     "started": "2026-10-17T14:30:00Z"},
+]
+
+
+class CiRunsTest(Fixture):
+
+    def setUp(self):
+        super().setUp()
+        self.env.now = lambda: "2026-10-17T15:00:00Z"
+        self.gh = subprocess.CompletedProcess(
+            GH_LIST, 0, stdout=json.dumps(CI_RUNS), stderr="")
+        self.gh_calls = []
+        self.launched = []
+        self.env.launcher = lambda cmd, **kwargs: (
+            self.launched.append((cmd, kwargs))
+        )
+        self.env.runner = self.fake_runner
+
+    def fake_runner(self, cmd, **kwargs):
+        if cmd == GH_LIST:
+            self.gh_calls.append((cmd, kwargs))
+            return self.gh
+        if cmd in (["python3", "-I", "tools/agents/claude_usage.py"],
+                   ["agy", "-p", "/usage"]):
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        raise AssertionError("unexpected command: %r" % cmd)
+
+    def head(self):
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.main_repo, text=True
+        ).strip()
+
+    def set_origin_main(self, sha):
+        subprocess.check_call(
+            ["git", "update-ref", "refs/remotes/origin/main", sha],
+            cwd=self.main_repo)
+
+    def write_read_sha(self, sha):
+        os.makedirs(self.dash, exist_ok=True)
+        self.write(self.env.path("ci.read_sha"), sha + "\n")
+
+    def write_ci_json(self, runs):
+        os.makedirs(self.dash, exist_ok=True)
+        self.write(self.env.path("ci.json"), json.dumps(runs))
+
+    def ci_launches(self):
+        return [cmd for cmd, _ in self.launched if cmd[-1] == "ci"]
+
+    def test_ci_command_writes_the_last_runs(self):
+        self.run_hook("ci", {})
+        with open(self.env.path("ci.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f), EXPECTED_CI)
+        self.assertEqual(self.gh_calls[0][1]["cwd"], self.main_repo)
+        # The new dataset is asked for on Stop like the others.
+        self.assertIn("ci", dashboard_lanes.DATASETS)
+        decision = json.loads(self.run_hook("stop", {})[0])
+        self.assertIn("ci.json", decision["reason"])
+
+    def test_failing_gh_keeps_the_old_file_and_names_the_command(self):
+        self.write_ci_json([])
+        self.gh = subprocess.CompletedProcess(
+            GH_LIST, 1, stdout="", stderr="no auth\n")
+        _, err = self.run_hook("ci", {})
+        with open(self.env.path("ci.json"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), "[]")
+        self.assertEqual(len(err.splitlines()), 1)
+        self.assertIn("gh run list", err)
+        self.assertIn("no auth", err)
+
+    def test_hourly_quota_reading_refreshes_ci_too(self):
+        self.run_hook("quota", {})
+        with open(self.env.path("ci.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f), EXPECTED_CI)
+
+    def test_moved_origin_main_launches_a_ci_read(self):
+        self.set_origin_main(self.head())
+        self.write_read_sha("0" * 40)
+        self.run_hook("stop", {"stop_hook_active": False})
+        self.assertEqual(len(self.ci_launches()), 1)
+        with open(self.env.path("ci.read_sha"), encoding="utf-8") as f:
+            self.assertEqual(f.read().strip(), self.head())
+
+    def test_unchanged_origin_main_with_finished_runs_launches_nothing(self):
+        self.set_origin_main(self.head())
+        self.write_read_sha(self.head())
+        self.write_ci_json(EXPECTED_CI[:1])
+        self.run_hook("stop", {"stop_hook_active": False})
+        self.assertEqual(self.ci_launches(), [])
+
+    def test_unfinished_run_launches_one_ci_read_per_stop(self):
+        self.set_origin_main(self.head())
+        self.write_read_sha(self.head())
+        self.write_ci_json(EXPECTED_CI)
+        self.run_hook("stop", {"stop_hook_active": False})
+        self.assertEqual(len(self.ci_launches()), 1)
+        self.run_hook("stop", {"stop_hook_active": False})
+        self.assertEqual(len(self.ci_launches()), 2)
+
+    def test_unfinished_run_without_origin_main_records_an_empty_sha(self):
+        self.write_ci_json(EXPECTED_CI)
+        self.run_hook("stop", {"stop_hook_active": False})
+        self.assertEqual(len(self.ci_launches()), 1)
+        with open(self.env.path("ci.read_sha"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), "\n")
 
 
 if __name__ == "__main__":
