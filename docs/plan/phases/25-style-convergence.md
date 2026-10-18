@@ -1083,6 +1083,50 @@ while dcfs's cache has not yet reached its durable point.
 
 Owner: dcfs-protocol.
 
+## 25.28f The periodic sync point syncs the database, not the backing (russ, 2026-10-18; queued after 25.28b merges, not started; owner dcfs-protocol)
+
+russ, 2026-10-18: "our periodic writeback should sync the database, not the
+filesystem the database is on ... I'm expecting us to run syncfs only one
+time: when the user runs syncfs on us."
+
+Today the periodic sync point runs syncfs on the backing, then ClearDirty,
+then the cache's durable point (one WAL fsync). After this step:
+
+- The periodic sync point keeps only the cache's durable point. It does no
+  backing I/O, so an idle or read-mostly daemon never spins up a disk. A
+  native filesystem's user space never forces a syncfs, and dcfs behaves
+  like the backing, only faster (`docs/design.md`, "Behave like the
+  backing").
+- syncfs runs only where the kernel asks for it: FUSE_SYNCFS (a client's
+  syncfs(2) or sync(2)) and, if the design needs it there, a clean unmount.
+- The dirty set is cleared only after a syncfs dcfs actually ran (a client's
+  SYNCFS, a clean shutdown), plus any narrower clearing the model's regimes
+  make legitimate (for example, an FSYNCDIR of D makes D's entries durable on
+  the supported backings). The model states each one.
+- Between syncfs calls the dirty set grows with the directories mutated.
+  After a power loss, recovery re-probes those directories. The bound is
+  what the backing itself could have lost.
+- Terms (russ's 2026-10-18 ruling, recorded in `docs/plan/log.md`): FSYNC and
+  FSYNCDIR are sync points of a file. They are not syncfs points. The
+  periodic sync point is no longer a syncfs point after this step.
+
+Consequences to design and model in the same change (AGENTS.md, "The
+protocol has a model"):
+
+- `docs/design.md`, the TLA+ model (SyncDriven and the periodic sync, the
+  ClearDirty guards), trace validation, the fault_power scenarios and the
+  ClockTests.
+- The five guest tests that drive the periodic point with `date -s` change
+  with it: `fault_ace.sh:188`, `fault_power.sh:430` and `:613`,
+  `sqlite_durability.sh:294`, `syscall_traces.sh:416`.
+- Test first: a fake backing that records calls shows the periodic sync point
+  issues no syncfs and FUSE_SYNCFS still issues one. It fails on the current
+  code.
+
+Interacts with 25.28c (the interval clock), 25.28d (a failed fsync poisons
+the cache) and 25.28e (O_SYNC and O_DSYNC opens). Ordering: after 25.28b
+merges.
+
 ## 25.28c An idle daemon reaches its sync point: a one-shot timer, modelled (russ, 2026-10-17; after 25.28b)
 
 25.28 built the "periodic" checkpoint as a clock check on request arrival,
@@ -1370,6 +1414,21 @@ stop carrying Status where practical (benchmark skips say what could not be meas
 Kind 3 infrastructure failures retain the whole status; `waitexit` unit test
 (`//test/qemu:waitexit_test`) with link-time `--wrap` fakes of `pidfd_open` and `poll`.
 
+### Merge record (clerk batch 17, 2026-10-18)
+
+- **25.34 merged 2026-10-18** by fast-forwarding main to 45b64446, so the
+  shfmt hashes in `.git-blame-ignore-revs` (34fa44b9, 67f7230f) stay valid.
+  Two style-review rounds (`docs/plan/review-findings.tsv`, rounds 1 and 2);
+  their outcomes are fixed/merged, and the Q rows are decided. The merge
+  includes status_wire (SerializeStatus and ParseStatus, testonly, protobuf
+  36.2), `testonly::RunCommand`, `execv(span)`, `poll(Duration)`, and
+  DcfsMount with an optional pid_t (pidfds deferred to 25.42).
+  kernel_facts_test is a manual weekly `qemu_cc_test` with its own image; it
+  fixes CI run 39138000104's bench_smoke SQLITE_FULL.
+- Evidence: fast 98 pass; presubmit removed_test (three targets), testonly,
+  syscalls tests and kernel_facts (three) pass; bench_smoke_test_{xfs,btrfs}
+  pass under coverage. Lane 5's xattr differential test is unblocked.
+
 ### Follow-ups from the 25.34 fix round and 17.6 (clerk batch 12, 2026-10-18)
 
 - **A mount start races an immediate unmount.** `DcfsMount::Start` returned
@@ -1382,6 +1441,16 @@ Kind 3 infrastructure failures retain the whole status; `waitexit` unit test
   `Start`. Owner: dcfs-protocol (mount namespaces). Open for russ's decision.
 - **Note from 17.6:** `test/qemu/guest/kernel_facts.sh` becomes a
   `qemu_cc_test` once these helpers land.
+- **InChild's early-return reap is untested.** `InChild`
+  (`test/qemu/guest/guest.cc`) reaps the child through an early-return
+  Cleanup when reading its socket fails, and no test covers that path. The
+  implementer said there was no practical way to test it. russ (2026-10-18,
+  "Our syscalls wrapper will allow this. No?"): it can be tested. Before
+  25.41: a guest_test variant with a `-Wl,--wrap` fake of `read` that fails,
+  asserting the child is reaped (no zombie: `waitid` reports it gone). After
+  25.41: `InChild` takes `LocalSyscalls`, and the test injects a failing
+  read. Queued, not started. Owner: dcfs-implementer (default; russ to
+  confirm). Cross-referenced from 25.41's migration list (step 9).
 
 ## 25.35 Strong types for IDs and sentinels (russ, 2026-10-17; queued, M2)
 
@@ -1601,6 +1670,12 @@ draft's step, numbered 25.41 (the draft's working number was 25.34b, and
 6. **Migrate [`DIR_CACHE_FS_TEST_WRAPS`].** Move `NoTransactionAt`, `DCFS_INJECT`, `WrappedCalls`, `FakeInodeNumbers`, hooks, and `SetgroupsFault` ([`dcfs/dir_cache_fs_test.cc:134-516`]) into a `HarnessSyscalls` delegating wrapper on the test harness's `Context`; delete `DIR_CACHE_FS_TEST_WRAPS`. *Test:* `bazel test //dcfs:dir_cache_fs_test //dcfs:dir_cache_fs_poisoned_test //dcfs:dir_cache_fs_slope_test //dcfs:dir_cache_fs_fault_sites_test`.
 7. **Migrate [`DIR_CACHE_FS_FAULTS`] and [`dir_cache_fs_crash_during_recovery_test`].** Replace the 8 `dcfs/testonly/` `--wrap` libraries ([`dcfs/testonly/BUILD.bazel:184-237`], [`dcfs/testonly/BUILD.bazel:310-334`]) with injected fakes/authorizer. *Test:* `bazel test //dcfs:dir_cache_fs_fault_... //dcfs:dir_cache_fs_crash_during_recovery_test`.
 8. **Delete `--wrap` allow-lists, ban `-Wl,--wrap`, and update docs.** Delete free-function callers outside `Real*Syscalls`; remove `__wrap_`/`__real_` exceptions from [`.clang-tidy:35-37,68-70`] and [`tools/raw_syscalls_test.py:15-17,141`]; add a check in [`tools/style_checks_test.py`] banning `--wrap` in `BUILD.bazel`/`*.bzl`; update [`AGENTS.md:22-23`], [`docs/style.md:474-475,516,532,1491-1493,1559,1757-1758`], and [`docs/design.md:3292-3312`]. *Test:* `bazel test --config=presubmit //...`.
+9. **Migrate the `InChild` reap test (25.34 follow-ups).** The reap test,
+   written with a `--wrap` fake before this step, takes `LocalSyscalls` here:
+   `InChild` takes `LocalSyscalls` and the test injects a failing `read`;
+   `InChild`'s early-return Cleanup reaps the child, and the test asserts no
+   zombie (`waitid` reports it gone). *Test:* `bazel test
+   //test/qemu:guest_test`.
 
 **Risks.**
 - *Bypassing the injected interface:* A caller invoking a free function in `syscalls::` would silently skip `NoTransactionAt` and `FaultSitesTest`. Mitigation: remove non-RAII free functions from `syscalls*.h` in sub-step 8 so only `Real*Syscalls` methods exist (`FileDescriptor::Close` is the sole documented exception).
