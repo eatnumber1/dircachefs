@@ -1006,6 +1006,8 @@ conversion incomplete and some of it wrong. Test first for every item.
 
 ## 25.28b The sync interval bounds the cache's durability lag (russ, 2026-10-16; protocol agent, after 25.9b)
 
+Merged 2026-10-18 (9d6468d3).
+
 Replaces 25.28's separate WAL-checkpoint clock (reviewed: it never runs
 under writes, because each sync point resets its clock without
 checkpointing, and its premise, reader starvation, does not hold for a
@@ -1259,6 +1261,12 @@ definitely needs to get added to the formal model too", and confirmed:
   sync and durable points, while kernel writeback ages dirty data by jiffies
   (fs/fs-writeback.c:2033-2037, v7.3-rc7). Review finding S4 on 25.28b,
   2026-10-18; the orchestrator ruled it under "behave like the backing".
+  Moving the interval to CLOCK_MONOTONIC stops the guest tests that drive
+  the periodic sync point with `date -s` from driving it, so each needs
+  another way to drive it. They are `test/qemu/guest/fault_ace.sh:188`,
+  `fault_power.sh:430` and `:613`, `sqlite_durability.sh:295`, and
+  `syscall_traces.sh:416` (`fault_power.sh:782` and `:785` step the clock
+  back and forth and do not drive it).
 
 Owner: dcfs-protocol, then an Opus review.
 Related (clerk batch 12, 2026-10-18): 26.36's follow-ups suspect that

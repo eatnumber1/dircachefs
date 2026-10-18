@@ -995,18 +995,50 @@ a check for speed.
 5. **Later: split `dcfs.tla`.** Split it so each config depends only on the
    modules it uses, so Bazel's cache skips configs a change does not affect.
    Not started; after items 1 to 4.
-6. **Mechanize the soundness of config shortcuts** (russ, 2026-10-18: "This
-   puts more burden on reviewers. Is there a way we can mechanize this
-   check?"). The argument for omitting `CacheDurable` in `MC.tla` (used by
-   `MC_large`, `MC_nolock`, `MC_interrupt_nolock`, `MC_interrupt_muts2`) is
-   checked by a Bazel test that parses `dcfs.tla` with SANY (`tla2tools.jar`)
-   and fails with the offending line when either part does not hold: (a)
-   `CacheDurable`'s `UNCHANGED` covers every variable except `dbOpts`; (b)
-   every occurrence of `dbOpts`, following operator definitions, sits in a
-   positive position under `\A x \in dbOpts` (no `\E`, no negation, no
-   equality or cardinality). A CI backstop runs one medium config with and
-   without `CacheDurable` and requires identical property verdicts. The same
-   pattern covers any config shortcut that omits a step on a soundness
-   argument. Independent of items 1 to 5. Owner: dcfs-protocol.
+6. The soundness check for config shortcuts (the `CacheDurable` argument) moved
+   to 12.27, "Unit tests of the spec", item 10.
 
 Russ's question is answered by items 1 to 4; item 5 waits for them.
+
+## 12.27 Unit tests of the spec: mechanical checks on the TLA+ model (russ, 2026-10-18: "Are there more properties of the model we can check mechanically? Essentially this becomes unit tests of the TLA+"; queued, not started)
+
+Each item is a Bazel test under `//formal/...`, mostly SANY-based (the parser
+in `tla2tools.jar`). Items 1 to 3 come first.
+
+1. Every `.cfg` for a module assigns every CONSTANT. This would have caught
+   22.5's configs lacking LongNames (CI run 39138000104).
+2. Frame completeness: every action primes or lists `UNCHANGED` for every
+   variable.
+3. No orphaned properties: every invariant and temporal property defined is
+   checked by some config, and every name a config references exists.
+4. Vacuity: for each `P => Q` property, a config asserting `~P` expects a
+   violation.
+5. Spec mutation testing: drop a conjunct, weaken a guard, or drop an
+   `UNCHANGED` entry, and require some config to fail (like the weekly code
+   mutation run).
+6. Every disjunct reachable: extend `formal/coverage` to branches and fail on
+   zero hits.
+7. Model-code name agreement: `InterruptPcs` against the code's
+   `InterruptionPoint` names, and the other mapped sets.
+8. Symmetry soundness, once 12.26 adds SYMMETRY: no property names an element
+   of a symmetric set.
+9. The state counts in `formal/README.md` are generated from the last run, not
+   hand-edited.
+10. The `CacheDurable` soundness check (moved from 12.26 item 6; russ,
+    2026-10-18: "Doesn't the parser-based check already cover this? Running two
+    additional TLA+ runs sounds expensive"). The argument for omitting
+    `CacheDurable` in `MC.tla` (used by `MC_large`, `MC_nolock`,
+    `MC_interrupt_nolock`, `MC_interrupt_muts2`) is checked by a Bazel test that
+    parses `dcfs.tla` with SANY and fails with the offending line when either
+    part does not hold: (a) `CacheDurable`'s `UNCHANGED` covers every variable
+    except `dbOpts`; (b) every occurrence of `dbOpts`, following operator
+    definitions transitively, sits in a positive position under
+    `\A x \in dbOpts` (no `\E`, no negation, no equality or cardinality). Any
+    occurrence the check cannot prove to be a positive universal read (for
+    example, passed as an operator argument, or inside `LET` or `RECURSIVE`)
+    fails the test with its line, and the spec is rewritten to the plain form.
+    The check fails closed. There is no CI backstop and no paired
+    with/without runs. The same pattern covers any config shortcut that omits a
+    step on a soundness argument.
+
+Owner: dcfs-protocol for items 5 and 7; dcfs-implementer for the others.
