@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Step 25.33b: unit test of testutil waitexit with link-time fakes of
+// Unit test of testutil waitexit with link-time fakes of
 // pidfd_open and poll.
 
 #include <fcntl.h>
