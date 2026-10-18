@@ -29,8 +29,8 @@ drift. Each rule is what most of the code does, or is in `AGENTS.md`,
 
 When rules disagree, the first applies: (1) `AGENTS.md`, the `docs/rules`
 indexes and every rule they link; (2) the Google C++ style guide (and Google's
-other style guides, as above); (3) Abseil's Tips of the Week (https://abseil.io/tips/) as design
-guidance. russ, 2026-10-09: "we adopt all of https://abseil.io/tips/. It's
+other style guides, as above); (3) Abseil's Tips of the Week
+(https://abseil.io/tips/) as design guidance. russ, 2026-10-09: "we adopt all of https://abseil.io/tips/. It's
 a 'rule', but not as strong of a rule as the Google style guide or other
 style rules I've established in the past. Coding and review agents should
 use it as design guidance rather than firm rules."

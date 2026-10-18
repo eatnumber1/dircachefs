@@ -675,7 +675,7 @@ def rule_indexes(root):
 
 
 ATTRIBUTIONS_LIST = ("tools", "repo_shape_attributions.txt")
-ATTRIBUTION_RE = re.compile(r"russ,\s+20\d\d-")
+ATTRIBUTION_RE = re.compile(r"russ\s*[,(]\s*20\d\d-")
 
 
 def agent_file_attributions(root):
@@ -687,20 +687,29 @@ def agent_file_attributions(root):
     each with the reason it is role-only; the list only shrinks.
     """
     known = {}
+    problems = []
     for line in read(root, *ATTRIBUTIONS_LIST).splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         head, _, reason = line.partition("|")
-        path, count = head.split()
-        known[path] = int(count)
+        fields = head.split()
+        if len(fields) != 2 or not fields[1].isdigit():
+            problems.append(
+                "tools/repo_shape_attributions.txt: cannot read %r: write "
+                "'path count | reason'" % line)
+            continue
+        known[fields[0]] = int(fields[1])
     paths = ["CLAUDE.md"]
     agents = os.path.join(root, ".claude", "agents")
     if os.path.isdir(agents):
         paths += [".claude/agents/" + name
                   for name in sorted(os.listdir(agents))
                   if name.endswith(".md")]
-    problems = []
+    for path in sorted(set(known) - set(paths)):
+        problems.append(
+            "tools/repo_shape_attributions.txt lists %s, which is gone: "
+            "take it off (the list only shrinks)" % path)
     for path in paths:
         count = len(ATTRIBUTION_RE.findall(read(root, path)))
         if count > known.get(path, 0):

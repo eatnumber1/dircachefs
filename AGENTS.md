@@ -4,17 +4,16 @@ Rules for anyone changing this repository, human or agent. `README.md`
 explains what dcfs is; `docs/design.md` explains how it works; the plan
 is `docs/plan/README.md` (one file per phase in `docs/plan/phases/`).
 Rules marked "(from phase N)" take effect when that plan phase lands.
-
-Every ratified rule has one line, with russ's words, the date and a link to
-its reasoning, in one of the topic indexes under `docs/rules/` (russ,
-2026-10-18: "make AGENTS.md the complete index", then "multiple 'roles'":
-AGENTS.md says which index to read in which case). This file holds only what
-every task needs. `tools/repo_shape.py` fails when a rule marked in
-`docs/style.md`, `docs/design.md`, `docs/plan/process.md` or `CLAUDE.md` is in
-no index, or an index links to a marker that is gone. To add a rule: write it
-and its reasoning where it belongs, put an anchor `<a id="rule-NAME"></a>` on
-it, and add a line to the one index it belongs to. `.claude/agents/*.md` name the
-indexes each role always reads and restate no rule.
+ Every ratified rule has one line, with russ's words, the date and a link to its
+reasoning, in one of the topic indexes under `docs/rules/` (russ, 2026-10-18:
+"make AGENTS.md the complete index", then "multiple 'roles'": AGENTS.md says
+which index to read in which case). This file holds only what every task needs.
+`tools/repo_shape.py` fails when a rule marked in `docs/style.md`,
+`docs/design.md`, `docs/plan/process.md` or `CLAUDE.md` is in no index, or an
+index links to a marker that is gone. To add a rule: write it and its reasoning
+where it belongs, put an anchor `<a id="rule-NAME"></a>` on it, and add a line
+to the one index it belongs to. `.claude/agents/*.md` name the indexes each role
+always reads and restate no rule.
 
 ## Always
 
@@ -48,7 +47,7 @@ indexes each role always reads and restate no rule.
 
 ## Read before you start
 
-Read the indexes for your kind of task. A review reads all of them.
+Read the indexes for your kind of task.
 
 | Your task | Read |
 |---|---|
@@ -58,7 +57,8 @@ Read the indexes for your kind of task. A review reads all of them.
 | Docs, Bazel files, shell, Python or a commit message | [style](docs/rules/index-style.md) |
 | Running commands on russ's machine (kvm, `bazel shutdown`, polling loops, `pkill -f`, zsh noclobber, `cd` into the lane, Docker is production) | [process](docs/rules/index-process.md) |
 | Dispatching, reviewing, merging, plan or bookkeeping work | [process](docs/rules/index-process.md) |
-| A review of any step | all five |
+| A style review (`dcfs-style-reviewer`) | [style](docs/rules/index-style.md), [code](docs/rules/index-code.md), [tests](docs/rules/index-tests.md) |
+| A review by `dcfs-reviewer` | all five |
 
 The indexes: [code](docs/rules/index-code.md),
 [style](docs/rules/index-style.md), [tests](docs/rules/index-tests.md),

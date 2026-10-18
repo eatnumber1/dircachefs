@@ -163,6 +163,27 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
         self.assertIn("lists 1 for .claude/agents/dcfs-known.md, which has 0",
                       problems[0])
 
+    def test_the_parenthesised_attribution_form_is_reported(self):
+        write(self.root, ".claude/agents/dcfs-x.md",
+              "Choose the effort (russ (2026-10-09): leverage levels).\n")
+        problems = repo_shape.agent_file_attributions(self.root)
+        self.assertEqual(1, len(problems), problems)
+
+    def test_a_listed_file_that_is_gone_is_reported(self):
+        os.remove(os.path.join(self.root, ".claude/agents/dcfs-known.md"))
+        problems = repo_shape.agent_file_attributions(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn(".claude/agents/dcfs-known.md, which is gone",
+                      problems[0])
+
+    def test_a_malformed_attribution_line_is_reported_not_raised(self):
+        write(self.root, "tools/repo_shape_attributions.txt",
+              "# known\nCLAUDE.md lots | a bad count\njust-a-path | no count\n")
+        problems = repo_shape.agent_file_attributions(self.root)
+        self.assertEqual(3, len(problems), problems)
+        self.assertIn("tools/repo_shape_attributions.txt: cannot read",
+                      problems[0])
+
     def test_a_marker_used_twice_in_a_file_is_reported(self):
         write(self.root, "CLAUDE.md",
               '- <a id="rule-x"></a>One.\n- <a id="rule-x"></a>Two.\n')

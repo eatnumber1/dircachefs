@@ -34,11 +34,7 @@ mapping's design): pass `model: fable` explicitly and say why in
 you think it will be helpful (but you don't have to!). Also remember to
 leverage different effort levels too." Choose the effort per task: low
 for mechanical batches, medium by default, high for protocol
-work. Reviews default to Opus high; xhigh only for protocol, crash-safety and
-identity steps, or after a shallow high review (russ, 2026-10-18: "Ok to your
-recommendation. Feel free to change the reviewer default now."), following
-`docs/plan/process.md` rule 6 until data says otherwise; collecting that data
-is a tools item.
+work; the reviewer defaults are in `docs/plan/process.md` rule 6.
 
 Definitions are in `.claude/agents/`. A step that fails review twice moves
 up one row (implementer to protocol, mechanical to implementer).

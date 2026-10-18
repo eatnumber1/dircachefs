@@ -62,7 +62,8 @@ process (its waves and file ownership table) is in `history.md`.
 4. <a id="rule-agent-report"></a>
    **Report.** The agent ends with: a diff summary, the test commands it
    ran with results (including the failing-first run), coverage of the
-   code it added (from Phase 7), and any deviation from the plan.
+   code it added (from Phase 7), any deviation from the plan, and any
+   design decision with a real alternative (see "Rules for every agent").
 5. <a id="rule-step-review"></a>
    **Review** (the `dcfs-style-reviewer` subagent plus the orchestrator,
    in the lane; and the Opus `dcfs-reviewer` too for protocol, identity
@@ -177,13 +178,13 @@ process (its waves and file ownership table) is in `history.md`.
   large-tier failures by [red CI until ship](#rule-red-ci-until-ship), russ,
   2026-10-17: "Until we ship, a red CI is not a problem.").
 - <a id="rule-coverage-baseline"></a>
-  Coverage baseline (russ, 2026-10-08, 2026-10-11): the gate fails on drops only; a
-  rise prints the suggested bump. The orchestrator bumps
-  `dcfs/coverage_baseline.txt` to a higher value when coverage rises.
-  **Never lower the coverage baseline** (russ, 2026-10-11: "You must not lower
-  the coverage baseline. That's why it exists. Only ever increase it."). If a
-  change would drop coverage, write tests to keep or raise the floor; never
-  lower `dcfs/coverage_baseline.txt`.
+  Coverage baseline (russ, 2026-10-08, 2026-10-11): the gate fails on drops
+  only; a rise prints the suggested bump. The orchestrator bumps
+  `dcfs/coverage_baseline.txt` to a higher value when coverage rises. **Never
+  lower the coverage baseline** (russ, 2026-10-11: "You must not lower the
+  coverage baseline. That's why it exists. Only ever increase it."). If a change
+  would drop coverage, write tests to keep or raise the floor; never lower
+  `dcfs/coverage_baseline.txt`.
 - <a id="rule-push-points"></a>
   Push points (russ, 2026-10-08): while development is fast, a push point
   needs every merged branch green on its tiers and nothing more; CI catches
@@ -322,7 +323,6 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   When russ is away, keep going with whatever does not need russ, and
   collect what does.
 
-<a id="rule-orchestrator-context"></a>
 ## Rules for every agent
 
 What every agent that works a step does, wherever its brief is silent:
@@ -333,12 +333,24 @@ What every agent that works a step does, wherever its brief is silent:
   printed.
 - <a id="rule-lane-bazel-server-stays"></a>
   Leave the lane's Bazel server running at the end of a step; the next step
-  reuses it (servers started in temporary worktrees are shut down, see
-  AGENTS.md).
+  reuses it (servers started in temporary worktrees are shut down: see
+  `docs/style.md` 3, "Everything goes through Bazel").
+- <a id="rule-stay-in-lane"></a>
+  Never create, download or edit files outside your lane.
+- <a id="rule-report-design-decisions"></a>
+  A design decision you make inside a step that has a real alternative (one
+  russ might choose differently) goes in your report for the step's As built
+  notes, with its alternative; if it changes user-visible behaviour or a
+  guarantee, it also goes on the questions table before the merge (see
+  "Questions for russ, and rulings").
 - <a id="rule-foreground-commands"></a>
-  Wait for a command in the foreground (600000 ms timeout; rerun if it needs
-  longer) and never background it.
+  An agent working a step waits for a command in the foreground (600000 ms
+  timeout; rerun if it needs longer) and never backgrounds it. The
+  orchestrator's exceptions are the background `bazel fetch` of a lane's
+  first command (see above) and agy jobs (`run_in_background`, see "Using
+  Gemini through `agy`").
 
+<a id="rule-orchestrator-context"></a>
 ## The orchestrator's context is the expensive one (russ, 2026-10-17)
 
 Every orchestrator tool call re-sends its whole conversation. So: the
@@ -353,26 +365,27 @@ orchestrator's context without losing the working state.
 How that works in practice (russ, 2026-10-17 and 2026-10-18; each was a
 slip he caught):
 - <a id="rule-clerk-batches"></a>
-  **Queue small plan and doc edits; send one clerk batch at a natural
-  pause** ("Are you remembering to use the clerk to keep your token use
-  low?", 2026-10-17). Only an edit that unblocks a running agent goes out at
-  once. `dashboard_lanes.py clerk-queue add "<file>: <change>"` queues an
-  item; the Stop hook asks for a batch when no subagent runs or at five
-  items; `clerk-queue drain` prints the brief for one dcfs-mechanical
-  dispatch.
+  **Queue small plan and doc edits; send one clerk batch at a natural pause**
+  ("Are you remembering to use the clerk to keep your token use low?",
+  2026-10-17). (Orchestrator's reading:) only an edit that unblocks a running
+  agent goes out at once. `dashboard_lanes.py clerk-queue add "<file>:
+  <change>"` queues an item; the Stop hook asks for a batch when no subagent
+  runs or at five items; `clerk-queue drain` prints the brief for one
+  dcfs-mechanical dispatch.
 - <a id="rule-explore-for-lookups"></a>
   **A question that needs more than one lookup goes to one Explore agent
   with all the sub-questions at once** ("Remember to use subagents to keep
   tool calls from wasting lots of tokens copying context!", 2026-10-18),
-  even when each grep looks quick; the orchestrator only composes the answer
-  from its report. CI log digging and any multi-command lookup go to one
-  Haiku or Explore agent.
+  (Orchestrator's reading:) even when each grep looks quick, the
+  orchestrator only composes the answer from its report; CI log digging and
+  any multi-command lookup go to one Haiku or Explore agent.
 - <a id="rule-status-from-known-state"></a>
-  **A status update is answered from known state**, without new tool calls
-  unless something changed (a background `gh run watch` already reports CI).
-  When the orchestrator's context is very large, it proposes a handoff and
-  compaction at the next natural pause (russ, 2026-10-18: "Are you still
-  using subagents for work, to save on your expensive context transfers?").
+  **A status update is answered from known state**. (Orchestrator's reading:) no
+  new tool calls unless something changed (a background `gh run watch` already
+  reports CI), and when the orchestrator's context is very large it proposes a
+  handoff and compaction at the next natural pause (russ, 2026-10-18: "Are you
+  still using subagents for work, to save on your expensive context
+  transfers?").
 - <a id="rule-chores-to-subagents"></a>
   **Any chore of more than one tool call goes to a Haiku subagent** (russ,
   2026-10-18: "Use subagents!"). (Orchestrator's reading:
@@ -404,19 +417,19 @@ orchestrator's notes (2026-10-18) so that they are in the repository:
 - <a id="rule-review-is-bottleneck"></a>
   **Review is the bottleneck, and tests are placed accordingly** (russ,
   2026-10-18: "Code review is expensive in tokens, and that's our real
-  bottleneck"): a test moves to a later CI wave only if it is not catching
-  bugs before review (step 5.13). The CI cache is large and not duplicated
-  (russ, 2026-10-18: "I'd prefer a large CI cache to no cache hits, as long
-  as there's no duplication."; step 5.6).
+  bottleneck"): (Orchestrator's decision under that rule, step 5.13:) a test
+  moves to a later CI wave only if it is not catching bugs before review. The CI
+  cache is large and not duplicated (russ, 2026-10-18: "I'd prefer a large CI
+  cache to no cache hits, as long as there's no duplication."; step 5.6).
 - <a id="rule-principle-settles-question"></a>
-  **When a ratified principle settles a question, rule; do not ask**
-  (russ, 2026-10-17, on Q-19 (atomic `O_TRUNC`), which "behave like the
-  backing" settles: "Yeah! Why isn't this obvious and therefore something
-  you automatically answer?"). (Orchestrator's reading:) before putting a question to russ, check the
-  plan, `docs/design.md`'s principles, the style rulings and the earlier
-  rulings. If they settle it, rule, record it with the principle cited, and
-  report it as decided. A recorded code comment giving a convenience reason
-  is not a reason to ask. Ask only when principles conflict, none applies
+  **When a ratified principle settles a question, rule; do not ask** (russ,
+  2026-10-17, on Q-19 (atomic `O_TRUNC`), which "behave like the backing"
+  settles: "Yeah! Why isn't this obvious and therefore something you
+  automatically answer?"). (Orchestrator's reading:) before putting a question
+  to russ, check the plan, `docs/design.md`'s principles, the style rulings and
+  the earlier rulings. If they settle it, rule, record it with the principle
+  cited, and report it as decided. A recorded code comment giving a convenience
+  reason is not a reason to ask. Ask only when principles conflict, none applies
   or the cost is out of proportion, and say which.
 - <a id="rule-formal-methods-proposals"></a>
   **Propose formal-methods work unprompted** (russ, 2026-10-09: "The TLA+
@@ -426,17 +439,17 @@ orchestrator's notes (2026-10-18) so that they are in the repository:
   question, a bug or a review turns up something a model could judge,
   propose the model step first and tell russ without being asked.
 - <a id="rule-track-review-findings"></a>
-  **Track review findings so trends show** (russ, 2026-10-17 and
-  2026-10-18: "I'd like to start collecting data on issues found during code
-  review, so we can look for trends." and "Remember to track reviewer
-  findings so we can look for patterns."). (Orchestrator's reading of the mechanism:)
-  when any review reports (Claude reviewer, style reviewer, Gemini, Argon, a
-  foreman Flash review), queue a clerk item to append its findings with `tools/agents/review_findings.py
-  add --step S --round R --reviewer X --date D` to
-  `docs/plan/review-findings.tsv` (a review with no findings gets a `none`
-  row); at merge, fill each finding's outcome (fixed with a commit,
-  declined, or question). `review_findings.py summary` reports patterns,
-  which drive which style rules to mechanize (25.39).
+  **Track review findings so trends show** (russ, 2026-10-17 and 2026-10-18:
+  "I'd like to start collecting data on issues found during code review, so we
+  can look for trends." and "Remember to track reviewer findings so we can look
+  for patterns."). (Orchestrator's reading of the mechanism:) when any review
+  reports (Claude reviewer, style reviewer, Gemini, Argon, a foreman Flash
+  review), queue a clerk item to append its findings with
+  `tools/agents/review_findings.py add --step S --round R --reviewer X --date D`
+  to `docs/plan/review-findings.tsv` (a review with no findings gets a `none`
+  row); at merge, fill each finding's outcome (fixed with a commit, declined, or
+  question). `review_findings.py summary` reports patterns, which drive which
+  style rules to mechanize (25.39).
 
   **A review ends with a findings block**, one finding per line, fields
   separated by " | ": severity (blocker|should|nit) | category (correctness,
@@ -455,10 +468,10 @@ orchestrator's notes (2026-10-18) so that they are in the repository:
   Opus high or xhigh.
 - <a id="rule-coauthor-trailer"></a>
   **The trailer names the model that wrote the commit** (russ, 2026-10-18:
-  "Whichever model is the author should be listed as co-author."). (Orchestrator's reading:) a brief
-  says "end with a Co-Authored-By trailer naming your model" (plus the
-  session line), and never pastes a fixed trailer. The orchestrator's own
-  commits carry its model (style 7).
+  "Whichever model is the author should be listed as co-author.").
+  (Orchestrator's reading:) a brief says "end with a Co-Authored-By trailer
+  naming your model" (plus the session line), and never pastes a fixed trailer.
+  The orchestrator's own commits carry its model (style 7).
 - <a id="rule-borrowed-files-in-full"></a>
   **When borrowing files from another of russ's repositories, copy the files
   in full; do not use git subtrees** (russ, 2026-09-27). `~/Sources/
@@ -598,9 +611,10 @@ reading. Not for writing code, nor for subtle protocol judgement.
    the answer comes back shallow. The orchestrator's own effort is the
    session's, which russ sets.
    Reviewers (russ, 2026-10-18: "Ok to your recommendation. Feel free to
-   change the reviewer default now."): Opus high by default, xhigh only for
-   protocol, crash-safety and identity steps or after a shallow high review,
-   until data says otherwise.
+   change the reviewer default now."; the recommendation was the
+   orchestrator's): Opus high by default, xhigh only for protocol,
+   crash-safety and identity steps or after a shallow high review, until
+   data says otherwise.
 7. Gemini has no network: a prompt that asks about style tells it to read
    the pinned Google guides in `bazel-bin/third_party/google_styleguide/`
    (`cpp.md`, `python.md`, `shell.md`, `markdown.md`; build them with

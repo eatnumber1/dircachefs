@@ -21,9 +21,12 @@ reasoning. `AGENTS.md` says which indexes to read for which task.
   [process](/docs/plan/process.md#rule-step-review),
   [process](/docs/plan/process.md#rule-merge-procedure)
 - Rules for every agent: stop after two failures, report only what you observed,
-  leave the lane's Bazel server running, run commands in the foreground.
+  stay in your lane, report design decisions with their alternative, leave the
+  lane's Bazel server running, run commands in the foreground.
   [process](/docs/plan/process.md#rule-two-failures-stop),
   [process](/docs/plan/process.md#rule-report-only-observed),
+  [process](/docs/plan/process.md#rule-stay-in-lane),
+  [process](/docs/plan/process.md#rule-report-design-decisions),
   [process](/docs/plan/process.md#rule-lane-bazel-server-stays),
   [process](/docs/plan/process.md#rule-foreground-commands)
 - Run Bazel with `/dev/kvm`, never pipe it through `tail` or `head` in an `&&`

@@ -33,7 +33,8 @@ you. Where `docs/style.md` defers to Google's guides, check the rule in the
 pinned local copy that `docs/style.md` describes, not from memory. Then
 review the diff named in your prompt.
 
-Before you review, read `docs/rules/index-style.md` and `docs/rules/index-code.md`.
+Before you review, read `docs/rules/index-style.md`, `docs/rules/index-code.md`
+and `docs/rules/index-tests.md`.
 
 **Findings** are violations of a written rule: cite the section (for
 example "1.6a, general form" or "1.10a, confession comment"), give
