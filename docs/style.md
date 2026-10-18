@@ -114,7 +114,14 @@ use it as design guidance rather than firm rules."
   left in production code).
 - **Function names**: `syscalls::` wrappers carry their libc/manpage names
   in lower case (`syscalls::setxattr`); every other function is CamelCase
-  (`SetXattr`). The two layers therefore never clash by construction.
+  (`SetXattr`). The two layers therefore never clash by construction. The
+  methods of the injected syscall interfaces (`BackingSyscalls`,
+  `LocalSyscalls`, `ProcessSyscalls`) are syscall wrappers too: they are
+  exempt from the CamelCase rule and named after the syscall they wrap
+  (`syscalls.read(...)`, `backing.openat(...)`, never `syscalls.Read(...)`)
+  (russ, 2026-10-18: "that's a rule here"). The protected per-op virtuals
+  behind `ioctl<OP>` and `fcntl<OP>` follow the normal CamelCase rule
+  (`IoctlGetFsUuid`).
 - **Every pointer says whether it may be null; a pointer that may not be
   null is usually a reference** (russ, 2026-10-10: "all pointers need
   either `absl_nullable` or `absl_nonnull`, including both raw pointers
@@ -469,6 +476,27 @@ keeps the fault sweep and the trace recorder complete, since both hook
 `backing.cc`; `syscalls.h` is the process-local set anyone may call; and
 `syscalls_process.h` exists so that `bench/` and the tools get wrappers
 without dcfs's libraries.
+
+**Prefer pidfds over plain pids** (russ, 2026-10-18). A child or daemon is
+held as an owned pidfd (a `FileDescriptor`, from `clone3` with
+`CLONE_PIDFD` or `pidfd_open`), signalled with `pidfd_send_signal`, and
+waited on with `waitid(P_PIDFD)` or `poll`. A `pid_t` is only for printing
+or for an API that takes nothing else. A pidfd names one process for its
+lifetime (no pid-reuse race), has no in-band `0` or `-1` meaning "all" or
+"none" (the `kill(0, SIGKILL)` bug), and is an event to wait on (no timers,
+1.11). There are three sources: `clone3(CLONE_PIDFD)`, `pidfd_open(2)`, and
+`open("/proc/<pid>", O_RDONLY|O_DIRECTORY)`, which `pidfd_send_signal(2)`
+names with the other two. Only `clone3` has no window: each other source
+learns the pid first and opens it after, and the pid can be reused in
+between. The uses differ. Checked against the Linux 7.3-rc7 source
+(`~/Sources/linux`; older kernels are not checked): `pidfd_send_signal`
+accepts a `/proc/<pid>` fd (`kernel/signal.c:4074`, which falls back to
+`tgid_pidfd_to_pid` at `fs/proc/base.c:3408`), but `waitid(P_PIDFD)`
+(`kernel/exit.c:1786`) and `poll` need a pidfs fd, because `pidfd_get_pid`
+(`kernel/pid.c:594`) and `pidfd_pid` (`fs/pidfs.c:725`) return `-EBADF` for
+any other file. A proc directory has no `poll` operation, and a file with
+none reports ready at once (`include/linux/poll.h:80`). So a `/proc/<pid>`
+fd is for signalling only: wait on a `clone3` or `pidfd_open` fd.
 
 **No raw syscalls anywhere** (russ, 2026-10-07: a firm rule). Syscalls go
 through `dcfs/syscalls.h` and `dcfs/syscalls_backing.h`, where the failure

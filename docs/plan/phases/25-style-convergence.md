@@ -1571,12 +1571,12 @@ draft's step, numbered 25.41 (the draft's working number was 25.34b, and
    - *Hot-path cost:* Cache hits do zero backing syscalls (`SlopeTest`, [`dcfs/dir_cache_fs_test.cc:8460-8503`]). On cache misses and mutations, one indirect call (~1–2 ns) precedes a kernel transition and filesystem operation (~300–5,000+ ns) — <0.5% overhead, verified by [`//bench:dcfs_bench`].
    - *Nth-call faults:* A `CountdownFault` helper in `testonly/` decrements a counter on matching calls and returns `ErrnoToStatus(err, op)` when `++calls == fail_at` (for [`dcfs/dir_cache_fs_test.cc:288-306`], [`dcfs/dir_cache_fs_test.cc:486-495`]) or while `times-- > 0` (for [`dcfs/fsck_test.cc:52-67`]).
 2. **Template parameter (`template <typename Syscalls = RealSyscalls>`) on callers.**
-   - *Rejected:* Zero dispatch cost, but [`dcfs/backing.cc`] (2,555 lines), [`dcfs/dir_cache_fs.cc`] (4,072 lines), [`dcfs/file_handle.cc`], [`dcfs/device_id.cc`], and [`dcfs/fsck.cc`] would either move into headers or require explicit instantiations of production `.cc` files for every test fake, breaking `.o`-level symbol enforcement in [`tools/banned_symbols.txt:117`] and bloating compile times. And [`FaultSitesTest`] still needs runtime dispatch across hooks. (Compile-time selection *is* used in step 25.38 for typed `ioctl`/`fcntl` tags that dispatch to non-template virtual methods on `BackingSyscalls`.)
+   - *Rejected:* Zero dispatch cost, but [`dcfs/backing.cc`] (2,555 lines), [`dcfs/dir_cache_fs.cc`] (4,072 lines), [`dcfs/file_handle.cc`], [`dcfs/device_id.cc`], and [`dcfs/fsck.cc`] would either move into headers or require explicit instantiations of production `.cc` files for every test fake, breaking `.o`-level symbol enforcement in [`tools/banned_symbols.txt:117`] and bloating compile times. And [`FaultSitesTest`] still needs runtime dispatch across hooks. (Compile-time selection *is* used in step 25.38 for the typed `ioctl<OP>`/`fcntl<OP>` member templates, which dispatch to protected pure virtual per-op methods on the interface.)
 3. **Per-thread or per-instance fault table inside `syscalls::`.**
    - *Rejected:* Violates [`docs/style.md:505-511`] (step 25.7: no test-only knobs in production code) and adds a TLS/table branch to every production syscall solely for tests.
 
 **Architecture of the seams.**
-- **Syscall interfaces:** [`Context`] carries `BackingSyscalls &backing_syscalls` and `LocalSyscalls &syscalls` (constructed in `main` at [`dcfs/main.cc:322-375`] and in test harnesses; no global `Default()` accessor). Low-level helpers in [`dcfs/backing.cc`], [`dcfs/file_handle.h:35-66`], and [`dcfs/device_id.h:33`] take `BackingSyscalls &` (or `Context &`). [`dcfs/fsck.h:37-49`] and [`dcfs/startup_channel.h:58`] take a small `FsckDeps` / `DaemonDeps` struct holding references to `BackingSyscalls`, `LocalSyscalls`, and `ProcessSyscalls`. [`FileDescriptor`] keeps calling [`syscalls::close`] directly (never wrapped; avoids doubling `sizeof(FileDescriptor)`). The template [`syscalls::ioctl`] becomes a typed front-end (anticipating 25.38) dispatching to concrete virtual methods on `BackingSyscalls` (`IoctlGetVersion`, `IoctlGetFsUuid`, `IoctlBtrfsFsInfo`, `IoctlBtrfsSubvolInfo`, `IoctlFlags`, `IoctlRaw`).
+- **Syscall interfaces:** [`Context`] carries `BackingSyscalls &backing_syscalls` and `LocalSyscalls &syscalls` (constructed in `main` at [`dcfs/main.cc:322-375`] and in test harnesses; no global `Default()` accessor). Low-level helpers in [`dcfs/backing.cc`], [`dcfs/file_handle.h:35-66`], and [`dcfs/device_id.h:33`] take `BackingSyscalls &` (or `Context &`). [`dcfs/fsck.h:37-49`] and [`dcfs/startup_channel.h:58`] take a small `FsckDeps` / `DaemonDeps` struct holding references to `BackingSyscalls`, `LocalSyscalls`, and `ProcessSyscalls`. [`FileDescriptor`] keeps calling [`syscalls::close`] directly (never wrapped; avoids doubling `sizeof(FileDescriptor)`). The template [`syscalls::ioctl`] becomes a typed front-end (anticipating 25.38): `ioctl<OP>` and `fcntl<OP>` are public non-virtual member templates on the interface, with the operation as a template parameter (`syscalls.ioctl<FS_IOC_GETFSUUID>(fd, ...)`, `syscalls.fcntl<F_GETFL>(fd)`). Each specialization dispatches to a protected pure virtual per-op method (`IoctlGetVersion`, `IoctlGetFsUuid`, `IoctlBtrfsFsInfo`, `IoctlBtrfsSubvolInfo`, `IoctlFlags`, `IoctlRaw`) that implementations and fakes override (the non-virtual-interface pattern). The injected interfaces keep syscall-looking names at call sites (`syscalls.read(...)`, `backing.openat(...)`, never `syscalls.Read(...)`); the naming rule is in [`docs/style.md`] section 1.2.
 - **Libfuse seam:** Extract a `FuseLowlevelOps` interface on [`FuseSession`] / [`FuseRequest`] for `fuse_passthrough_open`, `fuse_passthrough_close` ([`dcfs/dir_cache_fs.cc:158-221`]), and `fuse_reply_none` ([`dcfs/fuse_request.cc:136`]), replacing those 3 wraps in [`dcfs/fuse_request_test.cc:159`] and [`dcfs/dir_cache_fs_test.cc:320-335`].
 - **Trace-validation & recovery fault tests:** The 6 negative tests in [`DIR_CACHE_FS_FAULTS`] (`skip_mark_unknown`, `syscall_before_phase1`, `phase3_before_syscall`, `snapshot_after_syncfs`, `create_syscall_before_phase1`, `swallow_syscall_error`) test [`//formal:trace_validate`], not `dcfs`, by corrupting `dcfs` at link time. Replace `syscall_before_phase1`, `snapshot_after_syncfs`, `create_syscall_before_phase1`, and `swallow_syscall_error` with injected `BackingSyscalls` fakes that emit/alter trace events or run the backing syscall inside the fake before phase 1 commits, and replace `skip_mark_unknown` and `phase3_before_syscall` by either a `sqlite3_authorizer` on the test's [`sqlite::Database`] (`SQLITE_IGNORE` on the `unknown` write) or direct negative trace tests on `trace_validate`. In [`dir_cache_fs_crash_during_recovery_test`], replace wrapping mangled `cache::RecoverDirty` and `backing::BackingNlink` ([`dcfs/testonly/recover_dirty_fails_once.cc:25`], [`dcfs/testonly/probe_fails_once.cc:26`]) by injecting a `BackingSyscalls` fake that fails `statx` / `open_by_handle_at` on the first recovery pass and on the root-nlink probe.
 - **`tools/waitexit.c`:** Split `waitexit_run(pid_t pid, const struct waitexit_sys *sys)` in [`tools/waitexit.c:18-62`] with function pointers `.pidfd_open` and `.poll` so [`test/qemu/waitexit_test.cc:56-96`] injects fakes without `-Wl,--wrap`. *Ruling (russ, 2026-10-18, who asked why it needs a seam at all):* first check whether `tools/waitexit.c` is still used once 25.34 ports the guest scripts to C++. If it is not used, delete it. If it stays, it moves to C++ on `LocalSyscalls` instead of getting a function-pointer struct of its own.
@@ -1593,7 +1593,7 @@ draft's step, numbered 25.41 (the draft's working number was 25.34b, and
 
 **Risks.**
 - *Bypassing the injected interface:* A caller invoking a free function in `syscalls::` would silently skip `NoTransactionAt` and `FaultSitesTest`. Mitigation: remove non-RAII free functions from `syscalls*.h` in sub-step 8 so only `Real*Syscalls` methods exist (`FileDescriptor::Close` is the sole documented exception).
-- *Variadic `openat`/`ioctl`/`fcntl`:* Virtual methods cannot be variadic or templates. Mitigation: split `openat(dirfd, path, flags)` and `openat(dirfd, path, flags, mode)` and use typed `ioctl`/`fcntl` methods, aligning directly with step 25.38 ([`docs/plan/phases/25-style-convergence.md:1405-1437`]).
+- *Variadic `openat`/`ioctl`/`fcntl`:* Virtual methods cannot be variadic or templates. Mitigation: split `openat(dirfd, path, flags)` and `openat(dirfd, path, flags, mode)` and use the `ioctl<OP>`/`fcntl<OP>` member templates over per-op virtuals, aligning directly with step 25.38 ([`docs/plan/phases/25-style-convergence.md:1405-1437`]).
 - *Coverage Baseline:* Every `Real*Syscalls` method and error branch must stay covered so total coverage never drops ([`AGENTS.md:24-29`]).
 
 **Orchestrator review notes (2026-10-18).**
@@ -1601,3 +1601,32 @@ draft's step, numbered 25.41 (the draft's working number was 25.34b, and
 - (b) It executes the design `docs/design.md:3307-3312` sketched when `--wrap` was kept on 2026-10-16, and answers that decision's three objections: separate libraries kept, one way to call a syscall, and no virtual inheritance.
 - (c) Order: it lands before 25.35–25.38, so strong types and spans land once on the final interfaces.
 - (d) Owner: dcfs-protocol for sub-steps 6 and 7 (the fault and trace-validation tests touch the protocol's negative tests); dcfs-implementer otherwise.
+
+## 25.42 Pidfds over pids (russ, 2026-10-18; queued after the Friday quota reset)
+
+Russ's rule (2026-10-18): "Prefer pidfds over plain pids"
+([`docs/style.md`] section 1.5). A child or daemon is held as an owned pidfd,
+signalled with `pidfd_send_signal`, and waited on with `waitid(P_PIDFD)` or
+`poll`. The sources and their limits are in section 1.5: `clone3` with
+`CLONE_PIDFD` or `pidfd_open` for a child or daemon whose pid this process
+learns from the kernel, and `open("/proc/<pid>")` only where a pid arrives
+from outside. A `/proc/<pid>` fd can be signalled but not waited on
+(`kernel/exit.c:1786` (Linux 7.3-rc7)).
+
+Scope: `DcfsMount`, `RunCommand`, fsck's and the startup channel's children,
+[`bench/process.cc`] and the tools hold owned pidfds. `pid_t` holders across
+`dcfs/`, `tools/`, `bench/` and `test/qemu/` become pidfds; a `pid_t` stays
+only for printing or for an API that takes nothing else. `DcfsMount` holds
+its daemon as a pidfd here, not as the `std::optional<pid_t>` that 25.34
+keeps. Wrappers the steps need (`clone3`, `pidfd_open`, `pidfd_send_signal`,
+`waitid`) are added to the syscall libraries with tests.
+
+The check (from the 25.41 review, moved here from 25.39 by the 2026-10-18
+correction): no calls to the pid-based wrappers (`syscalls::kill`,
+`syscalls::waitpid`, `tgkill`) once pidfd equivalents exist, except in
+allow-listed places where only a pid works, each with its reason. Raw calls
+are already caught by `//tools:raw_syscalls_test`, so this check covers the
+wrappers. It lands with this step, not in 25.39. It fails first on a fixture
+that calls `syscalls::kill`.
+
+Owner: dcfs-implementer. Dependencies: none stated by russ.
