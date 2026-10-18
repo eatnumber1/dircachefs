@@ -846,7 +846,8 @@ tests) in `bazel-testlogs/<package>/<target>/test.outputs/serial.log`.
 - **POSIX conformance**: `pjdfstest_test` runs all of pjdfstest (about 8800
   checks, as root and as unprivileged users), once through dcfs and once
   directly on the same ext4 filesystem, and fails on any dcfs-specific
-  failure. Today both runs fail the same 28 checks. See
+  failure. Today both runs fail the same 28 checks on ext4, 30 on xfs and 32 on
+btrfs, none of them dcfs-specific. See
   `docs/conformance.md`. This test is slow: it runs as three guests per
   filesystem (shards by test directory), each a few minutes.
 

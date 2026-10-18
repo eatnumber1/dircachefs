@@ -64,3 +64,9 @@ af67100304513ad7b	2026-10-18T04:59:32Z	Clerk: update dashboard questions	mechani
 a5bf6adf474ddb63e	2026-10-18T05:02:41Z	Clerk: 22.7 listed state, ZFS note	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
 a680ce9d15e09645d	2026-10-18T05:23:49Z	Survey ZFS test suite for dcfs	investigation	dcfs-investigator	claude-sonnet-5-5	medium									
 ae4479cb174b94d4b	2026-10-18T05:25:56Z	Clerk: record ZFS test survey	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+a0c703e45156e9d38	2026-10-18T05:37:04Z	namelen-hybrid	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
+a54b1d9688992dc82	2026-10-18T05:54:30Z	Clerk: two style.md rulings	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+ab965331248b16bcc	2026-10-18T06:04:23Z	dashboard-quota	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+a690b2f5e63a2733d	2026-10-18T06:24:29Z	clerk-queue	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
+aab769422f7a9eaf4	2026-10-18T06:48:41Z	Plan: start-time submount/subvolume stubs	implementation	dcfs-implementer	claude-sonnet-5-5	high									
+a89d46a5dd91932bf	2026-10-18T06:56:41Z	Clerk batch: queued plan edits	mechanical	dcfs-mechanical	claude-haiku-5-5	low									

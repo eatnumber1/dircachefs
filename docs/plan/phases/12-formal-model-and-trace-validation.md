@@ -797,6 +797,12 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
   NAME_MAX"; FUSE allows FUSE_NAME_MAX = PATH_MAX - 1, fs/fuse/fuse_i.h:45).
   Behave like the backing: use the backing's own limit, statfs(2) f_namelen,
   read at mount. Part of the deferred per-filesystem limits question.
+- cpio (found 2026-10-17): `.github/ci/prepare.sh:40` installs `cpio` on the
+  CI host, but nothing uses it: `test/qemu/scripts/mkinitramfs.sh:333`
+  packs the initramfs with the pinned busybox's own `cpio` (the host one was
+  the failure of Phase 5.2's act run). Work: remove `cpio` from
+  `HOST_PACKAGES` and its comment at `prepare.sh:29`, and check CI still
+  passes (code change, with the CI check).
 - ZFS (2026-10-17): on Linux the VFS caps names (255) and values (64 KiB)
   before ZFS sees a request (fs/xattr.c:615-624, 642-643, 798-815). A pool
   holding a larger value (written by another OS; ZFS's own limits

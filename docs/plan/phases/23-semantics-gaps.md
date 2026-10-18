@@ -782,9 +782,12 @@ a cold database *and* from a warm one:
   bind and then dcfs (or `umount -R`, which does that order) ends the daemon
   with status 0 and a clean-shutdown record (the next start does no
   recovery).
-- **Restart with the bind on top.** *Proposed (by "behave like the
-  backing"): it works, there is no refusal and no new mechanism; the order
-  above is the administrator's.* The orderly restart is unmount of the
+- **Restart with the bind on top.** *DECIDED (orchestrator, 2026-10-17):
+  a restart or a dead daemon with a bind on a stub behaves as the backing
+  (`EBUSY` on umount, `ENOTCONN` when dead), with no wrapper refusal.*
+  Originally proposed (by "behave like the backing"): it works, there is no
+  refusal and no new mechanism; the order above is the administrator's.
+  The orderly restart is unmount of the
   bind, unmount of dcfs, mount of dcfs, mount of the bind; with the bind on
   top it cannot even begin (`EBUSY`), as natively. A daemon that dies with
   the bind mounted leaves the dcfs mount dead (`ENOTCONN`) and the bind
@@ -940,7 +943,9 @@ served, and dcfs starts without refusing.
    stub; mounts inside it are behind the boundary and ignored (the
    reconcile skips a mount point under one already handled). Two mounts on
    one point: the probe sees the top one, so the stub is its root.
-7. **A file mount point (decision to confirm).** Proposed: extend the
+7. **A file mount point (DECIDED, orchestrator, 2026-10-17: behave like the
+   backing; a file mount point becomes a non-directory stub, so a bind
+   mount over it works as for directories).** Proposed: extend the
    stub to a non-directory boundary, so it is *never reported as absent and
    never served from the wrong filesystem*: `IsBoundary` becomes true for a
    non-directory whose `st_dev` or mount id differs (for a same-filesystem
@@ -951,8 +956,8 @@ served, and dcfs starts without refusing.
    `d_type`. Alternative (decision 9 as written): `ENOTSUP` on lookup and
    the name left out of `readdir`: simpler, but `ls -l` of the parent then
    fails on the name, and "never reported as absent" is lost. Either way the
-   current silent service stops. Not on russ's path, so this sub-item may
-   land second.
+   current silent service stops. Decided above: this sub-item lands in this
+   step, with a guest test that a bind mount over a file stub works.
 8. **Stale stubs.** A mount removed between runs (or a boundary gone) leaves
    its stub until the parent is relisted (design.md "Not done here",
    unchanged by this step); it keeps a child instance's mount attached,
@@ -963,6 +968,13 @@ served, and dcfs starts without refusing.
    `statx` of the other filesystem's root per stub per run): reverts
    automatically, but costs that probe after every restart, and changes
    `boundary_test`'s `restart-from-cache`, which asserts the opposite.
+   **DECIDED (orchestrator, 2026-10-17):** a refused name is re-probed
+   lazily on its first lookup after each start, as native shows the covered
+   directory again after unmount. Only what a client asks for is probed; no
+   start-time probing, no statx at start. The step's tests change
+   `boundary_test`'s restart-from-cache expectation to match (work item for
+   the implementer: the test asserts the new behaviour, the old assertion is
+   removed, not weakened).
 9. **Contract flags found while reading** (these exist today at runtime
    and now matter for start): *(a)* renaming a mount point natively is
    `EBUSY` (rename(2), `EBUSY`: "in use by the system (for example as a
@@ -978,6 +990,16 @@ served, and dcfs starts without refusing.
    `opendir` of a stub return an empty directory for tools that cannot
    know?). Provisional: keep today's answers, record the difference in
    README and `docs/design.md`'s "Behave like the backing" list.
+   **Decided and open (orchestrator, 2026-10-17):** question 3 is decided:
+   a rename of a mount-kind stub gives `EBUSY` (native rename of a mount
+   point), while a subvolume-kind stub's rename passes through to the
+   backing (btrfs allows it natively). Question 4 is OPEN with russ: `find
+   -xdev`, `du -x`, `rsync -x` and `tar --one-file-system` descend into a
+   stub (same `st_dev`). Options: `ENOTSUP` (today); an empty directory
+   for tools that cannot know; or a FUSE kernel submount via
+   `FUSE_ATTR_SUBMOUNT` giving the stub its own `st_dev` (check whether
+   plain `/dev/fuse` supports it, not only virtiofs). Nothing is built for
+   question 4 until russ answers.
 10. **Docs.** README: "Instances, trees and boundaries" (drop "dcfs refuses
     to start in that case"), the Limitations bullet (retitled "Filesystems
     mounted below the source and btrfs subvolumes are stubs", with the warm
