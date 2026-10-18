@@ -180,7 +180,7 @@ echo "PASS: noisy, TCG and sanitizer runs report their CPU and are not held to t
 # line has one in the serial log, and must not be printed or compared with it.
 {
   echo "TEST first PASS"
-  printf 'COST cpu_us=400000 %s\r\n' "reads=50 writes=7 sectors_read=400 sectors_written=900 flushes=30 dcfs_reads=3 dcfs_writes=1 dcfs_read_bytes=4096 dcfs_write_bytes=0"
+  printf 'COST cpu_us=400000 %s\r\n' "reads=50 writes=7 sectors_read=400 sectors_written=900 flushes=30 dcfs_reads=752 dcfs_writes=10 dcfs_read_bytes=4096 dcfs_write_bytes=0"
   echo "MEM total=268435456 min_avail=200000000 peak_used=50000000 peak_shmem=1000000"
   echo "DCFS-TEST-EXIT=0"
 } >"$WORK/canned"
@@ -190,18 +190,18 @@ if grep '^run-qemu.sh: cost:' "$WORK/stdout" | grep -q "$(printf '\r')"; then fa
 grep -q "(0 bytes) (within the budgets in io_budgets.txt)" "$WORK/stdout" || fail "the last count of the line is not read: $(cat "$WORK/stdout")"
 echo "PASS: the carriage return the console adds to the COST line is dropped"
 
-# --- I/O (guest/io_budgets.txt: counts, no tolerance) -------------------------
+# --- I/O (guest/io_budgets.txt: counts) -------------------------
 
-IO_OK="reads=50 writes=7 sectors_read=400 sectors_written=900 flushes=30 dcfs_reads=3 dcfs_writes=1 dcfs_read_bytes=4096 dcfs_write_bytes=0"
+IO_OK="reads=50 writes=7 sectors_read=400 sectors_written=900 flushes=30 dcfs_reads=752 dcfs_writes=10 dcfs_read_bytes=4096 dcfs_write_bytes=0"
 canned "COST cpu_us=400000 $IO_OK"
 run //t:io
 [ "$RC" -eq 0 ] || fail "a run at its I/O budgets failed: $(cat "$WORK/stdout")"
-grep -q "run-qemu.sh: cost: disk I/O 50 reads, 7 writes, 400 sectors read, 900 sectors written, 30 flushes; dcfs caused 3 reads (4096 bytes), 1 writes (0 bytes) (within the budgets in io_budgets.txt)" "$WORK/stdout" ||
+grep -q "run-qemu.sh: cost: disk I/O 50 reads, 7 writes, 400 sectors read, 900 sectors written, 30 flushes; dcfs caused 752 reads (4096 bytes), 10 writes (0 bytes) (within the budgets in io_budgets.txt)" "$WORK/stdout" ||
   fail "the cost line does not say the I/O and the budget: $(cat "$WORK/stdout")"
 echo "PASS: a run at its I/O budgets passes, and says what it did"
 
-# One over, in each kind that has a budget: fails, naming both numbers; the
-# budget is not a tolerance.
+# One over, in each exact kind that has a budget (flushes and the bytes): fails,
+# naming both numbers.
 for over in flushes:31 dcfs_write_bytes:1; do
   canned "COST cpu_us=400000 $(echo "$IO_OK" | sed "s/${over%%:*}=[0-9]*/${over%%:*}=${over#*:}/")"
   run //t:io
@@ -210,7 +210,7 @@ for over in flushes:31 dcfs_write_bytes:1; do
   grep -q "^//t:io ${over%%:*}: count rose from [0-9]* to ${over#*:}; raising a budget is a deliberate edit of io_budgets.txt whose commit says why" "$WORK/stdout" ||
     fail "the failure for ${over%%:*} does not name the counts: $(cat "$WORK/stdout")"
 done
-echo "PASS: an I/O count one past its budget fails, naming both numbers, with no tolerance"
+echo "PASS: an I/O count one past its budget fails, naming both numbers"
 
 # Interim headroom (26.17c): the disk-request counts move with the host's load
 # (writeback and readahead timing), so reads, writes, sectors_read,
@@ -218,7 +218,7 @@ echo "PASS: an I/O count one past its budget fails, naming both numbers, with no
 # every other count stays exact. Allowed: reads 50 -> 51, writes 7 -> 8,
 # sectors_read 400 -> 408, sectors_written 900 -> 918, dcfs_reads 752 -> 768,
 # dcfs_writes 10 -> 11.
-IO_HEAD=$(echo "$IO_OK" | sed 's/^reads=50/reads=51/; s/ writes=7/ writes=8/; s/sectors_read=400/sectors_read=408/; s/sectors_written=900/sectors_written=918/; s/dcfs_reads=3/dcfs_reads=768/; s/dcfs_writes=1 /dcfs_writes=11 /')
+IO_HEAD=$(echo "$IO_OK" | sed 's/^reads=50/reads=51/; s/ writes=7/ writes=8/; s/sectors_read=400/sectors_read=408/; s/sectors_written=900/sectors_written=918/; s/dcfs_reads=752/dcfs_reads=768/; s/dcfs_writes=10 /dcfs_writes=11 /')
 canned "COST cpu_us=400000 $IO_HEAD"
 run //t:io
 [ "$RC" -eq 0 ] || fail "counts at their headroom failed: $(cat "$WORK/stdout")"
@@ -226,8 +226,8 @@ for over in reads:52 writes:9 sectors_read:409 sectors_written:919 dcfs_reads:76
   canned "COST cpu_us=400000 $(echo "$IO_HEAD" | sed "s/\(^\| \)${over%%:*}=[0-9]*/\1${over%%:*}=${over#*:}/")"
   run //t:io
   [ "$RC" -ne 0 ] || fail "${over%%:*} past its headroom passed: $(cat "$WORK/stdout")"
-  grep -q "^//t:io ${over%%:*}: count rose from [0-9]* to ${over#*:}" "$WORK/stdout" ||
-    fail "the failure for ${over%%:*} does not name the counts: $(cat "$WORK/stdout")"
+  grep -q "^//t:io ${over%%:*}: count rose from [0-9]* to ${over#*:}, past the 2% headroom (at least 1); raising a budget" "$WORK/stdout" ||
+    fail "the failure for ${over%%:*} does not name the counts and the headroom: $(cat "$WORK/stdout")"
 done
 canned "COST cpu_us=400000 $(echo "$IO_HEAD" | sed 's/flushes=30/flushes=31/')"
 run //t:io

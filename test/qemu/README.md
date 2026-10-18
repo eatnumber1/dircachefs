@@ -1425,16 +1425,19 @@ say; its `syscr` and `syscw` are not counted, since `strace_op`'s counts of the
 daemon's syscalls (`syscall_budgets.txt`) are the budgets for those. The fsync
 counts of the traced operations stay there too (`sync`).
 
-`guest/io_budgets.txt` has the same format as the others and no tolerance, except an interim 2% headroom (at least 1) on `reads`, `writes`, `sectors_read`, `sectors_written`, `dcfs_reads` and `dcfs_writes` (step 26.17c; `flushes` and the byte counts stay exact) until a deterministic count replaces them: the
+`guest/io_budgets.txt` has the same format as the others and no tolerance: the
 counts that are exact are held exactly, and each budget is the highest count
-seen plus the spread seen, so those that move are not flaky. They are pinned
-per kernel like the strace goldens: a bump of the kernel may re-baseline them in
-its own commit, with before and after; nothing else may. A count below its
-budget passes, so a counter that read nothing would pass everything:
-`run-qemu.sh` fails a target whose budget for `reads` is more than 0 if its guest
-counted none, and `cost_selfcheck` (`boot_test` on a virtio disk, `ram_disks_test` on a RAM disk)
-fails if a direct write of 1 MiB does not show in the disks' counters and the
-cgroup's.
+seen plus the spread seen, so those that move are not flaky. The one exception
+is an interim 2% headroom (at least 1) on the disk-request counts (`reads`,
+`writes`, `sectors_read`, `sectors_written`, `dcfs_reads`, `dcfs_writes`),
+described at `COST_DISK_COUNT_HEADROOM_KINDS` in `guest/strace_lib.sh`; 26.41
+(6) removes it. They are pinned per kernel like the strace goldens: a bump of
+the kernel may re-baseline them in its own commit, with before and after;
+nothing else may. A count below its budget passes, so a counter that read
+nothing would pass everything: `run-qemu.sh` fails a target whose budget for
+`reads` is more than 0 if its guest counted none, and `cost_selfcheck`
+(`boot_test` on a virtio disk, `ram_disks_test` on a RAM disk) fails if a direct
+write of 1 MiB does not show in the disks' counters and the cgroup's.
 
 Measured over 8 quiet runs, 4 with five other guests beside the test and 3 with
 7 or 8 busy loops and a `dsync` writer (the ext4 targets, 1 vCPU). This is step
