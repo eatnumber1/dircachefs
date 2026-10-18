@@ -324,6 +324,8 @@
  * test scripts can capture it.
  */
 #define _GNU_SOURCE
+#include "tools/testutil.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
@@ -342,6 +344,7 @@
 #include <sys/inotify.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/pidfd.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -703,20 +706,6 @@ static int cmd_heldstat(const char *path) {
   return 0;
 }
 
-/* The event source for a process: a pidfd, readable once it has exited.
- * Returns -1 with *gone set when there is none to watch because it is already
- * gone (or no pid was given: *gone stays 0). */
-static int watch_pid(const char *pid_str, int *gone) {
-  long pid = pid_str == NULL ? 0 : atol(pid_str);
-  int fd;
-
-  *gone = 0;
-  if (pid <= 0) return -1;
-  fd = (int)syscall(SYS_pidfd_open, (pid_t)pid, 0);
-  if (fd == -1) *gone = 1;
-  return fd;
-}
-
 /* Reads the whole of fd from its start into buf (NUL-terminated, truncated at
  * size - 1) and returns the length. */
 static size_t slurp(int fd, char *buf, size_t size) {
@@ -853,30 +842,6 @@ static int cmd_waitpath(const char *path, const char *pid_str) {
     }
     if (n == 2 && (fds[1].revents & POLLIN)) gone = 1;
   }
-}
-
-static int cmd_waitexit(char *const pids[], int count) {
-  int k;
-
-  for (k = 0; k < count; k++) {
-    struct pollfd p;
-    int gone, pfd = watch_pid(pids[k], &gone);
-
-    if (gone) continue;
-    if (pfd == -1) {
-      fprintf(stderr, "testutil waitexit: not a pid: %s\n", pids[k]);
-      return 2;
-    }
-    p = (struct pollfd){.fd = pfd, .events = POLLIN};
-    while (poll(&p, 1, -1) == -1) {
-      if (errno != EINTR) {
-        print_err(errno);
-        return 2;
-      }
-    }
-    close(pfd);
-  }
-  return 0;
 }
 
 static int cmd_fsync(const char *path) {

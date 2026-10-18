@@ -7,6 +7,7 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//formal:trace.bzl", "tla_trace_test")
 load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 load(":guest_libs.bzl", "GUEST_LIBS_ENV", "GUEST_LIBS_TOOLS")
+load(":qemu_cc_test.bzl", "qemu_cc_test")
 load(":qemu_test.bzl", "CONCURRENT_CPUS", "qemu_test", "qemu_test_matrix")
 load(":xfstests.bzl", "xfstests_test")
 load("//third_party/xfstests:helpers.bzl", "XFSTESTS_HELPERS", "XFSTESTS_VFS_HELPERS")
@@ -167,6 +168,22 @@ qemu_test(
     guest_script = "guest/boot.sh",
     size = "small",
     timeout = "moderate",
+)
+
+# Step 25.33b: waitexit tested exactly with pidfd_open and poll fakes.
+qemu_cc_test(
+    name = "waitexit_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["waitexit_test.cc"],
+    linkopts = [
+        "-Wl,--wrap=pidfd_open",
+        "-Wl,--wrap=poll",
+    ],
+    deps = [
+        "//tools:waitexit",
+        "@googletest//:gtest_main",
+    ],
 )
 
 # Step 26.17: the check that a test's disks are in the guest's RAM when it asks

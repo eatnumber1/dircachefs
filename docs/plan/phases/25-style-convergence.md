@@ -1329,7 +1329,8 @@ equivalent by one deliberate breakage, the script deleted. Its `waitexit`
 and `waitpath` checks stay end-to-end smoke tests; the "does not return
 early" claim lives in the exact unit test above.
 
-As built (2026-10-17, step-25.33b, first part): `FindingText(const absl::Status&)` in `dcfs/fsck.cc`
+As built (2026-10-17, step-25.33b): `FindingText(const absl::Status&)` in `dcfs/fsck.cc`
 is the single exempt helper in `tools/style_matchers/status_message.query`; domain outcomes
 stop carrying Status where practical (benchmark skips say what could not be measured);
-Kind 3 infrastructure failures retain the whole status.
+Kind 3 infrastructure failures retain the whole status; `waitexit` unit test
+(`//test/qemu:waitexit_test`) with link-time `--wrap` fakes of `pidfd_open` and `poll`.

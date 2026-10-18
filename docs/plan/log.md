@@ -4099,3 +4099,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   known-bug variant and the tests come first. Owner dcfs-protocol, review
   dcfs-reviewer; it supersedes 22.5's per-page interruption point, which
   lands first. It also amends style 1.12's "one snapshot" readdir sentence.
+- 2026-10-17 evening, 25.33b part 2: waitexit tested exactly in
+  //test/qemu:waitexit_test with link-time `--wrap` fakes of pidfd_open and poll.
