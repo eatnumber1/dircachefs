@@ -427,8 +427,10 @@ for allow in dcfs.allow_other dcfs.allow_other=0 allow_other; do
 done
 # The sync interval must be positive and finite (step 25.28b): it is the
 # cadence of the sync points, so none of 0, a negative, NaN or an infinite
-# one (no periodic sync point ever) means anything.
-for interval in 0 -1 nan inf; do
+# one (no periodic sync point ever) means anything. What counts is the
+# duration the seconds become: 1e300 is finite as a number but past
+# absl::Duration's range, so infinite, and 1e-300 rounds to zero.
+for interval in 0 -1 nan inf 1e300 1e-300; do
 	wrapper -o "dcfs.sync_interval_sec=$interval,dcfs.cache_db=$CACHE/si.db" "$SRC" "$MNT"
 	if [ "$WRC" -eq 1 ] && grep -q 'sync_interval_sec must be positive' "$OUT" && nothing_left "$MNT"; then
 		pass "refuses-sync-interval-$interval"

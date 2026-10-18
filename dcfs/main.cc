@@ -5,7 +5,6 @@
 #include <sys/stat.h>
 
 #include <cerrno>
-#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -307,15 +306,21 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
                           << "dcfs.cache_db is required (the cache "
                              "database's path)");
   }
-  // The cadence of the sync points (DirCacheFS::MaybeSyncNow): 0 would run
-  // one at every request, an infinite one none, and a negative or NaN
-  // interval means nothing.
-  if (double interval = absl::GetFlag(FLAGS_sync_interval_sec);
-      interval <= 0 || !std::isfinite(interval)) {
+  // The cadence of the sync points (DirCacheFS::MaybeSyncNow): zero would
+  // run one at every request, an infinite one none, and a negative one
+  // means nothing. Checked as the duration the seconds become, since that
+  // is what the cadence uses: absl::Seconds makes a value past its range
+  // (1e300) infinite, rounds one below its resolution (1e-300) to zero, and
+  // makes NaN negative infinity.
+  const absl::Duration sync_interval =
+      absl::Seconds(absl::GetFlag(FLAGS_sync_interval_sec));
+  if (sync_interval <= absl::ZeroDuration() ||
+      sync_interval == absl::InfiniteDuration()) {
     return MarkUsageError(InvalidArgumentErrorBuilder()
                           << "dcfs.sync_interval_sec must be positive and "
-                             "finite, not "
-                          << interval);
+                             "finite as a duration, not "
+                          << absl::GetFlag(FLAGS_sync_interval_sec) << " ("
+                          << absl::FormatDuration(sync_interval) << ")");
   }
   const std::string cache_db = *options.cache_db;
   const char *mountpoint = args.mountpoint.c_str();
@@ -489,7 +494,7 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
       .attr_timeout = absl::Seconds(absl::GetFlag(FLAGS_attr_timeout_sec)),
       .entry_timeout = absl::Seconds(absl::GetFlag(FLAGS_entry_timeout_sec)),
       .max_read = mount_opts->max_read,
-      .sync_interval = absl::Seconds(absl::GetFlag(FLAGS_sync_interval_sec)),
+      .sync_interval = sync_interval,
       // default_permissions and allow_other ahead of
       // --fuse_opt's; Init() checks the first is there.
       .mount_options = mount_opts->options,
