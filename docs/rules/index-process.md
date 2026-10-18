@@ -111,3 +111,7 @@ reasoning. `AGENTS.md` says which indexes to read for which task.
   (russ, 2026-10-18). [process](/docs/plan/process.md#rule-live-quota-readings),
   [process](/docs/plan/process.md#rule-pace-claude-quota),
   [process](/docs/plan/process.md#rule-readonly-jobs-off-claude)
+- Mechanical first: for every incident, review finding, chore or own mistake,
+  the first question is which check, script, type or skill stops it recurring
+  (russ, 2026-10-18, "prioritize mechanical first"; the orchestrator's reading,
+  not yet ratified). [process](/docs/plan/process.md#rule-mechanical-first)

@@ -3,7 +3,7 @@
 PROJECT DECISION: dcfs requires root (real `open_by_handle_at`,
 `FS_IOC_GETFSUUID`, and so on). There is no host-side test execution:
 **every** test -- plain unit tests included -- boots the project's own
-minimal Linux kernel under QEMU, as root, with KVM, and runs there. A
+minimal Linux kernel under QEMU, as root, under KVM when /dev/kvm is usable, otherwise TCG, and runs there. A
 `cc_test` in this repo does not exist; `qemu_cc_test` (below) is what
 every `dcfs/BUILD.bazel` test target uses instead.
 

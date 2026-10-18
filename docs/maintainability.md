@@ -905,7 +905,7 @@ measurement of quality.
 
 ## 16. How to check these claims yourself
 
-From the repository root. Bazel needs `/dev/kvm` only for the QEMU tests; none
+From the repository root. Bazel wants `/dev/kvm` only for the QEMU tests (otherwise they run under TCG); none
 of the commands below boots a guest.
 
 ```text

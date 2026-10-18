@@ -182,7 +182,7 @@ a guest.
 | CI `reproducible` | two builds in two output bases, byte-identical | `ci.yml:426` |
 | CI `mutation-changed` | mutants of the functions a push touches (at most 30) and, when `formal/` changes, of the model (at most 10); survivors are reported, not failed | `ci.yml:495` |
 | CI `full` | large and enormous, three shards (`test.sh --sizes=large,enormous --shard=I/3`) | `ci.yml:591` |
-| CI `xfstests` | xfstests shards, one runner per backing filesystem; does nothing without KVM | `ci.yml:710` |
+| CI `xfstests` | xfstests shards, one runner per backing filesystem; skipped on runners without KVM (test.sh:66-76); it would run under TCG but takes hours | `ci.yml:710` |
 | CI `asan`, `ubsan` | every tier under each sanitizer, three shards each | `ci.yml:796`, `:895` |
 | CI `osv` | dependency vulnerability scan | `ci.yml:994` |
 | Weekly `noisy` | the suite with the quiet kernel's determinism removed, `fault_ace_mixed_long_test_<fs>` seeded by run number, `kernel_facts_test_<fs>`; six runners; a report of findings, not a gate | `ci.yml:1161` |
@@ -660,7 +660,7 @@ documented Linux behaviour); dcfs fails the same, with zero dcfs-specific
 failures; the expected-failure lists are empty
 (`test/qemu/guest/pjdfstest.<fs>.expected_failures`). Enormous tier, three
 guests per filesystem, in the `full` CI job; the xfs and btrfs runs are
-skipped on runners without KVM.
+skipped in CI on runners without KVM.
 
 **SibylFS** (step 12.18b, `docs/conformance.md`, "SibylFS, a second oracle").
 pjdfstest checks single calls; SibylFS, the 2015 executable POSIX specification,
@@ -1145,8 +1145,8 @@ or unmodelled and the planned step that would address it, if there is one.
 - The disk-request budgets carry the interim 2% headroom described under
   "Cost and I/O budgets" until step 26.41 item 6 removes it.
 - ASan and non-KVM runs differ from the default: some tests are
-  incompatible with sanitizers, and without KVM the xfstests and the xfs and
-  btrfs pjdfstest runs are skipped by CI.
+  incompatible with sanitizers, and without KVM, in CI, the xfstests and the xfs and
+  btrfs pjdfstest runs are skipped.
 
 **Differential testing.**
 
@@ -1205,7 +1205,7 @@ bazel test --config=presubmit //...     # small + medium
 bazel test //formal/...
 bazel test //formal:small_test
 bazel test //formal:known_bug_crash_f1_phase1_not_durable_test
-# Trace validation (needs KVM)
+# Trace validation (runs under TCG without KVM, slower)
 bazel test //dcfs:dir_cache_fs_trace_test //test/qemu:trace_crash_test
 
 # Conformance and differential tests

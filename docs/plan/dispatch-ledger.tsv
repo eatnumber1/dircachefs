@@ -163,3 +163,5 @@ ac848b1767251a111	2026-10-18T23:12:36Z	fix-2617c-style	mechanical	dcfs-mechanica
 aca2a2dc31550d293	2026-10-18T23:13:02Z	Upload lanes and ci via skill	mechanical	dcfs-mechanical	haiku	low									
 a4d4ab26c62cdb915	2026-10-18T23:18:52Z	Clerk batch 26	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
 aada4e7d946dcb587	2026-10-18T23:19:17Z	Refresh stale plan dataset	mechanical	dcfs-mechanical	sonnet	low									
+a6bc4384d1279c470	2026-10-18T23:26:13Z	Audit KVM-required claims		Explore	sonnet										
+a0d9acea70630589f	2026-10-18T23:28:40Z	Clerk batch 27	mechanical	dcfs-mechanical	claude-haiku-5-5	low									

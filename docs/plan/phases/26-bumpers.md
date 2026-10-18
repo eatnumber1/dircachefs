@@ -1449,3 +1449,22 @@ Done when `tools/repo_shape_sleeps.txt` and 26.17c's headroom list are empty
 and no budget line counts I/O that the guest kernel schedules by time.
 Test first for each change; never widen a budget or tolerance to pass, and
 never weaken a test (AGENTS.md).
+
+## 26.44 A TCG boot test: one guest under `DCFS_FORCE_TCG=1` (clerk batch 27, 2026-10-18; queued, not started)
+
+Every guest test falls back to TCG when `/dev/kvm` is unusable or
+`DCFS_FORCE_TCG` is set (`test/qemu/scripts/run-qemu.sh:736-757`, since 5.1,
+e7e0714e), but nothing boots a guest that way: `run_qemu_cost_test.sh:158`
+only fakes the run. Add a test that boots one guest with `DCFS_FORCE_TCG=1`,
+asserts that it passes, and asserts that its log says `using tcg`
+(`run-qemu.sh:743`), so the fallback stays real. Test first; a C++ guest
+test under `test/qemu/guest/` (no new shell). Owner: dcfs-mechanical.
+
+## 26.45 Delete or use the `requires-kvm` tag (clerk batch 27, 2026-10-18; queued, not started)
+
+The tag is added at `test/qemu/qemu_test.bzl:330` and
+`test/qemu/qemu_cc_test.bzl:218`, and nothing reads it. KVM is optional for
+every guest test (26.44), so either delete the tag, per the
+no-unnecessary-code rule, or make CI select on it (CI's `full` job skips
+xfstests and the xfs and btrfs pjdfstest runs without KVM, `test.sh:66-76`
+and `test.sh:79-81`). Owner: dcfs-mechanical.

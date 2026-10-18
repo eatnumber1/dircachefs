@@ -24,6 +24,20 @@ process (its waves and file ownership table) is in `history.md`.
   for russ's review (e.g. the TLA+ model's README), sends anything outside
   the repository (LKML mail, pushes).
 
+## Mechanical first (russ, 2026-10-18)
+
+- <a id="rule-mechanical-first"></a>
+  **Mechanical first.** russ, 2026-10-18: "in general, you seem to be
+  forgetting to prioritize mechanical first in our process. How can we
+  better avoid you forgetting to do that?" The rule as the orchestrator
+  reads it (labelled as its reading; russ has not yet ratified this
+  wording): for every incident, review finding, chore or own mistake, the
+  first question is which check, script, type or skill stops it recurring;
+  that is queued (or built) before or instead of a manual fix; a chore done
+  by hand a second time becomes a script or skill; a manual fix without a
+  queued mechanism says why none is possible. The queued mechanisms are in
+  25.47 items 7 to 9 and 25.45.
+
 ## A step, start to finish
 
 1. <a id="rule-lane-clones"></a>
@@ -144,9 +158,10 @@ process (its waves and file ownership table) is in `history.md`.
    upload, `mark-uploaded`, or the Stop hook holds the turn open); the
    quota readings
    from "Quota management" below; `gh run list --limit 12`; and
-   `~/.cache/dcfs-dashboard/plan.json`, every plan step and its state
-   from the 2026-10-17 census, in which a merge flips its step to done
-   and a new step is added as queued),
+   `~/.cache/dcfs-dashboard/plan.json`, every plan step, its phase, title,
+   state and evidence, which `dashboard_lanes.py` regenerates from
+   `phases/*.md` and `log.md` (25.47 item 7; the orchestrator does not
+   hand-maintain it, so a merge needs no edit to it),
    upload each as an asset and point its dataset at the new file with a
    fresh `updated` time, all datasets in one batch write. At most one
    refresh per turn, at its end, covering every change in it; old
@@ -489,6 +504,12 @@ orchestrator's notes (2026-10-18) so that they are in the repository:
   seems needed and raise it only when the answer comes back shallow; its
   table gives judgement reviews Opus high and protocol or crash-safety work
   Opus high or xhigh.
+- Recommended, not a rule (russ, 2026-10-18: "The fresh-agent rule can get
+  adopted as a soft recommendation, not a rule. You should be allowed to make
+  judgement calls on a case-by-case basis."): prefer a fresh agent with a full
+  brief over resuming one whose context is very large (17.2e's implementer
+  reached about 450k tokens on 2026-10-18; every resumed turn re-reads it). A
+  judgement call case by case.
 - <a id="rule-coauthor-trailer"></a>
   **The trailer names the model that wrote the commit** (russ, 2026-10-18:
   "Whichever model is the author should be listed as co-author.").

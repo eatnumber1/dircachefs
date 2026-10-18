@@ -1986,6 +1986,22 @@ attribution check covers them). Scripts under `tools/agents/` come with tests.
 6. Script: one quota reading that prints Claude (`claude_usage.py`) and agy
    (`agy -p '/quota'`) together, folded with the queued `dashboard_lanes.py`
    quota fix.
+7. Script: the plan census. `dashboard_lanes.py` regenerates
+   `~/.cache/dcfs-dashboard/plan.json` (step, phase, title, state, evidence)
+   from `docs/plan/phases/*.md` and `log.md`, and adds `plan` to `DATASETS`
+   so the hook tracks it and `mark-uploaded` accepts it. It replaces
+   process.md's hand-maintained plan.json, which went stale from 2026-10-17
+   22:00Z because the orchestrator never updated it on merges; that stale
+   dataset makes the Dashboard type's toolbar read "Updated 1d ago". (The
+   dashboard page, files/index.html v10, now shows its own "Last updated"
+   line from the newest datasets `updated.at`.) Clerk batch 27, 2026-10-18.
+8. Stop-hook nudge: `dashboard_lanes.py` counts dispatch-ledger rows by
+   `task_class` per day and, on the second manual run of the same class with
+   no script or skill for it, prints "second manual <class> today: mechanize
+   it" (the mechanical-first rule, process.md). Clerk batch 27, 2026-10-18.
+9. `review_findings.py`: a `checks-owed` subcommand lists every row with
+   `mechanizable=could`; the clerk adds each new kind to 25.45's list, so no
+   mechanizable finding is lost. Clerk batch 27, 2026-10-18.
 
 *Test:* the scripts come with tests under `tools/agents/`.
 

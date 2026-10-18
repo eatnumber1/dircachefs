@@ -1499,7 +1499,7 @@ them in a commit, and a commit that carries one is a step not done.
 the operating rules stand at all times (russ, 2026-10-11, "I don't want
 an agent doing like `rm -rf /`"): nothing destructive outside the lane,
 nothing to Docker, no pushing, no working around a permission denial,
-no Bazel without KVM, no edits outside the checkout, no background
+run Bazel with /dev/kvm access (without it the tests run slowly under TCG), no edits outside the checkout, no background
 polling loops, and no hack that could escape the guest or the lane (a
 timer in a guest script is fine; a script that deletes host directories
 is not, submitted or not).
