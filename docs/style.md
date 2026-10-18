@@ -114,6 +114,18 @@ use it as design guidance rather than firm rules."
   type system, `constexpr`, `consteval`. An operation selector known at the
   call site (fcntl's `cmd`, an ioctl request) is a template argument; a
   runtime overload exists only where the value must come from a variable.
+- **Mechanize every rule you can** (russ, 2026-10-09, asked whether the three
+  syscall-wrapper libraries `syscalls.h`, `syscalls_backing.h` (with a golden
+  dependents test) and `syscalls_process.h` were worth the extra headers:
+  "Keep it. Mechanical invariant enforcement is more valuable."; russ,
+  2026-10-17: "Remember to mechanize all of the style rules you can."). A
+  rule that a Bazel target, a golden list, a clang-tidy check, a clang-query
+  matcher or a gate with a known-bad self-check can enforce is enforced that
+  way, not by a style sentence and a reviewer, even at the cost of extra
+  structure; structure that exists to make an invariant mechanical (a split
+  library, a golden list) is not merged away for simplicity. A rule proposed
+  here comes with its check, or with a type that makes the wrong code not
+  compile.
 
 ### 1.2 Narrowing Google's rules
 
@@ -1585,6 +1597,16 @@ necessary, but if you think one is necessary, come to me."
   (CI). Every test declares `size` and `timeout` (the QEMU macros refuse a
   missing one); pick the tier from the measured duration. The soak test is
   `manual`.
+- **Shard with Bazel's `shard_count`** (russ, 2026-10-18, step 5.12). Prefer
+  `shard_count` for googletest tests (Bazel sets `TEST_TOTAL_SHARDS` and
+  `TEST_SHARD_INDEX`; googletest splits its cases). A guest test's QEMU
+  runner forwards both variables and touches `TEST_SHARD_STATUS_FILE`;
+  pjdfstest splits its file list by the same variables. TLC configurations
+  cannot shard (12.25), and the style checks are build actions parallelized
+  by `--jobs`, not `shard_count`.
+- **The kernel-facts pins test the kernel, not dcfs** (russ, 2026-10-18,
+  steps 17.6 and 17.6b). `kernel_facts_test` runs only in the weekly
+  workflow, never in the fast, presubmit or per-push tiers.
 - **A test's verdict does not depend on host load or speed** (russ,
   2026-10-17: "in general for all our tests I'm interested in them being
   load-agnostic"). It counts events (syscalls, requests, I/O operations,
@@ -1697,6 +1719,14 @@ spaces."). A tab-indented file is converted, in one commit, by
   the guest scripts total 8,418 lines). russ accepted shell for guest tests
   (2026-10-07): they stay, with shared helpers in `lib.sh` instead of
   copies (C15). New host-side tooling over 100 lines is Python (section 5).
+- **C++ over shell, with two allowances** (russ, 2026-10-17: shell has little
+  tooling and weak style enforcement, "we can do it in C++ with only a few
+  helper functions just fine ... and harder-to-measure things like style are
+  better developed in C++"). Host Python tools stay Python (russ agreed,
+  2026-10-17). A C++ test helper may shell out (`system("mount a b")`) where
+  that is significantly simpler: "Don't overcomplicate it too much." The
+  full port of the guest scripts is a later phase, timed at the
+  orchestrator's choice.
 - A comment right after the shebang says what the script does and how it
   runs (63 of 63 scripts). Check names are lower case with hyphens. The zsh
   caveats belong to `CLAUDE.md`, not scripts.

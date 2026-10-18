@@ -1727,6 +1727,13 @@ readdirs per directory.
 Within one thread, nothing can interleave with a request, so today every
 request sees the cache in a consistent state between its own steps.
 
+**No interim compromises toward the coroutine design** (russ, 2026-09-27,
+when the project was planned): the code today is simple, synchronous and
+single-threaded, and reviewable in small chunks. It does not take on
+complexity now for the sake of the planned coroutines and io_uring
+architecture; the rules that do hold now are the ones listed under "Rules
+that hold now so that coroutines need no redesign".
+
 ### A backing filesystem that is frozen or stalled
 
 One thread means one request at a time, so a request blocked in a backing

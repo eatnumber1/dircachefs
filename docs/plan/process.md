@@ -316,6 +316,99 @@ clerk (Haiku, effort low) in one batched dispatch with exact instructions
 note). A self-handoff note in `docs/plan/notes/` lets russ compress the
 orchestrator's context without losing the working state.
 
+How that works in practice (russ, 2026-10-17 and 2026-10-18; each was a
+slip he caught):
+- **Queue small plan and doc edits; send one clerk batch at a natural
+  pause** ("Are you remembering to use the clerk to keep your token use
+  low?", 2026-10-17). Only an edit that unblocks a running agent goes out at
+  once. `dashboard_lanes.py clerk-queue add "<file>: <change>"` queues an
+  item; the Stop hook asks for a batch when no subagent runs or at five
+  items; `clerk-queue drain` prints the brief for one dcfs-mechanical
+  dispatch.
+- **A question that needs more than one lookup goes to one Explore agent
+  with all the sub-questions at once** ("Remember to use subagents to keep
+  tool calls from wasting lots of tokens copying context!", 2026-10-18),
+  even when each grep looks quick; the orchestrator only composes the answer
+  from its report. CI log digging and any multi-command lookup go to one
+  Haiku or Explore agent.
+- **A status update is answered from known state**, without new tool calls
+  unless something changed (a background `gh run watch` already reports CI).
+  When the orchestrator's context is very large, it proposes a handoff and
+  compaction at the next natural pause (russ, 2026-10-18: "Are you still
+  using subagents for work, to save on your expensive context transfers?").
+- **Any chore of more than one tool call goes to a Haiku subagent** (russ,
+  2026-10-18: "Use subagents!"). One cheap command, such as a
+  single quota read before a dispatch, stays inline: delegating it costs a
+  dispatch turn plus the clerk's tokens (russ, 2026-10-18: "Doesn't the
+  tool call send your full context though? Is it cheaper to ask the clerk
+  to do it?"). Better still is no orchestrator turn at all: a quota check
+  belongs in a PreToolUse hook on agent dispatch, or as the dispatched
+  agent's first step.
+
+## How the orchestrator works with russ
+
+Standing preferences russ gave in conversation, collected here from the
+orchestrator's notes (2026-10-18) so that they are in the repository:
+- **File changes go through the Edit or Write tool, not a script** (russ,
+  2026-10-09: "In the future, can you use your edit tool rather than a
+  python script to edit files? It's prettier and easier for me to review in
+  the Claude webui."). Every file the orchestrator changes itself (plan
+  bookkeeping, the dashboard page, memory notes) is one Edit or Write call
+  per file; Bash is for commands (git, gh, bazel, grep). This overrides any
+  harness hint to prefer Bash for edits.
+- **Until we ship, a red CI is not a problem** (russ, 2026-10-17, declining
+  a pre-push run of the large tests a change reaches: "No. Until we ship, a
+  red CI is not a problem."). The large and enormous tiers run in CI and
+  failures there are fixed forward; do not propose pre-push or pre-merge
+  gates for them, do not hedge a "push or not" answer on untested large
+  tests: say push, watch CI and dispatch fixes for any failure. Revisit when
+  dcfs ships.
+- **Review is the bottleneck, and tests are placed accordingly** (russ,
+  2026-10-18: "Code review is expensive in tokens, and that's our real
+  bottleneck"): a test moves to a later CI wave only if it is not catching
+  bugs before review (step 5.13). The CI cache is large and not duplicated
+  (russ, 2026-10-18: "I'd prefer a large CI cache to no cache hits, as long
+  as there's no duplication."; step 5.6).
+- **When a ratified principle settles a question, rule; do not ask**
+  (russ, 2026-10-17, on Q-19 (atomic `O_TRUNC`), which "behave like the
+  backing" settles: "Yeah! Why isn't this obvious and therefore something
+  you automatically answer?"). Before putting a question to russ, check the
+  plan, `docs/design.md`'s principles, the style rulings and the earlier
+  rulings. If they settle it, rule, record it with the principle cited, and
+  report it as decided. A recorded code comment giving a convenience reason
+  is not a reason to ask. Ask only when principles conflict, none applies
+  or the cost is out of proportion, and say which.
+- **Propose formal-methods work unprompted** (russ, 2026-10-09: "The TLA+
+  validates itself many times over. I want to expand use of formal methods",
+  and "If you come up at any point with ideas for how to do even more with
+  formal methods, let me know."). When a design question, a bug or a review
+  turns up something a model could judge, propose the model step first and
+  tell russ without being asked.
+- **Track review findings so trends show** (russ, 2026-10-17 and
+  2026-10-18: "I'd like to start collecting data on issues found during code
+  review, so we can look for trends." and "Remember to track reviewer
+  findings so we can look for patterns."). When any review reports (Claude
+  reviewer, style reviewer, Gemini, Argon, a foreman Flash review), queue a
+  clerk item to append its findings with `tools/agents/review_findings.py
+  add --step S --round R --reviewer X --date D` to
+  `docs/plan/review-findings.tsv` (a review with no findings gets a `none`
+  row); at merge, fill each finding's outcome (fixed with a commit,
+  declined, or question). `review_findings.py summary` reports patterns,
+  which drive which style rules to mechanize (25.39).
+- **Choose the effort on each dispatch** (russ, 2026-10-17, asking why
+  every lane ran at high effort: the agent type's default had decided it).
+  Pass `effort` explicitly: medium for reading, audits and verification,
+  high only for protocol work and puzzling failures.
+- **The trailer names the agent that wrote the commit** (russ, 2026-10-18:
+  "Whichever model is the author should be listed as co-author."). A brief
+  says "end with a Co-Authored-By trailer naming your model" (plus the
+  session line), and never pastes a fixed trailer. The orchestrator's own
+  commits carry its model (style 7).
+- **When borrowing files from another of russ's repositories, copy the files
+  in full; do not use git subtrees** (russ, 2026-09-27). `~/Sources/
+  fuse-generation-qemu` stays untouched (see the standing instructions
+  above).
+
 ## Timers (russ, 2026-10-17)
 
 Timers in the codebase stay banned (style 1.11; the dashboard tool's hourly
@@ -453,6 +546,32 @@ reading. Not for writing code, nor for subtle protocol judgement.
 8. Gemini's findings are treated as leads, not facts: a claim that would
    change the plan is re-verified (12.18 is the precedent: its "not
    usable" verdict was wrong).
+9. Route before each dispatch (russ, 2026-10-17: "Also are you remembering
+   to use Gemini when appropriate?", and 2026-10-18: "remember to use
+   Gemini and 'agy Claude/GPT' too."). Ask "could Gemini Flash do this?" and
+   consider the four routes: a Claude Code subagent, agy Gemini, agy Claude
+   (`claude-opus-5-5-*`, `claude-sonnet-5-5-*`) and agy GPT-OSS. Read-only
+   research, source greps, doc accuracy passes and self-contained tests go to
+   Gemini, within its daily share of the remaining weekly pool; Claude keeps
+   protocol and model work, reviews (Flash reviews proved too lenient) and
+   judgement-heavy design. A job that needs Claude-grade judgement but not
+   the session's tools can run through agy instead of a Claude Code subagent.
+10. Invoking agy (learned 2026-10-18). Use `agy --model <id> --mode plan
+   -p="$(cat prompt.txt)"`: the prompt must be attached to `-p` with `=`, or
+   a bare `-p --model` swallows the flag. ALWAYS run agy with the Bash tool's
+   `run_in_background: true`: a foreground call blocked the session for
+   minutes (russ, 2026-10-18: "I think those agy invocations were blocking
+   for you"). `agy -p` ends when the model's turn ends and kills any
+   background task it started, so a long or multi-command job runs through
+   `tools/agents/foreman.py` (stream-json, held open until JOB-COMPLETE) with
+   the model told to run everything in the foreground. `--mode auto` is not
+   available on this account.
+11. Don't start work you can't finish (russ, 2026-10-18, offering the last of
+   the week's Gemini quota): size a job to the remaining pool. With a few
+   points left, pick a small bounded job (a short review), not a large one
+   that could die midway. agy Opus at high effort drains its pool in minutes:
+   check headroom before each such job and give it work that is safe to
+   abandon.
 
 ## Quota management, Claude and Gemini together (russ, 2026-10-16)
 
@@ -465,7 +584,11 @@ first.
   (the session and weekly panels of `/usage`, through a pseudo-terminal;
   approximate: local sessions only). Gemini, and the Claude/GPT pool inside
   Antigravity: `agy -p "/usage"`. Read both before each dispatch; log a
-  snapshot when a day starts.
+  snapshot when a day starts. Read the pools live, never from the hourly
+  dashboard reading alone (russ, 2026-10-18: "Why do we keep relying on
+  stale hourly readings?"): `python3 tools/agents/dashboard_lanes.py quota`
+  reads Claude and agy/Gemini at once and updates `quota.json` and
+  `budget.json` for the dashboard. A live read is event-driven, not a timer.
 - **The Claude plan is the scarce resource** (the orchestrator runs on it and
   every coding agent does). Pace it so the week ends near 95%, never empty
   before its reset. russ's own interactive use outside the project happens
