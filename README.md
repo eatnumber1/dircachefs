@@ -1534,6 +1534,8 @@ recovery protocol, concurrency, and the test strategy.
 
 - [`docs/design.md`](docs/design.md): the detailed design.
 - [`docs/conformance.md`](docs/conformance.md): pjdfstest results.
+- [`docs/testing.md`](docs/testing.md): how dcfs's correctness is
+  established (every test and verification regime, and what is not covered).
 - [`test/qemu/README.md`](test/qemu/README.md): the QEMU test
   infrastructure.
 - Background: https://russ.har.mn/blog/2026-04-09/fuse-loopback-is-incomplete
