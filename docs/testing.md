@@ -28,6 +28,39 @@ code review as a style gate) is the subject of
 [`docs/maintainability.md`](maintainability.md). Mutation testing and
 coverage overlap with it and are covered here.
 
+## Contents
+
+- [What is being tested](#what-is-being-tested)
+  - [Assumptions the tests do not
+    question](#assumptions-the-tests-do-not-question)
+  - [The invariants that matter](#the-invariants-that-matter)
+- [Which regime checks which invariant](#which-regime-checks-which-invariant)
+- [Test tiers and where they run](#test-tiers-and-where-they-run)
+- [QEMU guests](#qemu-guests)
+- [Unit tests, fakes and fault injection](#unit-tests-fakes-and-fault-injection)
+- [The formal model](#the-formal-model)
+  - [What exists](#what-exists)
+  - [Configurations and state counts](#configurations-and-state-counts)
+  - [The models check themselves](#the-models-check-themselves)
+  - [Findings of the model](#findings-of-the-model)
+  - [Trace validation: does the code do what the model
+    says?](#trace-validation-does-the-code-do-what-the-model-says)
+  - [What the model does NOT cover](#what-the-model-does-not-cover)
+  - [Planned: unit tests of the specification (step
+    12.27)](#planned-unit-tests-of-the-specification-step-1227)
+- [Differential testing and conformance](#differential-testing-and-conformance)
+- [Crash and fault testing](#crash-and-fault-testing)
+- [Cancellation and interruption](#cancellation-and-interruption)
+- [Sanitizers](#sanitizers)
+- [Coverage](#coverage)
+- [Mutation testing](#mutation-testing)
+- [Cost and I/O budgets](#cost-and-io-budgets)
+- [Stress, soak and benchmarks](#stress-soak-and-benchmarks)
+- [Supply chain](#supply-chain)
+- [Process guarantees](#process-guarantees)
+- [Known gaps and open risks](#known-gaps-and-open-risks)
+- [How to check these claims yourself](#how-to-check-these-claims-yourself)
+
 ## What is being tested
 
 dcfs (`README.md`, `docs/design.md`) is a FUSE filesystem that mirrors one

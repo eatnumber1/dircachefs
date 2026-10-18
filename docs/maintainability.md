@@ -23,6 +23,43 @@ and drift. The plan, [`docs/plan/README.md`](plan/README.md), is
 where a step number such as 25.39 is defined; steps are cited as "25.39" and
 live in [`docs/plan/phases/`](plan/phases/).
 
+## Contents
+
+- [Summary](#summary)
+- [1. Philosophy, and where it is
+  written](#1-philosophy-and-where-it-is-written)
+- [2. Compiler gates](#2-compiler-gates)
+  - [What is enforced](#what-is-enforced)
+  - [What is not enforced yet](#what-is-not-enforced-yet)
+- [3. clang-tidy, clang-query and the allowlist
+  backlog](#3-clang-tidy-clang-query-and-the-allowlist-backlog)
+  - [How it runs](#how-it-runs)
+  - [The check set](#the-check-set)
+  - [The clang-query matchers](#the-clang-query-matchers)
+  - [The allowlist backlog and its trend](#the-allowlist-backlog-and-its-trend)
+- [4. Formatting](#4-formatting)
+- [5. `tools/repo_shape.py`](#5-toolsrepo_shapepy)
+- [6. Banned symbols in the shipped
+  binary](#6-banned-symbols-in-the-shipped-binary)
+- [7. Error handling and logging conventions, and how they are
+  held](#7-error-handling-and-logging-conventions-and-how-they-are-held)
+- [8. The syscall layer](#8-the-syscall-layer)
+- [9. Dependencies and the build](#9-dependencies-and-the-build)
+- [10. Review process and the findings
+  ledger](#10-review-process-and-the-findings-ledger)
+- [11. Commit discipline and the design
+  history](#11-commit-discipline-and-the-design-history)
+- [12. Documentation conventions](#12-documentation-conventions)
+- [13. Coverage and mutation, as a maintainability
+  matter](#13-coverage-and-mutation-as-a-maintainability-matter)
+- [14. Known debt and open work](#14-known-debt-and-open-work)
+- [15. Metrics](#15-metrics)
+- [16. How to check these claims
+  yourself](#16-how-to-check-these-claims-yourself)
+- [Where `docs/style.md` and other documents run ahead of the
+  tree](#where-docsstylemd-and-other-documents-run-ahead-of-the-tree)
+- [Appendix: the rules, by mechanism](#appendix-the-rules-by-mechanism)
+
 ## Summary
 
 The honest short version.
