@@ -1288,12 +1288,14 @@ recovery protocol, concurrency, and the test strategy.
   large uncached directory on a slow disk. A change past its backing
   syscall takes at most a few more short backing operations (a new name's
   probe, a refresh of attributes); a lookup may still refresh its answer's
-  attributes; a listing in progress may finish its current batch of up to
-  16 names. An interrupted `ls` that already has some entries gets those,
-  a short listing (the next `getdents` continues). A backing syscall
-  already blocked in the kernel (a disk spinning up, a hung network mount,
-  a long `fsync`) is waited out first. A change that already reached the
-  backing filesystem is completed and reported as done, never as `EINTR`. The
+  attributes; a directory being read into the cache may finish its current
+  batch of up to 16 names and then answer. An `ls` interrupted once the
+  directory is read gets the entries it has, at least one, as a short
+  listing (the next `getdents` continues), as the kernel's own `getdents`
+  does. A backing syscall already blocked in the kernel (a disk spinning
+  up, a hung network mount, a long `fsync`) is waited out first. A change
+  that already reached the backing filesystem is completed and reported as
+  done, never as `EINTR`. The
   exception is `fsync`: interrupted after its backing `fsync` and before
   the sync point that makes it durable in dcfs's cache, it replies `EINTR`
   although the file's data was synced; repeating it is harmless. See

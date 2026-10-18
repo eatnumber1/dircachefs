@@ -1778,8 +1778,9 @@ syscall:
   case: one request of 14-20 s for 20,000 entries at 10 ms per I/O,
   `cancel_inventory_test`);
 - before a refresh of attributes that is the request's own work (a
-  `GETATTR`, an `OPENDIR`, a `LOOKUP` of "." or "..", each `READDIRPLUS`
-  entry), and before `ParentOf` asks the backing filesystem for "..";
+  `GETATTR`, an `OPENDIR`, a `LOOKUP` of "." or ".."), and before
+  `ParentOf` asks the backing filesystem for ".."; in a listing, before
+  each entry's backing reads but the first's (below);
 - before every mutation's phase-2 syscall (create, unlink, rename, link,
   setattr, the xattr changes, a fallback write, fallocate,
   copy_file_range, ioctl);
@@ -1847,29 +1848,43 @@ then proves a bound per kind of request on the backing syscalls it takes
 after the arrival (`InterruptBound`): two for a create whose syscall was
 done (the probe of its new name, then, after phase 3, the refresh of the
 parent's attributes), one for any other mutation past its syscall (its
-refresh after phase 3), none for a lookup, a readdir, a readdirplus, a
-getattr or a sync point. And that an interrupted request eventually
-replies, `EINTR` if it reaches an interruption point, provided no request is
-postponed forever by the others (`InterruptedReplies`, `InterruptActedOn`).
-The count is of the model's steps, each a few syscalls on one object; it
-leaves out work with no backing syscall (cache queries and commits), the
-syscall a request is blocked in when the interrupt comes (below), and the
-probes of one batch of a population (at most 15 after the interrupt). One
-backing read follows the model's request on another object with no
-interruption point: a `LOOKUP`'s reply entry, refreshed when its
-attributes are unknown (after the model's lookup has answered).
-`InterruptSweepTest` holds the code to the bound in its own calls: every
-request interrupted from each of its backing calls on. Trace validation
-holds the code to the obligation where it sees the interrupt: an
-interruption point that saw it and let its caller go on would be rejected
-(`trace_fault_interruption_point_ignored_test`, `..._population_test`).
+refresh after phase 3) and for a readdirplus (its first entry's refresh),
+none for a lookup, a readdir, a getattr or a sync point; and none before
+an interruption point it reaches (`InterruptPrompt`). And that an
+interrupted request eventually replies, `EINTR` if it reaches an
+interruption point, provided no request is postponed forever by the
+others (`InterruptedReplies`, `InterruptActedOn`). The count is of the
+model's steps, each a few syscalls on one object; it leaves out work with
+no backing syscall (cache queries and commits), the syscall a request is
+blocked in when the interrupt comes (below), and the probes of one batch
+of a population (at most 15 after the interrupt: the model's `PD_commit`
+stands for the checks between batches only). `InterruptSweepTest` holds
+the code to the bound in its own calls, for each scenario it lists (each
+kind of request, F's included), interrupted from each of its backing
+calls on. Trace validation holds the code to the obligation where it sees
+the interrupt: an interruption point that saw it and let its caller go on
+would be rejected (`trace_fault_interruption_point_ignored_test`,
+`..._population_test`).
 
 **An interrupted listing replies what it has** (russ, 2026-10-17, the
-most useful result: `docs/style.md` 1.12). A `READDIR` or `READDIRPLUS`
-stopped by an interruption point after it built some entries (".", "..",
-the listed ones whose attributes it had) replies those: a short listing,
-a valid `getdents` result, which the next call continues from its last
-offset. With none built it replies `EINTR`.
+most useful result, `docs/style.md` 1.12; behave like the backing, the
+orchestrator for russ, 2026-10-18). The kernel's own `getdents` never
+fails with `EINTR` for a signal before it has delivered an entry: it
+checks for one only after the first (`fs/readdir.c:360`, `filldir64`;
+Linux v7.3-rc4), and a short batch is then a valid result. So a `READDIR`
+or `READDIRPLUS` builds its first entry whatever comes, honours an
+interruption point only once it has one, and stopped there replies the
+entries it has, which the next call continues from their last offset.
+(Its population comes before, and is interruptible: `EINTR`.)
+
+**One rule for what follows a model request.** After the model's request
+has replied, the code may still read the backing filesystem for other
+objects: a listing's ".." and entries (a `READDIR`'s ".." through
+`ParentOf`, a `READDIRPLUS`'s refreshes), and a `LOOKUP`'s reply entry,
+refreshed when its attributes are unknown. Such a read has an
+interruption point only where a short reply is possible, a listing with
+entries already built; a `LOOKUP` has one answer and cannot reply short,
+so its reply entry's refresh has none.
 
 **What cannot be interrupted yet**: a backing syscall already blocked in
 the kernel: the first I/O to a disk spinning up (seconds), a hung network

@@ -179,7 +179,7 @@ Owner: dcfs-protocol. Docs: `formal/README.md` (actions and properties
 tables), `docs/design.md` "Cancellation", README's EINTR paragraph if
 the guarantee is user-visible.
 
-### As built (step-22.5; round 1 2026-10-17, round 2 2026-10-18, pending review)
+### As built (step-22.5; rounds 1-3, 2026-10-17/18, pending review)
 
 Round 1 (the names below follow 22.6 and round 2):
 
@@ -283,6 +283,39 @@ rulings:
 - Not done: the test-name leftovers of 22.6 (`FakeInterrupts::
   checkpoints`, `CheckpointTest`, the cancel.sh check name, the
   `SessionLoop` log prefix), left for the follow-up the log names.
+
+Round 3, from the re-review and the style review (as the orchestrator
+decided under russ's rulings):
+
+- `InterruptionPoint` (dcfs/interruption_point.h, russ's correction: no
+  general strong-type helper yet): `CheckInterrupted` takes one, built
+  only by a consteval constructor from a non-empty string literal;
+  "maybe an interruption point" is `std::optional<InterruptionPoint>`.
+  Its compile-time refusals (an empty literal, a non-constant array) are
+  checked by hand and noted in its test: there is no compile-fail
+  harness.
+- Behave like the backing (S2): a listing builds its first entry whatever
+  comes and honours an interruption point only once it has one, as the
+  kernel's getdents (fs/readdir.c:360, filldir64); so it never replies
+  EINTR from an interruption point, only a short listing. `ParentOf` takes
+  its interruption point from the caller. `RDP_stat` is not an
+  interruption point; a readdirplus's Run is 1. Populations keep theirs.
+- One rule for reads after a model request has replied (S3): an
+  interruption point only where a short reply is possible; a LOOKUP's
+  reply entry has none.
+- B1, S4: a held getattr's interruption point has its test; the sweep
+  covers F's create, a held getattr, a write, a release and OPENDIR.
+- S5: `InterruptPrompt`, `QuietStepsUncounted` (in the liveness config),
+  `ASSUME QuietPcs \cap InterruptPcs = {}`, their premises, and the
+  reduced known-bug copies as tests.
+- S1: `PD_commit` stands for the between-batch checks only.
+- Style: `AppendDirEntries`/`AppendDirEntriesPlus` in place of the
+  immediately invoked lambdas; dcfs.tla's FUSE_INTERRUPT block cut to a
+  page; the test and comment findings.
+- State counts after round 3: `MC_interrupt` 547,645, `_muts2` 1,755,235
+  (18.9 min at load 65), `_nolock` 2,622,519 (33.7 min at load 65),
+  `_liveness` 65,261, `_liveness_slots` 110,435 (14.5 min at load 55; its
+  timeout is now "eternal"), `_files` 55,625, `_borndirty` 9,678.
 
 ## 22.6 Interruption points: the cancellation checkpoint renamed (russ, 2026-10-17; merged 2026-10-17, b838960, Gemini Flash)
 

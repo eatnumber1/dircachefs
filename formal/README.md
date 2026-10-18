@@ -343,7 +343,7 @@ prints. A request's first step runs inside `Arrive`.
 | `SyncClearDirty` | Clear D's dirty row (normal durability) unless a mutation of D began or ended since the snapshot or is in flight; forget `dirty.durable` | Sync points | `cache::ClearDirty` |
 | (write, first step), `WriteSyscall`, `WriteReply` | Step 12.8: a write of new contents to the file a name holds, through its writable open (passthrough; `ENOENT` if the name holds none), then the reply. It changes the file's data only, which no record of D's covers (the open's phase 1 and release are the file's, not modelled); it gives the crash regimes data to reorder | | `fuse_ops.cc` WRITE through passthrough |
 | `InterruptArrives` | With `Interrupts` (step 22.5): the kernel's FUSE_INTERRUPT for a request in flight arrives, at any step, once (in the safety configurations, only where its next step reads it: `CanArriveWhereItMatters`). Nothing changes but the request's `intr`; it goes on to its next interruption point | Cancellation | libfuse's `do_interrupt` (`SessionLoop::Drain`) |
-| `Interrupt` | An interruption point, just before a backing syscall (`RN_probe`, `PD_read`, `PD_commit`: the population's reads abandoned; `GA_stat`, `RDP_stat`: the refresh not taken; `C_sys`, `U_sys`, `R_sys`, `A_sys`; F's `FC_sys`, `FS_sys`, `FG_stat`, `FG_rstat`, a write's `W_sys`), finds the request's interrupt arrived: the request replies `EINTR`; a mutation past phase 1 `End`s (D's, or F's for F's setattr) without phase 3, its names and attributes left unknown and dirty, the backing unchanged. An obligation (step 22.5): at an interruption point an interrupted request has no other step (`Proceeds`, in `At`). Never between a syscall and its phase 3 | Cancellation | `CheckInterrupted` (`dcfs/interruption_point.h`), `SessionLoop` |
+| `Interrupt` | An interruption point, just before a backing syscall (`RN_probe`, `PD_read`, `PD_commit`: the population's reads abandoned, `PD_commit` standing for the checks between probe batches only; `GA_stat`: the refresh not taken; `C_sys`, `U_sys`, `R_sys`, `A_sys`; F's `FC_sys`, `FS_sys`, `FG_stat`, `FG_rstat`, a write's `W_sys`), finds the request's interrupt arrived: the request replies `EINTR`; a mutation past phase 1 `End`s (D's, or F's for F's setattr) without phase 3, its names and attributes left unknown and dirty, the backing unchanged. An obligation (step 22.5): at an interruption point an interrupted request has no other step (`Proceeds`, in `At`). Never between a syscall and its phase 3 | Cancellation | `CheckInterrupted` (`dcfs/interruption_point.h`), `SessionLoop` |
 | `Crash` | A kernel crash or power loss (`PowerLoss`: each disk keeps any of its possible states, the backing filesystem's from `BCrash` under its regime, and that is now all there is) or a daemon crash (`DaemonCrash`: the disks keep everything, but nothing more is durable than before, step 12.6b); memory is lost. `Next` takes it as `CrashServing`, `CrashRecovering` (from `Restart` to `ProbesDone`) and `CrashStopping`, so that coverage shows each fires. On `MC_small.cfg` (one crash, starting up) `CrashRecovering` can only follow a clean shutdown, an empty recovery; `MC_recovery.cfg` (two crashes) has a crash during the recovery of a dirty database (step 12.6) | Crashes, power loss and recovery | |
 | `Restart`, `Recover`, `StartRun`, `ProbesDone` | Start again: `RecoverDirty` (one transaction; it may also make unknown any present dentry, standing for those that point at dirty children, which the model does not track: `RecoverForgetting`; it keeps the dirty set, which only a sync point clears: step 12.6b), then `clean_shutdown = 0` with kSync, then (after `InitRoot`'s fill) the probe of the recovered rows ends | Recovery; Startup | `backing::StartRun`, `cache::RecoverDirty`, `backing::Startup` |
 | `BeginShutdown`, `StopSync`, `StopClear`, `StopCkpt`, `StopFlag` | Unmount, sync point, TRUNCATE checkpoint, `clean_shutdown = 1` with kSync, exit | Shutdown; What the clean-shutdown flag adds | `backing::FinishRun` |
@@ -369,9 +369,11 @@ prints. A request's first step runs inside `Arrive`.
 | `CacheLearnsAtCommit` | action property | The cache learns (a name it did not know, D's attributes) only at a commit of what a request read: a resolve's, a population's, an attribute fill's, a mutation's phase 3 (the actions), or, in trace validation, the fills the code makes outside a request slot (`OutOfSlotFill`, `Trace.cfg`: `GetattrWhole`). With `EffectAtSyscall`, a fill's effect is on the cache only and changes nothing anyone sees |
 | `ReplyObservable` | action property (step 12.7b) | SibylFS's observation: every reply is one the backing filesystem gave. A mutation that reached its syscall replies that syscall's result (success, `EEXIST`, `ENOENT`); an answer (a lookup's entry or negative entry, a listing, D's attributes, an unlink's or rename's `ENOENT` from its resolve) is what the backing filesystem answered at some instant between the request's call and its reply; `EAGAIN` and `EINTR` come only from a request that had no effect. See [Replies](#replies-what-replyobservable-quantifies-over) for the exact quantifier and the errno classes |
 | `RecoveryTerminates` | temporal | `(mode # "up") ~> (mode = "up")`: after any crash or shutdown, the daemon gets back to serving (recovery always terminates) |
-| `InterruptBound` | invariant (over the ghost `nsys`, step 22.5) | After its interrupt arrives, a request takes at most `Run(kind)` more backing syscalls before it replies (2 for a create, 1 for another mutation past its syscall and a release, 0 for the rest): `\A p \in Procs : ps[p].nsys <= Run(ps[p].kind)`. See [Timely interrupts](#timely-interrupts-step-225) |
+| `InterruptBound` | invariant (over the ghost `nsys`, step 22.5) | After its interrupt arrives, a request takes at most `Run(kind)` more backing syscalls before it replies (2 for a create, 1 for another mutation past its syscall, a release and a readdirplus, 0 for the rest): `\A p \in Procs : ps[p].nsys <= Run(ps[p].kind)`. See [Timely interrupts](#timely-interrupts-step-225) |
+| `InterruptPrompt` | invariant (step 22.5, round 3) | `\A p \in Procs : ps[p].intr /\ ps[p].pc \in InterruptPcs => ps[p].nsys = 0`: a request at an interruption point with its interrupt arrived has taken no backing syscall since |
+| `QuietStepsUncounted` | action property (step 22.5, round 3; `MC_interrupt_liveness.cfg`) | no step from a pc of `QuietPcs` counts a backing syscall, which `CanArriveWhereItMatters` relies on (`<=`: a reply or a crash resets the slot) |
 | `InterruptedReplies` | temporal (step 22.5) | `\A p \in Procs : ps[p].intr ~> ps[p].pc = "idle"`: an interrupted request eventually replies (or goes with a crash), under `RequestFairness` |
-| `InterruptActedOn` | temporal (step 22.5) | `\A p \in Procs : (ps[p].intr /\ ps[p].pc \in InterruptPcs) ~> (ps[p].pc = "idle" /\ (ps[p].rep.e = "EINTR" \/ mode # "up"))`: one at an interruption point replies `EINTR` (the interruption point acts, rather than going on to its syscall), under `RequestFairness` |
+| `InterruptActedOn` | temporal (step 22.5) | `\A p \in Procs : (ps[p].intr /\ ps[p].pc \in InterruptPcs) ~> (ps[p].pc = "idle" /\ (ps[p].rep.e = "EINTR" \/ mode # "up"))`: one at an interruption point replies `EINTR` (the interruption point acts, rather than going on to its syscall), under `RequestFairness`; at `PD_commit`, which stands for the code's checks between probe batches only |
 
 ### Replies: what `ReplyObservable` quantifies over
 
@@ -721,13 +723,13 @@ populated. Every configuration but `MC_long_names.cfg` sets it to `{}`.
 | `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes; `ReplyObservable` | 10,239,570 | ~20 min unloaded (CI 634 s on 2026-10-08 before step 12.6b's daemon crash; 27 min alone at load 11 without `ReplyObservable`, 64 min with it at load 9-12, 2026-10-08) |
 | `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; the three effect-point properties (since step 12.12a) and `ReplyObservable` (lookups and listings overlap mutations here) | 8,224,822 | ~6 min unloaded (CI 506 s before step 12.6b's daemon crash, for 6.37M states; 19 min alone at load 11, 2026-10-08) |
 | `MC_nolock_small.cfg` | `nolock_small_test` (medium) | step 12.12a (the audit's G4): as nolock with no crash and only `NolockGuardRequests` (lookups, listings, creates, unlinks, renames), so that `Mutation::Owns`, the phase-1 verification and the fill guards meeting a mutation bite before the large tier (`known_bug_rename_stale_source_nolock_small_test` finds R4 in these bounds); all invariants and the four action properties | 343,294 | ~1.5 min (load 8-14, 2026-10-10); with every kind but readdirplus 1,990,812 (6 min), with sync points added 1,185,567 |
-| `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` and `InterruptBound` (step 22.5) | 533,393 (280,869 before step 22.5; 1,134,929 with arrival anywhere and round 1's interruption points, 677,637 with arrival where it matters) | ~2 min at load 2 (2026-10-18); 8.4 min at load 30 with arrival anywhere |
+| `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` and `InterruptBound` (step 22.5) | 547,645 (280,869 before step 22.5; 1,134,929 with arrival anywhere and round 1's interruption points) | ~2 min at load 2, 3.4 min at load 60 (2026-10-18) |
 | `MC_long_names.cfg` | `long_names_test` (medium) | as small with `LongNames = {"b"}`, 1 mutation | 429,426 | ~1 min |
-| `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one); `ReplyObservable`, `InterruptBound` | 1,718,997 (892,708; 3,908,815; 2,252,176) | 8.7 min at load 40 (2026-10-18) |
-| `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable`, `InterruptBound` | 2,498,246 (1,036,982; 4,207,066; 2,774,256) | 13.2 min at load 40 (2026-10-18) |
-| `MC_interrupt_liveness.cfg` | `interrupt_liveness_test` (medium) | step 22.5: `FairSpec`, no VIEW; 2 names, 1 slot, every kind, 1 mutation, 1 crash; `InterruptBound`, `InterruptedReplies`, `InterruptActedOn` (the reply ghost keeps only `EINTR`: `RecordReply <- RecordEintr`) | 64,417 (64,111 before round 2's interruption points) | ~1.3 min at load 2, ~2-3 min at load 24-30 |
-| `MC_interrupt_liveness_slots.cfg` | `interrupt_liveness_slots_test` (large) | as `MC_interrupt_liveness.cfg` with 2 slots (another request can hold the thread), 1 name (so no rename), no crash | 107,473 (126,731 before round 2's interruption points) | 6.5 min at load 40 |
-| `MC_interrupt_files.cfg`, `MC_interrupt_borndirty.cfg` | `interrupt_files_test`, `interrupt_borndirty_test` (medium) | step 22.5: as `MC_atime.cfg` (with writes and FSYNCs) and `MC_borndirty.cfg` with `Interrupts`, 2 changes, no crash: F's interruption points (`FC_sys`, `FS_sys`) and a write's (`W_sys`), with `InterruptBound` and every invariant of the two | 55,625; 9,678 (78,402 and 13,642 with arrival anywhere; 59,680 and 10,266 before round 2's interruption points) | 15 s; 9 s (load 2, 2026-10-18) |
+| `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one); `ReplyObservable`, `InterruptBound` | 1,755,235 (892,708; 3,908,815 with arrival anywhere) | 18.9 min at load 65 (2026-10-18) |
+| `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable`, `InterruptBound` | 2,622,519 (1,036,982; 4,207,066 with arrival anywhere) | 33.7 min at load 65 (2026-10-18) |
+| `MC_interrupt_liveness.cfg` | `interrupt_liveness_test` (medium) | step 22.5: `FairSpec`, no VIEW; 2 names, 1 slot, every kind, 1 mutation, 1 crash; `InterruptBound`, `InterruptedReplies`, `InterruptActedOn` (the reply ghost keeps only `EINTR`: `RecordReply <- RecordEintr`) | 65,261 | ~1.3 min at load 2, 2 min at load 60 |
+| `MC_interrupt_liveness_slots.cfg` | `interrupt_liveness_slots_test` (large) | as `MC_interrupt_liveness.cfg` with 2 slots (another request can hold the thread), 1 name (so no rename), no crash | 110,435 | 14.5 min at load 55 (2026-10-18) |
+| `MC_interrupt_files.cfg`, `MC_interrupt_borndirty.cfg` | `interrupt_files_test`, `interrupt_borndirty_test` (medium) | step 22.5: as `MC_atime.cfg` (with writes and FSYNCs) and `MC_borndirty.cfg` with `Interrupts`, 2 changes, no crash: F's interruption points (`FC_sys`, `FS_sys`) and a write's (`W_sys`), with `InterruptBound` and every invariant of the two | 55,625; 9,678 (78,402 and 13,642 with arrival anywhere) | 15 s; 9 s (load 2, 2026-10-18) |
 | `MC_atime.cfg`, `MC_atime_concurrent.cfg`, `MC_atime_crash.cfg` | `atime_test`, `atime_concurrent_test`, `atime_crash_test` (medium) | the file F (step 23.8; [Access times of a file](#access-times-of-a-file-step-238)) | 334,826; 373,534; 29,322 (step 23.11: F's setattrs also move the ghost `fs`; 260,871, 292,824, 29,322 at step 23.8b's corrected `View`; before it 263,848, 297,308, 29,950, the first two depending on TLC's workers) | ~2.5 min; ~3.5 min; ~15 s (load 10-17, 2026-10-09) |
 | `MC_borndirty.cfg`, `_ext4`; `MC_borndirty_nolock.cfg`, `_nolock_ext4`; `MC_borndirty_recovery.cfg` | `borndirty_*_test` (medium) | step 23.11 ([Born-dirty create](#born-dirty-create-step-2311)) | 275,962; 382,710; 89,998; 108,724; 3,054 | 39 s; 2.2 min; 33 s; 46 s; 7 s (by hand, load 14, 2026-10-09) |
 | `MC_crash_ext4.cfg`, `MC_crash_metaprefix.cfg` | `crash_ext4_test`, `crash_metaprefix_test` (medium) | step 12.8: the two weaker backing regimes; 2 names, 1 slot, 3 mutations, 1 crash, lookups, getattrs, creates, unlinks, renames, attribute changes of D and syncs (the litmus configurations have the writes and FSYNCs); all invariants, `CrashRefines`, the effect-point properties and `ReplyObservable` | 356,954 (ext4), 292,044 (metaprefix) | ~3 min, ~1.5 min |
@@ -755,12 +757,14 @@ there and commutes with the other slots' steps, so the reduction merges
 only behaviors that differ in when an arrival nothing has read yet came:
 `MC_interrupt.cfg` 1,134,929 to 677,637, `_muts2` 3,908,815 to 2,252,176,
 `_nolock` 4,207,066 to 2,774,256, `_files` 78,402 to 59,680, `_borndirty`
-13,642 to 10,266 (before round 2's interruption points, which took them to
-533,393, 1,718,997, 2,498,246, 55,625 and 9,678); with it, every safety known bug of the interrupts still
-finds its counterexample (checked by hand, 2026-10-18). The set it
+13,642 to 10,266 (before round 2's interruption points; round 3's are in
+the table above). With it, the safety known bugs of the interrupts still
+find their counterexamples (`known_bug_<bug>_reduced_test`). The set it
 excludes is `QuietPcs`, the pcs whose step neither syscalls nor checks, so
-a new step's pc left out of it only costs states; a new step wrongly put
-in would hide its arrivals. The liveness configurations keep arrival
+a new step's pc left out of it only costs states; one wrongly put in would
+hide its arrivals, which `QuietStepsUncounted` (checked where the arrival
+is anywhere, `MC_interrupt_liveness.cfg`) finds for the steps that
+configuration reaches. The liveness configurations keep arrival
 anywhere: fairness can tell the two apart. With `Interrupts` off, `intr`
 and `nsys` stay `FALSE` and 0, and the other configurations' state counts
 are unchanged.
@@ -830,8 +834,12 @@ test checks another property first; four needed a new variant.
 | `RecoveryIdempotent` | lifetime | `lifetime_probe_list_in_memory` |
 | `HandlesResolveToTheirObject`, `GoneIsStale` | ident | `ident_skip_identity_statx` |
 
-Step 22.5's properties bite on their own known bugs, each of which checks
-that property alone: `InterruptBound` on `interruption_point_removed_create`
+Step 22.5's properties bite on their own known bugs or premises, each of
+which checks that property alone (`InterruptPrompt` on `interrupt_ignored`,
+`QuietStepsUncounted` on `quiet_pc_counted`, `QuietPcs` with a syscall
+step's pc; and `known_bug_<bug>_reduced_test` finds `interruption_point_
+removed_create`, `_unlink` and `interrupt_after_syscall` under
+`CanArriveWhereItMatters` too): `InterruptBound` on `interruption_point_removed_create`
 and `interruption_point_removed_unlink`,
 `InterruptActedOn` on `interrupt_ignored`, `InterruptedReplies` on
 `interrupt_not_replied`.
@@ -1760,7 +1768,7 @@ dispatch is the same as one interrupted right after its first step, which
 makes no backing syscall for any request but a sync point and a lookup of
 F (their syncfs and probe are in the first step in the model; the code has
 an interruption point before the sync point). At an interruption point
-(`InterruptPcs`: `RN_probe`, `PD_read`, `PD_commit`, `GA_stat`, `RDP_stat`,
+(`InterruptPcs`: `RN_probe`, `PD_read`, `PD_commit`, `GA_stat`,
 `C_sys`, `U_sys`, `R_sys`, `A_sys`, and F's `FC_sys`, `FS_sys`, `FG_stat`,
 `FG_rstat` and a write's `W_sys`) an interrupted request's only step is
 `Interrupt`: `At`, which every request step takes, requires `Proceeds(p)`,
@@ -1788,15 +1796,22 @@ interruption point removed: the review's B1):
 | linkcreate, unlink, rename, attribute change | 1 | after the syscall: `C_stat`, `U_stat`, `R_stat`, `A_stat` (the refresh after phase 3) |
 | F's create, F's setattr | 1 | after the syscall: `FC_probe`; `FS_stat` |
 | F's release | 1 | `FR_stat`, its held fill, which has no interruption point (the kernel's file is gone either way) |
-| lookup, readdir, readdirplus, getattr (of D or F), F's open and lookup, write, sync point, FSYNC | 0 | its next interruption point replies `EINTR`, or it replies with no further syscall |
+| readdirplus | 1 | `RDP_stat`, the refresh of ".", its first entry, which a listing builds whatever comes (round 3: the kernel's getdents does) |
+| lookup, readdir, getattr (of D or F), F's open and lookup, write, sync point, FSYNC | 0 | its next interruption point replies `EINTR`, or it replies with no further syscall |
 
 The bound bites: `known_bugs/interruption_point_removed_create` deletes the
 interruption point before a create's syscall, and the create takes 3;
 `known_bugs/interruption_point_removed_unlink` deletes an unlink's, which
 then takes 2 (its syscall and its refresh), past an unlink's 1, where the
-single bound of 2 found nothing. `PD_commit`'s interruption point is the
-one no count of the model's syscalls can see: nothing follows it but a
-commit and the reply, or the next `PD_read`. `interrupt_reach_<pc>_test`
+single bound of 2 found nothing. `PD_commit` stands for the code's interruption points between a
+population's probe batches only (the review of round 2 decided it): no
+count of the model's syscalls can see it removed, since nothing follows it
+but a commit and the reply, or the next `PD_read`; in the code it bounds
+the probes after an interrupt to the rest of a batch, which
+`InterruptSweepTest` counts. `InterruptPrompt` adds that a request at an
+interruption point with its interrupt arrived has taken no backing
+syscall since (`premise_interrupt_prompt_test`: it bites on
+`interrupt_ignored`). `interrupt_reach_<pc>_test`
 (`InterruptReach.tla`) shows that every interruption point is reached by
 an interrupted request, so that neither property is vacuous at any.
 
@@ -1814,22 +1829,21 @@ listxattr and a getxattr for each xattr, so not a fixed number), but
 entries, each with an interruption point before it, and a probe per name,
 with an interruption point before each batch of 16 (so at most 15 probes
 follow an interrupt). And what the code does after the model's request
-has replied, on objects other than D (the review's S1). With the
-interruption points of round 2, one such backing read is left: a
-`LOOKUP`'s reply entry, refreshed (an `OpenNode` and a statx) when its
-attributes are unknown, after the model's lookup has answered; the
-interruption point there would make the code reply `EINTR` where the
-model's lookup has replied its answer. A `READDIR`'s and a `READDIRPLUS`'s
-"..", and a `READDIRPLUS`'s entries, which also come after the model's
-request has replied, have interruption points before their backing reads,
-and an interrupted listing replies the entries it has (below).
+has replied, on objects other than D (the review's S1), under one rule
+(the re-review's S3): such a backing read has an interruption point only
+where a short reply is possible, a listing with entries already built (a
+`READDIR`'s or `READDIRPLUS`'s "..", a `READDIRPLUS`'s entries after its
+first). A `LOOKUP` has one answer and cannot reply short, so its reply
+entry's refresh (an `OpenNode` and a statx, when its attributes are
+unknown) has none.
 
 `InterruptSweepTest` (`dcfs/dir_cache_fs_test.cc`, its own target) is the
 bound in the code's own calls: each scenario's request (a lookup, its reply
 entry refreshed, a readdir of an uncached directory, an empty one and one of
 more than 64 KiB of names, a readdirplus with "."'s and an entry's
-attributes unknown, with ".." unknown, a getattr, a create, an unlink, a
-rename, an attribute change, a sync point), on a fresh tree and cache,
+attributes unknown, with ".." unknown, a getattr, a held getattr, an
+OPENDIR, a create of a directory and of a file, an unlink, a rename, a
+setattr, a write, a release, a sync point), on a fresh tree and cache,
 interrupted from each of its backing calls on (`ProtocolEvents::
 BackingCall`), must reply `EINTR` or its answer after no getdents64, at
 most 15 probes, and at most its case's run of other calls, each case's run
@@ -1852,12 +1866,14 @@ and the review found a third:
   calls with no interruption point (`ParentOf`'s open and probe of "..",
   each entry's refresh), and so did a `GETATTR`'s refresh. `ParentOf` and
   `FreshAttr` (for `GETATTR`, `OPENDIR`, a `LOOKUP` of "." or "..", each
-  `READDIRPLUS` entry) now have one, and the model's `GA_stat` and
-  `RDP_stat` (and F's `FG_stat`, `FG_rstat`) are interruption points.
-  Interrupted after it built some entries, a listing replies those, a short
-  listing (russ: the most useful result, `docs/style.md` 1.12); with none,
-  `EINTR`. The recorder writes no interrupt for a request whose model
-  request has replied, so the trace's reply is the model's.
+  `READDIRPLUS` entry after the first) now have one, and the model's
+  `GA_stat` (and F's `FG_stat`, `FG_rstat`) are interruption points. A
+  listing builds its first entry whatever comes (round 3: the kernel's
+  getdents checks for a signal only after its first entry,
+  `fs/readdir.c:360`), so `RDP_stat` is not one; stopped later, it replies
+  the entries it has, a short listing (russ: the most useful result,
+  `docs/style.md` 1.12). The recorder writes no interrupt for a request
+  whose model request has replied, so the trace's reply is the model's.
 
 **Liveness.** `InterruptedReplies`: an interrupted request eventually
 replies (`intr ~> idle`; a crash empties the slots, which counts).

@@ -79,9 +79,9 @@ tlc_test(
 # (InterruptArrives, at any step) took interrupt_test from 280,869 distinct
 # states to 1,134,929 (2.5 min alone at load 15, 8.4 min at load 30 beside
 # another test, 2026-10-17); arrival only where it can matter
-# (CanArriveWhereItMatters) to 677,637, and round 2's interruption points
-# to 533,393 (2 min at load 2, 2026-10-18): still past "moderate" at load
-# 30.
+# (CanArriveWhereItMatters) to 677,637, and its later interruption points
+# to 547,645 (2 min at load 2, 3.4 min at load 60, 2026-10-18): past
+# "moderate" at load 30.
 tlc_test(
     name = "interrupt_test",
     size = "medium",
@@ -92,9 +92,10 @@ tlc_test(
 )
 
 # Step 22.5: an interrupted request eventually replies, EINTR at an
-# interruption point (liveness, no VIEW): one slot (64,417 distinct
-# states, 1.3 min at load 2), and two slots, so that another request can
-# hold the thread (107,473, 6.5 min at load 40; 2026-10-18).
+# interruption point (liveness, no VIEW): one slot (65,261 distinct
+# states, 1.3 min at load 2, 2 min at load 60), and two slots, so that
+# another request can hold the thread (110,435, 14.5 min at load 55,
+# 2026-10-18: "eternal", for "long" timed out twice at that load).
 tlc_test(
     name = "interrupt_liveness_test",
     size = "medium",
@@ -107,17 +108,17 @@ tlc_test(
 tlc_test(
     name = "interrupt_liveness_slots_test",
     size = "large",
-    timeout = "long",
+    timeout = "eternal",
     config = "MC_interrupt_liveness_slots.cfg",
     spec = "MC.tla",
     srcs = ["dcfs.tla"],
 )
 
-# Since step 22.5: interrupt_muts2 1,718,997 distinct states (892,708
+# Since step 22.5: interrupt_muts2 1,755,235 distinct states (892,708
 # before the arrival; 3,908,815 with it anywhere), interrupt_nolock
-# 2,498,246 (1,036,982; 4,207,066); 8.7 and 13.2 min side by side at load
-# 40 (2026-10-18); with arrival anywhere 26 min each alone at load 30
-# (2026-10-17): kept "eternal", nolock being close to "long" at load 40.
+# 2,622,519 (1,036,982; 4,207,066); 18.9 and 33.7 min side by side at load
+# 65 (2026-10-18); with arrival anywhere 26 min each alone at load 30
+# (2026-10-17): "eternal".
 tlc_test(
     name = "interrupt_muts2_test",
     size = "large",
