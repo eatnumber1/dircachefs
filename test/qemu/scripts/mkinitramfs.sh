@@ -62,87 +62,93 @@ esac
 
 # True for an ELF file (a script or data file has no libraries to copy).
 is_elf() {
-	[ "$(dd if="$1" bs=4 count=1 2>/dev/null | cat -v)" = "^?ELF" ]
+  [ "$(dd if="$1" bs=4 count=1 2>/dev/null | cat -v)" = "^?ELF" ]
 }
 
 # Prints the DT_NEEDED sonames of the ELF file $1 (nothing for a static
 # binary) and, after them, its interpreter prefixed with "interp:". A readelf
 # that fails is an error, not a binary without libraries.
 elf_needs() {
-	is_elf "$1" || return 0
-	dynamic=$("$DCFS_READELF" --elf-output-style=GNU --dynamic "$1") ||
-		{ echo "mkinitramfs.sh: readelf failed on $1" >&2; exit 1; }
-	headers=$("$DCFS_READELF" --elf-output-style=GNU --program-headers "$1") ||
-		{ echo "mkinitramfs.sh: readelf failed on $1" >&2; exit 1; }
-	echo "$dynamic" | sed -n 's/.*Shared library: \[\(.*\)\].*/\1/p'
-	echo "$headers" |
-		sed -n 's/.*Requesting program interpreter: \(.*\)\]/interp:\1/p'
+  is_elf "$1" || return 0
+  dynamic=$("$DCFS_READELF" --elf-output-style=GNU --dynamic "$1") ||
+    {
+      echo "mkinitramfs.sh: readelf failed on $1" >&2
+      exit 1
+    }
+  headers=$("$DCFS_READELF" --elf-output-style=GNU --program-headers "$1") ||
+    {
+      echo "mkinitramfs.sh: readelf failed on $1" >&2
+      exit 1
+    }
+  echo "$dynamic" | sed -n 's/.*Shared library: \[\(.*\)\].*/\1/p'
+  echo "$headers" |
+    sed -n 's/.*Requesting program interpreter: \(.*\)\]/interp:\1/p'
 }
 
 # Copies the sysroot's file $1 (a path in the sysroot, symlinks followed)
 # into $ROOT at the same path.
 install_from_sysroot() {
-	dest="$ROOT$1"
-	[ -f "$dest" ] && return 0
-	mkdir -p "$(dirname "$dest")"
-	cp -L "$DCFS_SYSROOT$1" "$dest"
+  dest="$ROOT$1"
+  [ -f "$dest" ] && return 0
+  mkdir -p "$(dirname "$dest")"
+  cp -L "$DCFS_SYSROOT$1" "$dest"
 }
 
 # Copies the interpreter and the shared libraries of $1 (a binary already
 # installed in $ROOT), and of those libraries in turn, from the sysroot.
 copy_deps() {
-	pending=$(elf_needs "$1") || exit 1
-	seen=""
-	while [ -n "$pending" ]; do
-		item=$(echo "$pending" | sed -n 1p)
-		pending=$(echo "$pending" | sed 1d)
-		[ -n "$item" ] || continue
-		case " $seen " in
-		*" $item "*) continue ;;
-		esac
-		seen="$seen $item"
-		case "$item" in
-		interp:*)
-			install_from_sysroot "${item#interp:}"
-			;;
-		*)
-			for dir in /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu; do
-				if [ -f "$DCFS_SYSROOT$dir/$item" ]; then
-					install_from_sysroot "$dir/$item"
-					deps=$(elf_needs "$DCFS_SYSROOT$dir/$item") || exit 1
-					pending="$pending
+  pending=$(elf_needs "$1") || exit 1
+  seen=""
+  while [ -n "$pending" ]; do
+    item=$(echo "$pending" | sed -n 1p)
+    pending=$(echo "$pending" | sed 1d)
+    [ -n "$item" ] || continue
+    case " $seen " in
+    *" $item "*) continue ;;
+    esac
+    seen="$seen $item"
+    case "$item" in
+    interp:*)
+      install_from_sysroot "${item#interp:}"
+      ;;
+    *)
+      for dir in /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu; do
+        if [ -f "$DCFS_SYSROOT$dir/$item" ]; then
+          install_from_sysroot "$dir/$item"
+          deps=$(elf_needs "$DCFS_SYSROOT$dir/$item") || exit 1
+          pending="$pending
 $(echo "$deps" | sed '/^interp:/d')"
-					continue 2
-				fi
-			done
-			echo "mkinitramfs.sh: $1 needs $item, not in the sysroot" >&2
-			exit 1
-			;;
-		esac
-	done
+          continue 2
+        fi
+      done
+      echo "mkinitramfs.sh: $1 needs $item, not in the sysroot" >&2
+      exit 1
+      ;;
+    esac
+  done
 }
 
 OUT_ARG=$1
 if [ "$OUT_ARG" = "--unit" ]; then
-	shift
-	MODE=unit
-	OUT=$1
-	BUSYBOX=$2
-	INIT=$3
-	COSTLIB=$4
-	TESTBIN=$5
-	DISK0=$6
-	ARGS=$7
-	shift 7
+  shift
+  MODE=unit
+  OUT=$1
+  BUSYBOX=$2
+  INIT=$3
+  COSTLIB=$4
+  TESTBIN=$5
+  DISK0=$6
+  ARGS=$7
+  shift 7
 else
-	MODE=e2e
-	OUT=$1
-	BUSYBOX=$2
-	DCFS=$3
-	FHTEST=$4
-	TESTUTIL=$5
-	INIT=$6
-	shift 6
+  MODE=e2e
+  OUT=$1
+  BUSYBOX=$2
+  DCFS=$3
+  FHTEST=$4
+  TESTUTIL=$5
+  INIT=$6
+  shift 6
 fi
 
 case "$OUT" in
@@ -160,179 +166,179 @@ trap 'rm -rf "$WORK"' EXIT
 ROOT="$WORK/root"
 
 if [ "$MODE" = "unit" ]; then
-	mkdir -p "$ROOT/bin" "$ROOT/test/data" "$ROOT/proc" "$ROOT/sys" \
-		"$ROOT/dev" "$ROOT/tmp" "$ROOT/tests"
+  mkdir -p "$ROOT/bin" "$ROOT/test/data" "$ROOT/proc" "$ROOT/sys" \
+    "$ROOT/dev" "$ROOT/tmp" "$ROOT/tests"
 
-	cp "$BUSYBOX" "$ROOT/bin/busybox"
-	ln -sf busybox "$ROOT/bin/sh"
-	cp "$INIT" "$ROOT/init"
-	cp "$COSTLIB" "$ROOT/tests/cost_lib.sh"
+  cp "$BUSYBOX" "$ROOT/bin/busybox"
+  ln -sf busybox "$ROOT/bin/sh"
+  cp "$INIT" "$ROOT/init"
+  cp "$COSTLIB" "$ROOT/tests/cost_lib.sh"
 
-	cp "$TESTBIN" "$ROOT/test/run"
-	copy_deps "$ROOT/test/run"
-	chmod +x "$ROOT/test/run"
+  cp "$TESTBIN" "$ROOT/test/run"
+  copy_deps "$ROOT/test/run"
+  chmod +x "$ROOT/test/run"
 
-	printf '%s' "$ARGS" >"$ROOT/test/args"
+  printf '%s' "$ARGS" >"$ROOT/test/args"
 
-	: >"$ROOT/test/disk0"
-	if [ "$DISK0" != "-" ]; then
-		printf '%s' "$DISK0" >"$ROOT/test/disk0"
-	fi
+  : >"$ROOT/test/disk0"
+  if [ "$DISK0" != "-" ]; then
+    printf '%s' "$DISK0" >"$ROOT/test/disk0"
+  fi
 
-	for pair in "$@"; do
-		name=${pair%%:*}
-		src=${pair#*:}
-		dest="$ROOT/test/data/$name"
-		mkdir -p "$(dirname "$dest")"
-		cp "$src" "$dest"
-		# A data file that is a program (the dcfs of qemu_cc_test's dcfs=)
-		# runs here: its libraries come with it.
-		copy_deps "$dest"
-		chmod +x "$dest"
-	done
+  for pair in "$@"; do
+    name=${pair%%:*}
+    src=${pair#*:}
+    dest="$ROOT/test/data/$name"
+    mkdir -p "$(dirname "$dest")"
+    cp "$src" "$dest"
+    # A data file that is a program (the dcfs of qemu_cc_test's dcfs=)
+    # runs here: its libraries come with it.
+    copy_deps "$dest"
+    chmod +x "$dest"
+  done
 
-	chmod +x "$ROOT/init" "$ROOT/bin/"*
+  chmod +x "$ROOT/init" "$ROOT/bin/"*
 else
-	mkdir -p "$ROOT/bin" "$ROOT/tests" "$ROOT/proc" "$ROOT/sys" "$ROOT/dev" \
-		"$ROOT/tmp" "$ROOT/src" "$ROOT/cache" "$ROOT/mnt" \
-		"$ROOT/pjdfstest/tests"
+  mkdir -p "$ROOT/bin" "$ROOT/tests" "$ROOT/proc" "$ROOT/sys" "$ROOT/dev" \
+    "$ROOT/tmp" "$ROOT/src" "$ROOT/cache" "$ROOT/mnt" \
+    "$ROOT/pjdfstest/tests"
 
-	cp "$BUSYBOX" "$ROOT/bin/busybox"
-	cp "$DCFS" "$ROOT/bin/dcfs"
-	# Step 15.2: dcfs is mounted as mount.dcfs (argv[0] dispatch).
-	mkdir -p "$ROOT/sbin"
-	ln -sf ../bin/dcfs "$ROOT/sbin/mount.dcfs"
-	# libmount runs mount.<type> with the type of the mountinfo line
-	# (fuse.dcfs) for a remount.
-	ln -sf ../bin/dcfs "$ROOT/sbin/mount.fuse.dcfs"
-	# Step 15.6b: umount(8) runs umount.fuse.dcfs for a dcfs mount (and
-	# umount.fuse, for every FUSE mount, where the administrator installs it:
-	# both here, for the test of each).
-	ln -sf ../bin/dcfs "$ROOT/sbin/umount.fuse.dcfs"
-	ln -sf ../bin/dcfs "$ROOT/sbin/umount.fuse"
-	# Step 15.5: fsck.dcfs, which fsck(8) runs for a line with a passno.
-	ln -sf ../bin/dcfs "$ROOT/sbin/fsck.dcfs"
-	cp "$FHTEST" "$ROOT/bin/fhtest"
-	cp "$TESTUTIL" "$ROOT/bin/testutil"
-	ln -sf busybox "$ROOT/bin/sh"
-	cp "$INIT" "$ROOT/init"
-	copy_deps "$ROOT/bin/dcfs"
-	copy_deps "$ROOT/bin/fhtest"
-	copy_deps "$ROOT/bin/testutil"
+  cp "$BUSYBOX" "$ROOT/bin/busybox"
+  cp "$DCFS" "$ROOT/bin/dcfs"
+  # Step 15.2: dcfs is mounted as mount.dcfs (argv[0] dispatch).
+  mkdir -p "$ROOT/sbin"
+  ln -sf ../bin/dcfs "$ROOT/sbin/mount.dcfs"
+  # libmount runs mount.<type> with the type of the mountinfo line
+  # (fuse.dcfs) for a remount.
+  ln -sf ../bin/dcfs "$ROOT/sbin/mount.fuse.dcfs"
+  # Step 15.6b: umount(8) runs umount.fuse.dcfs for a dcfs mount (and
+  # umount.fuse, for every FUSE mount, where the administrator installs it:
+  # both here, for the test of each).
+  ln -sf ../bin/dcfs "$ROOT/sbin/umount.fuse.dcfs"
+  ln -sf ../bin/dcfs "$ROOT/sbin/umount.fuse"
+  # Step 15.5: fsck.dcfs, which fsck(8) runs for a line with a passno.
+  ln -sf ../bin/dcfs "$ROOT/sbin/fsck.dcfs"
+  cp "$FHTEST" "$ROOT/bin/fhtest"
+  cp "$TESTUTIL" "$ROOT/bin/testutil"
+  ln -sf busybox "$ROOT/bin/sh"
+  cp "$INIT" "$ROOT/init"
+  copy_deps "$ROOT/bin/dcfs"
+  copy_deps "$ROOT/bin/fhtest"
+  copy_deps "$ROOT/bin/testutil"
 
-	# step 4.5: pjdfstest, matched by path shape rather than a dedicated
-	# argument so this stays additive -- $(SRCS) in the :initramfs genrule
-	# just needs "@pjdfstest//:pjdfstest" and "@pjdfstest//:tests" added to
-	# srcs (see test/qemu/BUILD.bazel) and every existing caller/argument
-	# is untouched. The pjdfstest binary's source path ends in
-	# ".../pjdfstest" (its own basename); every file from the ":tests"
-	# filegroup has "/tests/" somewhere in its path (pjdfstest's own
-	# tests/ directory) -- neither pattern collides with any other src
-	# this genrule passes (busybox/dcfs/fhtest/testutil/init/guest/*.sh
-	# all live under this repo's singular "test/qemu" directory).
-	# */tests/* (pjdfstest's own tests/ tree, which includes misc.sh) is
-	# checked before the generic *.sh guest-test-script pattern below, since
-	# tests/misc.sh would otherwise match *.sh first and land in the wrong
-	# place (/tests/misc.sh instead of /pjdfstest/tests/misc.sh).
-	# pjdfstest.<fstype>.expected_failures / pjdfstest.<fstype>.backing_failures
-	# (step 5.2; the checked-in per-filesystem failure baselines
-	# guest/pjdfstest.sh reads -- one enforced dcfs-specific baseline and one
-	# purely documentary backing-filesystem-failure record per fstype) are
-	# also matched by path shape here, ahead of the generic *.sh pattern for
-	# the same reason: both names end in "_failures", so one glob catches
-	# every current and future fstype's pair without listing each by name.
-	for f in "$@"; do
-		case "$f" in
-		*alpine_strace/root/*)
-			# step 26.3: strace and its musl closure, installed at their
-			# Alpine paths (/usr/bin/strace, /lib/ld-musl-x86_64.so.1,
-			# /usr/lib/*.so.*), where musl's loader finds them in the guest.
-			rel=${f#*alpine_strace/root/}
-			case "$rel" in
-			usr/bin/strace | lib/* | usr/lib/*)
-				mkdir -p "$ROOT/$(dirname "$rel")"
-				cp -L "$f" "$ROOT/$rel"
-				;;
-			esac
-			;;
-		*alpine_dmsetup/root/*)
-			# step 11.1: dmsetup (guest/fault_lib.sh), libdevmapper and
-			# musl, at their Alpine paths like strace's.
-			rel=${f#*alpine_dmsetup/root/}
-			case "$rel" in
-			sbin/dmsetup | lib/* | usr/lib/*)
-				mkdir -p "$ROOT/$(dirname "$rel")"
-				cp -L "$f" "$ROOT/$rel"
-				;;
-			esac
-			;;
-		*tools/kernel_bugs/*)
-			# step 26.15: the standalone reproducers of kernel bugs
-			# (//tools/kernel_bugs:guest_files), installed beside their helper
-			# binaries under /kernel_bugs/<dir>/ (guest/kernel_bug_repro.sh);
-			# checked before the generic *.sh pattern below, which would put
-			# reproduce.sh in /tests.
-			rel=${f#*tools/kernel_bugs/}
-			dest="$ROOT/kernel_bugs/$rel"
-			mkdir -p "$(dirname "$dest")"
-			cp "$f" "$dest"
-			copy_deps "$dest"
-			chmod +x "$dest"
-			;;
-		*sibylfs_checker/bin/*)
-			# step 12.18b: SibylFS's prebuilt fs_test_posix and fs_test_check
-			# (//third_party/sibylfs), dynamic: copy_deps installs the
-			# toolchain's glibc for them.
-			mkdir -p "$ROOT/sibylfs/bin"
-			cp "$f" "$ROOT/sibylfs/bin/$(basename "$f")"
-			chmod +x "$ROOT/sibylfs/bin/$(basename "$f")"
-			copy_deps "$ROOT/sibylfs/bin/$(basename "$f")"
-			;;
-		*sibylfs_test_suite/file/*)
-			# step 12.18b: the suite's scripts, as the tarball the pin
-			# fetches (88 MB unpacked; guest/sibylfs.sh unpacks what it runs).
-			mkdir -p "$ROOT/sibylfs"
-			cp "$f" "$ROOT/sibylfs/test-suite.tar.gz"
-			;;
-		*/tests/*)
-			rel=${f#*/tests/}
-			dest="$ROOT/pjdfstest/tests/$rel"
-			mkdir -p "$(dirname "$dest")"
-			cp "$f" "$dest"
-			;;
-		*/pjdfstest) cp "$f" "$ROOT/pjdfstest/pjdfstest" ;;
-		*xfstests*/fsstress | *xfstests*/fsx | *xfstests*/replay-log | */test/qemu/crash_states | */test/qemu/kernel_facts)
-			# step 11.2b: xfstests' fsstress and fsx (//third_party/xfstests);
-			# step 12.14: its replay-log and our crash_states;
-			# our kernel_facts (test/qemu/kernel_facts.cc).
-			cp "$f" "$ROOT/bin/$(basename "$f")"
-			copy_deps "$ROOT/bin/$(basename "$f")"
-			;;
-		*/bench/dcfs_bench)
-			# phase 10: the benchmark binary (//bench:dcfs_bench).
-			cp "$f" "$ROOT/bin/dcfs_bench"
-			copy_deps "$ROOT/bin/dcfs_bench"
-			;;
-		*/pjdfstest.*_failures)
-			cp "$f" "$ROOT/pjdfstest/$(basename "$f")"
-			;;
-		*/sibylfs.*_divergences)
-			# step 12.18b: guest/sibylfs.sh's baselines, one per file system.
-			mkdir -p "$ROOT/sibylfs"
-			cp "$f" "$ROOT/sibylfs/$(basename "$f")"
-			;;
-		*.sh) cp "$f" "$ROOT/tests/$(basename "$f")" ;;
-		*/syscall_budgets.txt | */request_budgets.txt | */fault_ace_mixed.expected_failures)
-			cp "$f" "$ROOT/tests/$(basename "$f")"
-			;;
-		esac
-	done
+  # step 4.5: pjdfstest, matched by path shape rather than a dedicated
+  # argument so this stays additive -- $(SRCS) in the :initramfs genrule
+  # just needs "@pjdfstest//:pjdfstest" and "@pjdfstest//:tests" added to
+  # srcs (see test/qemu/BUILD.bazel) and every existing caller/argument
+  # is untouched. The pjdfstest binary's source path ends in
+  # ".../pjdfstest" (its own basename); every file from the ":tests"
+  # filegroup has "/tests/" somewhere in its path (pjdfstest's own
+  # tests/ directory) -- neither pattern collides with any other src
+  # this genrule passes (busybox/dcfs/fhtest/testutil/init/guest/*.sh
+  # all live under this repo's singular "test/qemu" directory).
+  # */tests/* (pjdfstest's own tests/ tree, which includes misc.sh) is
+  # checked before the generic *.sh guest-test-script pattern below, since
+  # tests/misc.sh would otherwise match *.sh first and land in the wrong
+  # place (/tests/misc.sh instead of /pjdfstest/tests/misc.sh).
+  # pjdfstest.<fstype>.expected_failures / pjdfstest.<fstype>.backing_failures
+  # (step 5.2; the checked-in per-filesystem failure baselines
+  # guest/pjdfstest.sh reads -- one enforced dcfs-specific baseline and one
+  # purely documentary backing-filesystem-failure record per fstype) are
+  # also matched by path shape here, ahead of the generic *.sh pattern for
+  # the same reason: both names end in "_failures", so one glob catches
+  # every current and future fstype's pair without listing each by name.
+  for f in "$@"; do
+    case "$f" in
+    *alpine_strace/root/*)
+      # step 26.3: strace and its musl closure, installed at their
+      # Alpine paths (/usr/bin/strace, /lib/ld-musl-x86_64.so.1,
+      # /usr/lib/*.so.*), where musl's loader finds them in the guest.
+      rel=${f#*alpine_strace/root/}
+      case "$rel" in
+      usr/bin/strace | lib/* | usr/lib/*)
+        mkdir -p "$ROOT/$(dirname "$rel")"
+        cp -L "$f" "$ROOT/$rel"
+        ;;
+      esac
+      ;;
+    *alpine_dmsetup/root/*)
+      # step 11.1: dmsetup (guest/fault_lib.sh), libdevmapper and
+      # musl, at their Alpine paths like strace's.
+      rel=${f#*alpine_dmsetup/root/}
+      case "$rel" in
+      sbin/dmsetup | lib/* | usr/lib/*)
+        mkdir -p "$ROOT/$(dirname "$rel")"
+        cp -L "$f" "$ROOT/$rel"
+        ;;
+      esac
+      ;;
+    *tools/kernel_bugs/*)
+      # step 26.15: the standalone reproducers of kernel bugs
+      # (//tools/kernel_bugs:guest_files), installed beside their helper
+      # binaries under /kernel_bugs/<dir>/ (guest/kernel_bug_repro.sh);
+      # checked before the generic *.sh pattern below, which would put
+      # reproduce.sh in /tests.
+      rel=${f#*tools/kernel_bugs/}
+      dest="$ROOT/kernel_bugs/$rel"
+      mkdir -p "$(dirname "$dest")"
+      cp "$f" "$dest"
+      copy_deps "$dest"
+      chmod +x "$dest"
+      ;;
+    *sibylfs_checker/bin/*)
+      # step 12.18b: SibylFS's prebuilt fs_test_posix and fs_test_check
+      # (//third_party/sibylfs), dynamic: copy_deps installs the
+      # toolchain's glibc for them.
+      mkdir -p "$ROOT/sibylfs/bin"
+      cp "$f" "$ROOT/sibylfs/bin/$(basename "$f")"
+      chmod +x "$ROOT/sibylfs/bin/$(basename "$f")"
+      copy_deps "$ROOT/sibylfs/bin/$(basename "$f")"
+      ;;
+    *sibylfs_test_suite/file/*)
+      # step 12.18b: the suite's scripts, as the tarball the pin
+      # fetches (88 MB unpacked; guest/sibylfs.sh unpacks what it runs).
+      mkdir -p "$ROOT/sibylfs"
+      cp "$f" "$ROOT/sibylfs/test-suite.tar.gz"
+      ;;
+    */tests/*)
+      rel=${f#*/tests/}
+      dest="$ROOT/pjdfstest/tests/$rel"
+      mkdir -p "$(dirname "$dest")"
+      cp "$f" "$dest"
+      ;;
+    */pjdfstest) cp "$f" "$ROOT/pjdfstest/pjdfstest" ;;
+    *xfstests*/fsstress | *xfstests*/fsx | *xfstests*/replay-log | */test/qemu/crash_states | */test/qemu/kernel_facts)
+      # step 11.2b: xfstests' fsstress and fsx (//third_party/xfstests);
+      # step 12.14: its replay-log and our crash_states;
+      # our kernel_facts (test/qemu/kernel_facts.cc).
+      cp "$f" "$ROOT/bin/$(basename "$f")"
+      copy_deps "$ROOT/bin/$(basename "$f")"
+      ;;
+    */bench/dcfs_bench)
+      # phase 10: the benchmark binary (//bench:dcfs_bench).
+      cp "$f" "$ROOT/bin/dcfs_bench"
+      copy_deps "$ROOT/bin/dcfs_bench"
+      ;;
+    */pjdfstest.*_failures)
+      cp "$f" "$ROOT/pjdfstest/$(basename "$f")"
+      ;;
+    */sibylfs.*_divergences)
+      # step 12.18b: guest/sibylfs.sh's baselines, one per file system.
+      mkdir -p "$ROOT/sibylfs"
+      cp "$f" "$ROOT/sibylfs/$(basename "$f")"
+      ;;
+    *.sh) cp "$f" "$ROOT/tests/$(basename "$f")" ;;
+    */syscall_budgets.txt | */request_budgets.txt | */fault_ace_mixed.expected_failures)
+      cp "$f" "$ROOT/tests/$(basename "$f")"
+      ;;
+    esac
+  done
 
-	chmod +x "$ROOT/init" "$ROOT/bin/"*
-	if [ -n "$(find "$ROOT/tests" -mindepth 1 -print -quit)" ]; then
-		chmod +x "$ROOT/tests/"*
-	fi
-	[ -f "$ROOT/pjdfstest/pjdfstest" ] && chmod +x "$ROOT/pjdfstest/pjdfstest"
+  chmod +x "$ROOT/init" "$ROOT/bin/"*
+  if [ -n "$(find "$ROOT/tests" -mindepth 1 -print -quit)" ]; then
+    chmod +x "$ROOT/tests/"*
+  fi
+  [ -f "$ROOT/pjdfstest/pjdfstest" ] && chmod +x "$ROOT/pjdfstest/pjdfstest"
 fi
 
 # The archive is made by the pinned busybox's own cpio (no host cpio: Phase
@@ -343,8 +349,8 @@ fi
 # empty or partial can be cached.
 CPIO="$WORK/initramfs.cpio"
 if ! (cd "$ROOT" && find . | "$BUSYBOX_ABS" cpio -o -H newc >"$CPIO") ||
-	! gzip -1 <"$CPIO" >"$OUT_ABS"; then
-	rm -f "$OUT_ABS"
-	echo "mkinitramfs.sh: building the initramfs failed" >&2
-	exit 1
+  ! gzip -1 <"$CPIO" >"$OUT_ABS"; then
+  rm -f "$OUT_ABS"
+  echo "mkinitramfs.sh: building the initramfs failed" >&2
+  exit 1
 fi
