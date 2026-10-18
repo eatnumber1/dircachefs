@@ -716,4 +716,15 @@ sgid_make noptrace-capwrite 0:2000 4666
 sgid_check sgid2b-setuid-root-capwrite-noptrace noptrace-capwrite root \
   capwrite "0:4666|0:666"
 
+# --- in a user namespace (step 17.2e) -------------------------------------
+#
+# The root of a child user namespace passes the root check, but its
+# capabilities, and those its callers' /proc entries show, count only in
+# that namespace: mount.dcfs refuses to start (dcfs/main.cc's
+# RequireInitUserNamespace).
+mkdir -p /tmp/userns_mnt
+expect_fail userns-mount-refused "must run in the init user namespace" \
+  userns "${MOUNT_DCFS:-/sbin/mount.dcfs}" -o "$(dcfs_options)" "$SRC" \
+  /tmp/userns_mnt
+
 exit "$FAILED"

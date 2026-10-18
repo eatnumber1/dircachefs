@@ -39,8 +39,9 @@ absl::StatusOr<std::vector<uint32_t>> Numbers(std::string_view value) {
 
 // The kernel writes these lines for every task (proc_pid_status:
 // task_state's "Uid:" (real, effective, saved, filesystem) and "Groups:",
-// task_cap's "CapEff:"), in decimal but the capabilities in hex; anything
-// else is not a status file.
+// task_cap's "CapEff:", fs/proc/array.c:188, :198 and :327 (Linux
+// v7.3-rc7)), in decimal but the capabilities in hex; anything else is not
+// a status file.
 absl::StatusOr<ProcCredentials> ParseProcStatus(std::string_view status) {
   std::optional<std::vector<uint32_t>> uids;
   std::optional<std::vector<uint32_t>> groups;
@@ -82,6 +83,13 @@ absl::StatusOr<bool> SharesMyUserNamespace(pid_t tid) {
       syscalls::stat(absl::StrCat("/proc/", tid, "/task/", tid, "/ns/user")));
   ASSIGN_OR_RETURN(struct stat mine, syscalls::stat("/proc/self/ns/user"));
   return theirs.st_dev == mine.st_dev && theirs.st_ino == mine.st_ino;
+}
+
+absl::StatusOr<bool> InInitUserNamespace() {
+  // USER_NS_INIT_INO; the sysroot's <linux/nsfs.h> predates it.
+  constexpr ino_t kInitUserNamespaceInode = 0xEFFFFFFDU;
+  ASSIGN_OR_RETURN(struct stat mine, syscalls::stat("/proc/self/ns/user"));
+  return mine.st_ino == kInitUserNamespaceInode;
 }
 
 }  // namespace dcfs

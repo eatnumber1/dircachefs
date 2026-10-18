@@ -40,12 +40,15 @@
 #include <cstring>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
+#include "absl/functional/any_invocable.h"
 #include "absl/log/log_sink.h"
 #include "absl/log/log_sink_registry.h"
 #include "absl/status/status_matchers.h"
 #include "absl/strings/str_join.h"
+#include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
 #include "dcfs/credentials.h"
 #include "dcfs/fd.h"
@@ -92,6 +95,9 @@ struct FakeChannel {
   // in `cap_fsetid`.
   bool read_cap_fsetid = false;
   std::optional<absl::StatusOr<bool>> cap_fsetid;
+  // If set, FakeGetattr runs it after Caller() and before
+  // CallerHasCapFsetid().
+  absl::AnyInvocable<void()> between_reads;
 };
 
 // Never actually called: this test drives the session entirely via
@@ -125,6 +131,7 @@ void FakeGetattr(fuse_req_t req, fuse_ino_t, struct fuse_file_info *) {
   auto *channel = static_cast<FakeChannel *>(fuse_req_userdata(req));
   FuseRequest fr(req);
   if (channel->read_caller) channel->caller = fr.Caller();
+  if (channel->between_reads) channel->between_reads();
   if (channel->read_cap_fsetid) channel->cap_fsetid = fr.CallerHasCapFsetid();
   if (channel->reply_attr_then_fail) {
     struct stat st = {};
@@ -349,6 +356,39 @@ TEST(FuseRequestChannelTest, CallerWithoutCapFsetidInProcHasNone) {
   RunGetattr(channel);
   EXPECT_THAT(channel.cap_fsetid,
               testing::Optional(absl_testing::IsOkAndHolds(false)));
+}
+
+// Caller and CallerHasCapFsetid answer from one read of the status file:
+// a thread that drops CAP_FSETID (a nonzero fsuid) after Caller() read it
+// is still the thread Caller() saw.
+TEST(FuseRequestChannelTest, CallerAndCapFsetidShareOneReadOfTheStatus) {
+  absl::Notification started;
+  absl::Notification drop;
+  absl::Notification dropped;
+  absl::Notification done;
+  pid_t tid = 0;
+  std::thread thread([&] {
+    tid = syscalls::gettid();
+    started.Notify();
+    drop.WaitForNotification();
+    EXPECT_THAT(syscalls::setfsuid(1000), IsOk());
+    dropped.Notify();
+    done.WaitForNotification();
+  });
+  started.WaitForNotification();
+  FakeChannel channel;
+  channel.read_caller = true;
+  channel.read_cap_fsetid = true;
+  channel.request_pid = static_cast<uint32_t>(tid);
+  channel.between_reads = [&] {
+    drop.Notify();
+    dropped.WaitForNotification();
+  };
+  RunGetattr(channel);
+  done.Notify();
+  thread.join();
+  EXPECT_THAT(channel.cap_fsetid,
+              testing::Optional(absl_testing::IsOkAndHolds(true)));
 }
 
 // pid 0 has no /proc entry to vouch for CAP_FSETID: none, and the

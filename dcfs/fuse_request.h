@@ -20,6 +20,7 @@
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
 #include "dcfs/credentials.h"
+#include "dcfs/proc_status.h"
 #include "dcfs/status.h"
 #include "fuse_lowlevel.h"
 
@@ -174,8 +175,15 @@ class FuseRequest {
   // ReplyNegativeEntry.
   absl::Status ReplyEntryParam(const fuse_entry_param &param);
 
+  // The status file of the thread that sent the request
+  // (ReadProcCredentials), read at the first call and kept: Caller and
+  // CallerHasCapFsetid answer from one read of one task, with no window
+  // between two reads in which its tid could name another.
+  const absl::StatusOr<ProcCredentials> &CallerStatus() const;
+
   std::optional<fuse_req_t> req_;
   int errno_sent_ = 0;
+  mutable std::optional<absl::StatusOr<ProcCredentials>> caller_status_;
 };
 
 }  // namespace dcfs

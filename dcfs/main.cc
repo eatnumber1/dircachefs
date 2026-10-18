@@ -59,6 +59,7 @@
 #include "dcfs/mount_options.h"
 #include "dcfs/mounts_below.h"
 #include "dcfs/proc_file.h"
+#include "dcfs/proc_status.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/remount.h"
 #include "dcfs/session_loop.h"
@@ -626,6 +627,23 @@ absl::Status RequireRoot(std::string_view program) {
          "needs setfsuid, setfsgid and setgroups");
 }
 
+// Root of the host, not of a user namespace: the root of a child user
+// namespace passes RequireRoot, but the capabilities dcfs and its callers'
+// /proc entries show count only in their own namespace, while the kernel
+// asks for them in the init one (open_by_handle_at's CAP_DAC_READ_SEARCH,
+// and the capable(CAP_FSETID) of a write's privilege removal that
+// FuseRequest::CallerHasCapFsetid vouches for).
+absl::Status RequireInitUserNamespace(std::string_view program) {
+  ASSIGN_OR_RETURN(const bool init, InInitUserNamespace());
+  if (init) return absl::OkStatus();
+  return FailedPreconditionErrorBuilder()
+         << program
+         << " must run in the init user namespace: the capabilities of "
+            "root in another one do not count where the kernel asks for "
+            "them (open_by_handle_at's CAP_DAC_READ_SEARCH, a writer's "
+            "CAP_FSETID)";
+}
+
 // The wrapper: `mount.dcfs SOURCE MOUNTPOINT [-sfnv] [-N ns] [-o OPTIONS]`.
 // Returns its exit status.
 int MountHelperMain(int argc, char *argv[]) {
@@ -643,6 +661,7 @@ int MountHelperMain(int argc, char *argv[]) {
   absl::StatusOr<HelperOptions> options = SplitHelperOptions(args->options);
   absl::Status checked = options.status();
   if (checked.ok()) checked = RequireRoot(kMountHelperName);
+  if (checked.ok()) checked = RequireInitUserNamespace(kMountHelperName);
   if (checked.ok() && args->mount_namespace.has_value()) {
     checked = MarkUsageError(UnimplementedErrorBuilder()
                              << "Option -N is not supported");

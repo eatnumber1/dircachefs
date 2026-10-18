@@ -86,6 +86,7 @@ TEST(ProcStatusTest, ReadsThisProcess) {
   EXPECT_THAT(read.groups, UnorderedElementsAreArray(groups));
   EXPECT_NE(read.cap_effective & kFsetid, 0u);
   EXPECT_THAT(SharesMyUserNamespace(syscalls::getpid()), IsOkAndHolds(true));
+  EXPECT_THAT(InInitUserNamespace(), IsOkAndHolds(true));
 }
 
 // A filesystem uid other than 0 drops the filesystem capabilities, CAP_FSETID

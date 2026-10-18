@@ -37,12 +37,18 @@ absl::StatusOr<ProcCredentials> ReadProcCredentials(pid_t tid);
 // Whether thread `tid`'s user namespace is this process's: the nsfs inode
 // that stat(2) of /proc/<tid>/task/<tid>/ns/user reaches, against
 // /proc/self/ns/user's. Following that link needs ptrace read access to the
-// task (fs/proc/namespaces.c, proc_ns_get_link:
-// ptrace_may_access(PTRACE_MODE_READ_FSCREDS)), which a reader without
+// task (proc_ns_get_link's ptrace_may_access(PTRACE_MODE_READ_FSCREDS),
+// fs/proc/namespaces.c:63 (Linux v7.3-rc7)), which a reader without
 // CAP_SYS_PTRACE lacks for a task of another uid, or for one holding a
-// capability the reader does not (cap_ptrace_access_check); then this
-// fails.
+// capability the reader does not (cap_ptrace_access_check,
+// security/commoncap.c:164 (Linux v7.3-rc7)); then this fails.
 absl::StatusOr<bool> SharesMyUserNamespace(pid_t tid);
+
+// Whether this process runs in the init user namespace: its
+// /proc/self/ns/user is the nsfs inode USER_NS_INIT_INO
+// (include/uapi/linux/nsfs.h:50 (Linux v7.3-rc7); PROC_USER_INIT_INO, the
+// same number, since Linux 3.8).
+absl::StatusOr<bool> InInitUserNamespace();
 
 }  // namespace dcfs
 
