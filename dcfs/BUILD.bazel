@@ -498,7 +498,7 @@ cc_library(
     deps = [
       ":capability_set",
       ":proc_file",
-      ":ret_check",
+      ":status",
       ":syscalls",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",

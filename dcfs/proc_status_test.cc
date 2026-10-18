@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 
+#include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/strings/str_cat.h"
 #include "dcfs/syscalls.h"
@@ -24,6 +25,7 @@ namespace {
 
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
+using ::absl_testing::StatusIs;
 using ::testing::ElementsAre;
 using ::testing::IsEmpty;
 using ::testing::Not;
@@ -56,7 +58,8 @@ TEST(ProcStatusTest, AnEmptyGroupsLineIsNoGroups) {
   EXPECT_EQ(parsed.cap_effective.ToKernel(), uint64_t{0x000001ffffffffff});
 }
 
-// Whatever the kernel would never write is refused, each line on its own.
+// Whatever the kernel would never write is refused as an invalid argument,
+// each line on its own.
 TEST(ProcStatusTest, WhatIsNotAStatusFileIsRefused) {
   const std::string uid = "Uid:\t0\t0\t0\t0\n";
   const std::string groups = "Groups:\t0\n";
@@ -69,7 +72,9 @@ TEST(ProcStatusTest, WhatIsNotAStatusFileIsRefused) {
            absl::StrCat(uid, "Groups:\twheel\n", cap),    // not a gid
            absl::StrCat(uid, groups, "CapEff:\tzz\n"),    // not hex
        }) {
-    EXPECT_THAT(ParseProcStatus(status), Not(IsOk())) << status;
+    EXPECT_THAT(ParseProcStatus(status),
+                StatusIs(absl::StatusCode::kInvalidArgument))
+        << status;
   }
 }
 

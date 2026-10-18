@@ -19,7 +19,7 @@
 #include "absl/strings/strip.h"
 #include "dcfs/capability_set.h"
 #include "dcfs/proc_file.h"
-#include "dcfs/ret_check.h"
+#include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 
 namespace dcfs {
@@ -30,8 +30,12 @@ absl::StatusOr<std::vector<uint32_t>> Numbers(std::string_view value) {
   std::vector<uint32_t> numbers;
   for (std::string_view number :
        absl::StrSplit(value, absl::ByAnyChar(" \t"), absl::SkipEmpty())) {
-    RET_CHECK(absl::SimpleAtoi(number, &numbers.emplace_back()))
-        << "a number in a status file line: " << number;
+    uint32_t parsed = 0;
+    if (!absl::SimpleAtoi(number, &parsed)) {
+      return InvalidArgumentErrorBuilder()
+             << "Not a decimal number in a status file line: " << number;
+    }
+    numbers.push_back(parsed);
   }
   return numbers;
 }
@@ -46,26 +50,36 @@ absl::StatusOr<std::vector<uint32_t>> Numbers(std::string_view value) {
 absl::StatusOr<ProcCredentials> ParseProcStatus(std::string_view status) {
   std::optional<std::vector<uint32_t>> uids;
   std::optional<std::vector<uint32_t>> groups;
-  std::optional<uint64_t> cap_effective;
+  std::optional<CapabilitySet> cap_effective;
   for (std::string_view line : absl::StrSplit(status, '\n')) {
     if (absl::ConsumePrefix(&line, "Uid:")) {
       ASSIGN_OR_RETURN(uids, Numbers(line));
     } else if (absl::ConsumePrefix(&line, "Groups:")) {
       ASSIGN_OR_RETURN(groups, Numbers(line));
     } else if (absl::ConsumePrefix(&line, "CapEff:")) {
-      RET_CHECK(absl::SimpleHexAtoi(absl::StripAsciiWhitespace(line),
-                                    &cap_effective.emplace()))
-          << "a status file's CapEff line: " << line;
+      uint64_t bits = 0;
+      if (!absl::SimpleHexAtoi(absl::StripAsciiWhitespace(line), &bits)) {
+        return InvalidArgumentErrorBuilder()
+               << "Not a hex capability set in a status file's CapEff line: "
+               << line;
+      }
+      cap_effective = CapabilitySet::FromKernel(bits);
     }
   }
-  RET_CHECK(uids.has_value() && uids->size() == 4)
-      << "a status file without four uids";
-  RET_CHECK(groups.has_value()) << "a status file with no Groups line";
-  RET_CHECK(cap_effective.has_value()) << "a status file with no CapEff line";
+  if (!uids.has_value() || uids->size() != 4) {
+    return InvalidArgumentErrorBuilder()
+           << "A status file without a Uid line of four uids";
+  }
+  if (!groups.has_value()) {
+    return InvalidArgumentErrorBuilder() << "A status file with no Groups line";
+  }
+  if (!cap_effective.has_value()) {
+    return InvalidArgumentErrorBuilder() << "A status file with no CapEff line";
+  }
   return ProcCredentials{
       .fsuid = (*uids)[3],
       .groups = std::vector<gid_t>(groups->begin(), groups->end()),
-      .cap_effective = CapabilitySet::FromKernel(*cap_effective)};
+      .cap_effective = *cap_effective};
 }
 
 absl::StatusOr<ProcCredentials> ReadProcCredentials(pid_t tid) {
