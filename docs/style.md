@@ -1304,19 +1304,37 @@ necessary, but if you think one is necessary, come to me."
   loop internally)." So the question for any race is: what does the syscall
   promise its caller on a native filesystem? `listxattr`/`getxattr` promise
   nothing across a concurrent writer and answer ERANGE; dcfs answers ERANGE.
-  `rename`, `unlink`, `readdir` promise atomicity (a listing is a consistent
-  snapshot, a rename either happened or did not); dcfs's own bookkeeping may
-  never turn that into an EAGAIN or a partial answer, so an internal conflict
-  is resolved by waiting or by retrying without bound, never reported. A
-  comment at each such site names the contract it keeps.
+  `rename` promises atomicity (rename(2): "If newpath already exists, it
+  will be atomically replaced, so that there is no point at which another
+  process attempting to access newpath will find it missing"; a rename
+  either happened or did not); dcfs's own bookkeeping may never turn that
+  into an EAGAIN or a partial answer, so an internal conflict is resolved
+  by waiting or by retrying without bound, never reported. `readdir`
+  promises no snapshot (POSIX readdir: "If a file is removed from or added
+  to the directory after the most recent call to opendir() or rewinddir(),
+  whether a subsequent call to readdir() returns an entry for that file is
+  unspecified"; getdents64(2) says nothing about consistency across calls):
+  entries added or removed during a listing may or may not appear, and dcfs
+  owes no more. `unlink` has no atomicity claim here: neither unlink(2) nor
+  POSIX promises more than that the name is removed, so a stronger claim
+  needs a source or a native differential test first. Every contract claim
+  cites its source where it is written (POSIX text, a man page, or the
+  kernel code path) and, where it can be measured, a native differential
+  test (the same operations with dcfs out of the loop) backs it: an
+  unsourced claim of atomicity is how a whole-directory snapshot got built
+  where `getdents64` streams pages. A comment at each such site names the
+  contract it keeps and where it is written. Behaving like the backing, only
+  faster, is `docs/design.md`'s "Behave like the backing, only faster"; 22.7
+  (streamed directory population) builds on this paragraph.
 - **Where the contract allows more than one answer, give the most useful
   one.** russ, 2026-10-17: "When there's ambiguity, you should be choosing
   the most _useful_ result." A readdir interrupted after it has built
   some entries replies them as a short listing (a valid getdents result;
   the next call continues) rather than EINTR, which would discard them. (A
   short batch is not the "partial answer" ruled out above: getdents
-  returns listings in batches, and the listing across calls stays one
-  snapshot.) A read interrupted after some bytes returns them. The same
+  returns listings in batches, a short batch is a valid result, and
+  entries added or removed during the listing may or may not appear, as on
+  the backing.) A read interrupted after some bytes returns them. The same
   test applies to any choice the backing's contract leaves open.
 - **Not retry loops:** restarting a syscall the kernel asked to restart
   (`EINTR` when the caller has not cancelled: `umount_helper.cc`'s blocking

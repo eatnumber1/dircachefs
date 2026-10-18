@@ -76,6 +76,17 @@ process (its waves and file ownership table) is in `history.md`.
      Standards: Self-Explanatory Code First, Document Timeless Invariants /
      Deliberate Omissions / Subtle Caveats, and Ban Redundant Method-Name-Echoing
      Docstrings);
+   - behaves like the backing, only faster (russ, 2026-10-17;
+     `docs/design.md`, "Behave like the backing, only faster"): for each
+     operation the diff touches ask "With dcfs not in the loop, what does
+     the backing do for this operation, over time? Where does dcfs block,
+     snapshot, retry or decide by its own rule where the backing would
+     not? Does any buffer grow with directory or file size?"; a claim about what the backing, the kernel or POSIX promises
+     cites its source (POSIX text, a man page, or the kernel code path)
+     where it is written, and a native differential test backs it where it
+     can be measured; a design decision with a real alternative is in the
+     step's As built notes, and on the questions table if it changes
+     user-visible behavior or a guarantee;
    - the dcfs invariants: every cache/backing function takes `Context&`;
      no paths after startup (objects are reached by fd or handle; Phase 13
      opens names relative to a parent fd, which is still not a path); no

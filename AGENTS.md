@@ -77,6 +77,19 @@ Rules marked "(from phase N)" take effect when that plan phase lands.
   at interruption points (`dcfs/interruption_point.h`), each just before
   a backing syscall and never between a mutation's syscall and its phase 3,
   and has a cancellation test; cancellation never breaks the tri-state rule.
+- **Behave like the backing, only faster.** With dcfs out of the loop,
+  what does the backing do for this operation, over time? dcfs does that
+  (`docs/design.md`, "Behave like the backing, only faster"): the same
+  results, incremental where it is, interruptible where it is, no stronger
+  and no weaker guarantees. A claim about what the backing, the kernel or
+  POSIX promises cites its source (POSIX text, a man page, or the kernel
+  code path) where it is written, and where it can be measured, a native
+  differential test (the same operations with dcfs out of the loop) backs
+  it.
+- **Bounded memory.** A request's working memory is O(1) in the size of
+  the files and directories it touches; the cache database grows with the
+  filesystem, the working memory does not (`docs/design.md`, "Bounded
+  memory"). Any exception is a recorded decision with its reason.
 - **File names are bytes.** Never treat a name, symlink target or xattr
   name as text; escape it whenever it is printed (from phase 9).
 - **Third-party code is fetched and built by Bazel** (from phase 4), not

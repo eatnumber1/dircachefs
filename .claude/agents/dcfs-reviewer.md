@@ -20,6 +20,16 @@ place, is a finding (russ, 2026-10-10: backing.cc's xattr writes kept a
 /proc reopen beside the path form that already served every file type).
 A retry loop or a timer in the diff is a finding, whatever its comment
 says (`docs/style.md` 1.11, 1.12).
+Ask of every operation the diff touches (russ, 2026-10-17): "With dcfs not
+in the loop, what does the backing do for this operation, over time? Where
+does dcfs block, snapshot, retry or decide by its own rule where the
+backing would not? Does any buffer grow with directory or file size?"
+Each such place is a finding unless a recorded decision
+covers it (`docs/design.md`, "Behave like the backing, only faster"). A
+claim in the diff about what the backing, the kernel or POSIX promises must
+cite its source (POSIX text, a man page, or the kernel code path) where it
+is written, and a native differential test backs it where it can be
+measured; an unsourced contract claim is a finding.
 For every branch the diff adds (`if`, `else`, `continue`, early return,
 error path), name the input or event that reaches it; a branch you cannot
 reach is a finding, whatever its comment says, and a comment that confesses

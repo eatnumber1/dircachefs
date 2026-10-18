@@ -59,7 +59,8 @@ Goals:
   cost is re-reading recently changed entries.
 - **Behave like the backing filesystem.** POSIX semantics, ownership,
   errnos and inode numbers as the backing filesystem would give them,
-  measured with pjdfstest against raw ext4.
+  measured with pjdfstest against raw ext4 (see
+  [Behave like the backing, only faster](#behave-like-the-backing-only-faster)).
 
 Non-goals:
 
@@ -76,6 +77,58 @@ Non-goals:
   that dcfs deliberately does not pursue (see
   [Identity model](#identity-model)).
 - **Unprivileged operation.** dcfs runs as root, full stop.
+
+### Behave like the backing, only faster
+
+The principle behind every operation: with dcfs out of the loop, what does
+the backing filesystem do for this operation, over time? dcfs does that,
+only faster. russ, 2026-10-10: "for each fuse operation, I prefer you
+implement the same contract that the backing fs implements. If it's
+ERANGE-on-races with the backing store, then ERANGE-on-races for us. If the
+syscall is supposed to be atomic (like `rename`), then ours _must_ be
+atomic (even if that means an infinite retry loop internally)." In
+practice:
+
+- **Same results.** Errnos, attributes, ordering rules and inode numbers
+  are the backing's.
+- **Incremental where the backing is incremental.** `getdents64` streams
+  pages; dcfs's listing streams pages, and an interrupted or short batch is
+  a valid result. A whole-directory snapshot is a different shape from the
+  backing's, even when each answer it gives is correct.
+- **Interruptible where the backing is.** A request the kernel can
+  interrupt on the backing can be interrupted on dcfs (`AGENTS.md`,
+  "Requests are cancellable").
+- **Partial results where the backing gives them.** A read interrupted
+  after some bytes returns them; so does a listing.
+- **No stronger and no weaker guarantees.** A guarantee the backing does
+  not give is not given by dcfs either (a listing is not a snapshot: POSIX
+  leaves entries added or removed during it unspecified), and a guarantee
+  it gives is not lost (`rename` is atomic). Plan step 12.19 pins the
+  non-guarantees so a model or a test notices a stronger dcfs.
+- **A cache hit is the intended difference.** Answering without touching
+  the backing, and so without spinning the disk up, is the whole point and
+  the only divergence that needs no further reason.
+- **Any other divergence is a recorded decision with its reason,** in this
+  document, and on the questions table for russ if it changes user-visible
+  behavior or a guarantee (`docs/plan/process.md`, "Questions for russ").
+
+A claim about what the backing, the kernel or POSIX promises cites its
+source where it is written, and a native differential test backs it where
+it can be measured (`docs/style.md` 1.12).
+
+### Bounded memory
+
+A request's working memory is O(1) in the size of the files and
+directories it touches: the backing's `getdents64` fills a fixed caller
+buffer, and dcfs never holds a whole directory to answer. Total memory is
+the configured caches (SQLite's `cache_size`) plus that, times the requests
+in flight (bounded by the thread pool). Sizes the kernel bounds (names,
+paths, xattr values up to 64 KiB) count as bounded. The cache database
+itself grows with the filesystem by design; the bound is on working
+memory. Any exception is a recorded decision with its reason. The model
+bounds the items buffered per request (`formal/README.md`, "Changing the
+model"), and plan step 26.41 measures allocations at two sizes and holds
+the slope at zero.
 
 ## Assumptions
 

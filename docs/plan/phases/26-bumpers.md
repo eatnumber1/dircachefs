@@ -1324,6 +1324,12 @@ proposal"):
    indexes), held the same way. Both depend on one request at a time
    (the daemon is single-threaded); the io_uring phase keeps that possible
    with a deterministic test executor (README future work).
+3b. Allocation budgets (russ, 2026-10-17, bounded memory:
+   `docs/design.md`, "Bounded memory"): allocations, or peak bytes, per
+   operation are measured at two sizes (e.g. 10 and 100,000 entries) and
+   must have zero slope: a request's working memory does not grow with the
+   directory or file it touches. Counts, not time, so load does not move
+   them; an exception is a recorded decision.
 4. Wall-clock speed is an A/B benchmark: main and the candidate
    interleaved on the same host, compared as a ratio; on demand or
    nightly.

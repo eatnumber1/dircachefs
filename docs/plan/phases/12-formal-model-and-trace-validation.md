@@ -691,7 +691,11 @@ will). Nothing checks the model's guards against the code.
   within that step's declared maximum (a create's `C_probe`: ProbeChild's
   statx plus one getxattr per xattr; `PopulateRead`: a bounded number of
   getdents64 calls). A call no step covers, or more calls than a step
-  declares, makes the trace invalid. This is what would have caught 22.5's
+  declares, makes the trace invalid. So the map checks that each action
+  stands for bounded work (a constant number of backing syscalls,
+  independent of directory or file size; an action that stands for a loop
+  is split or recorded as a finding: `formal/README.md`, "Changing the
+  model"). This is what would have caught 22.5's
   getdents64 loop and readdir's per-entry refreshes, which the model's
   granularity hid. The register also lists the model's abstractions
   ("PopulateRead is one step", "D has no parent", "a reply carries no

@@ -1707,6 +1707,15 @@ model in the same change (AGENTS.md). In practice:
 - Run `bazel test //formal/...`. If a property fails, read the
   counterexample: either the code change is wrong, or the model needs
   more care.
+- Each action stands for a bounded amount of backing work (a constant
+  number of backing syscalls, independent of directory size or file size);
+  an action that stands for a loop in the code is split, or the gap is
+  recorded as a finding. The abstraction map (step 12.21) checks this.
+- Working memory is bounded too (`docs/design.md`, "Bounded memory"): a
+  ghost variable counts the items a request has buffered, and an
+  invariant like `InterruptBound` (22.5) holds it below a constant
+  independent of directory size, so an action that gathers an unbounded
+  collection fails it.
 - A new request kind: add it to `AllKinds`, an `Arrive` branch for its
   first step, one action per later step (listed in `Next` and in the
   action table above), and, if it mutates, its names in `MutatedNames`.
