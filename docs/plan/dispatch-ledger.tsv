@@ -115,3 +115,8 @@ a13d31e772dcb6b3f	2026-10-18T19:15:22Z	25.28b	mechanical	dcfs-mechanical	claude-
 a60e4fe93a64aef6e	2026-10-18T19:19:19Z	Clerk batch 19	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
 a1578cae30a7c40da	2026-10-18T19:41:15Z	Refresh dashboard data files	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
 a2e51fdd96109a0df	2026-10-18T19:44:05Z	Clerk batch 20	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+a90c2ee9475c6d67a	2026-10-18T19:55:58Z	17.2e	review	dcfs-reviewer	claude-opus-5-5	xhigh									
+aefbda8588d252f11	2026-10-18T19:57:01Z	Close Q-26/27 on dashboard	mechanical	dcfs-mechanical	haiku	low									
+af715cf63dd7627c0	2026-10-18T19:58:29Z	Fix dashboard open-questions display	investigation	dcfs-investigator	claude-sonnet-5-5	high									
+ab7c0f36184e3f3e0	2026-10-18T20:08:29Z	Audit osv dependency coverage		Explore	sonnet										
+a55230b798e902460	2026-10-18T20:10:25Z	Clerk batch 21	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
