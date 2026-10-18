@@ -1704,6 +1704,150 @@ class CiRunsTest(Fixture):
             self.assertEqual(f.read(), "\n")
 
 
+class ClerkQueueTest(Fixture):
+
+    def setUp(self):
+        super().setUp()
+        self.write(os.path.join(self.agents, "dcfs-mechanical.md"),
+                   "---\nname: dcfs-mechanical\nmodel: haiku\neffort: low\n"
+                   "---\nbody\n")
+
+    def clerk(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        code = dashboard_lanes.main(
+            ["clerk-queue"] + list(args), stdin=io.StringIO(""),
+            stdout=out, stderr=err, env=self.env)
+        self.assertEqual(code, 0)
+        return out.getvalue(), err.getvalue()
+
+    def stop(self):
+        return self.run_hook("stop", {"stop_hook_active": False})[0]
+
+    def settle(self):
+        """Stop once and mark every dataset uploaded: stop asks nothing."""
+        self.stop()
+        self.mark(*dashboard_lanes.DATASETS)
+
+    def add_items(self, n):
+        for i in range(n):
+            self.clerk("add", "item %d" % i)
+
+    def test_add_then_drain_numbers_items_in_order(self):
+        self.assertEqual(self.clerk("add", "first", "item"), ("", ""))
+        self.clerk("add", "second")
+        self.clerk("add", "third\nsplit")
+        out, err = self.clerk("drain")
+        self.assertEqual(err, "")
+        self.assertEqual(out.splitlines(), [
+            "Bookkeeping clerk batch (orchestrator's queue):",
+            "1. first item",
+            "2. second",
+            "3. third split",
+            "Edit exactly the files named; commit on main in ~/Sources/"
+            "dircachefs as 'plan: clerk batch: <short summary>' with your "
+            "Co-Authored-By trailer; run bash .github/ci/commit_subjects.sh "
+            "origin/main..main; report the hash and gate status.",
+        ])
+
+    def test_drain_empties_the_queue(self):
+        self.clerk("add", "one")
+        self.clerk("drain")
+        self.assertEqual(self.clerk("drain"), ("", ""))
+        self.assertFalse(os.path.exists(self.env.path("clerk_queue.md")))
+
+    def test_drain_of_an_empty_queue_prints_nothing(self):
+        self.assertEqual(self.clerk("drain"), ("", ""))
+        self.assertFalse(
+            os.path.exists(self.env.path("clerk_queue.dispatched")))
+
+    def test_add_without_text_is_a_usage_error(self):
+        out, err = self.clerk("add")
+        self.assertEqual(out, "")
+        self.assertEqual(len(err.splitlines()), 1)
+        self.assertIn("usage", err)
+        self.assertFalse(os.path.exists(self.env.path("clerk_queue.md")))
+
+    def test_bare_and_unknown_subcommands_are_errors(self):
+        for args in ([], ["bogus"]):
+            out, err = self.clerk(*args)
+            self.assertEqual(out, "")
+            self.assertEqual(len(err.splitlines()), 1)
+
+    def test_stop_asks_when_queue_is_non_empty_and_no_agent_runs(self):
+        self.settle()
+        self.clerk("add", "one")
+        decision = json.loads(self.run_hook(
+            "stop", {"stop_hook_active": False})[0])
+        self.assertEqual(decision["decision"], "block")
+        self.assertEqual(
+            decision["reason"],
+            "Clerk queue has 1 items: run `dashboard_lanes.py clerk-queue "
+            "drain` and dispatch one dcfs-mechanical clerk (effort low) with "
+            "its output.")
+
+    def test_stop_does_not_ask_with_an_agent_running_and_fewer_items(self):
+        self.settle()
+        self.launch(prompt="none")
+        self.mark(*dashboard_lanes.DATASETS)
+        self.add_items(4)
+        self.assertEqual(self.stop(), "")
+
+    def test_stop_asks_at_five_items_with_an_agent_running(self):
+        self.settle()
+        self.launch(prompt="none")
+        self.mark(*dashboard_lanes.DATASETS)
+        self.add_items(5)
+        reason = json.loads(self.run_hook(
+            "stop", {"stop_hook_active": False})[0])["reason"]
+        self.assertTrue(reason.startswith("Clerk queue has 5 items: "), reason)
+
+    def test_clerk_ask_follows_a_dataset_ask_in_the_same_block(self):
+        self.settle()
+        self.clerk("add", "one")
+        self.run_cmd_lane_state()
+        reason = json.loads(self.run_hook(
+            "stop", {"stop_hook_active": False})[0])["reason"]
+        self.assertIn("lanes.json", reason)
+        self.assertIn(" Clerk queue has 1 items: ", reason)
+        self.assertTrue(reason.endswith("with its output."), reason)
+
+    def run_cmd_lane_state(self):
+        dashboard_lanes.main(
+            ["lane-state", "lane-2", "paused", "clerk test"],
+            stdin=io.StringIO(""), stdout=io.StringIO(),
+            stderr=io.StringIO(), env=self.env)
+
+    def test_no_clerk_ask_while_the_drain_marker_exists(self):
+        self.settle()
+        self.clerk("add", "one")
+        self.clerk("drain")
+        self.clerk("add", "two")
+        self.assertEqual(self.stop(), "")
+
+    def test_mechanical_stop_clears_the_drain_marker(self):
+        self.clerk("add", "one")
+        self.clerk("drain")
+        self.launch(subagent_type="dcfs-mechanical", prompt="none")
+        self.assertTrue(
+            os.path.exists(self.env.path("clerk_queue.dispatched")))
+        self.run_hook("subagent-stop", {"agent_id": "a1"})
+        self.assertFalse(
+            os.path.exists(self.env.path("clerk_queue.dispatched")))
+
+    def test_other_stops_leave_the_drain_marker(self):
+        self.clerk("add", "one")
+        self.clerk("drain")
+        self.launch(prompt="none")
+        self.run_hook("subagent-stop", {"agent_id": "a1"})
+        self.assertTrue(
+            os.path.exists(self.env.path("clerk_queue.dispatched")))
+
+    def test_mechanical_stop_without_a_marker_is_quiet(self):
+        self.launch(subagent_type="dcfs-mechanical", prompt="none")
+        self.assertEqual(
+            self.run_hook("subagent-stop", {"agent_id": "a1"}), ("", ""))
+
+
 if __name__ == "__main__":
     unittest.main()
 

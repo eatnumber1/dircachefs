@@ -141,6 +141,23 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
   blank, notes for quota delta).
 - `ledger set ID field=value ...`: fills or updates outcome fields in the
   dispatch ledger at merge time.
+- `clerk-queue add TEXT...`: appends TEXT (joined by spaces, a newline counts
+  as a space) as one numbered item of the bookkeeping clerk queue,
+  `clerk_queue.md`. It prints nothing; empty text is a usage error.
+- `clerk-queue drain`: prints the clerk brief for the queue (the header
+  `Bookkeeping clerk batch (orchestrator's queue):`, one numbered line per
+  item, then the closing line that tells the clerk what to edit, how to commit
+  on main, and what to report), removes the queue, and writes
+  `clerk_queue.dispatched`. An empty queue prints nothing and changes nothing.
+  The orchestrator pastes the brief into one `dcfs-mechanical` dispatch
+  (effort low).
+
+The clerk rule: `stop` asks for a clerk when the queue is non-empty and either
+no agent is running or the queue holds 5 items (`CLERK_BATCH`), and the ask
+names the count and the drain command. It does not ask while
+`clerk_queue.dispatched` exists; a `dcfs-mechanical` agent stopping (the
+SubagentStop hook) removes that marker. The ask is added to a dataset ask in
+the same block when both apply.
 
 The table has an orchestrator row and one row per `lane-N` under
 `~/Sources/dircachefs-lanes/`. A lane with recorded agents shows the step
@@ -236,8 +253,8 @@ State is in `$DCFS_DASHBOARD_DIR` (default `~/.cache/dcfs-dashboard/`):
 `sloc.json`, `sloc.head`, `sloc.uploaded.sha256`, `quota.json`,
 `quota.uploaded.sha256`, `quota.read_at`, `quota.log`, `budget.json`,
 `budget.uploaded.sha256`, `ci.json`, `ci.uploaded.sha256`, `ci.read_sha`,
-`ci.log`, and an optional config.json
-(`{"model": ..., "effort": ...}`) for the orchestrator row.
+`ci.log`, `clerk_queue.md`, `clerk_queue.dispatched`, and an optional
+config.json (`{"model": ..., "effort": ...}`) for the orchestrator row.
 A malformed input or an unreadable state file prints one line to stderr and
 exits 0, because a failing hook can wedge the session.
 

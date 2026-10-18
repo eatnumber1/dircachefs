@@ -20,6 +20,8 @@ this directory for the hook configuration.
     dashboard_lanes.py lane-state ...  set or clear lane state override
     dashboard_lanes.py ledger add ...  append row for unhooked agent job
     dashboard_lanes.py ledger set ...  fill outcome fields at merge time
+    dashboard_lanes.py clerk-queue add TEXT...  queue a bookkeeping item
+    dashboard_lanes.py clerk-queue drain        print the clerk brief, empty it
 
 State lives in $DCFS_DASHBOARD_DIR (default ~/.cache/dcfs-dashboard):
 running.json, finished.json, lanes.json, uploaded.sha256,
@@ -27,6 +29,7 @@ lanes.uploaded.json, lane_states.json, lane_states.uploaded.json,
 sloc.json, sloc.head, sloc.uploaded.sha256, quota.json,
 quota.uploaded.sha256, quota.read_at, quota.log, budget.json,
 budget.uploaded.sha256, ci.json, ci.uploaded.sha256, ci.read_sha, ci.log,
+clerk_queue.md, clerk_queue.dispatched,
 and an optional config.json with "model" and
 "effort" for the orchestrator row. Dispatch ledger is kept in
 docs/plan/dispatch-ledger.tsv under the main repository checkout.
@@ -80,6 +83,15 @@ TASK_CLASSES = {
     "dcfs-reviewer": "review",
     "dcfs-style-reviewer": "style-review",
 }
+
+CLERK_BATCH = 5
+CLERK_MARKER = "clerk_queue.dispatched"
+CLERK_CLOSING = (
+    "Edit exactly the files named; commit on main in ~/Sources/dircachefs as "
+    "'plan: clerk batch: <short summary>' with your Co-Authored-By trailer; "
+    "run bash .github/ci/commit_subjects.sh origin/main..main; report the hash "
+    "and gate status."
+)
 
 
 @dataclasses.dataclass
@@ -1230,6 +1242,76 @@ def lane_state(env, args):
     return ""
 
 
+def clerk_items(env):
+    """The queued clerk items, in order: one per line of clerk_queue.md."""
+    path = env.path("clerk_queue.md")
+    if not os.path.exists(path):
+        return []
+    return read_text(path).splitlines()
+
+
+def clerk_add(env, words):
+    # One item per line: a newline in the text would split it in two.
+    text = " ".join(words).replace("\n", " ").strip()
+    if not text:
+        raise ValueError("usage: clerk-queue add TEXT...")
+    items = clerk_items(env)
+    items.append(text)
+    write_atomic(env.path("clerk_queue.md"),
+                 "".join(item + "\n" for item in items))
+    return ""
+
+
+def clerk_drain(env):
+    """The clerk brief for the queue, which it empties; "" if it is empty.
+
+    The brief is pasted into one dcfs-mechanical dispatch. The marker holds
+    stop() back from asking for another clerk until that clerk stops.
+    """
+    items = clerk_items(env)
+    if not items:
+        return ""
+    lines = ["Bookkeeping clerk batch (orchestrator's queue):"]
+    lines += ["%d. %s" % (n, item) for n, item in enumerate(items, 1)]
+    lines.append(CLERK_CLOSING)
+    os.remove(env.path("clerk_queue.md"))
+    write_atomic(env.path(CLERK_MARKER), "")
+    return "\n".join(lines) + "\n"
+
+
+def clerk_queue(env, args):
+    if not args:
+        raise ValueError("clerk-queue requires a subcommand (add or drain)")
+    if args[0] == "add":
+        return clerk_add(env, args[1:])
+    if args[0] == "drain":
+        return clerk_drain(env)
+    raise ValueError("unknown clerk-queue subcommand: %r" % args[0])
+
+
+def clear_clerk_marker(env):
+    path = env.path(CLERK_MARKER)
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def clerk_ask(env):
+    """The sentence asking for a clerk, or "" when none is due.
+
+    A batch of CLERK_BATCH items asks even with agents running. Fewer wait
+    for a stop with no agent running, so that nothing is left unasked.
+    """
+    items = clerk_items(env)
+    if not items or os.path.exists(env.path(CLERK_MARKER)):
+        return ""
+    running = load_json(env.path("running.json"), {})
+    if running and len(items) < CLERK_BATCH:
+        return ""
+    return ("Clerk queue has %d items: run `dashboard_lanes.py clerk-queue "
+            "drain` and dispatch one dcfs-mechanical clerk (effort low) with "
+            "its output." % len(items))
+
+
 def post_agent(env, event):
     # An agent_id means a subagent made this call: its launches are not
     # lanes of the orchestrator.
@@ -1276,6 +1358,8 @@ def subagent_stop(env, event):
         finished[event["agent_id"]] = record
         kept = dict(list(finished.items())[-FINISHED_KEPT:])
         write_atomic(env.path("finished.json"), json.dumps(kept, indent=2))
+        if record["subagent_type"] == "dcfs-mechanical":
+            clear_clerk_marker(env)
     regenerate(env)
     try:
         record_ledger_stop(env, event)
@@ -1343,7 +1427,10 @@ def stop(env, event):
 
     # Only news asks. sloc never asks on its own: it rides along with an ask.
     asking = [name for name in ASKING if dataset_changed(env, name)]
+    clerk = clerk_ask(env)
     if not asking:
+        if clerk:
+            return json.dumps({"decision": "block", "reason": clerk})
         return ""
 
     names = [
@@ -1365,6 +1452,8 @@ def stop(env, event):
             "Dashboard %s changed: upload %s and run %s"
             % (names_str, paths_str, mark_command)
         )
+    if clerk:
+        reason += " " + clerk
     return json.dumps({"decision": "block", "reason": reason})
 
 
@@ -1448,6 +1537,8 @@ def main(argv, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
                 stdout.write(ledger(env, argv[1:]))
             elif argv[0] == "lane-state":
                 stdout.write(lane_state(env, argv[1:]))
+            elif argv[0] == "clerk-queue":
+                stdout.write(clerk_queue(env, argv[1:]))
             elif argv[0] == "mark-uploaded":
                 stdout.write(mark_uploaded(env, argv[1:]))
             elif argv[0] in MANUAL:
