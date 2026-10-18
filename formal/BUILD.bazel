@@ -428,6 +428,26 @@ KNOWN_BUG_TIMEOUTS = {"rename_stale_source": "long"}
     for bug, violation in KNOWN_BUGS.items()
 ]
 
+# Step 22.5: the reduction of the safety configurations' arrival
+# (CanArriveWhereItMatters) keeps the counterexamples of the known bugs it
+# could hide: second configurations of their modules with it.
+[
+    tlc_test(
+        name = "known_bug_%s_reduced_test" % bug,
+        size = "medium",
+        timeout = "moderate",
+        config = "known_bugs/%s_reduced.cfg" % bug,
+        expect_violation = KNOWN_BUGS[bug],
+        spec = "known_bugs/%s.tla" % bug,
+        srcs = MODEL,
+    )
+    for bug in [
+        "interruption_point_removed_create",
+        "interruption_point_removed_unlink",
+        "interrupt_after_syscall",
+    ]
+]
+
 # Step 23.11: the audit's two candidate rules for G5 on path B too (a
 # phase 3 that fails after its syscall, with the kernel's lock and no
 # crash): second configurations of their modules.
@@ -451,6 +471,12 @@ KNOWN_BUG_TIMEOUTS = {"rename_stale_source": "long"}
 # conditions per inode, each violated by the known bug that breaks it (a
 # configuration of that bug's module that checks only the property).
 PREMISES = {
+    # Step 22.5's invariant and action property of timely interrupts.
+    "interrupt_prompt": ("interrupt_ignored", "Invariant InterruptPrompt is violated"),
+    "quiet_steps_uncounted": (
+        "quiet_pc_counted",
+        "Action property QuietStepsUncounted is violated",
+    ),
     "born_dirty": ("borndirty_two_commits", "Invariant BornDirty is violated"),
     "lost_row_probed": (
         "borndirty_two_commits",

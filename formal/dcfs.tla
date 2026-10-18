@@ -680,7 +680,10 @@ UnknownAsNegative(n, l) ==
 \* link every listed child, prune every other row (PruneDentriesNotIn) and
 \* mark D complete, in one transaction. Then LookupOrPopulate answers from
 \* the cache if the listing was recorded, else from the listing itself;
-\* readdir (ListCached) checks again or retries.
+\* readdir (ListCached) checks again or retries. Its interruption point
+\* stands for the code's checks between the population's probe batches
+\* only: the code's other ones, before its first read and each getdents64,
+\* are PD_read's.
 PDCommit(p) ==
     /\ At(p, "PD_commit")
     /\ LET r == ps[p]
@@ -1242,6 +1245,7 @@ QuietPcs ==
      "R_fail", "R_fail2", "A3", "A_fill", "S2", "W_reply", "FR_fill",
      "FG_fill", "FG_rfill", "FS_end", "FS_fill", "FC_rec", "FC_mark",
      "FC_fail", "FL_commit"}
+ASSUME QuietPcs \cap InterruptPcs = {}
 \* The safety configurations' arrival (MC_interrupt.cfg and the others:
 \* CanArrive <- CanArriveWhereItMatters; step 22.5): only where the
 \* request's next step reads `intr`, and only when it could take that step
@@ -2499,6 +2503,19 @@ Run(kind) ==
 \* (InterruptSweepTest in dcfs/dir_cache_fs_test.cc counts them).
 InterruptBound == \A p \in Procs : ps[p].nsys <= Run(ps[p].kind)
 
+\* ... and none before an interruption point it reaches: there the
+\* interrupt is acted on at once, so a request that is at one with its
+\* interrupt arrived has taken no backing syscall since.
+InterruptPrompt ==
+    \A p \in Procs : ps[p].intr /\ ps[p].pc \in InterruptPcs => ps[p].nsys = 0
+
+\* No step from a pc of QuietPcs is counted, what CanArriveWhereItMatters
+\* relies on (checked where the arrival is anywhere,
+\* MC_interrupt_liveness.cfg). Not equal: a reply or a crash resets the
+\* slot.
+QuietStepsUncounted ==
+    [][\A p \in Procs : ps[p].pc \in QuietPcs => ps'[p].nsys <= ps[p].nsys]_vars
+
 \* An interrupted request eventually replies (or the daemon goes down with
 \* it: a crash empties every slot). known_bugs/interrupt_not_replied.
 InterruptedReplies == \A p \in Procs : ps[p].intr ~> ps[p].pc = "idle"
@@ -2506,7 +2523,8 @@ InterruptedReplies == \A p \in Procs : ps[p].intr ~> ps[p].pc = "idle"
 \* ... and one at an interruption point replies EINTR: the interruption
 \* point acts on the interrupt, rather than going on to the syscall
 \* (known_bugs/interrupt_ignored). Read from the reply ghost (`rep`),
-\* unless the daemon went down first.
+\* unless the daemon went down first. At PD_commit, the code's checks
+\* between probe batches only.
 InterruptActedOn ==
     \A p \in Procs :
         (ps[p].intr /\ ps[p].pc \in InterruptPcs)
