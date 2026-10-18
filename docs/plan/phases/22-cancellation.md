@@ -282,8 +282,8 @@ answer; dcfs-protocol decides, with the model, and records the answers in
    the handle for the prune, as today's population holds them (a name
    stamp on the dentries is the alternative if memory budgets object).
    Consequence to state: a stream of plain pages alone completes nothing, so
-   a repeated plain `ls` re-reads the backing directory until some lookup
-   or READDIRPLUS drains it; measure the effect on spin-ups (26.x) and
+   a repeated plain `ls` re-reads the backing directory until a READDIRPLUS
+   page completes it (a lookup no longer does: item 8); measure the effect on spin-ups (26.x) and
    decide if plain pages should also probe after replying.
 5. *An abandoned or interrupted stream?* Proposed: the pages recorded stay
    (they are fills like any lookup's); the listing stays incomplete;
@@ -306,12 +306,28 @@ answer; dcfs-protocol decides, with the model, and records the answers in
    `seen` set, records idempotently (upserts guarded by `CanFill`), and
    each completes or not on its own guard. A handle opened after a
    completion is a cache handle.
-8. *Lookups.* `LookupOrPopulate` on an unknown name of an incomplete
-   directory keeps its spin-up policy (one drain records the whole
-   directory, so the disk spins up once): `PopulateDirectory` becomes the
-   same page engine run to EOF, with one interruption point at each page's
-   start, instead of a second mechanism. An interrupted drain keeps its
-   recorded pages. `ListCached`'s attempt loop and its `EAGAIN` ("kept
+8. *Lookups resolve one name* (russ, 2026-10-17: point operations stop
+   populating the parent directory). `LookupOrPopulate` on an unknown name
+   of an incomplete directory resolves only that name on the backing
+   (`openat` O_PATH, the reads of one child) and caches the answer:
+   positive, or a negative entry (absent). A directory becomes complete
+   only when a client reads its listing to the last `getdents64` page
+   (item 4's guard); no lookup drains a directory, and `PopulateDirectory`
+   as a run-to-EOF drain is removed (the page engine, driven only by
+   readdir, is the one mechanism). Reason: "only cache data that the
+   client asked for. Don't over-fetch", "behave like the backing", and
+   bounded memory (one `stat` no longer reads a million-entry directory).
+   Repeated lookups of a name are cached either way, and the kernel's
+   negative dentries absorb most repeats. The cost: the first lookup of
+   each distinct name in a never-listed directory is one backing call, so
+   probe-heavy workloads (PATH search, include paths, import paths) pay it
+   once per name, and a negative lookup in an incomplete directory is not
+   answered without the backing. M3 (README milestones) records spin-ups
+   and backing lookups per workload; revisit with that data if probe-heavy
+   workloads cost real spin-ups. The model: population is driven only by
+   readdir; a lookup in an incomplete directory is a single-name resolve;
+   12.24's no-over-fetch property is stated for lookups too.
+   `ListCached`'s attempt loop and its `EAGAIN` ("kept
    changing") go in the same change (25.10 removes the retry there too;
    whichever lands second drops what is left): a readdir no longer needs
    the listing recorded to answer.
@@ -347,7 +363,7 @@ end of the stream instead of at the end of one read).
   reply; a name present throughout the stream is replied exactly once.
 - `InterruptBound` (22.5) holds with no interruption point inside a page's
   probes: K is `getdents64` plus N probes' syscalls, written out, and the
-  drain's loop has one interruption point at each page's start.
+  stream's loop has one interruption point at each page's start.
 - Model state counts: the new steps only multiply the listing
   configurations; `MC_large` and `MC_nolock` are re-measured and the
   growth reported (the stream's page size in the model is one name).
@@ -359,7 +375,7 @@ end of the stream instead of at the end of one read).
 
 - *Cancellation:* a request interrupted during a stream replies within
   one page's work (`cancel_test`, counting backing calls after the
-  interrupt, not time: at most K); an interrupted drain keeps its pages.
+  interrupt, not time: at most K); an interrupted stream keeps its pages.
 - *`ls | head` reads one backing page:* `getdents64` calls counted
   (load-agnostic, as 26.36's rule says) are one for the first page of a
   large directory, against all of its pages today; `probe` calls are at

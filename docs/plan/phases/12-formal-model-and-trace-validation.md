@@ -773,8 +773,9 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
 - Model "no over-fetch" (russ, 2026-10-17, from docs/design.md "Only cache
   what the client asked for"): a ghost set of what the in-flight requests
   asked for; every backing read targets an asked-for object or key; a
-  per-request bound. Pending russ's answer on whether lookups are included
-  (today a lookup populates the whole directory).
+  per-request bound. Decided (russ, 2026-10-17): lookups are included; a
+  lookup resolves one name and never populates the directory (22.7 item 8),
+  so the property covers lookups too.
 - Xattr population stops prefetching: values are read on demand, and the
   name list is cached only on listxattr (russ, 2026-10-17).
 - Per-filesystem xattr limits: deferred by russ ("Let's circle back on

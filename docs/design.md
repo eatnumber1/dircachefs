@@ -113,7 +113,9 @@ practice:
   syscall returns it whole, with no offset: `fs/xattr.c` `listxattr`) is
   cached as returned; population does not prefetch xattrs. Whether this
   also applies to lookups (today a lookup populates the whole directory for
-  negative-lookup completeness) is open: question to russ.
+  negative-lookup completeness) is decided (russ, 2026-10-17): it does not. A lookup resolves one name and
+  caches the answer; a directory completes only when a client reads its
+  listing to the end (plan step 22.7).
 - **No stronger and no weaker guarantees.** A guarantee the backing does
   not give is not given by dcfs either (a listing is not a snapshot: POSIX
   leaves entries added or removed during it unspecified), and a guarantee
@@ -1008,6 +1010,12 @@ invalidation. A mutation never clears them; it marks only its own names
 `unknown`.
 
 ## Population policy
+
+*Plan step 22.7 replaces this policy (russ, 2026-10-17: "only cache data
+that the client asked for. Don't over-fetch"): a lookup in an incomplete
+directory resolves only that name and caches the answer, and a directory
+completes only when a client reads its listing to the last page. The text
+below is as built and stays until 22.7 lands.*
 
 **One spin-up per directory.** The first time a directory's contents are
 needed and its listing is not complete, `backing::PopulateDirectory` reads

@@ -192,6 +192,12 @@ only. A comma ends an option, so values of `dcfs.fuse_opt` and
 option). `mount.dcfs` is also installed as `mount.fuse.dcfs`, the name
 `mount(8)` looks for when it remounts a mount of type `fuse.dcfs`.
 
+To fill the cache up front, for example after the first mount or before you
+rely on the disks staying spun down, run `find /mnt/media > /dev/null`. One
+walk lists every directory to its end, so every listing becomes complete and
+later lookups, including of missing names, are answered without the backing.
+It spins the disks up once, and it also warms the kernel's caches.
+
 ### Options
 
 Options prefixed `dcfs.` configure dcfs (`dcfs.ro` makes the dcfs mount
