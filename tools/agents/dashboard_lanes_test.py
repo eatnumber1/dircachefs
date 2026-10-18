@@ -780,6 +780,7 @@ class StopMessageTest(Fixture):
         self.assertIn("lanes.json", reason)
         self.assertIn("sloc.json", reason)
         self.assertIn("Dashboard lanes and sloc changed: upload", reason)
+        self.assertIn("(skill: dcfs-dashboard-upload)", reason)
 
         # Mark uploaded clears both.
         self.mark(*dashboard_lanes.DATASETS)

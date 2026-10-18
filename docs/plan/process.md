@@ -135,7 +135,8 @@ process (its waves and file ownership table) is in `history.md`.
    `mark-uploaded`) are the subagent's, not the orchestrator's (russ,
    2026-10-18: "Use subagents!", sent while the orchestrator was
    hand-uploading dashboard datasets; the update's `data` holds `source` and
-   `updated` at the top level). The refresh rewrites its four
+   `updated` at the top level; the subagent follows the
+   `dcfs-dashboard-upload` skill). The refresh rewrites its four
    snapshot files (the steps in flight and queued, in the Queue's order;
    each lane's step, agent type, model and effort, which the
    `dashboard_lanes` hooks write to `~/.cache/dcfs-dashboard/lanes.json`

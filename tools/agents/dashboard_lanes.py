@@ -976,7 +976,8 @@ def upload_context(env):
     return json.dumps({"hookSpecificOutput": {
         "hookEventName": "PostToolUse",
         "additionalContext": (
-            "Dashboard lanes changed: upload %s and run "
+            "Dashboard lanes changed: upload %s (skill: "
+            "dcfs-dashboard-upload) and run "
             "dashboard_lanes.py mark-uploaded lanes." % path),
     }})
 
@@ -1442,14 +1443,15 @@ def stop(env, event):
     if len(names) == 1:
         reason = (
             "Dashboard %s changed: upload %s to the dashboard's %s dataset "
-            "and run %s"
+            "(skill: dcfs-dashboard-upload) and run %s"
             % (names[0], paths[0], names[0], mark_command)
         )
     else:
         names_str = ", ".join(names[:-1]) + " and " + names[-1]
         paths_str = ", ".join(paths[:-1]) + " and " + paths[-1]
         reason = (
-            "Dashboard %s changed: upload %s and run %s"
+            "Dashboard %s changed: upload %s (skill: dcfs-dashboard-upload) "
+            "and run %s"
             % (names_str, paths_str, mark_command)
         )
     if clerk:

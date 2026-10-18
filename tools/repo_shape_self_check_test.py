@@ -150,6 +150,13 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
         self.assertEqual(1, len(problems), problems)
         self.assertIn(".claude/agents/dcfs-x.md has 1", problems[0])
 
+    def test_a_restated_attribution_in_a_skill_is_reported(self):
+        write(self.root, ".claude/skills/x/SKILL.md",
+              "A rule (russ, 2026-10-06).\n")
+        problems = repo_shape.agent_file_attributions(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn(".claude/skills/x/SKILL.md has 1", problems[0])
+
     def test_claude_md_attributions_are_counted_too(self):
         write(self.root, "CLAUDE.md", "A rule (russ, 2026-10-06).\n")
         problems = repo_shape.agent_file_attributions(self.root)

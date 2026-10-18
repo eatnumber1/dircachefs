@@ -34,9 +34,9 @@ Each function takes the root of a source tree and returns a list of problems
   by an anchor `<a id="rule-NAME"></a>`; exactly one docs/rules/index-*.md
   links to `/<file>#rule-NAME` for every marker, every such link has its
   marker, and AGENTS.md links to every index (russ, 2026-10-18);
-- agent_file_attributions: .claude/agents/*.md and CLAUDE.md restate no rule
-  with a "russ, 20NN-" attribution beyond the role-only ones counted in
-  tools/repo_shape_attributions.txt.
+- agent_file_attributions: .claude/agents/*.md, .claude/skills/**/*.md and
+  CLAUDE.md restate no rule with a "russ, 20NN-" attribution beyond the
+  role-only ones counted in tools/repo_shape_attributions.txt.
 
 (The fourth rule, commit subjects, needs git: .github/ci/commit_subjects.sh.)
 """
@@ -681,7 +681,8 @@ ATTRIBUTION_RE = re.compile(r"russ\s*[,(]\s*20\d\d-")
 def agent_file_attributions(root):
     """A rule is homed once; agent files and CLAUDE.md point to it.
 
-    A "russ, 20NN-" attribution in .claude/agents/*.md or CLAUDE.md is a
+    A "russ, 20NN-" attribution in .claude/agents/*.md, .claude/skills/**/*.md
+    or CLAUDE.md is a
     rule restated (or homed) outside style.md, design.md and process.md. The
     known ones are counted per file in tools/repo_shape_attributions.txt,
     each with the reason it is role-only; the list only shrinks.
@@ -706,6 +707,12 @@ def agent_file_attributions(root):
         paths += [".claude/agents/" + name
                   for name in sorted(os.listdir(agents))
                   if name.endswith(".md")]
+    skills = os.path.join(root, ".claude", "skills")
+    for directory, _, names in sorted(os.walk(skills)):
+        paths += [
+            os.path.relpath(os.path.join(directory, name), root)
+            for name in sorted(names) if name.endswith(".md")
+        ]
     for path in sorted(set(known) - set(paths)):
         problems.append(
             "tools/repo_shape_attributions.txt lists %s, which is gone: "
