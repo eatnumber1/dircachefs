@@ -660,6 +660,27 @@ expires or dcfs invalidates them.
   backing call; no request iterates the whole dirty set), checked by TLC
   in the model's configurations.
 
+- **Entry expiry uses `FUSE_EXPIRE_ONLY`** (russ, 2026-10-18, approved).
+  Expire-only is the default and expected form of entry invalidation: dcfs
+  expires the dentry's timeout, the next walk revalidates with a LOOKUP,
+  and the kernel invalidates the entry itself if dcfs answers gone or
+  different. Verified in the kernel tree (v7.3-rc4-607-gd530980dfbb7):
+  `FUSE_EXPIRE_ONLY` is protocol 7.38
+  (`include/uapi/linux/fuse.h:202`); the flag is read in
+  `fuse_reverse_inval_entry` (`fs/fuse/dir.c:1632`) and the kernel
+  advertises `FUSE_HAS_EXPIRE_ONLY` (bit 35, `fs/fuse/inode.c:1478`), which
+  dcfs must see before it sends the flag. Lock: `fuse_reverse_inval_entry`
+  takes `inode_lock_nested(parent, I_MUTEX_PARENT)` before it tests the
+  flag, so expire takes the parent lock too; the earlier deadlock finding
+  applies to expire as well as to full invalidation.
+  Full entry invalidation (`d_invalidate`: immediate drop, subtree prune,
+  detaches mounts on the name) is used only where the model or a test shows
+  the immediate drop is needed. If none does, dcfs never calls it (no dead
+  code). Mounts on a name (23.13's bind over a stub) must survive every
+  notification dcfs sends. Inode invalidation (attributes and data, e.g.
+  the chattr case's synchronous attribute invalidation) is separate and
+  unchanged.
+
 Owner: dcfs-protocol, after 25.28b and 22.5 (all three touch dcfs.tla).
 
 ## 12.21 The model's environment assumptions, registered and enforced (russ, 2026-10-17: "I agree with your proposals"; queued)
@@ -830,3 +851,21 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
   ("ERANGE-on-races with the backing store, then ERANGE-on-races for us").
   With on-demand xattrs a client's getxattr/listxattr passes its own size to
   the backing and returns the backing's ERANGE unchanged; the loops go.
+- **Symlink identity and `READDIRPLUS_AUTO`** (russ, 2026-10-18).
+  `CACHE_SYMLINKS` is on today (`dcfs/dir_cache_fs.cc:241`). Question: can a
+  cached target survive when dcfs reports a reused nodeid with a new
+  generation? Verified in the kernel tree (v7.3-rc4-607-gd530980dfbb7): no.
+  `fuse_iget` compares the generation through `fuse_stale_inode`
+  (`fs/fuse/inode.c:494-512`, `fs/fuse/fuse_i.h:853`); on a mismatch it
+  marks the old inode bad, unhashes it and retries, so the new nodeid gets
+  a fresh inode and a fresh readlink. `fuse_get_link` fails EIO on a bad
+  inode (`fs/fuse/dir.c:1870-1878`). The attribute path makes the same
+  check (`fs/fuse/dir.c:1529`, `fc->attr_generation`). So the kernel
+  distinguishes a reused nodeid by generation, and dcfs needs no
+  `notify_inval_inode` for a new generation. Guest test: recycle an inode
+  number between two symlinks with different targets; the second target is
+  read fresh. If that test fails, stop and bring it to russ before changing
+  dcfs (russ, 2026-10-18: "I'll be surprised if it doesn't use the
+  generation. If you find that it doesn't, pause and let's discuss.").
+  Also set `READDIRPLUS_AUTO` explicitly in Init as a deliberate choice,
+  with its reason in the comment (the step records the value and why).

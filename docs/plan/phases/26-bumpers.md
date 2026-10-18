@@ -1143,6 +1143,34 @@ start, or something?"
 Owner: dcfs-implementer, effort medium (the default touches 25.28b's
 bound and its model's Interval; check the model's comment still holds).
 
+## 26.42 Warn about FUSE request timeouts (russ, 2026-10-18; queued, M2)
+
+russ: "Maybe also LOG(WARNING) at startup if it's set."
+
+- dcfs never sets a FUSE request timeout. A timeout is a timer that aborts
+  the connection when a request runs long, so a disk spin-up would abort
+  the mount. dcfs keeps it that way.
+- Read the system-wide sysctls at startup: `/proc/sys/fs/fuse/
+  default_request_timeout` and `/proc/sys/fs/fuse/max_request_timeout`.
+  Verified in the kernel tree (v7.3-rc4-607-gd530980dfbb7): both are in
+  `fs/fuse/sysctl.c:23-50`, registered under `fs/fuse` by
+  `fuse_sysctl_register` (`fs/fuse/inode.c:2089`), range 0 to 65535, with
+  the default 0 (`fs/fuse/req_timeout.c:21`, `:29`). They first appear in
+  the v6.19 tag (earliest tag containing them; the adding commit was not
+  pinned, and the step's author should pin it).
+- If either is non-zero, LOG(WARNING) once at startup, naming the value and
+  the risk: a timeout shorter than the disks' worst-case response (spin-up
+  included) aborts dcfs mounts.
+- Start-only: the check runs at startup and nowhere else. No inotify watch
+  and no reread (russ, 2026-10-18: "It's not worth an inotify watch just
+  to log a warning."); the README says the warning is checked at start.
+- README: warn that a value shorter than the disks' worst-case response
+  (spin-up included) aborts dcfs mounts; recommend leaving both unset.
+- Test first: a guest test with the sysctl set gets the WARNING, and a
+  guest test with both at 0 gets none.
+
+Owner: dcfs-implementer, effort low.
+
 ## 26.37 CI run 39046531637 (3441f89): the asan shards and xfstests_1 (2026-10-17) (merged 2026-10-17, 233baa3)
 
 The first CI run after 12.18b, 26.30 and 26.34 failed in two places.

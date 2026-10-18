@@ -72,7 +72,7 @@ final hardware check (Phase 21.2).
 | | Milestone | Steps | Done when |
 |---|---|---|---|
 | M1 | A trustworthy core | 25.28b, 22.5, 17.2e, 25.10, 22.7 (placement provisional), 25.28c, 12.20, 26.40, 12.19, 26.39, 12.24 | every user-visible promise in the README has a test and, where it is the protocol, a model property |
-| M2 | CI you can trust | 26.41, 26.36's follow-ups, 7.6b, 25.33b, the shell ports (boot.sh first), 25.27, 17.5, 23.13 (stubs for submounts and btrfs subvolumes present at start: required for M3, russ 2026-10-17), 25.35, 25.36, 25.37 (after the dependency-injection step, to be written; strong types, scrub, spans), 25.38 (typed `syscalls::`, after 25.37), 25.39 (mechanize every style rule, after 25.38), 25.40 (support FUSE_STATX, russ 2026-10-17; queued) | main stays green through a week of normal merges with no budget re-measure |
+| M2 | CI you can trust | 26.41, 26.36's follow-ups, 7.6b, 25.33b, the shell ports (boot.sh first), 25.27, 17.5, 23.13 (stubs for submounts and btrfs subvolumes present at start: required for M3, russ 2026-10-17), 25.35, 25.36, 25.37 (after the dependency-injection step, to be written; strong types, scrub, spans), 25.38 (typed `syscalls::`, after 25.37), 25.39 (mechanize every style rule, after 25.38), 25.40 (support FUSE_STATX, russ 2026-10-17; queued), 26.42 (warn about FUSE request timeouts at start, russ 2026-10-18; queued) | main stays green through a week of normal merges with no budget re-measure |
 | M2.5 | In-memory cache (the database on tmpfs) | 27.1, 27.2 | the guest suites pass with the cache on tmpfs, restart and reboot behave as documented, and the kernel-cache interplay is measured and decided |
 | M3 | Daily driver on russ's file server | 15.12, 14.10b, 26.38, 23.13 (from M2), a runbook | two weeks serving the media pool unattended, with the disks' sleep time shown; record spin-ups and backing lookups per workload (per-name lookups, 22.7) |
 | M4 | Release candidate | 16, 18, the xfstests target, the coverage target, man page and README, packaging | a fresh machine installs, mounts and survives the README's documented failures from the docs alone |
@@ -219,6 +219,10 @@ push; the queue above starts in earnest after the reset.
   which kernel-blocked calls stay uninterruptible, with a test for each
   that does become cancellable (russ, 2026-10-17: "Make sure it's
   written down to work on later").
+- **FUSE over io_uring is part of that overhaul** (russ, 2026-10-18: "we'll
+  get to that later. It'll be a major overhaul."). `FUSE_CAP_OVER_IO_URING`
+  is deliberately unset today (`dcfs/dir_cache_fs.cc`, the init handler);
+  it is not a separate item and is set only with the io_uring phase.
 - **Queued follow-up: FUSE INTERRUPT cancels in-flight backing syscalls**
   (russ, 2026-10-17; queued, after the io_uring phase). The io_uring phase
   is unnumbered, so this follow-up has no step number yet. On
