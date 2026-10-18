@@ -791,3 +791,16 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
   NAME_MAX"; FUSE allows FUSE_NAME_MAX = PATH_MAX - 1, fs/fuse/fuse_i.h:45).
   Behave like the backing: use the backing's own limit, statfs(2) f_namelen,
   read at mount. Part of the deferred per-filesystem limits question.
+- ZFS (2026-10-17): on Linux the VFS caps names (255) and values (64 KiB)
+  before ZFS sees a request (fs/xattr.c:615-624, 642-643, 798-815). A pool
+  holding a larger value (written by another OS; ZFS's own limits
+  unverified: no OpenZFS source here) reads back as E2BIG. Today
+  GetXattrOPath (dcfs/backing.cc:179-196) fails population on it, so one
+  such file makes the whole directory unlistable through dcfs while the
+  backing lists it. Fetching xattrs on demand (russ's no-prefetch ruling)
+  fixes it: only the client asking gets E2BIG, as from the backing.
+- ListXattrOPath and GetXattrOPath (dcfs/backing.cc:159-196) retry up to 4
+  times on ERANGE, a retry loop contrary to russ's 1.12 ruling
+  ("ERANGE-on-races with the backing store, then ERANGE-on-races for us").
+  With on-demand xattrs a client's getxattr/listxattr passes its own size to
+  the backing and returns the backing's ERANGE unchanged; the loops go.
