@@ -312,8 +312,10 @@ answer; dcfs-protocol decides, with the model, and records the answers in
    `Releasedir`.
 6. *seekdir, telldir, rewinddir.* Proposed: a request at an offset other
    than the last reply's end (a `seekdir`) does `lseek` on the backing
-   descriptor to that cookie (reopening it if EOF closed it), is a
-   non-recording page (item 4's flag), and passes the backing's answer
+   descriptor to that cookie (reopening it if EOF closed it), records its
+   names as `listed` like any page, but the stream can no longer complete
+   the listing (only a contiguous read from offset 0 to EOF does; a later
+   `rewinddir` restores that), and passes the backing's answer
    through for a cookie it does not like (style 1.12: the backing's
    contract). `rewinddir` on a stream handle restarts the stream at 0 with
    a new snapshot (it may complete the listing); the handle does not turn
