@@ -448,8 +448,11 @@ orchestrator's notes (2026-10-18) so that they are in the repository:
 - <a id="rule-effort-per-dispatch"></a>
   **Choose the effort on each dispatch** (russ, 2026-10-17, asking why
   every lane ran at high effort: the agent type's default had decided it).
-  (Orchestrator's reading:) pass `effort` explicitly: medium for reading, audits and verification,
-  high only for protocol work and puzzling failures.
+  Pass `effort` explicitly, by rule 6 of "Using Gemini through `agy`", "Vary
+  the effort knob per job" (russ, 2026-10-17): start one notch lower than
+  seems needed and raise it only when the answer comes back shallow; its
+  table gives judgement reviews Opus high and protocol or crash-safety work
+  Opus high or xhigh.
 - <a id="rule-coauthor-trailer"></a>
   **The trailer names the model that wrote the commit** (russ, 2026-10-18:
   "Whichever model is the author should be listed as co-author."). (Orchestrator's reading:) a brief
