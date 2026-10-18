@@ -170,7 +170,7 @@ privilege removal: the kernel then keeps `SB_NOSEC` and stops sending a
 
 Owner: dcfs-protocol, then an Opus review (identity and permissions).
 
-As built (lane-3, branch step-17.2e, rebased 2026-10-18 onto 44676d75).
+As built (lane-3, branch step-17.2e, rebased 2026-10-18 onto 333998c9).
 Rounds 1 and 2: `DirCacheFS::Init` requires V2 beside POSIX ACLs and
 DONT_MASK (`InitWithoutHandleKillprivV2IsRefused`); every file gets
 passthrough (`PassthroughFor`, `MakeBackingFile`'s mode and

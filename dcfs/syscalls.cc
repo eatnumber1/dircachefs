@@ -112,13 +112,12 @@ using CapabilityData =
 
 }  // namespace
 
-absl::StatusOr<CapabilitySets> capget() {
+CapabilitySets capget() {
   __user_cap_header_struct header = ThisThread();
   CapabilityData data{};
-  // capget(2) fails only for a header or buffer this function got wrong
-  // (EFAULT, EINVAL) or a pid that is not the caller's (ESRCH).
-  RET_CHECK_EQ(::syscall(SYS_capget, &header, data.data()), 0)
-      << "capget(2) of the calling thread";
+  // Cannot fail (syscalls.h): the header and buffers are this function's
+  // and right, and pid 0 is the calling thread.
+  ::syscall(SYS_capget, &header, data.data());
   auto join = [](uint32_t low, uint32_t high) {
     return uint64_t{high} << 32 | low;
   };

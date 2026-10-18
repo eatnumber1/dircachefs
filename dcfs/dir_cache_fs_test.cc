@@ -7415,7 +7415,7 @@ TEST_F(DirCacheFSTest, ATruncateFailsWhereTheDaemonLacksCapFsetid) {
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   std::thread([&] {
     constexpr uint64_t kFsetid = uint64_t{1} << CAP_FSETID;
-    ASSERT_OK_AND_ASSIGN(syscalls::CapabilitySets sets, syscalls::capget());
+    syscalls::CapabilitySets sets = syscalls::capget();
     sets.effective &= ~kFsetid;
     sets.permitted &= ~kFsetid;
     ASSERT_THAT(syscalls::capset(sets), IsOk());

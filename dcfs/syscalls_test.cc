@@ -600,19 +600,19 @@ TEST(SyscallsCredentialsTest, TheQuerySentinelIsNotAnId) {
 TEST(SyscallsCredentialsTest, CapsetRaisesOnlyAPermittedCapability) {
   constexpr uint64_t kFsetid = uint64_t{1} << CAP_FSETID;
   std::thread([] {
-    ASSERT_OK_AND_ASSIGN(syscalls::CapabilitySets root, syscalls::capget());
+    const syscalls::CapabilitySets root = syscalls::capget();
     EXPECT_NE(root.effective & kFsetid, 0u);
     // Root's capabilities above 31 (CAP_SYSLOG 34 to CAP_CHECKPOINT_RESTORE
     // 40) are in the second 32-bit word, which both calls carry.
     EXPECT_NE(root.permitted >> 32, 0u);
     ASSERT_THAT(syscalls::setfsuid(1000), IsOk());
-    ASSERT_OK_AND_ASSIGN(syscalls::CapabilitySets sets, syscalls::capget());
+    syscalls::CapabilitySets sets = syscalls::capget();
     EXPECT_EQ(sets.effective & kFsetid, 0u);
     EXPECT_EQ(sets.permitted, root.permitted);
     EXPECT_EQ(sets.inheritable, root.inheritable);
     sets.effective |= kFsetid;
     ASSERT_THAT(syscalls::capset(sets), IsOk());
-    ASSERT_OK_AND_ASSIGN(syscalls::CapabilitySets raised, syscalls::capget());
+    const syscalls::CapabilitySets raised = syscalls::capget();
     EXPECT_NE(raised.effective & kFsetid, 0u);
     EXPECT_EQ(raised.permitted, root.permitted);
     EXPECT_EQ(raised.inheritable, root.inheritable);
