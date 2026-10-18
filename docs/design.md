@@ -100,6 +100,20 @@ practice:
   "Requests are cancellable").
 - **Partial results where the backing gives them.** A read interrupted
   after some bytes returns them; so does a listing.
+- **Stream where the backing streams.** russ, 2026-10-17: "In general
+  though, if the backing streams, we should stream."
+- **Bounded, not small.** russ, 2026-10-17: "Bounded is not small. We don't
+  need it to be small, we just need it to be bounded reasonably for the
+  operation being done."
+- **Only cache what the client asked for.** russ, 2026-10-17: "Cache each
+  one as it's read. Don't prefetch all of them. ... except in the case of
+  listxattrs then cache the keys as you see them ... Basically, only cache
+  data that the client asked for. Don't over-fetch." So xattr values are
+  cached one at a time as clients read them; listxattr's name list (one
+  syscall returns it whole, with no offset: `fs/xattr.c` `listxattr`) is
+  cached as returned; population does not prefetch xattrs. Whether this
+  also applies to lookups (today a lookup populates the whole directory for
+  negative-lookup completeness) is open: question to russ.
 - **No stronger and no weaker guarantees.** A guarantee the backing does
   not give is not given by dcfs either (a listing is not a snapshot: POSIX
   leaves entries added or removed during it unspecified), and a guarantee
