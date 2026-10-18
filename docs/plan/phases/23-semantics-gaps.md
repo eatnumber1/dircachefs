@@ -974,7 +974,12 @@ served, and dcfs starts without refusing.
    start-time probing, no statx at start. The step's tests change
    `boundary_test`'s restart-from-cache expectation to match (work item for
    the implementer: the test asserts the new behaviour, the old assertion is
-   removed, not weakened).
+   removed, not weakened). The start-time reconcile of item 2 is not
+   superseded by this: it reads `/proc/self/mountinfo` and touches only
+   the database (no backing I/O, no spin-up), and it records a cached
+   present dentry that a new mount now covers as unknown, which a lazy
+   check cannot catch without probing every lookup. "No start-time
+   probing" therefore means no backing probes; the reconcile stays.
 9. **Contract flags found while reading** (these exist today at runtime
    and now matter for start): *(a)* renaming a mount point natively is
    `EBUSY` (rename(2), `EBUSY`: "in use by the system (for example as a
@@ -993,13 +998,17 @@ served, and dcfs starts without refusing.
    **Decided and open (orchestrator, 2026-10-17):** question 3 is decided:
    a rename of a mount-kind stub gives `EBUSY` (native rename of a mount
    point), while a subvolume-kind stub's rename passes through to the
-   backing (btrfs allows it natively). Question 4 is OPEN with russ: `find
+   backing (btrfs allows it natively). Question 4 was open with russ: `find
    -xdev`, `du -x`, `rsync -x` and `tar --one-file-system` descend into a
    stub (same `st_dev`). Options: `ENOTSUP` (today); an empty directory
    for tools that cannot know; or a FUSE kernel submount via
    `FUSE_ATTR_SUBMOUNT` giving the stub its own `st_dev` (check whether
-   plain `/dev/fuse` supports it, not only virtiofs). Nothing is built for
-   question 4 until russ answers.
+   plain `/dev/fuse` supports it, not only virtiofs). **russ decided
+   (2026-10-17): `ENOTSUP` inside a stub for now** (the tools descend and
+   get `ENOTSUP`). The proper fix is the kernel patch in
+   `docs/plan/notes/kernel-patches.md` (row 8), which lets a `/dev/fuse`
+   daemon give a stub its own `st_dev`; nothing else is built for
+   question 4 until it ships.
 10. **Docs.** README: "Instances, trees and boundaries" (drop "dcfs refuses
     to start in that case"), the Limitations bullet (retitled "Filesystems
     mounted below the source and btrfs subvolumes are stubs", with the warm
@@ -1010,7 +1019,12 @@ served, and dcfs starts without refusing.
     update the three in-document links and the table of contents), startup
     step 2 and the "Not done here" bullet. Phase 15 decision 9 and 15.4's
     text get a line pointing here. `test/qemu/README.md`'s `readonly_test`
-    and `nfs_test` paragraphs.
+    and `nfs_test` paragraphs. README also recommends, as the way to use a
+    subvolume or submount below SOURCE, bind-mounting it over its stub
+    (`mount -t dcfs ... /mnt/btrfs /mnt/btrfs.cached`, then `mount -o bind
+    /mnt/btrfs/subvol /mnt/btrfs.cached/subvol`), which also makes `-xdev`
+    tools behave as on the backing. Written when 23.13 lands and its
+    acceptance test passes.
 
 **The model.** `formal/ident.tla` and `formal/lifetime.tla` already have
 boundaries (`Boundaries`, `StubIds`, `Refuse`, `StubGone`; `MC_ident_stubs`

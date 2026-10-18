@@ -113,9 +113,12 @@ Rules marked "(from phase N)" take effect when that plan phase lands.
 
 - Design decisions and their reasons go in `docs/design.md`; user-facing
   behavior and limitations in `README.md`.
-- When a plan phase changes, update its file in `docs/plan/phases/` and
-  the status table in `docs/plan/README.md`; append to
-  `docs/plan/log.md`.
+- Everything in `docs/plan/` except the implementing agent's own "As
+  built" notes in its step's phase file is the orchestrator's or its
+  bookkeeping clerk's (status, log, other steps, the ledger). When a plan
+  phase changes, the orchestrator updates its file in `docs/plan/phases/`
+  and the status table in `docs/plan/README.md`, and appends to
+  `docs/plan/log.md`; an agent reports what it needs.
 - Commit subjects start with the plan step they belong to, e.g.
   `3.2: third_party/linux: build the pinned kernel with Bazel`.
 - Never push, publish or send anything outside the repository unless the

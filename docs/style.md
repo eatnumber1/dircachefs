@@ -381,6 +381,12 @@ where it means nothing; a comment like "For kX: ..." is not enough.
 russ, 2026-10-17: "It's easy to ignore a comment. The compiler enforces
 types. Express it in the type system."
 
+A value that may be absent is a `std::optional` (for a string,
+`std::optional<std::string_view>`), not a value that is empty or null by
+convention: the type says it may be missing, and every reader must check
+it. Ruling from the 22.5 style review, made by the orchestrator under
+russ's "Express it in the type system" above.
+
 ### 1.5 `syscalls.h`
 
 One thin wrapper per documented Linux syscall or libc call, named for its
@@ -950,6 +956,11 @@ fails the caller with EOVERFLOW first, fs/fuse/dev.c), and
      case deserves a RET_CHECK_NE rather than a comment").
   6. A Cleanup is declared `absl::Cleanup name = [captures] { ... };`
      (Abseil's documented form, no empty parameter list).
+  7. A body that must hand its `Status` to a decision made after it (a
+     short listing whose result the caller checks later) is a helper
+     taking the output container by reference, not an immediately
+     invoked lambda. Ruling from the 22.5 style review, made by the
+     orchestrator under russ's rulings above.
 - **Program output is `absl::PrintF`/`FPrintF`/`SNPrintF`/`StrFormat`,
   never iostreams and never the C printf family** (russ, 2026-10-10: "I
   agree", after asking what the 19 sites do: `--version` lines,
@@ -1143,7 +1154,9 @@ the obvious what or how." Apply the core principles:
 - **Length**: one to three lines for a block, up to about ten for a non-local
   invariant; longer reasoning goes in `docs/design.md` and the comment points
   to it. No restating the code, no changelog ("fixed in step N" is the
-  commit's).
+  commit's). The length limits apply to TLA+ comments too: a model's long
+  argument lives in `formal/README.md`, and the module comment points to it.
+  Ruling from the 22.5 style review, made by the orchestrator.
 - `/* */` only for argument names (`/*is_dir=*/false`) and in `tools/*.c`.
 
 ### 1.10 One abstraction over variants; branching is discouraged
@@ -1635,8 +1648,11 @@ protocol event (`dcfs/protocol_events.h`) and `Trace.tla` action;
 - **Where things go.** Decisions and reasons: `docs/design.md`. User-facing
   behavior and limitations: `README.md` (also the source of the `dcfs(8)`
   man page). Test usage: `test/qemu/README.md`. A pin: its
-  `third_party/<name>/README.md`. Plan, log, status: `docs/plan/` (the
-  orchestrator edits it; an agent reports what it needs).
+  `third_party/<name>/README.md`. Plan, log, status: `docs/plan/`. The
+  implementing agent writes its own step's "As built" notes in that
+  step's phase file; everything else in `docs/plan/` (status, log, other
+  steps, ledger) is the orchestrator's or its bookkeeping clerk's, and an
+  agent reports what else it needs.
 - **Prose.** Full sentences, plain and specific, no marketing; say what the
   program does and does not do. Measured numbers carry units, date and
   environment ("about 1 minute (KVM)", "released 2026-05-13; the latest
