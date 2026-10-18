@@ -88,8 +88,8 @@ tlc_test(
     srcs = ["dcfs.tla"],
 )
 
-# Step 22.5: an interrupted request eventually replies, EINTR at a
-# checkpoint (liveness, no VIEW): one slot (64,111 distinct states, 2 min at
+# Step 22.5: an interrupted request eventually replies, EINTR at an
+# interruption point (liveness, no VIEW): one slot (64,111 distinct states, 2 min at
 # load 24, 2.7 min at load 30), and two slots, so that another request can
 # hold the thread (126,731, 4.5 min at load 20, 8 min at load 30).
 tlc_test(
@@ -127,6 +127,27 @@ tlc_test(
     size = "large",
     timeout = "eternal",
     config = "MC_interrupt_nolock.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
+# Step 22.5: FUSE_INTERRUPT for F's requests and a file's data (F's
+# setattr, a write, F's create: their interruption points), with the
+# bound and every invariant of MC_atime.cfg and MC_borndirty.cfg.
+tlc_test(
+    name = "interrupt_files_test",
+    size = "medium",
+    timeout = "long",
+    config = "MC_interrupt_files.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
+tlc_test(
+    name = "interrupt_borndirty_test",
+    size = "medium",
+    timeout = "long",
+    config = "MC_interrupt_borndirty.cfg",
     spec = "MC.tla",
     srcs = ["dcfs.tla"],
 )
@@ -273,10 +294,12 @@ KNOWN_BUGS = {
     "interrupt_after_syscall": "Invariant CacheNeverWrong is violated",
     "interrupt_undo": "Invariant TriState is violated",
     "interrupt_leaks_guard": "Invariant GuardsBalanced is violated",
-    # Step 22.5 (not historical): what makes an interrupt timely. A
-    # checkpoint removed (the create's), checkpoints that never see the
+    # Step 22.5 (not historical): what makes an interrupt timely. An
+    # interruption point removed (a create's; an unlink's, whose run stays
+    # within a create's), interruption points that never see the
     # interrupt, and one that stops the request without replying.
-    "interrupt_checkpoint_removed": "Invariant InterruptBound is violated",
+    "interruption_point_removed_create": "Invariant InterruptBound is violated",
+    "interruption_point_removed_unlink": "Invariant InterruptBound is violated",
     "interrupt_ignored": "Temporal properties were violated",
     "interrupt_not_replied": "Temporal properties were violated",
     # Step 12.7: an effect point too early (phase 1 records the outcome)
