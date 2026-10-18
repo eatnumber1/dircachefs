@@ -332,6 +332,12 @@ BAns(r, b) ==
 (* Writing: a commit appends to the WAL. A kSync commit (phase 1, startup,  *)
 (* shutdown) fsyncs it, so every earlier commit is durable too; a normal    *)
 (* commit may or may not survive a power loss.                              *)
+(* That holds only while no fsync of the WAL has failed: after one, Linux   *)
+(* returns 0 to later fsyncs while the pages it could not write may never   *)
+(* reach the disk, and SQLite's recovery stops at the gap, so no later      *)
+(* commit is durable (docs/design.md, "The cache's durable point";          *)
+(* durability.tla's `failed`). Not modelled here: step 25.28d's model work  *)
+(* covers it (a failed durable point ends the run, the cache discarded).    *)
 Commit(new, sync) ==
     /\ dbCur' = new
     /\ dbOpts' = IF sync THEN {new} ELSE dbOpts \cup {new}
@@ -1194,6 +1200,11 @@ CacheDurable ==
 \* point's only barrier (SyncBarrier <- FsyncOnly).
 FsyncSyncPoint == FALSE
 
+\* Whether an FSYNC replies without the cache's durable point. Not the
+\* code; known_bugs/fsync_skips_durable_point overrides it, and
+\* FsyncedCacheDurable catches it.
+FsyncSkipsDurablePoint == FALSE
+
 \* The fsync.
 FsyncFrom(p, r) ==
     /\ bSeq' = FsyncOnly(r)
@@ -1206,7 +1217,7 @@ FsyncFrom(p, r) ==
 \* point, and dbOpts is {dbCur} already then.
 FsyncDurable(p) ==
     /\ At(p, "Y_reply")
-    /\ dbOpts' = {dbCur}
+    /\ dbOpts' = IF FsyncSkipsDurablePoint THEN dbOpts ELSE {dbCur}
     /\ Reply(p, ps[p], Rep("ok", {}))
     /\ UNCHANGED <<bCur, bSeq, dbCur>> /\ UnchangedGuards
     /\ UNCHANGED <<servedWrong, stamp>>
@@ -2515,6 +2526,15 @@ ReplyObservable ==
                   /\ (ps[p].pc # "idle" \/ ps'[p].rb # ps[p].rb))
            => IF ps[p].pc = "idle" THEN ImmediateWitnessed(ps'[p].rep)
               ELSE ReplyWitnessed(ps[p], ps'[p].rep)]_vars
+
+\* An FSYNC's or FSYNCDIR's reply comes after the cache's durable point: a
+\* power loss after it loses no commit made before it (the inode rows an
+\* NFS client's handles name among them). Checked in the configurations
+\* with FSYNCs (MC_litmus_fsync_*.cfg).
+FsyncedCacheDurable ==
+    [][\A p \in Procs :
+         (Serving /\ ps[p].pc = "Y_reply" /\ ps'[p].pc = "idle")
+           => dbOpts' = {dbCur'}]_vars
 
 \* Recovery always terminates: the daemon always gets back to serving.
 RecoveryTerminates == (mode # "up") ~> (mode = "up")

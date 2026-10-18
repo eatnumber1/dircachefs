@@ -403,6 +403,9 @@ KNOWN_BUGS = {
     # Step 12.8, not historical: a sync point after FSYNC with the file's
     # fsync as its only barrier, under the ext4 regime.
     "sync_by_file_fsync": "Invariant CrashSafe is violated",
+    # Not historical (the 25.28b Opus review's S3): an FSYNC that replies
+    # without the cache's durable point.
+    "fsync_skips_durable_point": "Action property FsyncedCacheDurable is violated",
     # Step 23.11 (not historical): born-dirty create. The row and its mark
     # in two transactions; the parent's phase 1 not durable; the audit's G5,
     # a fill that inserts the row clean, as the code does today (without
@@ -740,6 +743,18 @@ tlc_test(
     config = "known_bugs/premise_lost_only_since_sync.cfg",
     expect_violation = "Invariant LostOnlySinceSync is violated",
     spec = "known_bugs/durability_sync_point_skips_checkpoint.tla",
+    srcs = ["durability.tla"],
+)
+
+# Not the code: an FSYNC that replies without the cache's durable point
+# (the 25.28b Opus review's S3). FsyncedDurable catches it.
+tlc_test(
+    name = "known_bug_durability_fsync_skips_durable_point_test",
+    size = "small",
+    timeout = "short",
+    config = "known_bugs/durability_fsync_skips_durable_point.cfg",
+    expect_violation = "Invariant FsyncedDurable is violated",
+    spec = "known_bugs/durability_fsync_skips_durable_point.tla",
     srcs = ["durability.tla"],
 )
 
