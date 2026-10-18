@@ -4064,3 +4064,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   look in 26.41. Cost: 8% of the Gemini week (52% -> 44% left). The
   second foreman step (quota panel) stalled on claude_usage.py and was
   stopped; its partial work is stashed in lane-8.
+- 2026-10-17, Gemini cost explained (agy transcripts): the query-plan
+  worker made 355 calls re-sending ~145k tokens of context each; the
+  22.6 rename (274 calls) fell partly in the same quota window. Four rules
+  agreed (russ) and put in process.md rule 4a.

@@ -374,6 +374,17 @@ reading. Not for writing code, nor for subtle protocol judgement.
    clone's first build outlasts the limit). Read-only jobs still use
    `--mode plan` and write to the orchestrator's scratchpad. No protocol,
    crash-safety or identity work (rule 6's table).
+4a. Cost per job (measured 2026-10-17 from agy's transcripts, which log
+   tokens per model call; russ: "Agreed"): a job's cost is roughly its
+   number of model calls times its context, since every call re-sends the
+   session. The query-plan worker took 355 calls (173 file views, many
+   rereading slices; 133 commands), 51.7M cached context tokens and 260k
+   output, about 5% of the Gemini week. So a prompt: (1) gives the map
+   (files and line ranges) and says to read each file whole, once; (2)
+   uses Flash medium for mechanical work, high only where judgement is
+   needed; (3) keeps one task per job (a refactor and its test are two
+   jobs); (4) prefers the narrow design to a wide refactor. The dispatch
+   ledger records each job's calls and token totals from the transcript.
 5. Narrow jobs, several of them (russ, 2026-10-17: "The long context is
    good, but be wary of Flash's limitations. Consider using multiple,
    narrowly targeted reviewers."). Give each job the whole tree as
