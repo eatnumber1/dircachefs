@@ -2222,7 +2222,7 @@ absl::Status DirCacheFS::Fsync(FuseRequest &req, fuse_ino_t ino, int datasync,
   // an fsync replied EINTR did not run; after it only the cache's durable
   // point and the reply follow.
   RETURN_IF_ERROR(
-      CheckInterrupted(ctx_, InterruptionPoint("an fsync's sync point")));
+      CheckInterrupted(ctx_, InterruptionPoint("an fsync's syscall")));
   BackingCall("FsyncFd");
   RETURN_IF_ERROR(backing::FsyncFd(fd, datasync != 0));
   // The fsync makes durable what the backing filesystem's fsync does, no
@@ -2530,7 +2530,7 @@ absl::Status DirCacheFS::Fsyncdir(FuseRequest &req, fuse_ino_t ino,
   // the syscall, then the cache's durable point, as in Fsync().
   RETURN_IF_ERROR(RequireAttr(id).status());
   RETURN_IF_ERROR(
-      CheckInterrupted(ctx_, InterruptionPoint("an fsyncdir's sync point")));
+      CheckInterrupted(ctx_, InterruptionPoint("an fsyncdir's syscall")));
   RETURN_IF_ERROR(backing::FsyncDir(ctx_, id, datasync != 0));
   RETURN_IF_ERROR(MakeCacheDurable());
   return req.ReplyErrno(0);
