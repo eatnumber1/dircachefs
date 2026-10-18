@@ -22,7 +22,6 @@ NeverInterruptedAt_U_sys == NeverInterruptedAt("U_sys")
 NeverInterruptedAt_R_sys == NeverInterruptedAt("R_sys")
 NeverInterruptedAt_A_sys == NeverInterruptedAt("A_sys")
 NeverInterruptedAt_GA_stat == NeverInterruptedAt("GA_stat")
-NeverInterruptedAt_RDP_stat == NeverInterruptedAt("RDP_stat")
 NeverInterruptedAt_FC_sys == NeverInterruptedAt("FC_sys")
 NeverInterruptedAt_FS_sys == NeverInterruptedAt("FS_sys")
 NeverInterruptedAt_W_sys == NeverInterruptedAt("W_sys")
@@ -32,6 +31,6 @@ NeverInterruptedAt_FG_rstat == NeverInterruptedAt("FG_rstat")
 \* Every pc above is one of InterruptPcs, and the other way round: a new
 \* interruption point needs its reachability test too.
 ASSUME InterruptPcs = {"RN_probe", "PD_read", "PD_commit", "C_sys", "U_sys",
-                       "R_sys", "A_sys", "GA_stat", "RDP_stat", "FC_sys",
-                       "FS_sys", "W_sys", "FG_stat", "FG_rstat"}
+                       "R_sys", "A_sys", "GA_stat", "FC_sys", "FS_sys",
+                       "W_sys", "FG_stat", "FG_rstat"}
 =============================================================================

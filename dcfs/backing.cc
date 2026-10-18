@@ -1655,15 +1655,17 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   return scope.Finish(std::move(answer));
 }
 
-absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
+absl::StatusOr<InodeId> ParentOf(
+    Context &ctx, InodeId dir,
+    std::optional<InterruptionPoint> interruption_point) {
   ASSIGN_OR_RETURN(std::optional<InodeId> cached, cache::ParentOf(ctx, dir));
   if (cached.has_value()) return *cached;
 
-  // `dir`'s own dentry is unknown (audit F6): ask the backing filesystem.
-  // A fill of the parent's row, as PopulateDirectory records a child, with
-  // an interruption point before its backing reads.
-  RETURN_IF_ERROR(
-      CheckInterrupted(ctx, InterruptionPoint("a directory's parent")));
+  // `dir`'s own dentry is unknown (audit F6): ask the backing filesystem,
+  // recording the parent's row as PopulateDirectory records a child.
+  if (interruption_point.has_value()) {
+    RETURN_IF_ERROR(CheckInterrupted(ctx, *interruption_point));
+  }
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   ctx.events->ParentLookupStarted(ctx, dir);
   ASSIGN_OR_RETURN(FileDescriptor dir_fd,

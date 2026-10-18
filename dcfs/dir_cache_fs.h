@@ -403,6 +403,16 @@ class DirCacheFS : private events::Bookkeeping {
   absl::StatusOr<std::vector<Listed>> ListCached(
       InodeId dir, int64_t cursor, size_t budget,
       absl::FunctionRef<size_t(std::string_view)> entry_size);
+  // A READDIR's (READDIRPLUS's) entries from offset `off`: "." and ".." if
+  // due, then `listed`, appended to `entries` one by one. An interruption
+  // point, which the first entry never passes, stops it with EINTR, the
+  // entries built so far kept (docs/design.md, "Cancellation").
+  absl::Status AppendDirEntries(InodeId dir, off_t off,
+                                const std::vector<Listed> &listed,
+                                std::vector<FuseDirEntry> &entries);
+  absl::Status AppendDirEntriesPlus(InodeId dir, off_t off,
+                                    const std::vector<Listed> &listed,
+                                    std::vector<FuseDirEntryPlus> &entries);
 
   // `attr` (id's row) if valid, else refreshed (RefreshAttrsOf) and answered
   // from the fresh statx itself, whether or not the cache recorded it (see

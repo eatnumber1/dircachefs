@@ -1242,9 +1242,11 @@ class DirCacheFSTest : public ::testing::Test {
 
   // The names a READDIRPLUS (plus = true) or READDIR of `dir` from offset 0
   // returns, in order; an error reply as its errno.
-  absl::StatusOr<std::vector<std::string>> List(InodeId dir, bool plus) {
+  absl::StatusOr<std::vector<std::string>> List(InodeId dir, bool plus,
+                                                off_t offset = 0) {
     struct fuse_read_in in = {};
     in.size = 64 * 1024;
+    in.offset = static_cast<uint64_t>(offset);
     std::string body;
     AppendBytes(body, in);
     Reply reply = Send(plus ? FUSE_READDIRPLUS : FUSE_READDIR,
@@ -7551,11 +7553,12 @@ TEST_F(DirCacheFSTest, ReaddirInterruptedAtItsParentRepliesTheEntriesBefore) {
   ctx_.interrupts = &NoInterrupts();
 }
 
-// Step 22.5: a READDIRPLUS has an interruption point before each entry's
-// refresh. At "."'s (formal/dcfs.tla's RDP_stat) nothing is built: EINTR.
-// At an entry's, after "." and "..": those, a short listing.
-TEST_F(DirCacheFSTest,
-       ReaddirplusInterruptedAtARefreshRepliesTheEntriesBefore) {
+// A READDIRPLUS refreshes its first entry whatever comes (the kernel's
+// getdents checks for a signal only once it has an entry: fs/readdir.c,
+// filldir64), and has an interruption point before each later entry's
+// refresh: interrupted there, it replies the entries before, a short
+// listing.
+TEST_F(DirCacheFSTest, ReaddirplusRefreshesItsFirstEntryAndStopsAtALaterOne) {
   ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/f"));
   Start();
@@ -7572,17 +7575,60 @@ TEST_F(DirCacheFSTest,
   ASSERT_EQ(Chmod(f, S_IFREG | 0600).error, -EINTR);
   StartTrace();
   interrupts.checkpoints = 0;
-  EXPECT_EQ(ErrnoOf(List(d, true).status()), EINTR);
-  // "."'s refresh passes (the first interruption point), f's stops.
-  interrupts.at = 2;
-  interrupts.checkpoints = 0;
   EXPECT_THAT(List(d, true), IsOkAndHolds(::testing::ElementsAre(".", "..")));
-  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
-  EXPECT_FALSE(attr.valid);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr d_attr, cache::GetAttr(ctx_, d));
+  EXPECT_TRUE(d_attr.valid);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr f_attr, cache::GetAttr(ctx_, f));
+  EXPECT_FALSE(f_attr.valid);
   interrupts.at = 0;
   EXPECT_THAT(List(d, true),
               IsOkAndHolds(::testing::ElementsAre(".", "..", "f")));
   ctx_.interrupts = &NoInterrupts();
+}
+
+// A listing resumed at "..", interrupted from the start: ".." first,
+// though ParentOf must ask the backing filesystem for it; then a READDIR
+// has nothing more to read, and a READDIRPLUS stops before f's refresh.
+TEST_F(DirCacheFSTest, ListingFromDotDotBuildsItsFirstEntry) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  WriteFile(Path("d/f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  ASSERT_THAT(List(d, false), IsOk());
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f", d));
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  interrupts.at = 1;
+  // A rename of d and an attribute change of f interrupted before their
+  // syscalls: d's own dentry and f's attributes unknown.
+  ASSERT_EQ(Rename(kRootInode, "d", kRootInode, "e").error, -EINTR);
+  interrupts.checkpoints = 0;
+  ASSERT_EQ(Chmod(f, S_IFREG | 0600).error, -EINTR);
+  interrupts.checkpoints = 0;
+  EXPECT_THAT(List(d, false, /*offset=*/1),
+              IsOkAndHolds(::testing::ElementsAre("..", "f")));
+  interrupts.checkpoints = 0;
+  EXPECT_THAT(List(d, true, /*offset=*/1),
+              IsOkAndHolds(::testing::ElementsAre("..")));
+  ctx_.interrupts = &NoInterrupts();
+}
+
+// A listing's first entry whose refresh fails with EINTR of its own (a
+// backing syscall's, not an interruption point's) replies the error, not
+// an empty listing, which would end the directory.
+TEST_F(DirCacheFSTest, ReaddirplusWhoseFirstRefreshFailsRepliesTheError) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  ASSERT_THAT(List(d, false), IsOk());
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  interrupts.at = 1;
+  // d's attributes unknown.
+  ASSERT_EQ(Chmod(d, S_IFDIR | 0700).error, -EINTR);
+  ctx_.interrupts = &NoInterrupts();
+  OpenByHandleFailures() = {EINTR};
+  EXPECT_EQ(ErrnoOf(List(d, true).status()), EINTR);
 }
 
 // Step 22.5: the other requests whose refresh of a directory's attributes
@@ -8430,9 +8476,11 @@ struct InterruptCase {
 //  - a lookup's reply entry, refreshed (outside the model's lookup, which
 //    has replied: formal/README.md, "Timely interrupts"): a refresh, with
 //    no interruption point;
-//  - a readdirplus (the model's 0, RDP_stat an interruption point) and a
-//    getattr (0, GA_stat): the rest of one refresh, or of ParentOf's
-//    OpenNode and its parent's probe, each after its interruption point;
+//  - a readdirplus (the model's 1, RDP_stat): its first entry's whole
+//    refresh, with no interruption point before it; then the rest of one
+//    refresh, or of ParentOf's OpenNode and its parent's probe, each after
+//    its interruption point;
+//  - a getattr (the model's 0, GA_stat): the rest of its refresh;
 //  - the mutations (the model's 1, or a create's 2, after its syscall):
 //    from the interruption point to the reply, the opens between it and
 //    the syscall included, as the model's syscall step holds them: a
@@ -8450,8 +8498,8 @@ const InterruptCase kInterruptCases[] = {
     {.scenario = "readdir_empty", .run = 3},
     // Its listing's first calls only: the probes after are as above.
     {.scenario = "readdir_large", .run = 3, .max_at = 8},
-    {.scenario = "readdirplus", .run = 3},
-    {.scenario = "readdirplus_parent", .run = 3},
+    {.scenario = "readdirplus", .run = 4},
+    {.scenario = "readdirplus_parent", .run = 4},
     {.scenario = "getattr", .run = 3},
     {.scenario = "create", .run = 4},
     {.scenario = "unlink", .run = 4},
