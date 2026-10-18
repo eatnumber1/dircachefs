@@ -1112,7 +1112,25 @@ dcfs restarted or dead with a bind mounted on a stub: works as natively
 refuses to mount over a directory with mounts beneath it (acceptance
 criterion).
 
-## 23.15 O_DIRECT on the non-passthrough path (2026-10-18, from the Explore research on O_DIRECT and inotify; queued)
+## 23.15 Per-open flags on the declined (non-passthrough) path (2026-10-18, from the Explore research on O_DIRECT and inotify; widened 2026-10-18; queued)
+
+- **Audit first (widened 2026-10-18):** the step starts with an audit
+  table: every open(2) flag and every RWF_* write flag, crossed with
+  {passthrough, declined path}. Each cell records who honours the flag
+  (kernel or dcfs), its source (kernel file:line at v7.3-rc7, or dcfs
+  file:line), and the test that pins it. Gaps found by the audit become
+  this step's work.
+- **Sync flags (widened 2026-10-18):** besides O_DIRECT, check whether
+  O_SYNC, O_DSYNC and RWF_*SYNC writes on the declined path are as durable
+  as native. dcfs writes through the shared fd, which is not O_SYNC. Check
+  whether the kernel's generic_write_sync sends FUSE_FSYNC for them (cite
+  fs/fuse/file.c, v7.3-rc7). Either way, a differential test (native vs
+  dcfs) pins the result.
+- **Formal model (conditional):** if the audit finds that dcfs must act on
+  a sync flag itself, `formal/dcfs.tla`'s write request gains the sync
+  variant (the write, then the backing fsync, before the reply), with a
+  `formal/known_bugs/` variant that drops it. The same change updates
+  12.21's register.
 
 The research (2026-10-18, under "behave like the backing") found that
 O_DIRECT works only where the open gets passthrough. When fi.flags has
@@ -1133,3 +1151,36 @@ backing's O_DIRECT rules are not carried through.
 
 Owner: dcfs-implementer. Numbered 23.15 because 23.14 is named above as
 the follow-up for 23.13's sub-items (7) and (9).
+
+## 23.16 Passthrough required at mount (russ, 2026-10-18: passthrough ruling; queued)
+
+Passthrough is a required kernel feature like the others. Its fallback
+for a kernel without it is removed, not kept beside the requirement.
+
+- Require FUSE_CAP_PASSTHROUGH at mount, as the other required kernel
+  features are. Refuse to mount with FailedPrecondition in DirCacheFS
+  Init, next to the existing "which dcfs requires; refusing to mount"
+  check.
+- Delete the kernel-without-passthrough branch and its WARNING
+  (dcfs/dir_cache_fs.cc:326, "a missing capability with a fallback").
+- README and `docs/design.md` gain passthrough in the kernel-features list.
+- Test first: a guest kernel or config without passthrough is refused, or
+  the Init path is run with the capability withheld, and the refusal is
+  asserted. Quote the failing run before the change.
+
+Owner: dcfs-implementer. The declined path (setuid+setgid without group
+execute) stays until 23.17.
+
+## 23.17 Delete the declined passthrough write path (deferred until kernel-patches row 10 ships)
+
+Deferred until the production kernel (Ubuntu LTS) carries kernel-patches
+row 10's patch, likely years. Then the workaround goes: `PassthroughFor`'s
+decline (dcfs/dir_cache_fs.cc:119), `WriteFile`'s caller-credential write
+for that mode, and 23.15's O_DIRECT handling on that path. The tests'
+expectations for that mode move to the passthrough path.
+
+- Until then, the decline and `WriteFile`'s caller-credential write carry a
+  top comment naming kernel-patches row 10. The first step that touches
+  either adds it.
+
+Owner: dcfs-implementer.

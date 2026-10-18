@@ -17,8 +17,9 @@ merge); this file orders the steps.
   tests at `--local_test_jobs=4` each): the lanes' `--local_test_jobs`
   together stay at or under the core count, so each lane runs `2`, at
   most three lanes run guest tests at once, and the orchestrator's own
-  pre-merge checks count as a lane. Non-building lanes (reviews, the TLA+
-  model, docs) cost nothing here. Watch for guest-test timeouts caused by contention; if they
+  pre-merge checks count as a lane. Non-building lanes (reviews, docs) cost
+  nothing here. A model-checking run (the TLA+ model) counts its TLC
+  workers against the shared core budget, like guest test slots. Watch for guest-test timeouts caused by contention; if they
   appear, pause the newest lane rather than raise timeouts. Phases may
   start out of the listed order when they depend on nothing in flight.
   Where a third building lane would help, it is marked "(lane 3 if the

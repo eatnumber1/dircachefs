@@ -742,6 +742,13 @@ will). Nothing checks the model's guards against the code.
   enforcement, a guard whose removal breaks nothing is deleted.
 - **Signal sweep (26.6):** SIGTERM/SIGHUP to the daemon at each backing
   call site in a guest test, alongside the syscall-fault sweep.
+- **Kernel facts the register records (2026-10-18, from 23.15 and 23.16):**
+  - "On a non-passthrough FUSE file, the kernel turns an O_SYNC, O_DSYNC or
+    RWF_*SYNC write into a FUSE_FSYNC (generic_write_sync)." Entered once
+    23.15 verifies it; enforced by 23.15's differential test.
+  - "Passthrough I/O honours the open flags of the FUSE file at open time"
+    (fs/fuse/passthrough.c:169-171). Enforced by the 23.15 audit's test for
+    each flag on the passthrough path.
 
 ## 12.22 Worst cases nobody listed: exhaustive and guided search (russ, 2026-10-17: "I want to do it, but put it after M3. Let's deploy to my machine first.")
 
@@ -853,7 +860,8 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
   `formal/dcfs.tla` LKFrom allows that path.
   Tests: `NameLimitTest` in dcfs/backing_test.cc (a fake f_namelen of 16);
   no vfat differential test (no vfat mkfs in test/qemu). Per-filesystem
-  xattr limits stay deferred.
+  xattr limits stay deferred. **Done 2026-10-18:** 32ea4ab (the hybrid)
+  and 2552c4a (LongNames in the model, with the upstream citations).
 - cpio (found 2026-10-17): `.github/ci/prepare.sh:40` installs `cpio` on the
   CI host, but nothing uses it: `test/qemu/scripts/mkinitramfs.sh:333`
   packs the initramfs with the pinned busybox's own `cpio` (the host one was
@@ -898,3 +906,30 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
   defaults it relies on (ASYNC_READ, AUTO_INVAL_DATA, ...), and a guest
   test asserts each relied-upon default's value in the negotiated
   connection.
+- **Merge record (2026-10-18):** the name-length hybrid was cherry-picked to
+  main as 32ea4ab and 2552c4a, with the conflicts in `docs/design.md` and
+  this file resolved by keeping main's text and adding the branch's "Name
+  limits are the backing's" bullet and "Decided ... done" paragraph. The
+  full `//formal/...` gate ran 206 of 209 passing, with 3 TIMEOUTs:
+  crash_ext4_test at its 300 s moderate limit, and nolock_test and
+  large_test at 3600 s. Load was about 55, and every config's state space
+  was unchanged (small_test 1,479,307 states and interrupt_test 280,869,
+  identical; LongNames = {} adds only an empty-set test). Merged on that
+  evidence; 12.25 addresses the load.
+
+## 12.25 TLC tests declare their resources (russ, 2026-10-18: approved; queued)
+
+Four TLC JVMs ran at `-workers auto` with 8 GC threads each, while Bazel
+counted each as 1 CPU. That drove the load to 55 on 8 cores.
+
+- `third_party/tlaplus/tlc.bzl` and `tlc_test_runner.sh.tpl`: a fixed
+  `-workers` per target class instead of auto (the default is auto at
+  tlc.bzl:82-88), with a matching `cpu:N` tag.
+- `-XX:ParallelGCThreads=N` to match the workers.
+- An explicit `-Xmx`, with a matching `resources:memory` tag. Today no
+  `-Xmx` is passed, so the JVM default (about 15.5 GB) applies.
+- The numbers come from the time-analysis agent's TLC scaling measurements
+  (states/s at 1, 2, 4 and 8 workers; peak RSS). They are not chosen here.
+- No test is weakened: the same configs and the same state counts.
+
+Owner: dcfs-implementer, after the time analysis reports.

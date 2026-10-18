@@ -36,16 +36,16 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-18	22.5	2	dcfs-style-reviewer/claude-sonnet-5-5/high	nit	style-other	docs/style.md 3	dcfs/BUILD.bazel:1231	asan_mem flag on test target missing explanatory comment	could	open
 2026-10-18	22.5	2	dcfs-style-reviewer/claude-sonnet-5-5/high	nit	status-handling	docs/style.md 1.2	dcfs/dir_cache_fs_test.cc:7710	Ignored status cast to void instead of calling IgnoreError()	checked	open
 2026-10-18	22.5	2	dcfs-style-reviewer/claude-sonnet-5-5/high	nit	commit-hygiene	docs/style.md 7		Commit subjects over 72 columns and body wrapping lines over 72	checked	open
-2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	should	contract-claim	AGENTS.md & docs/style.md 1.9	dcfs/backing.cc:611-635	Incorrect filesystem limit claims and wrong kernel function citations in comments	no	open
-2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	should	comment-accuracy	docs/style.md 1.9	dcfs/backing.h:320-325	Stale comments and contract text after caching long names	no	open
-2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	should	docs	docs/style.md 1.9 & 7	dcfs/backing.cc:612-635	Comments exceed length guideline; filesystem table and rationale belong in design.md	could	open
-2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	blocker	test-gap	docs/style.md 1.10a	dcfs/backing.cc:1636	Branch listed || beyond_limit has no test; surviving mutant in incomplete directory	could	open
-2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	nit	style-other	docs/style.md 1.2	dcfs/backing.cc:1595	Local scalar variables declared const without stated rationale	could	open
-2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	nit	naming	docs/style.md 1.1	dcfs/backing.cc:1616	Variable negative_beyond_limit reads wider than implied negative	no	open
-2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	nit	comment-accuracy	docs/style.md 1.9	dcfs/metadata_cache.h:110-113	LookupResult::implied doc disagrees with use on unrecorded negatives	no	open
-2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	nit	test-shape	docs/style.md 2	dcfs/backing_test.cc:1458-1459	NameLimitTest::SetUp missing ASSERT_NO_FATAL_FAILURE around base SetUp	could	open
+2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	should	contract-claim	AGENTS.md & docs/style.md 1.9	dcfs/backing.cc:611-635	Incorrect filesystem limit claims and wrong kernel function citations in comments	no	fixed/merged
+2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	should	comment-accuracy	docs/style.md 1.9	dcfs/backing.h:320-325	Stale comments and contract text after caching long names	no	fixed/merged
+2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	should	docs	docs/style.md 1.9 & 7	dcfs/backing.cc:612-635	Comments exceed length guideline; filesystem table and rationale belong in design.md	could	fixed/merged
+2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	blocker	test-gap	docs/style.md 1.10a	dcfs/backing.cc:1636	Branch listed || beyond_limit has no test; surviving mutant in incomplete directory	could	fixed/merged
+2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	nit	style-other	docs/style.md 1.2	dcfs/backing.cc:1595	Local scalar variables declared const without stated rationale	could	fixed/merged
+2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	nit	naming	docs/style.md 1.1	dcfs/backing.cc:1616	Variable negative_beyond_limit reads wider than implied negative	no	fixed/merged
+2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	nit	comment-accuracy	docs/style.md 1.9	dcfs/metadata_cache.h:110-113	LookupResult::implied doc disagrees with use on unrecorded negatives	no	fixed/merged
+2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	nit	test-shape	docs/style.md 2	dcfs/backing_test.cc:1458-1459	NameLimitTest::SetUp missing ASSERT_NO_FATAL_FAILURE around base SetUp	could	fixed/merged
 2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	nit	commit-hygiene	docs/style.md 7		Commit subject over 72 columns and body wrapping lines over 72	checked	open
-2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	should	model-gap	AGENTS.md	formal/dcfs.tla:571-586	TLA+ model does not allow resolving alone for names beyond limit in incomplete dir	no	open
+2026-10-18	12.24	1	dcfs-style-reviewer/claude-sonnet-5-5/high	should	model-gap	AGENTS.md	formal/dcfs.tla:571-586	TLA+ model does not allow resolving alone for names beyond limit in incomplete dir	no	fixed/merged
 2026-10-17	agents	1	gemini-3.8-flash-medium	none				dashboard quota	no	open
 2026-10-17	agents	1	gemini-3.8-flash-medium	none				dashboard lane states	no	open
 2026-10-17	agents	1	gemini-3.8-flash-medium	none				budget fix	no	open
