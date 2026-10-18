@@ -989,7 +989,7 @@ right after the code the model's step stands for, with no backing syscall
 | `ShutdownBegin`, `Checkpointed`, `CleanShutdownRecorded` | `backing::FinishRun` | `shutdown`, `checkpoint`, `clean` | `BeginShutdown`, `StopCkpt`, `StopFlag` | Shutdown |
 | `LifetimeChanged` | after every `++lookups_` (`ReplyEntry`, `Readdirplus`'s entries, `Create`, `Tmpfile`), a successful `Open`, the end of `Release`, each `Forget` and `ForgetMulti` entry, phase 3 of `RemoveChild` and of a rename over an object (`RefreshAfterRename`), and `backing::Startup`'s probe of a recovered row | (a nodeid's trace: `lookup`, `create`, `tmpfile`, `open`, `release`, `forget`, `removed`) | none in `dcfs.tla`; `lifetime.tla`'s ([below](#trace-validation-of-nodeids)) | Row lifetime; mmap after close |
 | `Destroyed` | the end of `DirCacheFS::Destroy` | (every nodeid's trace: `destroy`) | `lifetime.tla`'s `Destroy` | mmap after close |
-| `Interrupted` | `Checkpoint` (`dcfs/checkpoint.h`), when the request being served was interrupted | `interrupt` (a mutation's with its `End`, after an `interrupt_arrives` line at the checkpoint, step 22.5; a population's where it started, its reads abandoned); the request's `EINTR` reply is its `reply` | `T_Interrupt` (the arrival and the act, unless an `interrupt_arrives` line came first); `T_InterruptArrives`: from then on the checkpoint's only step is `Interrupt`, so a syscall line there is rejected (`trace_fault_checkpoint_ignored_test`) | Cancellation |
+| `Interrupted` | `Checkpoint` (`dcfs/checkpoint.h`), when the request being served was interrupted | `interrupt` (a mutation's with its `End`, after an `interrupt_arrives` line at the checkpoint, step 22.5; a population's where it started, its reads abandoned); the request's `EINTR` reply is its `reply` | `T_Interrupt` (the arrival and the act, unless an `interrupt_arrives` line came first); `T_InterruptArrives`: from then on the checkpoint's only step is `Interrupt`, so a syscall line there is rejected (`trace_fault_interruption_point_ignored_test`) | Cancellation |
 | `OutOfBandChange` | `backing::ReconcileAttrs`, when it adopts a change | `cut` | none (no out-of-band changes in the model) | Out-of-band change detection |
 | `InodeForgetting`, `InodeForgotten` | `cache::InvalidateInode` (and `DeleteInode`), before and after its DELETE | `gone`; `cut` (`invalidated`) | none. The recorder notes the present rows that point at the inode; once the (outermost) transaction has committed, a directory whose state changed by exactly those names becoming unknown is cut, any other change is `unexplained` | Identity model |
 
@@ -1256,7 +1256,7 @@ renames with flags and syscall failures.
   | `snapshot_after_syncfs`: a sync point's snapshot taken after its syncfs calls | `TraceScenarioMkdirDuringSync` | `unexplained` at `SyncfsStarting`: no snapshot right before |
   | `swallow_syscall_error`: an unlink's syscall reports EBUSY, which the request ignores, replying OK | `TraceScenarioUnlink` | `unexplained` at the request's reply: a syscall error the model does not have, and its request replied OK |
   | `create_syscall_before_phase1`: a create's syscall started before its phase 1, inside a readdir's population of the same directory | `TraceScenarioMkdirDuringListing` | `unexplained` at `MutationSyscallStarting`, written although the directory's lines were held for the listing |
-  | `checkpoint_ignored` (step 22.5): a checkpoint sees the request's interrupt, and its caller carries on to the syscall | `TraceScenarioInterruptedUnlink` | the unlink's `syscall` line, after its `interrupt_arrives` line: at a checkpoint the model's interrupted request may only take `Interrupt`. Before step 22.5 the recorder wrote nothing at that checkpoint (the interrupt's line waited for the `End`), and the trace was valid |
+  | `interruption_point_ignored` (step 22.5): an interruption point sees the request's interrupt, and its caller carries on to the syscall | `TraceScenarioInterruptedUnlink` | the unlink's `syscall` line, after its `interrupt_arrives` line: at an interruption point the model's interrupted request may only take `Interrupt`. Before step 22.5 the recorder wrote nothing at that interruption point (the interrupt's line waited for the `End`), and the trace was valid |
 
   For example:
 
@@ -1843,7 +1843,7 @@ between). For a mutation interrupted before its syscall it writes the act
 with the mutation's `End` (the model's `Interrupt` ends it), and, since
 step 22.5, an `interrupt_arrives` line at the checkpoint itself
 (`T_InterruptArrives`), so that a syscall the code took there instead is a
-line the model rejects: `trace_fault_checkpoint_ignored_test` (a caller
+line the model rejects: `trace_fault_interruption_point_ignored_test` (a caller
 that ignores its checkpoint's `EINTR`) is rejected at the unlink's
 `syscall` line, and was valid before. `trace_tests/interrupt_*.log` check
 the three cases on hand-written traces.

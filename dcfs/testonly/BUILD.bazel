@@ -295,8 +295,8 @@ cc_library(
 )
 
 cc_library(
-    name = "checkpoint_ignored",
-    srcs = ["checkpoint_ignored.cc"],
+    name = "interruption_point_ignored",
+    srcs = ["interruption_point_ignored.cc"],
     alwayslink = True,
     visibility = ["//dcfs:__pkg__"],
     deps = [

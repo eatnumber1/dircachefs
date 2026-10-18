@@ -1783,9 +1783,9 @@ void TraceRecorder::Interrupted(Context &ctx) {
       } else if (req.begun && !req.syscall_seen) {
         // Between its phase 1 and its syscall: the interrupt is visible
         // from here on (step 22.5: the model's InterruptArrives, after
-        // which the checkpoint's only step is Interrupt, so a syscall line
-        // instead is rejected), and the act's line comes with its End
-        // (MutationEnded).
+        // which the interruption point's only step is Interrupt, so a
+        // syscall line instead is rejected), and the act's line comes with
+        // its End (MutationEnded).
         Emit(ctx, dir, &req, "interrupt_arrives");
       } else {
         Emit(ctx, dir, &req, "interrupt");

@@ -34,7 +34,7 @@
 //dcfs:device_id_fault_test_bin
 //dcfs:device_id_test_bin
 //dcfs:dir_cache_fs_crash_during_recovery_test_bin
-//dcfs:dir_cache_fs_fault_checkpoint_ignored_test_bin
+//dcfs:dir_cache_fs_fault_interruption_point_ignored_test_bin
 //dcfs:dir_cache_fs_fault_create_syscall_before_phase1_test_bin
 //dcfs:dir_cache_fs_fault_sites_test_bin
 //dcfs:dir_cache_fs_poisoned_test_bin

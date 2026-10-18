@@ -7474,10 +7474,10 @@ TEST_F(DirCacheFSTest, MutationInterruptedAfterItsSyscallCompletes) {
   ctx_.interrupts = &NoInterrupts();
 }
 
-// An unlink interrupted at the checkpoint before its syscall, traced
-// (as MutationInterruptedBeforeItsSyscallLeavesItUnknown, without its
-// expectations: //dcfs:trace_fault_checkpoint_ignored_test runs it with a
-// caller that ignores the checkpoint's EINTR, step 22.5).
+// An unlink interrupted at the interruption point before its syscall,
+// traced (as MutationInterruptedBeforeItsSyscallLeavesItUnknown, without its
+// expectations: //dcfs:trace_fault_interruption_point_ignored_test runs it
+// with a caller that ignores the interruption point's EINTR, step 22.5).
 TEST_F(DirCacheFSTest, TraceScenarioInterruptedUnlink) {
   WriteFile(Path("f"));
   Start();

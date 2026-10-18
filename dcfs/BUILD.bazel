@@ -1336,8 +1336,9 @@ test_suite(
 #       phase 1, inside a readdir's population of the same directory.
 #   swallow_syscall_error: an unlink's syscall reports an error the model
 #       does not have, which the request ignores, replying OK.
-#   checkpoint_ignored: a checkpoint sees the request's interrupt, and its
-#       caller (an unlink's) carries on to its syscall (step 22.5).
+#   interruption_point_ignored: an interruption point sees the request's
+#       interrupt, and its caller (an unlink's) carries on to its syscall
+#       (step 22.5).
 # Mangled with libc++ (std::__1::basic_string_view): the toolchain's standard
 # library. `llvm-nm` on the object shows the names to wrap.
 BEGIN_REMOVE = "_ZN4dcfs5cache11BeginRemoveERNS_7ContextElNSt3__117basic_string_viewIcNS3_11char_traitsIcEEEElNS0_12FillSnapshotE"
@@ -1348,7 +1349,7 @@ BEGIN_CREATE = "_ZN4dcfs5cache11BeginCreateERNS_7ContextElNSt3__117basic_string_
 
 UNLINK_AT = "_ZN4dcfs7backing8UnlinkAtERNS_7ContextERKNS_11CredentialsElNSt3__117basic_string_viewIcNS6_11char_traitsIcEEEEi"
 
-CHECKPOINT = "_ZN4dcfs10CheckpointERNS_7ContextENSt3__117basic_string_viewIcNS2_11char_traitsIcEEEE"
+CHECK_INTERRUPTED = "_ZN4dcfs16CheckInterruptedERNS_7ContextENSt3__117basic_string_viewIcNS2_11char_traitsIcEEEE"
 
 DIR_CACHE_FS_FAULTS = {
     "skip_mark_unknown": dict(
@@ -1392,12 +1393,12 @@ DIR_CACHE_FS_FAULTS = {
         # The reply: OK, after a syscall error the model does not have.
         event = "\"c\":\"RequestEnd\",\"ev\":\"unexplained\",\"why\":\"a syscall error the model does not have: .*EBUSY.*, and its request replied OK\"",
     ),
-    "checkpoint_ignored": dict(
-        wraps = [CHECKPOINT],
+    "interruption_point_ignored": dict(
+        wraps = [CHECK_INTERRUPTED],
         test = "TraceScenarioInterruptedUnlink",
-        # The unlinkat, after the checkpoint saw the interrupt (its
-        # interrupt_arrives line): at a checkpoint the model's interrupted
-        # request may only take Interrupt.
+        # The unlinkat, after the interruption point saw the interrupt (its
+        # interrupt_arrives line): at an interruption point the model's
+        # interrupted request may only take Interrupt.
         event = "\"c\":\"MutationSyscall\",\"ev\":\"syscall\"",
     ),
 }

@@ -669,8 +669,8 @@ TEST_F(TraceRecorderTest, InterruptedRequestsReplyEintr) {
   ASSERT_THAT(evs, ::testing::ElementsAre(
                        "begin", "lookup", "interrupt", "reply", "phase1",
                        "interrupt_arrives", "interrupt", "reply"));
-  // The mkdir's interrupt_arrives line is written at the checkpoint, its
-  // interrupt line after its End: no mutation in flight then.
+  // The mkdir's interrupt_arrives line is written at the interruption
+  // point, its interrupt line after its End: no mutation in flight then.
   EXPECT_THAT(lines[5], HasSubstr("\"c\":\"Interrupted\""));
   EXPECT_THAT(lines[6], HasSubstr("\"inflight\":0"));
   // Each reply line carries the request's EINTR (step 12.7b).

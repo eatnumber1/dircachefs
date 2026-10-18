@@ -853,7 +853,7 @@ TRACE_TESTS = {
     # ... and a lookup that says the cache answered negative for an unknown
     # name (LookupOutcome; reply_lookup_answer is the valid one).
     "lookup_outcome_wrong": "\"ev\":\"lookup\"",
-    # Step 22.5: an unlink's checkpoint before its syscall sees the
+    # Step 22.5: an unlink's interruption point before its syscall sees the
     # interrupt (its interrupt_arrives line), and the unlink ends without
     # its syscall and replies EINTR (4): valid ...
     "interrupt_before_syscall": None,

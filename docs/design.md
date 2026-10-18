@@ -1858,7 +1858,7 @@ directory's names waits for the rest of them; and a readdir's population
 (not a lookup's) has none before its reads, and an empty directory's
 none at all. Trace validation holds the code to the obligation where the
 code sees the interrupt: a mutation's checkpoint that saw it and then took
-the syscall would be rejected (`trace_fault_checkpoint_ignored_test`).
+the syscall would be rejected (`trace_fault_interruption_point_ignored_test`).
 
 **What cannot be interrupted yet**: a backing syscall already blocked in
 the kernel: the first I/O to a disk spinning up (seconds), a hung network
