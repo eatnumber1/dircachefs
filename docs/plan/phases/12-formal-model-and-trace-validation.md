@@ -845,7 +845,15 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
   PATH_MAX is "the real kernel limit on a possible path component, not
   NAME_MAX"; FUSE allows FUSE_NAME_MAX = PATH_MAX - 1, fs/fuse/fuse_i.h:45).
   Behave like the backing: use the backing's own limit, statfs(2) f_namelen,
-  read at mount. Part of the deferred per-filesystem limits question.
+  read at mount. Decided (russ, 2026-10-17: the hybrid) and done by "12.24:
+  names longer than the backing's f_namelen go to the backing": a name of at
+  most `ctx.name_max` (f_namelen, read by `InitRoot`) is answered from the
+  cache as before; a longer one skips the cache and is resolved alone on
+  the backing (ENAMETOOLONG on ext4, xfs and btrfs, recorded nowhere);
+  `formal/dcfs.tla` LKFrom allows that path.
+  Tests: `NameLimitTest` in dcfs/backing_test.cc (a fake f_namelen of 16);
+  no vfat differential test (no vfat mkfs in test/qemu). Per-filesystem
+  xattr limits stay deferred.
 - cpio (found 2026-10-17): `.github/ci/prepare.sh:40` installs `cpio` on the
   CI host, but nothing uses it: `test/qemu/scripts/mkinitramfs.sh:333`
   packs the initramfs with the pinned busybox's own `cpio` (the host one was

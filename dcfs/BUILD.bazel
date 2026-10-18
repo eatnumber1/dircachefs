@@ -1784,6 +1784,7 @@ qemu_cc_test(
     size = "small",
     timeout = "short",
     srcs = ["backing_test.cc"],
+    linkopts = ["-Wl,--wrap=fstatfs64"],  # NameLimitTest's fake f_namelen
     disks = [("vdb", "ext4", "32M")],  # ProbeRoot/InitRoot need GetDeviceId (FS_IOC_GETFSUUID), which tmpfs doesn't support
     deps = [
       ":backing",

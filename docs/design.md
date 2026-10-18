@@ -127,6 +127,25 @@ practice:
   does. A lookup resolves one name and caches the answer; a directory
   completes only when a client reads its listing to the end (plan step
   22.7).
+- **Name limits are the backing's.** russ, 2026-10-17. NAME_MAX (255) is
+  not the kernel's limit on a path component (`fs/readdir.c:146-148`:
+  PATH_MAX is "the real kernel limit on a possible path component, not
+  NAME_MAX"; FUSE allows `FUSE_NAME_MAX` = PATH_MAX - 1,
+  `fs/fuse/fuse_i.h:45`), so dcfs imposes none of its own: it reads the
+  source's `f_namelen` once (`fstatfs(2)`, `Context::name_max`), and a name
+  longer than that skips the cache and is resolved alone on the backing,
+  even in an incomplete directory (nothing populates). A complete listing
+  would answer ENOENT where the backing answers ENAMETOOLONG (pjdfstest
+  `chmod/02.t`). On the supported backings `f_namelen` is the exact byte
+  limit and lookup checks it before any I/O (Linux v7.3-rc4: ext4
+  `fs/ext4/super.c:7011`, `fs/ext4/namei.c:1768-1769`; xfs
+  `fs/xfs/xfs_super.c:982`, `fs/xfs/xfs_iops.c:322-323`; btrfs
+  `fs/btrfs/super.c:1815`, `fs/btrfs/inode.c:6094-6095`), so no over-long
+  name is ever present in the cache, and the ENAMETOOLONG answer is
+  recorded nowhere (see "Bounded memory"). Supporting a filesystem whose
+  lookup limit differs from its `f_namelen` (exfat reports a byte upper
+  bound, 255 * 6, for a limit of 255 UTF-16 units) means revisiting this
+  check.
 - **No stronger and no weaker guarantees.** A guarantee the backing does
   not give is not given by dcfs either (a listing is not a snapshot: POSIX
   leaves entries added or removed during it unspecified), and a guarantee
@@ -152,7 +171,14 @@ the configured caches (SQLite's `cache_size`) plus that, times the requests
 in flight (bounded by the thread pool). Sizes the kernel bounds (names,
 paths, xattr values up to 64 KiB) count as bounded. The cache database
 itself grows with the filesystem by design; the bound is on working
-memory. Any exception is a recorded decision with its reason. The model
+memory. Any exception is a recorded decision with its reason. One case of
+the rule: an ENAMETOOLONG answer for an over-long name is not recorded
+("Behave like the backing", "Name limits are the backing's"). The backing
+checks the length before it reads any directory block (`ext4_lookup`,
+`fs/ext4/namei.c:1768-1769`; `fs/xfs/xfs_iops.c:323`;
+`fs/btrfs/inode.c:6095`), so asking costs a syscall and no disk I/O (no
+spin-up), while recording it would need a new dentry state and a row per
+probed junk name, which grows without bound. The model
 bounds the items buffered per request (`formal/README.md`, "Changing the
 model"), and plan step 26.41 measures allocations at two sizes and holds
 the slope at zero.

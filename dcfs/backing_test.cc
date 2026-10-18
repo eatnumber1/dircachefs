@@ -55,6 +55,21 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
+// The f_namelen fstatfs(2) reports for every descriptor while set: a
+// filesystem with a small name limit, which no mkfs we have can make.
+namespace {
+std::optional<int64_t> g_fake_namelen;
+}  // namespace
+
+extern "C" {
+int __real_fstatfs64(int fd, struct statfs64 *buf);
+int __wrap_fstatfs64(int fd, struct statfs64 *buf) {
+  int rc = __real_fstatfs64(fd, buf);
+  if (rc == 0 && g_fake_namelen.has_value()) buf->f_namelen = *g_fake_namelen;
+  return rc;
+}
+}
+
 namespace dcfs::backing {
 namespace {
 
@@ -1437,6 +1452,66 @@ TEST(BackingCredentialsTest, SetgroupsIsPerThread) {
   absl::c_sort(in_main_meanwhile);
   EXPECT_EQ(in_main_meanwhile, sorted_original);
   EXPECT_THAT(GetGroups(), absl_testing::IsOkAndHolds(*original));
+}
+
+// A mount whose backing reports f_namelen == 16 (step 12.24): a name up to
+// that is answered from a complete listing; a longer one always goes to the
+// backing.
+class NameLimitTest : public BackingTest {
+ protected:
+  void SetUp() override {
+    g_fake_namelen = 16;
+    ASSERT_NO_FATAL_FAILURE(BackingTest::SetUp());
+    WriteFile(Path(std::string(17, 'e')), "long");
+  }
+  void TearDown() override {
+    BackingTest::TearDown();
+    g_fake_namelen.reset();
+  }
+};
+
+TEST_F(NameLimitTest, NamesWithinTheLimitAreAnsweredFromTheCache) {
+  ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
+  uint64_t before = ctx_.backing_calls;
+  EXPECT_THAT(LookupOrPopulate(ctx_, kRootInode, std::string(16, 'm')),
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
+  EXPECT_EQ(ctx_.backing_calls, before);
+}
+
+TEST_F(NameLimitTest, LongerNamesGoToTheBackingEveryTime) {
+  ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
+  for (int i = 0; i < 2; ++i) {
+    // Present in the listing, yet not answered from the cache.
+    uint64_t before = ctx_.backing_calls;
+    EXPECT_THAT(LookupOrPopulate(ctx_, kRootInode, std::string(17, 'e')),
+                IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
+    EXPECT_GT(ctx_.backing_calls, before) << "lookup " << i;
+    // Over the real limit too: the backing's ENAMETOOLONG, never recorded.
+    before = ctx_.backing_calls;
+    absl::StatusOr<LookupResult> result =
+        LookupOrPopulate(ctx_, kRootInode, std::string(256, 'x'));
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(ErrnoOf(result.status()), ENAMETOOLONG) << result.status();
+    EXPECT_GT(ctx_.backing_calls, before) << "lookup " << i;
+  }
+}
+
+TEST_F(NameLimitTest, ALongNameInAnIncompleteDirectoryIsResolvedAlone) {
+  ASSERT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
+  EXPECT_THAT(LookupOrPopulate(ctx_, kRootInode, std::string(17, 'm')),
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
+  // Nothing listed the directory.
+  EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
+}
+
+// pjdfstest chmod/02.t: the backing's own answer for a name past its limit,
+// from a complete listing.
+TEST_F(BackingTest, NameBeyondTheBackingsLimitGetsItsEnametoolong) {
+  ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
+  absl::StatusOr<LookupResult> result =
+      LookupOrPopulate(ctx_, kRootInode, std::string(256, 'x'));
+  ASSERT_FALSE(result.ok());
+  EXPECT_EQ(ErrnoOf(result.status()), ENAMETOOLONG) << result.status();
 }
 
 }  // namespace

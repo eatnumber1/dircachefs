@@ -14,7 +14,7 @@
 
 #include <fcntl.h>
 #include <linux/fs.h>      // FS_IOC_GETVERSION
-#include <linux/limits.h>  // NAME_MAX (255, the generic Linux VFS cap)
+#include <linux/limits.h>  // PATH_MAX, XATTR_*
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/statvfs.h>
@@ -599,6 +599,7 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
 struct RootProbe {
   RootIdentity identity;
   struct statx stx{};
+  size_t name_max = 0;
 };
 
 absl::StatusOr<RootProbe> Probe(Context &ctx, int source_fd) {
@@ -608,6 +609,9 @@ absl::StatusOr<RootProbe> Probe(Context &ctx, int source_fd) {
   ASSIGN_OR_RETURN(probe.identity.device_id, GetDeviceId(source_fd));
   ASSIGN_OR_RETURN(struct statfs sfs, syscalls::fstatfs(source_fd));
   probe.identity.fstype = static_cast<int64_t>(sfs.f_type);
+  // ext4, xfs and btrfs report their exact byte limit (255; Linux v7.3-rc4
+  // fs/ext4/super.c:7011, fs/xfs/xfs_super.c:982, fs/btrfs/super.c:1815).
+  probe.name_max = static_cast<size_t>(sfs.f_namelen);
   ASSIGN_OR_RETURN(probe.stx,
                    syscalls::statx(source_fd, "", AT_EMPTY_PATH, kAttrMask));
   if (!S_ISDIR(probe.stx.stx_mode)) {
@@ -653,6 +657,7 @@ absl::Status InitRoot(Context &ctx, FileDescriptor source_fd) {
               : (vfs.f_flag & ST_RELATIME) ? AtimePolicy::kRelative
                                            : AtimePolicy::kStrict;
   ctx.source_read_only_at_start = (vfs.f_flag & ST_RDONLY) != 0;
+  ctx.name_max = probe.name_max;
   absl::Status inserted = ctx.mounts.Insert(device, std::move(source_fd));
   if (!inserted.ok() && !absl::IsAlreadyExists(inserted)) return inserted;
   return absl::OkStatus();
@@ -1547,31 +1552,23 @@ absl::StatusOr<cache::LookupResult> WithStub(cache::LookupResult result,
 absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
                                                      InodeId parent,
                                                      std::string_view name) {
-  // A name this long can never be a real directory entry on any local
-  // filesystem this daemon backs onto (ext4/btrfs/xfs all cap a single
-  // path component at NAME_MAX, the generic Linux VFS limit): reject it
-  // outright rather than falling through to the "directory listing is
-  // complete and doesn't have it" negative-entry path below, which would
-  // otherwise misreport ENOENT (found via pjdfstest's chmod/02.t: a name
-  // one byte past NAME_MAX got ENOENT once the parent directory's listing
-  // was already cached, instead of ENAMETOOLONG). A name that reaches an
-  // actual backing syscall (create, mkdir, ...) already gets ENAMETOOLONG
-  // for free from the real filesystem; this only covers the pure-lookup
-  // fast path, which never touches the backing filesystem at all once a
-  // directory is known complete.
-  if (name.size() > NAME_MAX) {
-    return ErrnoToStatus(
-        ENAMETOOLONG,
-        absl::StrCat("Path component of ", name.size(), " bytes is too long: ",
-                     EscapeBytes(name.substr(0, 32)), "..."));
-  }
+  // A name longer than the backing's limit skips the cache and is resolved
+  // alone on the backing, which answers ENAMETOOLONG (ext4, xfs and btrfs
+  // check the length before any I/O: Linux v7.3-rc4 fs/ext4/namei.c:1768,
+  // fs/xfs/xfs_iops.c:323, fs/btrfs/inode.c:6095). A complete listing would
+  // answer ENOENT (pjdfstest chmod/02.t); the error is recorded nowhere
+  // (docs/design.md, "Name limits are the backing's").
+  bool long_name = name.size() > ctx.name_max;
   events::Scope scope(*ctx.events, ctx, &ProtocolEvents::LookupBegin,
                       &ProtocolEvents::LookupEnd, parent, name);
   // The frame's result is its End's status.
   absl::StatusOr<cache::LookupResult> answer =
       [&]() -> absl::StatusOr<cache::LookupResult> {
-    ASSIGN_OR_RETURN(cache::LookupResult result,
-                     cache::Lookup(ctx, parent, name));
+    cache::LookupResult result{.kind = cache::LookupResult::Kind::kUnknown,
+                               .id = 0};
+    if (!long_name) {
+      ASSIGN_OR_RETURN(result, cache::Lookup(ctx, parent, name));
+    }
     // `name` is a persisted refusal (see ProbeChild/cache::SetRefused): it
     // exists on the backing filesystem but dcfs will not cache across it, so
     // this must never be reported as absent -- it is its stub, straight from
@@ -1595,18 +1592,20 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
     // An unknown name in a complete listing (e.g. left by a mutation's phase
     // 1, or an invalidation): everything else is known, so resolve just it
     // (audit F7) rather than relisting the directory.
-    ASSIGN_OR_RETURN(bool listed, cache::ChildrenComplete(ctx, parent));
+    ASSIGN_OR_RETURN(bool complete, cache::ChildrenComplete(ctx, parent));
+    // Whatever the listing, a name past the limit is resolved alone.
+    bool resolve_alone = complete || long_name;
     // Model: LookupStep (or the request's Arrive) going to the backing
     // filesystem; no syscall since the cache read.
     ctx.events->LookupDecided(ctx, parent, name,
-                              listed ? events::LookupOutcome::kResolve
-                                     : events::LookupOutcome::kPopulate,
+                              resolve_alone ? events::LookupOutcome::kResolve
+                                            : events::LookupOutcome::kPopulate,
                               0);
     // Before the probe or the population's I/O (formal/dcfs.tla's
     // Interrupt at RN_probe, PD_read).
     RETURN_IF_ERROR(CheckInterrupted(
-        ctx, listed ? "resolving a name" : "listing a directory"));
-    if (listed) {
+        ctx, resolve_alone ? "resolving a name" : "listing a directory"));
+    if (resolve_alone) {
       ASSIGN_OR_RETURN(result, ResolveName(ctx, parent, name));
       return WithStub(result, parent, name);
     }

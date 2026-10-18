@@ -391,7 +391,8 @@ enum class LookupOutcome {
   kFound,     // served from the cache: present
   kNegative,  // served from the cache: absent
   kRefused,   // served from the cache: a refused boundary (EXDEV)
-  kResolve,   // unknown in a complete listing: ResolveName
+  kResolve,   // ResolveName: unknown in a complete listing, or a name past
+              // the backing's limit (whatever the cache holds)
   kPopulate,  // unknown, listing incomplete: PopulateDirectory
 };
 

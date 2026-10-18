@@ -319,10 +319,14 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir);
 
 // Looks `name` up in `parent`, resolving it from the backing filesystem if
 // the cache cannot answer: by ResolveName if `parent`'s listing is
-// complete (only `name` is unknown), else by populating `parent`. Never
-// returns kUnknown. A refused boundary is kRefused with its stub; if its
-// stub could not be recorded (a concurrent mutation of `parent` kept the
-// listing or probe from recording anything), EAGAIN.
+// complete (only `name` is unknown), else by populating `parent`. A name
+// longer than ctx.name_max is resolved alone whatever the cache holds, even
+// if `parent` is incomplete (nothing populates); the backing's ENAMETOOLONG
+// is returned and recorded nowhere (docs/design.md, "Name limits are the
+// backing's"; pjdfstest chmod/02.t). Never returns kUnknown. A refused boundary
+// is kRefused with its stub; if its stub could not be recorded (a concurrent
+// mutation of `parent` kept the listing or probe from recording anything),
+// EAGAIN.
 //
 // Every object it records is checked against the backing inode numbers
 // reserved for stubs (>= 2^63): one in that range fails the lookup (and

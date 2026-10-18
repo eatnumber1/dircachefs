@@ -2,6 +2,8 @@
 #ifndef DCFS_CONTEXT_H_
 #define DCFS_CONTEXT_H_
 
+#include <linux/limits.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -141,6 +143,11 @@ struct Context {
   // not, a sync point that finds it read-only fails (backing::SyncBacking,
   // steps 11.5, 11.5b).
   bool source_read_only_at_start = false;
+  // The longest name, in bytes, the source filesystem accepts: its
+  // statfs(2) f_namelen, read by InitRoot. A longer name is never answered
+  // from the cache (backing::LookupOrPopulate). The default is what a
+  // Context nothing has initialised has.
+  size_t name_max = NAME_MAX;
   // The protocol events (dcfs/protocol_events.h): records nothing in
   // production; trace validation's recorder in the testonly builds. Never
   // null; not owned.
