@@ -57,6 +57,9 @@ use it as design guidance rather than firm rules."
   (Google shell style) follow in 7.6b with their pins. The one-time
   reformat is one commit, listed in `.git-blame-ignore-revs`, made when no
   lane holds an unmerged code branch, since it touches most lines.
+- **A mechanical reformat commit** (clang-format, shfmt) may use the `style:`
+  commit prefix (section 7) and is listed in `.git-blame-ignore-revs`
+  (orchestrator ruling, 2026-10-18).
 - **Structural style rules are checked by the pinned LLVM's own tools, in a
   test of tier `small`** (25.21): `//tools:style_checks_test` runs
   clang-tidy (`.clang-tidy`: the `google-`, `abseil-`, `bugprone-`, `cert-`,
@@ -86,6 +89,10 @@ use it as design guidance rather than firm rules."
   finds missing and unused includes, both with phase 7's clang toolchain
   (F6). Until then, state each direct dep in BUILD and add no include that
   nothing uses.
+- **A POSIX macro that include-cleaner attributes to a C header is included
+  from that header.** A macro such as `WIFEXITED`, `SIGKILL` or `SEEK_SET`
+  gets `NOLINTNEXTLINE(modernize-deprecated-headers)` on its include, with the
+  reason in the comment directly above it (orchestrator ruling, 2026-10-18).
 - **No copies of UAPI definitions.** The pinned sysroot's kernel headers
   (`<linux/fs.h>` and the rest of trixie's linux-libc-dev, step 7.1b) are
   the only source of a kernel constant, struct or ioctl number: no
@@ -519,7 +526,8 @@ scanned: `tools/fhtest.c` is a copy of fuse-generation-qemu's
 `tools/testutil.c` is a C program for the guest, kept in C alongside it;
 neither can use the C++ wrappers; and `tools/banned_symbols_fixture.cc`
 makes banned calls on purpose. `//tools:raw_syscalls_test` enforces the rule
-over `dcfs/`, `dcfs/testonly/` and `bench/` (`test/qemu/` joins it in 25.39;
+over `dcfs/`, `dcfs/testonly/`, `bench/` and `test/qemu/` (`test/qemu/`
+from 25.34;
 names in
 `tools/raw_syscalls_names.txt`). It cannot catch a call through a macro or
 function pointer, a name not in the list, a stream or filesystem type named
@@ -781,10 +789,6 @@ doubles the strerror suffix). `status_dropped` reports
 a failure branch (`if (!s.ok()) return false;`) that never mentions the status
 (report only: some are legitimate domain answers, such as a predicate that is
 false when the probe failed).
-
-Serializing a status across a process boundary may call `.message()` to carry
-it beside its code and payloads (`EncodeChildResult` in
-`test/qemu/guest/guest.cc`, orchestrator ruling, 2026-10-18); nothing else may.
 
 **Return a failed status or log it, never both** (1.7).
 
@@ -1489,6 +1493,11 @@ necessary, but if you think one is necessary, come to me."
   GoogleTest binaries, `qemu_test`/`qemu_test_matrix` for guest scripts
   (`test/qemu/README.md`). Host-side tests need neither root nor a kernel
   (Python, shell smoke tests of pinned tools, TLC, `//tools:format_test`).
+- **Suite-wide state.** State that tests read is a static
+  `absl::NoDestructor<State>` reached through a function. A resource no test
+  reads (a mount that only has to exist) is a `::testing::Environment`.
+  Neither uses a raw `new` pointer (orchestrator ruling, 2026-10-18, from the
+  25.34 round-2 style review).
 - **GoogleTest.** `TEST_F(<Subject>Test, ...)` with a fixture (220 of 299
   tests; plain `TEST` 79); a `PascalCase` sentence for the behavior
   (`RecycledInodeNumberGetsANewRow`). No `DISABLED_` (0 uses): fix or
@@ -1550,6 +1559,9 @@ necessary, but if you think one is necessary, come to me."
   `FakeChannel` in `fuse_request_channel_test.cc`). Syscall faults are
   link-time `-Wl,--wrap=<symbol>` fakes in a test target of their own, so
   the wrap affects no other test (`dcfs/BUILD.bazel:225-246`).
+- **A test helper does not reuse a production struct** whose extra fields it
+  would silently ignore (`guest.h`'s `Identity` is not `dcfs::Credentials`;
+  orchestrator ruling, 2026-10-18, from the 25.34 round-2 style review).
 - **The forged-request harness** (`dir_cache_fs_test.cc`,
   `fuse_request_channel_test.cc`): a real libfuse session with
   `fuse_session_custom_io()` fed hand-built requests through
@@ -1690,7 +1702,9 @@ spaces."). A tab-indented file is converted, in one commit, by
   caveats belong to `CLAUDE.md`, not scripts.
 - **A guest script converts to `shfmt -i 2` in its own style** (orchestrator
   ruling, 2026-10-18): the conversion is committed before new lines are added
-  to the script, and no new line is tab-indented.
+  to the script, and no new line is tab-indented. The conversion is a
+  mechanical reformat (1.1): its commit uses the `style:` prefix and is listed
+  in `.git-blame-ignore-revs`.
 - **A new guest script is thin glue** (orchestrator ruling, 2026-10-18, from
   the 17.6 style review): it sources `lib.sh`, uses its helpers, defines no
   functions and ends by running one C++ binary. Until 25.34's helpers land,
@@ -1787,8 +1801,8 @@ protocol event (`dcfs/protocol_events.h`) and `Trace.tla` action;
   rest.
 - **Commit subject**: `N.M: area: what changed` for a plan step (`23.4:
   copy_file_range, the ioctl allowlist and O_TMPFILE`); `plan:`, `notes:`
-  and `agents:` for orchestrator edits, notes and agent instructions. No
-  trailing period; about 72 columns (62 of 323 are longer).
+  and `agents:` for orchestrator edits, notes and agent instructions, and
+  `style:` for a mechanical reformat (1.1). No trailing period; about 72 columns (62 of 323 are longer).
 - **Commit body**: wrapped at 72, says why. A bug fix or behavior change
   quotes the failing-first run under a "Failing first" heading (about 30
   bodies), then the model and test results. It ends with the model's

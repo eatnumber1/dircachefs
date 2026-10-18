@@ -1498,6 +1498,17 @@ Steps:
      `path:line (Linux vX)` in code and docs is checked against that tag in
      the pinned kernel source. Wrong line numbers were review findings in
      22.5, 17.6 and 25.28b.
+   - No production caller (russ, 2026-10-18, asking whether a dead-code check
+     would have flagged `syscalls::kill` and `syscalls::waitpid`). Today
+     `-Weverything` catches only unused statics, locals, parameters and
+     private fields; the coverage gate counts a function as covered when only
+     its own test calls it; mutation testing is weekly. The check links every
+     shipped binary (`dcfs`, `mount.dcfs`, the umount helper, `fsck.dcfs`, and
+     the shipped tools) with `-ffunction-sections -Wl,--gc-sections
+     -Wl,--print-gc-sections` for our code, collects the functions of ours
+     that the linker discards (no shipped caller), and fails on any not in an
+     allowlist with a reason. `testonly` targets are excluded. It is a Bazel
+     test, so it runs before review.
 4. Items for this step, not done by the clerk:
    - `tools/agents/foreman.py`'s review prompt (`run_review`) takes the
      findings block format from the reviewer agents
@@ -1602,7 +1613,7 @@ draft's step, numbered 25.41 (the draft's working number was 25.34b, and
 - (c) Order: it lands before 25.35–25.38, so strong types and spans land once on the final interfaces.
 - (d) Owner: dcfs-protocol for sub-steps 6 and 7 (the fault and trace-validation tests touch the protocol's negative tests); dcfs-implementer otherwise.
 
-## 25.42 Pidfds over pids (russ, 2026-10-18; queued after the Friday quota reset)
+## 25.42 Pidfds over pids (russ, 2026-10-18; queued after the 2026-10-23 quota reset)
 
 Russ's rule (2026-10-18): "Prefer pidfds over plain pids"
 ([`docs/style.md`] section 1.5). A child or daemon is held as an owned pidfd,
@@ -1621,12 +1632,36 @@ its daemon as a pidfd here, not as the `std::optional<pid_t>` that 25.34
 keeps. Wrappers the steps need (`clone3`, `pidfd_open`, `pidfd_send_signal`,
 `waitid`) are added to the syscall libraries with tests.
 
-The check (from the 25.41 review, moved here from 25.39 by the 2026-10-18
-correction): no calls to the pid-based wrappers (`syscalls::kill`,
-`syscalls::waitpid`, `tgkill`) once pidfd equivalents exist, except in
-allow-listed places where only a pid works, each with its reason. Raw calls
-are already caught by `//tools:raw_syscalls_test`, so this check covers the
-wrappers. It lands with this step, not in 25.39. It fails first on a fixture
-that calls `syscalls::kill`.
+The deletion (russ, 2026-10-18, superseding the earlier "flag calls to
+pid-based wrappers" wording): once every caller holds a pidfd, delete
+`syscalls::kill`, `syscalls::waitpid` and any `tgkill` wrapper. The compiler
+then enforces the rule, and `//tools:raw_syscalls_test` and `banned_symbols`
+keep raw calls out, so no new check is needed. A wrapper survives only if a
+caller truly has nothing but a pid (for example a pid read from a file, where
+opening `/proc/<pid>` is the alternative to try first), and each survivor is
+recorded with its reason beside the wrapper.
 
 Owner: dcfs-implementer. Dependencies: none stated by russ.
+
+## 25.43 Log a SQLite rollback only when it fails (russ, 2026-10-18; queued, not started)
+
+The warning "rolling back a failed transaction failed: ... no transaction is
+active" is misleading when SQLite has already rolled the transaction back by
+itself, as after SQLITE_FULL. Found by the CI investigation of run
+39138000104.
+
+Fix: `UnwindFailedTransaction` (`dcfs/sqlite.cc`, near line 466) checks
+`Connection::InTransaction()` and skips the ROLLBACK when the transaction has
+already ended. A real rollback failure still logs.
+
+Steps:
+
+1. Test first: a unit test makes a commit fail with SQLITE_FULL, using the
+   existing "cache full" abort-trigger pattern in `dcfs/dir_cache_fs_test.cc`,
+   and asserts no warning with `ScopedMockLog`. Quote the failing run. A second
+   test makes a real rollback fail and asserts that it still logs.
+2. Fix `UnwindFailedTransaction` as above.
+
+Test: the two new tests, then `bazel test --config=fast //dcfs/...`.
+
+Owner: dcfs-implementer. Dependencies: none.

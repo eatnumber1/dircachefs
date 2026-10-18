@@ -102,3 +102,7 @@ ab630c0c993aa990b	2026-10-18T15:30:56Z	25.34	implementation	dcfs-implementer	cla
 a342812217938e5c4	2026-10-18T15:30:56Z	25.28b	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
 a0dd7db48d87cff4c	2026-10-18T15:41:45Z	Clerk batch 14	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
 ad91a3a1a6cff3c90	2026-10-18T16:01:26Z	Clerk batch 15	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+ac25a1b33b14b88fc	2026-10-18T16:04:40Z	25.34	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
+ab07b1ef7a7e5b484	2026-10-18T16:16:06Z	style-statustostring	investigation	dcfs-investigator	claude-sonnet-5-5	high									
+a60886a14f37538d6	2026-10-18T16:36:37Z	Fix known_bug deadlock config	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+a7e3fadefe5992fe6	2026-10-18T16:40:13Z	Clerk batch 16	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
