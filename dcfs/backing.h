@@ -171,23 +171,22 @@ absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset);
 // FUSE_CAP_PASSTHROUGH granted the kernel writes directly against `fd` and
 // this is never called. Returns the number of bytes written (always
 // `buf.size()` on success; a short write only happens on an error, which is
-// then returned instead). Runs as the caller (AsCaller), so that an
-// unprivileged write clears setgid on a file without group execute.
+// then returned instead). Runs as the caller keeping CAP_FSETID
+// (backing.cc's AsCallerKeepingCapFsetid), so it removes no setuid or
+// setgid itself: the kernel's SETATTR before it did (DirCacheFS::Setattr).
 absl::StatusOr<size_t> WriteFile(const Credentials &caller, int fd,
                                  std::span<const char> buf, off_t offset);
 
 // fallocate(2) on `fd` (as ReadFile/WriteFile, an already-open, identity
 // verified real fd -- DirCacheFS::Fallocate's shared per-inode backing fd).
-// Runs as the caller (AsCaller), so that an unprivileged fallocate/punch/zero
-// clears setgid on a file without group execute.
+// Runs as the caller keeping CAP_FSETID, as WriteFile does.
 absl::Status FallocateFd(const Credentials &caller, int fd, int mode,
                          off_t offset, off_t length);
 
 // copy_file_range(2) between two such fds (DirCacheFS::CopyFileRange, step
 // 23.4): the backing filesystem's own copy, which on btrfs and xfs shares
 // the extents (a reflink) where it can. Returns how many bytes it copied.
-// Runs as the caller (AsCaller), so that an unprivileged copy clears setgid
-// on a file without group execute.
+// Runs as the caller keeping CAP_FSETID, as WriteFile does.
 absl::StatusOr<size_t> CopyFileRangeFd(const Credentials &caller, int fd_in,
                                        off_t off_in, int fd_out, off_t off_out,
                                        size_t len, unsigned int flags);

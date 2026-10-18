@@ -6784,10 +6784,15 @@ std::vector<gid_t> ThreadGroups() {
   });
 }
 
-// Step 17.2: fallocate by a caller outside the file's group clears the setgid
-// bit on a file without group execute (02666 -> 0666). Group-member and root
-// callers keep it.
-TEST_F(DirCacheFSTest, FallocateByCallerOutsideGroupClearsSetgid) {
+// Steps 17.2 and 17.2e: the fallocate itself removes no privileges, from
+// root, a group member or a caller outside the file's group alike: it runs
+// with CAP_FSETID. A caller without CAP_FSETID has the kernel send the
+// SETATTR that sets nothing first (file_modified, fs/fuse/file.c:2881
+// (Linux v7.3-rc7)), which removes them
+// (EmptySetattrOfAFileOpenForWritingDropsSetuidAndSetgidAsAWrite); with no
+// SETATTR before it, as here, the caller holds CAP_FSETID or the file
+// carries nothing to remove.
+TEST_F(DirCacheFSTest, FallocateRemovesNoPrivilegesItself) {
   auto restore_groups = WithThreadGroups({1000});
 
   WriteFile(Path("f_root"), "data");
@@ -6832,7 +6837,7 @@ TEST_F(DirCacheFSTest, FallocateByCallerOutsideGroupClearsSetgid) {
     EXPECT_EQ(Release(f_grp, fh).error, 0);
   }
 
-  // Outside group: unprivileged caller outside group drops setgid.
+  // Outside the group: kept too.
   {
     auto [open, fh] = Open(f_out, O_WRONLY);
     ASSERT_EQ(open.error, 0);
@@ -6840,80 +6845,18 @@ TEST_F(DirCacheFSTest, FallocateByCallerOutsideGroupClearsSetgid) {
         Fallocate(f_out, fh, 0, 0, 4096, /*uid=*/1000, /*gid=*/1000).error, 0);
     ASSERT_OK_AND_ASSIGN(struct stat st,
                          syscalls::fstatat(AT_FDCWD, Path("f_out")));
-    EXPECT_EQ(st.st_mode & 07777, 0666u);
+    EXPECT_EQ(st.st_mode & 07777, 02666u);
     auto [ga, attr] = Getattr(f_out);
     ASSERT_EQ(ga.error, 0);
-    EXPECT_EQ(attr.mode & 07777, 0666u);
+    EXPECT_EQ(attr.mode & 07777, 02666u);
     EXPECT_EQ(Release(f_out, fh).error, 0);
   }
 }
 
-// Step 17.2: fallback WriteFile by a caller outside the file's group clears the
-// setgid bit on a file without group execute (02666 -> 0666). Group-member and
-// root callers keep it.
-TEST_F(DirCacheFSTest, WriteByCallerOutsideGroupClearsSetgid) {
-  auto restore_groups = WithThreadGroups({1000});
-
-  WriteFile(Path("f_root"), "data");
-  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("f_root"), 02666, 0), IsOk());
-  WriteFile(Path("f_grp"), "data");
-  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("f_grp"), 02666, 0), IsOk());
-  WriteFile(Path("f_out"), "data");
-  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("f_out"), 02666, 0), IsOk());
-
-  Start();
-  ASSERT_OK_AND_ASSIGN(InodeId f_root, Id("f_root"));
-  ASSERT_OK_AND_ASSIGN(InodeId f_grp, Id("f_grp"));
-  ASSERT_OK_AND_ASSIGN(InodeId f_out, Id("f_out"));
-
-  // Root control: root keeps CAP_FSETID, so setgid is kept.
-  {
-    auto [open, fh] = Open(f_root, O_WRONLY);
-    ASSERT_EQ(open.error, 0);
-    EXPECT_EQ(Write(f_root, fh, "x", 0, /*uid=*/0, /*gid=*/0).error, 0);
-    EXPECT_EQ(Release(f_root, fh).error, 0);
-    ASSERT_OK_AND_ASSIGN(struct stat st,
-                         syscalls::fstatat(AT_FDCWD, Path("f_root")));
-    EXPECT_EQ(st.st_mode & 07777, 02666u);
-    auto [ga, attr] = Getattr(f_root);
-    ASSERT_EQ(ga.error, 0);
-    EXPECT_EQ(attr.mode & 07777, 02666u);
-  }
-
-  // Group-member control: caller is in the file's group (gid 0), so setgid is
-  // kept.
-  {
-    auto [open, fh] = Open(f_grp, O_WRONLY);
-    ASSERT_EQ(open.error, 0);
-    EXPECT_EQ(Write(f_grp, fh, "x", 0, /*uid=*/1000, /*gid=*/0).error, 0);
-    EXPECT_EQ(Release(f_grp, fh).error, 0);
-    ASSERT_OK_AND_ASSIGN(struct stat st,
-                         syscalls::fstatat(AT_FDCWD, Path("f_grp")));
-    EXPECT_EQ(st.st_mode & 07777, 02666u);
-    auto [ga, attr] = Getattr(f_grp);
-    ASSERT_EQ(ga.error, 0);
-    EXPECT_EQ(attr.mode & 07777, 02666u);
-  }
-
-  // Outside group: unprivileged caller outside group drops setgid.
-  {
-    auto [open, fh] = Open(f_out, O_WRONLY);
-    ASSERT_EQ(open.error, 0);
-    EXPECT_EQ(Write(f_out, fh, "x", 0, /*uid=*/1000, /*gid=*/1000).error, 0);
-    EXPECT_EQ(Release(f_out, fh).error, 0);
-    ASSERT_OK_AND_ASSIGN(struct stat st,
-                         syscalls::fstatat(AT_FDCWD, Path("f_out")));
-    EXPECT_EQ(st.st_mode & 07777, 0666u);
-    auto [ga, attr] = Getattr(f_out);
-    ASSERT_EQ(ga.error, 0);
-    EXPECT_EQ(attr.mode & 07777, 0666u);
-  }
-}
-
-// Step 17.2: CopyFileRangeFd by a caller outside the destination's group clears
-// the setgid bit on a file without group execute (02666 -> 0666). Group-member
-// and root callers keep it.
-TEST_F(DirCacheFSTest, CopyFileRangeByCallerOutsideGroupClearsSetgid) {
+// Steps 17.2 and 17.2e: as FallocateRemovesNoPrivilegesItself, for the
+// destination of a copy_file_range (file_modified, fs/fuse/file.c:2975
+// (Linux v7.3-rc7)).
+TEST_F(DirCacheFSTest, CopyFileRangeRemovesNoPrivilegesItself) {
   auto restore_groups = WithThreadGroups({1000});
 
   WriteFile(Path("src"), "source data");
@@ -6966,7 +6909,7 @@ TEST_F(DirCacheFSTest, CopyFileRangeByCallerOutsideGroupClearsSetgid) {
     EXPECT_EQ(Release(dst_grp, out_fh).error, 0);
   }
 
-  // Outside group: unprivileged caller outside group drops setgid.
+  // Outside the group: kept too.
   {
     auto [out_open, out_fh] = Open(dst_out, O_WRONLY);
     ASSERT_EQ(out_open.error, 0);
@@ -6975,10 +6918,10 @@ TEST_F(DirCacheFSTest, CopyFileRangeByCallerOutsideGroupClearsSetgid) {
               0);
     ASSERT_OK_AND_ASSIGN(struct stat st,
                          syscalls::fstatat(AT_FDCWD, Path("dst_out")));
-    EXPECT_EQ(st.st_mode & 07777, 0666u);
+    EXPECT_EQ(st.st_mode & 07777, 02666u);
     auto [ga, attr] = Getattr(dst_out);
     ASSERT_EQ(ga.error, 0);
-    EXPECT_EQ(attr.mode & 07777, 0666u);
+    EXPECT_EQ(attr.mode & 07777, 02666u);
     EXPECT_EQ(Release(dst_out, out_fh).error, 0);
   }
 
@@ -7489,13 +7432,15 @@ TEST_F(DirCacheFSTest, ATruncateFailsWhereTheDaemonLacksCapFsetid) {
   EXPECT_EQ(st.st_size, 4);
 }
 
-// Step 17.2e: a write that does not go through passthrough carries
-// FUSE_WRITE_KILL_SUIDGID from a caller without CAP_FSETID, but the pinned
-// libfuse 3.18.2 does not hand the flag over (3.18.3 does), so this pins
-// what dcfs does without it: the write, as the caller, removes privileges
-// by the current rule: a caller outside the group loses both bits, a group
-// member setuid alone, root neither.
-TEST_F(DirCacheFSTest, FallbackWriteRemovesPrivilegesAsTheCaller) {
+// Step 17.2e: a write that does not go through passthrough comes after the
+// kernel's own removal, as a passthrough write does: fuse_cache_write_iter
+// calls kiocb_modified (fs/fuse/file.c:1518 (Linux v7.3-rc7)), which sends
+// the SETATTR that sets nothing for a writer without CAP_FSETID. So the
+// write itself, run with CAP_FSETID, removes nothing, whoever sends it, and
+// whether or not it carries FUSE_WRITE_KILL_SUIDGID (which the pinned
+// libfuse 3.18.2 does not hand over). Goes with 23.16, which retires the
+// path that does not go through passthrough.
+TEST_F(DirCacheFSTest, FallbackWriteRemovesNoPrivilegesItself) {
   struct Case {
     std::string name;
     uid_t uid;
@@ -7508,12 +7453,17 @@ TEST_F(DirCacheFSTest, FallbackWriteRemovesPrivilegesAsTheCaller) {
        .uid = 1000,
        .gid = 1000,
        .kill = FUSE_WRITE_KILL_SUIDGID,
-       .want = 0666},
+       .want = 06666},
       {.name = "member",
        .uid = 1000,
        .gid = 0,
        .kill = FUSE_WRITE_KILL_SUIDGID,
-       .want = 02666},
+       .want = 06666},
+      {.name = "outside_with_cap_fsetid",
+       .uid = 1000,
+       .gid = 1000,
+       .kill = 0,
+       .want = 06666},
       {.name = "root", .uid = 0, .gid = 1000, .kill = 0, .want = 06666},
   };
   for (const Case &c : cases) {

@@ -1130,7 +1130,7 @@ absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset) {
 
 absl::StatusOr<size_t> WriteFile(const Credentials &caller, int fd,
                                  std::span<const char> buf, off_t offset) {
-  return AsCaller(caller, [&]() -> absl::StatusOr<size_t> {
+  return AsCallerKeepingCapFsetid(caller, [&]() -> absl::StatusOr<size_t> {
     size_t total = 0;
     while (total < buf.size()) {
       ASSIGN_OR_RETURN(
@@ -1145,14 +1145,14 @@ absl::StatusOr<size_t> WriteFile(const Credentials &caller, int fd,
 
 absl::Status FallocateFd(const Credentials &caller, int fd, int mode,
                          off_t offset, off_t length) {
-  return AsCaller(
+  return AsCallerKeepingCapFsetid(
       caller, [&] { return syscalls::fallocate(fd, mode, offset, length); });
 }
 
 absl::StatusOr<size_t> CopyFileRangeFd(const Credentials &caller, int fd_in,
                                        off_t off_in, int fd_out, off_t off_out,
                                        size_t len, unsigned int flags) {
-  return AsCaller(caller, [&] {
+  return AsCallerKeepingCapFsetid(caller, [&] {
     return syscalls::copy_file_range(fd_in, off_in, fd_out, off_out, len,
                                      flags);
   });

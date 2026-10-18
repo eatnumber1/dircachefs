@@ -577,8 +577,12 @@ sgid-nofsetid-otrunc 0:2000 2666 nofsetid otrunc 0:666
 setuid-userns-write 0:2000 4666 userns write 0:666
 suid-userns-write 0:2000 6666 userns write 0:666
 suid-fsetid-write 0:2000 6666 fsetid write 0:6666
+suid-fsetid-fallocate 0:2000 6666 fsetid fallocate 0:6666
+suid-fsetid-copy 0:2000 6666 fsetid copy 0:6666
 suid-fsetid-truncate 0:2000 6666 fsetid truncate 0:6666
 suid-fsetid-otrunc 0:2000 6666 fsetid otrunc 0:6666
+sgid-fsetid-fallocate 0:2000 2666 fsetid fallocate 0:2666
+sgid-fsetid-copy 0:2000 2666 fsetid copy 0:2666
 sgid-fsetid-truncate 0:2000 2666 fsetid truncate 0:2666
 setuid-root-capwrite 0:2000 4666 root capwrite 0:4666
 setuid-other-capwrite 0:2000 4666 bob capwrite 0:666
