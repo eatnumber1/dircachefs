@@ -157,6 +157,51 @@ tlc_test(
     srcs = ["dcfs.tla"],
 )
 
+# Step 22.5: every interruption point is reached by an interrupted request
+# (InterruptReach.tla): for each, its configuration with one invariant, that
+# no slot is ever there with its interrupt arrived, whose violation TLC
+# must find. The configuration is the base's constants (its INVARIANTS,
+# PROPERTIES and VIEW cut).
+INTERRUPT_REACH = {
+    "RN_probe": "MC_interrupt_liveness.cfg",
+    "PD_read": "MC_interrupt_liveness.cfg",
+    "PD_commit": "MC_interrupt_liveness.cfg",
+    "C_sys": "MC_interrupt_liveness.cfg",
+    "U_sys": "MC_interrupt_liveness.cfg",
+    "R_sys": "MC_interrupt_liveness.cfg",
+    "A_sys": "MC_interrupt_liveness.cfg",
+    "GA_stat": "MC_interrupt_liveness.cfg",
+    "RDP_stat": "MC_interrupt_liveness.cfg",
+    "FC_sys": "MC_interrupt_borndirty.cfg",
+    "FS_sys": "MC_interrupt_files.cfg",
+    "W_sys": "MC_interrupt_files.cfg",
+    "FG_stat": "MC_interrupt_files.cfg",
+    "FG_rstat": "MC_interrupt_files.cfg",
+}
+
+[
+    genrule(
+        name = "interrupt_reach_%s_cfg" % pc,
+        srcs = [base],
+        outs = ["interrupt_reach_%s.cfg" % pc],
+        cmd = "sed '/^INVARIANTS/,$$d' $< >$@ && printf 'INVARIANTS\\n    NeverInterruptedAt_%s\\n' >>$@" % pc,
+    )
+    for pc, base in INTERRUPT_REACH.items()
+]
+
+[
+    tlc_test(
+        name = "interrupt_reach_%s_test" % pc,
+        size = "small",
+        timeout = "short",
+        config = ":interrupt_reach_%s_cfg" % pc,
+        expect_violation = "Invariant NeverInterruptedAt_%s is violated" % pc,
+        spec = "InterruptReach.tla",
+        srcs = MODEL,
+    )
+    for pc in INTERRUPT_REACH
+]
+
 # Step 23.8: access times of a file (the held fill, the cold open's and the
 # held records' atime-only dirty rows, sync points keeping a held file's row
 # and not run for atime-only rows).
