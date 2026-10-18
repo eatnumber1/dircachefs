@@ -266,11 +266,17 @@ shard.
 
 ## 17.5 Tests ported from the OpenZFS suite's ideas (russ, 2026-10-17; queued, M2)
 
-We adopt nothing from ZTS as a suite: it needs a ZFS pool throughout,
-ksh93, and its files are CDDL. We reimplement its ideas from scratch as
-C++ guest tests that compare dcfs with the backing (dcfs must behave like
-the backing), citing the ZFS source file in a comment and never copying
-CDDL code. cmd/seekflood.c is MIT and may be copied with its header.
+We adopt nothing from ZTS as a suite: it needs a ZFS pool throughout and
+ksh93. CDDL is file-level copyleft and binds only the covered files, so
+using it in tests is fine (russ asked, 2026-10-17): fetch OpenZFS at a
+pinned version with Bazel (AGENTS.md: third-party code is fetched, not
+checked in) and build the generic C helpers we want from
+tests/zfs-tests/cmd/ (libc, pthread and sys/xattr.h only), unmodified or
+with CDDL-licensed patches, driven by our own C++ guest tests that compare
+dcfs with the backing (dcfs must behave like the backing). Never paste
+CDDL code into our MIT files. A helper that sleeps or loops for a fixed
+time breaks the load-agnostic rule: reimplement that one instead.
+cmd/seekflood.c is MIT.
 Survey: notes/zfs-test-suite-survey-2026-10-17.md.
 
 Iteration counts, not sleeps or time-bounded loops (load-agnostic).
