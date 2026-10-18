@@ -334,6 +334,11 @@ TEST_F(StatementTest, PreparedReturnsSameCachedStatementResetAndUnbound) {
   ASSERT_THAT(second->Step(), IsOkAndHolds(false));
 }
 
+TEST_F(StatementTest, PrepareRefusesASecondStatement) {
+  EXPECT_THAT(Statement::Prepare(conn_, "SELECT 1; SELECT 2"),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
 TEST_F(StatementTest, ForEachRowVisitsAllRowsInOrderAndStopsOnError) {
   ASSERT_THAT(conn_.Exec("INSERT INTO t (id) VALUES (1), (2), (3)"), IsOk());
 
@@ -411,6 +416,34 @@ TEST(StorageErrorTest, OtherCodesAreUnchanged) {
   EXPECT_EQ(StatusToErrno(Sqlite3ErrorCodeToStatus(SQLITE_FULL)), ENOSPC);
   EXPECT_EQ(StatusToErrno(Sqlite3ErrorCodeToStatus(SQLITE_CONSTRAINT_UNIQUE)),
             EEXIST);
+}
+
+// The code table for the primary codes the tests above leave out; an
+// extended code is mapped by its low byte
+// (https://www.sqlite.org/rescode.html).
+TEST(StorageErrorTest, CanonicalCodeOfEachPrimaryCode) {
+  const std::vector<std::pair<int, absl::StatusCode>> table = {
+      {SQLITE_OK, absl::StatusCode::kOk},
+      {SQLITE_ROW, absl::StatusCode::kOk},
+      {SQLITE_DONE, absl::StatusCode::kOk},
+      {SQLITE_NOTFOUND, absl::StatusCode::kNotFound},
+      {SQLITE_MISUSE, absl::StatusCode::kInternal},
+      {SQLITE_RANGE, absl::StatusCode::kInvalidArgument},
+      {SQLITE_MISMATCH, absl::StatusCode::kInvalidArgument},
+      {SQLITE_CANTOPEN, absl::StatusCode::kUnavailable},
+      {SQLITE_CANTOPEN_ISDIR, absl::StatusCode::kUnavailable},
+      {SQLITE_CONSTRAINT_NOTNULL, absl::StatusCode::kFailedPrecondition},
+      {SQLITE_CORRUPT, absl::StatusCode::kInternal},
+  };
+  for (const auto &[code, canonical] : table) {
+    EXPECT_EQ(Sqlite3ErrorCodeToCanonical(code), canonical)
+        << sqlite3_errstr(code);
+  }
+}
+
+TEST(StorageErrorTest, AStatusNotFromSqliteHasNoCode) {
+  EXPECT_THAT(GetSqliteCodeFromStatus(absl::InternalError("not from sqlite")),
+              StatusIs(absl::StatusCode::kNotFound));
 }
 
 TEST(ExecScriptTest, RunsMultipleStatementsAndSkipsCommentSemicolons) {
