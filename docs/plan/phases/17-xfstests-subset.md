@@ -196,6 +196,25 @@ step makes the space explicit and checks all of it differentially.
 
 Owner: dcfs-implementer (medium), then a review against the kernel's rules.
 
+## 17.2g CAP_SYS_RESOURCE reaches every caller through passthrough (found by 17.2e's round-3 review, 2026-10-18; queued, not started)
+
+Passthrough writes run with the daemon's CAP_SYS_RESOURCE: the backing file
+is opened with the daemon's credentials (fs/fuse/backing.c:122), and
+AsCaller keeps CAP_SYS_RESOURCE too. ext4's root-reserved blocks
+(fs/ext4/balloc.c:654-657, Linux v7.3-rc7) are therefore open to every
+caller through dcfs, where a native non-root caller gets ENOSPC.
+
+- **First, a native differential test** (behave like the backing): a
+  non-root caller writing into the reserved blocks on ext4, natively and
+  through dcfs, with the same results required; then the same on xfs and
+  btrfs where they reserve blocks.
+- **Then a design.** capset is out for passthrough. Options to weigh: open
+  the backing file with the caller's credentials; or drop CAP_SYS_RESOURCE
+  from the daemon's effective set before BACKING_OPEN. The step decides and
+  cites the kernel code path it relies on.
+- Owner: dcfs-protocol (the credentials and identity boundary), after 17.2e
+  and 17.2f merge.
+
 ## 17.3 Performance finding (done 2026-10-11, 313bff6)
 
 29 metadata-heavy tests run 20-50x slower through dcfs (4-37 s natively,

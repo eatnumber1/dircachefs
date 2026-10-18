@@ -120,3 +120,14 @@ aefbda8588d252f11	2026-10-18T19:57:01Z	Close Q-26/27 on dashboard	mechanical	dcf
 af715cf63dd7627c0	2026-10-18T19:58:29Z	Fix dashboard open-questions display	investigation	dcfs-investigator	claude-sonnet-5-5	high									
 ab7c0f36184e3f3e0	2026-10-18T20:08:29Z	Audit osv dependency coverage		Explore	sonnet										
 a55230b798e902460	2026-10-18T20:10:25Z	Clerk batch 21	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+ac090560f2f467bbb	2026-10-18T20:22:45Z	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high									
+a6676543e91567fd1	2026-10-18T20:23:10Z	Upload dashboard datasets	mechanical	dcfs-mechanical	haiku	low									
+a812c49337fc6fc24	2026-10-18T20:32:56Z	5.13	investigation	dcfs-investigator	claude-sonnet-5-5	high									
+a88061b034f8c222d	2026-10-18T20:33:10Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low									
+af42268f661e304e0	2026-10-18T20:33:41Z	Upload ci dataset	mechanical	dcfs-mechanical	haiku	low									
+a366efbdbf3b5a25b	2026-10-18T20:41:30Z	Disk-read budget headroom	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
+a6155a01e41ec90da	2026-10-18T20:41:44Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low									
+aba4039a908740995	2026-10-18T20:45:33Z	25.34	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
+a152f39933e7de162	2026-10-18T20:45:33Z	tlc-measure	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
+a2995d2168e4f6c9f	2026-10-18T20:45:50Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low									
+aaa8bd0188633ee00	2026-10-18T20:52:06Z	Clerk batch 22	mechanical	dcfs-mechanical	claude-haiku-5-5	low									

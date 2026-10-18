@@ -519,6 +519,10 @@ Merged 2026-10-11:
   applied; non-SMT core pinning is off by default and enabled only for budget-measuring
   runs (DCFS_PIN_NON_SMT=1); run-qemu.sh header, test/qemu/README.md, and
   run_qemu_cost_test self-check updated.
+- 26.17c interim headroom for disk count budgets (russ 2026-10-18: "until that's
+  done, add a small headroom right now so I can push and get CI green again");
+  in progress, on branch fix-disk-read-headroom, not merged; removed by 26.41's
+  deterministic counts (26.41 (6)).
 
 ## 26.18 End-to-end tests: assertions and oracles in C++ (russ, 2026-10-09, approved; start after the weekly quota resets, Friday 2026-10-16)
 
@@ -1056,43 +1060,21 @@ never weaken a test (AGENTS.md).
    re-measure ruling ("Agreed").
 
 **Proposed follow-ups (from 26.36).**
-- A. Switch `cpu_budgets.txt` to `instr_user` (10% tolerance, unheld where
-  `perf_event_open` fails), re-measuring all its lines together over one run
-  count; includes `fault_ace_a_test`, `fault_ace_mixed_test_ext4` and
-  `xfstests_1_test_ext4`, which 26.36 did not measure.
-- B. Sync points on demand for the eight sync-interval sleeps.
-- C. `cancel.sh` by counts of backing requests after the signal (four verdicts
-  on time).
-- D. `readdir_boundary.sh`'s linear-versus-quadratic check by instructions.
-- E. The fault windows (`fault_recover.sh`, `fault_selftest.sh`) by events
-  (11.3c).
-- F. `probe`/`expect_answered`/`fd_blocked`/`quiesce_daemon` by counters, and
-  the fourteen settles after them.
-- G. `nfs.sh`'s rpc readiness and mount retry; `init`'s coverage-run waits.
-- H. `xfstests.sh`'s per-test `LIMIT` sized from the harness's allowance.
-- I. The disks' I/O budgets move with load (`write_test_ext4` writes 329 to 336
-  against 325, flushes 144 to 150 against 145, at 87 to 91% host pressure,
-  unchanged by 26.36; `fault_ace_b_test` 0.2 to 0.6% over): ext4's periodic
-  journal commit fires by guest time. Mount the test disks with a long commit
-  interval or hold those counts only on runs that are not load-starved (russ
-  decides), then re-measure with the other lines of `xfstests_1_test_ext4` and
-  the ACE tests under russ's rule: lines together, one run count.
+- A. Now in 26.43 (3), with B to H: `instr_user` CPU budgets.
+- B. Now in 26.43 (3): sync points on demand for the sync-interval sleeps.
+- C. Now in 26.43 (3): `cancel.sh` by counts of backing requests.
+- D. Now in 26.43 (3): `readdir_boundary.sh` by instructions.
+- E. Now in 26.43 (3): the fault windows by events.
+- F. Now in 26.43 (3): probe, settle and quiesce waits by counters.
+- G. Now in 26.43 (3): `nfs.sh` and `init` waits.
+- H. Now in 26.43 (3): `xfstests.sh`'s `LIMIT` from the allowance.
+- I. Now in 26.41 (6): the disks' I/O budgets become deterministic counts.
 
 ### Follow-ups from the 25.34 fix round (clerk batch 12, 2026-10-18)
 
-- **`write_test_ext4`'s I/O budget is load-sensitive.** At host load ~50 it
-  counted 335 writes against a budget of 325 and failed ("load-starved");
-  alone it passes (24.8 s on main). It also failed in 17.6's first presubmit
-  run. A verdict that varies with load breaks the load-agnostic rule
-  (AGENTS.md, Tests): find what makes the count depend on timing (writeback,
-  journal commits) and make the budget count only what dcfs causes; test
-  first. Owner: dcfs-investigator.
-- **Suspected cause: the wall-clock sync interval.** The 25.28b fix round saw
-  it again (writes 325 to 328 against 325). The suspicion: at high load the
-  number of sync points during the test (each a syncfs and a WAL fsync)
-  varies, so the writes vary. If so, the budget must not count sync-point
-  writes by time; this connects to 25.28c (interval on CLOCK_MONOTONIC, a
-  timerfd). Not measured yet.
+- **`write_test_ext4`'s I/O budget is load-sensitive.** Now in 26.43 (2).
+- **Suspected cause: the wall-clock sync interval.** Now in 26.43 (2), with
+  25.28c's CLOCK_MONOTONIC interval as the link.
 - **`pmu.sh` in the shell list.** `test/qemu/guest/pmu.sh` (from 26.36) was
   added to `tools/repo_shape_guest_shell.txt`, a list that should only
   shrink: port it to C++. Owner: dcfs-implementer, after 25.34 merges.
@@ -1395,6 +1377,18 @@ proposal"):
 5. The per-test block-layer I/O budgets (`io_budgets.txt`) and per-test
    CPU budgets (`cpu_budgets.txt`) go; the wall allowance stays only as a
    hang guard.
+6. **Count something deterministic** (russ, 2026-10-18: "Count something
+   deterministic"; neither a longer commit interval nor skipping load-starved
+   runs). Replace every disk count budget with a count of what dcfs causes:
+   the cgroup `io.stat` counters (`dcfs_reads`, `dcfs_writes` and siblings)
+   and the `/sys/block` counters (`reads`, `writes`, `sectors_read`,
+   `sectors_written`), counted at the syscall layer, so a verdict never
+   depends on page-cache, readahead or journal-commit timing. Then remove
+   26.17c's interim +2% headroom (fault_ace_mixed_test_ext4 `dcfs_reads` 753
+   against 752, CI run 39157612253, pinned in 25.28b from too narrow a
+   sample). The full run 9d6468d3 that went red was this budget; its test
+   body passed. Part of 26.43 (the load-agnostic-to-zero step, which owns the
+   rest of the load-sensitivity work).
 
 **Investigation first:** from `docs/plan/log.md`, the phase files, git
 history and CI history, every regression or finding the CPU, I/O,
@@ -1415,3 +1409,43 @@ against native; none caught only by a block-layer I/O or CPU-time
 budget. Eight budget failures were noise (load, block-layer merging, the
 journal timer, timed tests, a missing sanitizer flag), all from CPU-time,
 wall-time or block-layer budgets. So the proposal proceeds as russ agreed.
+
+## 26.43 Load-agnostic to zero (russ, 2026-10-18; queued, not started, M2)
+
+Gathers the load-sensitivity work that was scattered as un-numbered
+follow-ups, so that one step owns it. Not started before the 2026-10-23
+quota reset. Owners: dcfs-investigator first (the measurement and the
+audit), then dcfs-implementer (the changes).
+
+1. The disk count budgets become deterministic counts: **26.41 (6)** owns
+   this (russ, 2026-10-18: "Count something deterministic"), with 26.17c's
+   headroom removed in the same change.
+2. `write_test_ext4`'s I/O budget and its suspected cause: at host load ~50
+   it counted 335 writes against 325 and failed ("load-starved"); alone it
+   passes (24.8 s on main); it also failed in 17.6's first presubmit run.
+   At 87 to 91% host pressure the disks' writes and flushes moved (329 to
+   336 against 325, 144 to 150 against 145), and `fault_ace_b_test` was 0.2
+   to 0.6% over. The suspicion: the wall-clock sync interval, so the number
+   of sync points (each a syncfs and a WAL fsync) varies with load. Find what
+   makes the count depend on timing (writeback, journal commits, the sync
+   interval, which 25.28c moves to CLOCK_MONOTONIC) and make the budget count
+   only what dcfs causes; test first. The 25.28b fix round saw it again
+   (writes 325 to 328 against 325).
+3. 26.36's follow-ups A to H (the owner and scope are unchanged): `instr_user`
+   CPU budgets across `cpu_budgets.txt` with 10% tolerance, re-measured
+   together over one run count, including `fault_ace_a_test`,
+   `fault_ace_mixed_test_ext4` and `xfstests_1_test_ext4`; sync points on
+   demand for the sync-interval sleeps; `cancel.sh` by counts of backing
+   requests after the signal; `readdir_boundary.sh` by instructions; the
+   fault windows (`fault_recover.sh`, `fault_selftest.sh`) by events (11.3c);
+   `probe`, `expect_answered`, `fd_blocked` and `quiesce_daemon` by counters,
+   with the fourteen settles after them; `nfs.sh`'s rpc readiness and mount
+   retry and `init`'s coverage-run waits; `xfstests.sh`'s per-test `LIMIT`
+   from the harness's allowance.
+4. The remaining entries of `tools/repo_shape_sleeps.txt`, each a verdict on
+   time or a sleep standing in for an event (1.11).
+
+Done when `tools/repo_shape_sleeps.txt` and 26.17c's headroom list are empty
+and no budget line counts I/O that the guest kernel schedules by time.
+Test first for each change; never widen a budget or tolerance to pass, and
+never weaken a test (AGENTS.md).

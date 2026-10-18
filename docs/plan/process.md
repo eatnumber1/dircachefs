@@ -495,6 +495,9 @@ first.
   each dispatch.
   russ, 2026-10-18 13:00 PT: 17.2e's Opus re-review runs now (started at 83%),
   not Monday.
+  Measured cost class (2026-10-18, 17.2e round 3): an Opus re-review of a
+  mid-sized step: <1% of the weekly quota (83% before at 12:55, 83% after at
+  13:22). Use it to size the lumps above.
   The orchestrator itself is the largest consumer: lean turns, hands-on work
   delegated, Opus subagents only for protocol, identity, oracle and
   security-relevant work, Sonnet for routine implementation, Haiku for
