@@ -18,7 +18,7 @@ does not pass a `model` override, so the type's model and effort apply.
 | `dcfs-implementer` | Sonnet | medium | the default for plan steps |
 | `dcfs-investigator` | Sonnet | high | measurement and investigation (emulation speed, hermetic kernel/QEMU/busybox builds, puzzling failures) |
 | `dcfs-protocol` | Opus | high | the write-through protocol, dirty set and recovery, identity, crash and failure handling, mount namespaces, the TLA+ model |
-| `dcfs-reviewer` | Opus | xhigh | read-only review of hard steps and of the plan |
+| `dcfs-reviewer` | Opus | high | read-only review of hard steps and of the plan |
 | `dcfs-style-reviewer` | Sonnet (Opus for judgement-heavy reshaping steps) | high | read-only style review of every step's diff before merge, against `docs/style.md` incl. 1.9's comment rules (russ, 2026-10-12/16) |
 
 <a id="rule-orchestrator-delegates"></a>
@@ -33,14 +33,12 @@ mapping's design): pass `model: fable` explicitly and say why in
 `docs/plan/log.md`. russ (2026-10-09): "You can use it a little more if
 you think it will be helpful (but you don't have to!). Also remember to
 leverage different effort levels too." Choose the effort per task: low
-for mechanical batches, medium by default, high or xhigh for protocol
-work and reviews. This conflicts with `docs/plan/process.md`
-rule 6, "Vary the effort knob per job" (russ, 2026-10-17), whose table says
-"Protocol, crash safety, a puzzling failure | not Gemini | Opus high or
-xhigh" and "Review needing judgement | Argon medium | Sonnet high, Opus
-high", and "Start a job one notch lower than seems needed and raise it only
-when the answer comes back shallow": here reviews are "high or xhigh", there
-a judgement review is "Opus high" (conflict raised with russ 2026-10-18).
+for mechanical batches, medium by default, high for protocol
+work. Reviews default to Opus high; xhigh only for protocol, crash-safety and
+identity steps, or after a shallow high review (russ, 2026-10-18: "Ok to your
+recommendation. Feel free to change the reviewer default now."), following
+`docs/plan/process.md` rule 6 until data says otherwise; collecting that data
+is a tools item.
 
 Definitions are in `.claude/agents/`. A step that fails review twice moves
 up one row (implementer to protocol, mechanical to implementer).

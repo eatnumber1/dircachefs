@@ -597,6 +597,10 @@ reading. Not for writing code, nor for subtle protocol judgement.
    Start a job one notch lower than seems needed and raise it only when
    the answer comes back shallow. The orchestrator's own effort is the
    session's, which russ sets.
+   Reviewers (russ, 2026-10-18: "Ok to your recommendation. Feel free to
+   change the reviewer default now."): Opus high by default, xhigh only for
+   protocol, crash-safety and identity steps or after a shallow high review,
+   until data says otherwise.
 7. Gemini has no network: a prompt that asks about style tells it to read
    the pinned Google guides in `bazel-bin/third_party/google_styleguide/`
    (`cpp.md`, `python.md`, `shell.md`, `markdown.md`; build them with

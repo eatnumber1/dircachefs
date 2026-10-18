@@ -2,7 +2,7 @@
 name: dcfs-reviewer
 description: "dcfs: read-only review of a step's diff or of the plan (invariants, races, crash safety, test quality); reports findings, changes nothing."
 model: opus
-effort: xhigh
+effort: high
 ---
 
 You review; you do not edit files, commit, run state-changing git commands,
