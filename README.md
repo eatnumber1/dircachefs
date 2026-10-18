@@ -66,14 +66,17 @@ The repository carries forward the history of a 2023 experiment called
   There is no unprivileged mode: `mount.dcfs` refuses to run as another user
   and says why (see [Responsibilities](#responsibilities-of-the-administrator)).
 - **Linux 6.9 or later** for `FS_IOC_GETFSUUID` (filesystem identity) and
-  FUSE passthrough (`CONFIG_FUSE_PASSTHROUGH`).
+  FUSE passthrough (`CONFIG_FUSE_PASSTHROUGH`): both are in v6.9 and in no
+  earlier release (`include/uapi/linux/fs.h` and `fs/fuse/passthrough.c` at
+  the Linux v6.8 and v6.9 tags).
 - **A backing filesystem that supports file handles
   (`name_to_handle_at`) and a stable filesystem identity.** ext4, xfs and
   btrfs are all tested (step 5.2: every e2e test runs on all three). ext4
   and xfs report that identity through `FS_IOC_GETFSUUID` directly; btrfs
-  does not implement `FS_IOC_GETFSUUID` at all (no `fs/btrfs/*.c` file
-  calls the kernel's `super_set_uuid()`, on any kernel version, so the
-  generic ioctl always returns `ENOTTY` for it), so dcfs falls back to
+  does not answer `FS_IOC_GETFSUUID` (it sets `sb->s_uuid`,
+  `fs/btrfs/disk-io.c:3557`, but never `sb->s_uuid_len`, and the generic ioctl
+  returns `ENOTTY` when that is 0, `fs/ioctl.c:460`; Linux v7.3-rc4), so dcfs
+  falls back to
   `BTRFS_IOC_FS_INFO`'s `fsid` field there instead -- the same UUID
   `btrfs filesystem show`/`blkid` report, reached through a btrfs-specific
   ioctl rather than the generic one. ZFS is not supported until OpenZFS
@@ -96,8 +99,9 @@ The repository carries forward the history of a 2023 experiment called
 Bazel builds everything else, but a few build and test steps still use the
 host's tools. This is the complete list, kept honest by running the whole
 suite in a fresh GitHub-runner-like container (`act`, see
-[CI](#continuous-integration)); `.github/ci/prepare.sh` installs exactly
-these packages on a CI runner.
+[CI](#continuous-integration)); `.github/ci/prepare.sh` installs these
+packages on a CI runner, and `cpio` besides, which nothing uses any more
+(`test/qemu/scripts/mkinitramfs.sh` packs with busybox's own).
 
 | Package (Debian/Ubuntu) | Used by | Why it is not hermetic yet |
 |---|---|---|
@@ -174,7 +178,8 @@ and `--version`): `mount(8)` runs it for a mount of type `dcfs`, as in
 /srv/media /mnt/media`. SOURCE is the directory to cache (a directory: a
 file is refused), as `mount` would take it; MOUNTPOINT is where dcfs appears.
 `mount.dcfs -V` prints the version. `-f` checks the
-options and mounts nothing; `-s` and `-v` are ignored; `-N` is not supported.
+options and mounts nothing; `-s`, `-n` and `-v` are accepted and ignored; `-N` is
+not supported.
 
 `mount.dcfs` returns once dcfs answers the kernel's first request (it is
 serving) or with the failure's message on its standard error and a non-zero
@@ -269,8 +274,8 @@ sudo mount -t dcfs -o dcfs.cache_db=/var/lib/dcfs/media.db \
 (Where `mount` does not run mount helpers, run `mount.dcfs` itself with the
 same arguments, e.g. `sudo mount.dcfs -o ... /srv/media /mnt/media`.)
 
-The first listing of each directory reads it from the backing disk and
-records everything about its entries (attributes, file handle, symlink
+The first lookup or listing in each directory reads the whole directory from
+the backing disk and records everything about its entries (attributes, file handle, symlink
 target, xattrs). After that, `find /mnt/media -ls` or `ls -lR` reads
 nothing from the backing disk, also after dcfs is restarted. Opening a
 file for reading or writing does spin the disk up.
@@ -543,8 +548,9 @@ dcfs trusts what it has cached, so the setup has to keep it true.
 ### Exporting over NFS
 
 nfsd can reach the mount (dcfs always mounts with `allow_other`), and a FUSE
-filesystem needs an explicit `fsid=` in its export; each exported dcfs mount needs its own. An `/etc/exports`
-line:
+filesystem is not stored on a device, so its export names an explicit `fsid=`
+(`exports(5)`, option `fsid=`; every export in `test/qemu/guest/nfs.sh` does);
+each exported dcfs mount needs its own. An `/etc/exports` line:
 
 ```
 /mnt/media  192.168.1.0/24(rw,fsid=1,no_subtree_check)
@@ -885,14 +891,15 @@ that is itself cut off (a power-cut test ending the VM) loses its processes'.
 The report covers the small and medium tiers only (`--config=presubmit`):
 the large and enormous tests, and the trace-validation tests, are not in it.
 CI publishes it as the `coverage-lcov` artifact (dcfs, bench and tools only);
-the gate below runs only there. The first baseline (small and medium tiers): all
-of `dcfs/*.cc` 92.4% of lines and 73.3% of branches.
+the gate below runs only there. The baseline (small and medium tiers) is
+`dcfs/coverage_baseline.txt`: today 96.95% of the lines and 83.25% of the
+branches of `dcfs/*.cc`.
 
 The gate (step 8.1, `tools/coverage_gate.sh`, run by `.github/ci/coverage.sh`
 in the CI coverage job only, not in the local tiers): `dcfs/*.cc` line and
 branch coverage of the published report must not fall below the committed
-baseline `dcfs/coverage_baseline.txt` (`lines 92.40`, `branches 73.30`, two
-decimals). Below it on either, the job fails with the numbers. Above it by 0.1
+baseline `dcfs/coverage_baseline.txt` (`lines 96.95` and `branches 83.25` today,
+two decimals). Below it on either, the job fails with the numbers. Above it by 0.1
 or more on either, the job passes and prints (and adds to the job summary) a
 note, `raise dcfs/coverage_baseline.txt to X / Y`: the baseline only moves up,
 in a later commit, and a rise never turns a push red (0.1 is the tolerance for
@@ -933,18 +940,13 @@ A shard is a deterministic partition of the suite's test targets
 the sorted list, size by size, so each shard gets its share of the slow
 tests; `//tools:shard_test`), passed to Bazel as explicit targets, so the
 test-result cache applies per shard. The sanitizer shards skip the host-only
-tests (`HOST_ONLY_COMPATIBLE`, `test/qemu/README.md`), which leaves 156 test
-targets, 52 per shard. `full`'s 34 large and enormous targets are 12, 11 and
-11 per shard (small and medium are `presubmit`'s). The targets of step 11.2
-fall as follows (`.github/ci/test.sh --shard=I/3 --list` prints a shard):
+tests (`HOST_ONLY_COMPATIBLE`, `test/qemu/README.md`), which leaves 215 test
+targets (2026-10-17: `.github/ci/test.sh --config=asan --shard=I/3 --list`), 72,
+72 and 71 per shard. `full`'s 56 large and enormous targets are 19, 19 and 18
+per shard (small and medium are `presubmit`'s). `.github/ci/test.sh
+--shard=I/3 --list` prints which targets a shard holds.
 
-| Shard | `full` (large, enormous) | `asan` (every tier) |
-|---|---|---|
-| 0 | `fault_ace_fs_test_btrfs`, `fault_power_kill_test_xfs`, destroy, nfs, pjdfstest on xfs | `fault_ace_a_test`, `fault_ace_fs_test_xfs`, the ext4/xfs/btrfs fault tests (some) |
-| 1 | `fault_ace_a_test`, `fault_ace_fs_test_xfs`, idle_long, pjdfstest on btrfs | `fault_ace_b_test`, `fault_power_kill_test_btrfs`, `fault_power_kill_test_ext4` |
-| 2 | `fault_ace_b_test`, `fault_power_kill_test_btrfs`, bench_full, formal large, pjdfstest on ext4 | `fault_ace_fs_test_btrfs`, `fault_power_kill_test_xfs` |
-
-Expected wall time per shard (2026-10-08: the serial sum of the targets'
+Expected wall time per shard (2026-10-08, for the shards as dealt then: the serial sum of the targets'
 measured times on a shared 4-core machine at two test jobs, divided by 1.5 for
 the runner running two guests at a time; the sanitizer builds are cold in every
 run: fetch 24 min and build 20 min, measured on GitHub): `full` 46, 52 and
@@ -1002,7 +1004,8 @@ than another shard; neither is done until a `cold` run measures the shards.
   1800, 3600, 7200 s for short, moderate, long, eternal; Phase 5.1 measured
   pjdfstest on ext4 at 3502 s of the default 3600 s) and pjdfstest runs on
   ext4 only (about 3500 s per filesystem under TCG, and xfs and btrfs have
-  the other tests' variants); `.github/ci/test.sh` does both.
+  the other tests' variants); `.github/ci/prepare.sh` sets the timeouts and
+  `.github/ci/test.sh` leaves those two out.
 - **Failures** upload every test's `test.log`, `test.xml` and `test.outputs/`
   (the guest's serial console) as the `test-logs-<job>` artifact.
 - **Kernel matrix: not yet.** Every test boots Alpine's `linux-virt` of the
@@ -1129,8 +1132,10 @@ descriptor. That is what allows mounting dcfs over its own source.
 
 **Explicit states.** Every cached fact is present, absent or unknown, and
 a directory listing is either complete (a name without a row is absent) or
-not. A lookup the cache cannot answer probes just that name, or lists the
-whole directory once; after that, the directory is served from the cache.
+not. A lookup in a directory whose listing is not complete lists the whole
+directory once, and a name left unknown in a complete one (by a change or a
+failed change) is probed alone (`docs/design.md`, "Population policy"); after
+that, the directory is served from the cache.
 
 **Write-through in three phases.** Every mutation (1) marks what it is
 about to change as unknown and records the affected inodes in a durable
@@ -1143,7 +1148,8 @@ shutdown; after an unclean shutdown, everything still in the dirty set is
 forgotten. This bounds what a power loss costs to re-reading the entries
 changed in the last few seconds. A file that was only read is in the dirty
 set too, for its access time only: that alone makes no sync point run
-until the kernel's own dirtytime expiry (12 hours by default), and after a
+until the kernel's own dirtytime expiry (12 hours by default,
+`fs/fs-writeback.c:64`, Linux v7.3-rc4), and after a
 crash it costs only that file's attributes. A new file or directory is
 created dirty until the next sync point, like a real filesystem's: a crash
 before then re-checks it at the next start (and forgets it if the backing
@@ -1168,7 +1174,8 @@ recovery protocol, concurrency, and the test strategy.
 - **An unmount that does not go through the unmount helper does not wait for
   the daemon.** The kernel does not wait for the daemon of a plain FUSE mount
   (it sends FUSE_DESTROY and waits for the answer only for `fuseblk` and
-  virtiofs), so `umount -i`, `fusermount -u`, a program calling `umount2`, a
+  virtiofs: `fs/fuse/inode.c:1964`, `:1936` and `fs/fuse/virtio_fs.c:1558`,
+  Linux v7.3-rc4), so `umount -i`, `fusermount -u`, a program calling `umount2`, a
   plain `umount PATH` without the optional `umount.fuse` link (see
   [Building](#building)), and an installation without any link return while
   the daemon is still syncing the backing filesystem and closing the cache
@@ -1233,7 +1240,9 @@ recovery protocol, concurrency, and the test strategy.
   bit, where the backing filesystem refuses it with `EPERM`. Writes to a
   file with setuid and setgid but not group execute do not use FUSE
   passthrough and were about 3.6 times slower (ext4 in the QEMU guest,
-  2026-10-17; `docs/design.md`, "Caller credentials").
+  2026-10-17; `BM_SetidWrite` against `BM_Write` in `bench/dcfs_bench.cc`,
+  step 17.2b in `docs/plan/log.md`; `docs/design.md`, "Caller credentials",
+  says why passthrough is declined).
 - **A backing filesystem that stops taking writes holds the whole daemon.**
   With the backing filesystem frozen (`fsfreeze -f`, an LVM or storage
   snapshot, a hung network mount), a change through dcfs blocks in its
@@ -1305,8 +1314,9 @@ recovery protocol, concurrency, and the test strategy.
   btrfs subvolume is not a separate mount, cannot catch a subvolume that
   already exists under SOURCE before dcfs starts: this is a real gap,
   not an oversight, and there is no way to detect it at startup short of
-  walking the whole tree first (which dcfs deliberately never does; see
-  "Coherence" below). What dcfs *does* catch, for a subvolume exactly as
+  walking the whole tree first (which dcfs deliberately never does: it lists a
+  directory only when a request needs it, `docs/design.md`, "Population
+  policy"). What dcfs *does* catch, for a subvolume exactly as
   for a real mount, is the boundary appearing at runtime -- a new mount, or
   a btrfs subvolume (pre-existing or freshly created), the first time dcfs
   lists the directory it lives in: logged as an error and shown as an
@@ -1317,7 +1327,8 @@ recovery protocol, concurrency, and the test strategy.
   no backing inode number may use; dcfs refuses, with `ENOTSUP`, any object
   whose backing inode number is in it). A 32-bit program built without
   large-file support cannot list a directory that holds a stub: the
-  kernel's compat `getdents` returns `EOVERFLOW` for its inode number. The stub can be looked up, `stat`ed and used as a
+  kernel's compat `getdents` returns `EOVERFLOW` for its inode number
+  (`fs/readdir.c:519`, Linux v7.3-rc4). The stub can be looked up, `stat`ed and used as a
   mount point; anything inside it (listing it, looking up, creating,
   opening) fails with `ENOTSUP`, logged once per stub, removing it with
   `EBUSY` (as a mount point), and renaming it
@@ -1421,7 +1432,8 @@ recovery protocol, concurrency, and the test strategy.
   xattrs work, an unlinked file can be reopened through
   `/proc/<pid>/fd/<n>`), and linking one back gets the local filesystem's
   answer: `ENOENT` for a file with no link left (Linux links such a file
-  only if `O_TMPFILE` made it, which works through dcfs), `EPERM` for a
+  only if `O_TMPFILE` made it, `fs/namei.c:5916`, Linux v7.3-rc4, which works
+  through dcfs), `EPERM` for a
   directory.
 - **Access times of directories and symlinks are dcfs's own.** A regular
   file's access time is the backing filesystem's: reads go through
@@ -1448,7 +1460,9 @@ recovery protocol, concurrency, and the test strategy.
   file is open).
 - **Reflinks fail with `EOPNOTSUPP`; most ioctls with `ENOTTY`.** The
   kernel answers `FICLONE`, `FICLONERANGE` and `FIDEDUPERANGE` itself and
-  FUSE has no way to forward them, so `cp --reflink=always` fails on every
+  FUSE has no way to forward them (`fs/ioctl.c:540`; FUSE's
+  `file_operations` has `.copy_file_range`, `fs/fuse/file.c:3094`, and no
+  `.remap_file_range`; Linux v7.3-rc4), so `cp --reflink=always` fails on every
   backing filesystem. `copy_file_range` does reach the backing filesystem,
   which on btrfs and xfs shares the extents as a reflink would:
   `cp --reflink=auto` (coreutils' default) gets that. Of the other
