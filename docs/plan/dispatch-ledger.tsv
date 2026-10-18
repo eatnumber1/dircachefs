@@ -131,3 +131,14 @@ aba4039a908740995	2026-10-18T20:45:33Z	25.34	implementation	dcfs-implementer	cla
 a152f39933e7de162	2026-10-18T20:45:33Z	tlc-measure	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
 a2995d2168e4f6c9f	2026-10-18T20:45:50Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low									
 aaa8bd0188633ee00	2026-10-18T20:52:06Z	Clerk batch 22	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+a478d05149bf9fe02	2026-10-18T20:54:43Z	22.5	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
+af301165769abe5e5	2026-10-18T20:55:38Z	docs-testing	review	dcfs-reviewer	claude-opus-5-5	xhigh									
+afaf669c594d4f644	2026-10-18T20:55:53Z	Style review 26.17c (post-merge)	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
+a9eaaefe870bda8dc	2026-10-18T20:56:10Z	Upload lanes and sloc datasets	mechanical	dcfs-mechanical	haiku	low									
+a908ec489db2937b7	2026-10-18T20:56:42Z	docs-maintainability	review	dcfs-reviewer	claude-opus-5-5	xhigh									
+aa124e63c646ac641	2026-10-18T20:57:18Z	Upload lanes dataset	mechanical	dcfs-mechanical	haiku	low									
+ac1c86d74ae69038e	2026-10-18T21:10:38Z	rules-index	style-review	dcfs-style-reviewer	opus	high									
+af4827fad5679654c	2026-10-18T21:15:42Z	Upload sloc/quota/budget datasets	mechanical	dcfs-mechanical	haiku	low									
+a0504854946da4ac3	2026-10-18T21:16:27Z	Correct quota dataset reading	mechanical	dcfs-mechanical	haiku	low									
+aa36da7ee7dec764b	2026-10-18T21:20:12Z	Effort-decision data audit		Explore	sonnet										
+af0bdc86f54db0d31	2026-10-18T21:21:42Z	Clerk batch 23	mechanical	dcfs-mechanical	claude-haiku-5-5	low									

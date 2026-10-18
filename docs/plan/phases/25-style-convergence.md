@@ -1840,6 +1840,60 @@ Test: the two new tests, then `bazel test --config=fast //dcfs/...`.
 
 Owner: dcfs-implementer. Dependencies: none.
 
+## 25.44 Correct the false statements in docs/style.md and AGENTS.md (russ, 2026-10-18; queued, not started; after the rules-index branch merges)
+
+Found by the 2026-10-18 maintainability fact-check. Several statements in
+`docs/style.md` and `AGENTS.md` are false about today's tree. Each one either
+becomes true (the code or the check is implemented) or is reworded to say it is
+planned, with the step that will make it true.
+
+`docs/style.md` (line numbers as of 2026-10-18):
+
+- `layering_check` is said to be enforced (87-91); it is off in
+  `tools/style_checks.bzl:74`.
+- `format_test` is said to enforce BUILD layout and to run shfmt (1631-1633,
+  1677, 1622, 14); `tools/format.py` takes only `.c`, `.cc` and `.h`.
+- The matchers `const_local_value`, `char_pointer_string` and the
+  function-pointer matcher are described as existing (187-242).
+- The `ABSL_FLAG`-outside-`main` `repo_shape` rule (220-222).
+- The confession check (1315-1318).
+- The injected syscall interfaces (124-131); 25.41 has not started.
+- "0 annotations" (165); seven exist.
+- `FATAL` (`CHECK`) is listed as a log level (1093).
+- `happy_path_nested` is listed as report-only (1074-1076).
+- `status_dropped` is missing from the report-only list (77-78).
+- The checked directories (70).
+- Stale shell and Python numbers (1653-1655).
+- The thin-glue ruling is superseded by `no_new_guest_shell` (1708-1713).
+- Appendix A rows F1, F2, F6, C3, C13, D2 and N1.
+- `-Weverything` is written in the present tense (158-162),
+  `test/qemu/README.md` (1744) and `docs/plan/phases/25-style-convergence.md`
+  (1671); it becomes true with the `.bazelrc` change or is reworded as planned.
+
+`AGENTS.md`:
+
+- "every test declares `size` and `timeout` explicitly" is false for 72 of 663
+  tests: 39 in `formal/`, 14 in `tools/`, 7 in `test/qemu/`, and the rest under
+  `third_party/`. Add the missing timeouts, then add a check: the QEMU macros
+  already refuse a missing one, so extend that to the `tlc_test` and `py_test`
+  macros, or add a `tools/repo_shape.py` rule.
+
+Steps:
+
+1. Count the false statements again against the tree on the day the step
+   starts; the line numbers above are from 2026-10-18 and will have moved.
+2. For each statement, either implement it (with a test or a check that fails
+   first, as the rule requires) or reword it as planned, naming this step or
+   the step that will make it true.
+3. Add the `size` and `timeout` declarations and the check for the 72 tests.
+
+Test: a check that fails on a test that lacks `size` or `timeout`, shown
+failing first; the implementer names the commands when the step starts.
+
+Owner: not yet assigned (the orchestrator chooses). Dependencies: the
+rules-index branch merges first, because it restructures `docs/style.md` and
+`AGENTS.md`.
+
 ### 25.34 as built (dcfs-implementer, 2026-10-17)
 
 - Helpers: `test/qemu/guest/guest.h` (`DcfsMount::{Start,Unmount,Crash,Log}`,
