@@ -7388,8 +7388,10 @@ TEST_F(DirCacheFSTest, InterruptedPopulationRecordsNothing) {
   ctx_.interrupts = &interrupts;
   // (Not traced: the trace spec's initial states range over every subset
   // of the names, 2^200 here; InterruptedPopulationIsTraced is.)
-  // Its first interruption points pass: probes run, then the interrupt is seen.
-  interrupts.at = 3;
+  // Its first interruption points pass (the population's, its two
+  // getdents64 calls', its first probe batch's): probes run, then the
+  // interrupt is seen.
+  interrupts.at = 5;
   std::shared_ptr<int> probes = CountProbes();
   EXPECT_EQ(ErrnoOf(List(d, false).status()), EINTR);
   EXPECT_GT(*probes, 0);
@@ -7423,6 +7425,77 @@ TEST_F(DirCacheFSTest, InterruptedPopulationIsTraced) {
   EXPECT_THAT(cache::ChildrenComplete(ctx_, d), IsOkAndHolds(false));
   interrupts.at = 0;
   EXPECT_THAT(List(d, false), IsOkAndHolds(::testing::SizeIs(5)));
+  ctx_.interrupts = &NoInterrupts();
+}
+
+// Counts one kind of ProtocolEvents::BackingCall.
+class CountBackingCalls final : public ProtocolEvents {
+ public:
+  explicit CountBackingCalls(std::string_view what) : what_(what) {}
+  void BackingCall(Context & /*ctx*/, std::string_view what,
+                   absl::SourceLocation /*site*/) override {
+    if (what == what_) ++count;
+  }
+  int count = 0;
+
+ private:
+  std::string what_;
+};
+
+// Step 22.5: a readdir's population has the lookup's interruption point
+// before its reads. Interrupted there, a readdir of an uncached empty
+// directory (whose population has no probe batch) replies EINTR without
+// opening it.
+TEST_F(DirCacheFSTest, ReaddirOfAnUncachedEmptyDirectoryIsInterruptible) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  StartTrace();
+  interrupts.at = 1;
+  CountBackingCalls opens("open_by_handle_at");
+  observers_->Add(&opens);
+  EXPECT_EQ(ErrnoOf(List(d, false).status()), EINTR);
+  observers_->Remove(&opens);
+  EXPECT_EQ(opens.count, 0);
+  EXPECT_THAT(cache::ChildrenComplete(ctx_, d), IsOkAndHolds(false));
+  interrupts.at = 0;
+  EXPECT_THAT(List(d, false), IsOkAndHolds(::testing::SizeIs(2)));
+  ctx_.interrupts = &NoInterrupts();
+}
+
+// Step 22.5: an interruption point before each getdents64 of a listing.
+// A directory whose names take more than one getdents64 buffer (64 KiB),
+// interrupted at its third interruption point (after the population's
+// first, and the first getdents64's): EINTR after one getdents64, before
+// any probe, nothing recorded.
+TEST_F(DirCacheFSTest, ListingIsInterruptedBetweenItsReads) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  constexpr int kNames = 1200;  // of 45 bytes: about 77 KiB of dirents
+  for (int i = 0; i < kNames; ++i) {
+    WriteFile(Path(absl::StrCat("d/", std::string(40, 'n'), i)));
+  }
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  interrupts.at = 3;
+  std::shared_ptr<int> probes = CountProbes();
+  CountBackingCalls listing_reads("getdents64");
+  observers_->Add(&listing_reads);
+  EXPECT_EQ(ErrnoOf(List(d, false).status()), EINTR);
+  EXPECT_EQ(listing_reads.count, 1);
+  EXPECT_EQ(*probes, 0);
+  EXPECT_THAT(cache::ChildrenComplete(ctx_, d), IsOkAndHolds(false));
+  EXPECT_FALSE(ctx_.db.InTransaction());
+  // Not interrupted, the same listing takes three (the last finds the
+  // end).
+  interrupts.at = 0;
+  listing_reads.count = 0;
+  EXPECT_THAT(List(d, false), IsOk());
+  EXPECT_EQ(listing_reads.count, 3);
+  observers_->Remove(&listing_reads);
   ctx_.interrupts = &NoInterrupts();
 }
 
@@ -8024,6 +8097,279 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<CheckpointCase> &info) {
       return info.param.name;
     });
+
+// --- The interrupt sweep (step 22.5) -----------------------------------------
+//
+// The code's form of formal/dcfs.tla's InterruptBound, swept: each
+// scenario's request, on a fresh tree and cache, is interrupted from each
+// of its backing calls on (the interrupt made pending at its k-th
+// ProtocolEvents::BackingCall hook, or before the first), and must reply
+// EINTR or its usual answer (a listing perhaps short: docs/style.md 1.12)
+// after at most its run of backing calls. The call the interrupt arrives at
+// is not counted (a model step is atomic: an arrival comes before or after
+// it). The rest are, by class: a listing's getdents64 calls (none may
+// follow: an interruption point is before each), its probes (at most 15:
+// an interruption point before each batch of 16, backing.cc's
+// PopulateDirectory), and every other call (at most the case's `run`).
+
+// The sweep's interruption source: pending once the counter says so.
+class SweepInterrupts final : public Interrupts {
+ public:
+  bool Interrupted() override { return pending; }
+  bool pending = false;
+};
+
+// Records a request's backing call hooks; makes the interrupt pending at the
+// `at`-th (0-based) and keeps the hooks after it.
+class BackingCallSweep final : public ProtocolEvents {
+ public:
+  void BackingCall(Context & /*ctx*/, std::string_view what,
+                   absl::SourceLocation /*site*/) override {
+    if (!armed) return;
+    every.emplace_back(what);
+    if (calls == at) {
+      interrupts.pending = true;
+    } else if (interrupts.pending) {
+      after.emplace_back(what);
+    }
+    ++calls;
+  }
+  bool armed = false;
+  int at = -1;
+  int calls = 0;
+  std::vector<std::string> every;
+  std::vector<std::string> after;
+  SweepInterrupts interrupts;
+};
+
+// One fresh fixture per run of a scenario.
+class InterruptRun : public DirCacheFSTest {
+ public:
+  void Begin(std::string_view scenario) {
+    SetUp();
+    MakeTree(scenario);
+    Start();
+    Prepare(scenario);
+    ctx_.interrupts = &sweep_.interrupts;
+    observers_->Add(&sweep_);
+  }
+
+  void End() {
+    observers_->Remove(&sweep_);
+    ctx_.interrupts = &NoInterrupts();
+    TearDown();
+  }
+
+  // What a request did: its backing calls, those after the interrupt, and
+  // the errno it replied (0: success).
+  struct Outcome {
+    std::vector<std::string> every;
+    std::vector<std::string> after;
+    int error = 0;
+  };
+
+  // Runs the scenario's request with the interrupt pending from its `at`-th
+  // backing call on (-1: from the start, as for one interrupted before its
+  // dispatch; nullopt: never).
+  Outcome Run(std::string_view scenario, std::optional<int> at) {
+    sweep_.at = at.value_or(-2);
+    sweep_.interrupts.pending = at == -1;
+    sweep_.armed = true;
+    const int error = Request(scenario);
+    sweep_.armed = false;
+    return {.every = sweep_.every, .after = sweep_.after, .error = error};
+  }
+
+ private:
+  // A name long enough that a listing of kLargeNames of them takes more
+  // than one getdents64 buffer (64 KiB).
+  static std::string LongName(int i) {
+    return absl::StrCat(std::string(40, 'n'), i);
+  }
+  static constexpr int kLargeNames = 1200;
+
+  void MakeTree(std::string_view scenario) {
+    ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+    if (scenario == "readdir_empty") return;
+    if (scenario == "readdir_large") {
+      for (int i = 0; i < kLargeNames; ++i) WriteFile(Path("d/" + LongName(i)));
+      return;
+    }
+    // Two probe batches.
+    for (int i = 0; i < 20; ++i) WriteFile(Path(absl::StrCat("d/f", i)));
+    WriteFile(Path("f"));
+  }
+
+  // A request of the setup, interrupted at its first interruption point:
+  // what its phase 1 made unknown stays unknown.
+  void InterruptedSetup(absl::AnyInvocable<void()> request) {
+    SweepInterrupts setup;
+    setup.pending = true;
+    ctx_.interrupts = &setup;
+    request();
+    ctx_.interrupts = &NoInterrupts();
+  }
+
+  void Prepare(std::string_view scenario) {
+    ASSERT_THAT(List(kRootInode, false), IsOk());
+    ASSERT_OK_AND_ASSIGN(d_, Id("d"));
+    if (scenario == "lookup" || scenario.starts_with("readdir_")) {
+      return;  // d itself uncached
+    }
+    ASSERT_OK_AND_ASSIGN(f_, Id("f"));
+    if (scenario == "lookup_refresh" || scenario.starts_with("readdirplus")) {
+      ASSERT_THAT(List(d_, false), IsOk());
+      ASSERT_OK_AND_ASSIGN(InodeId f0, Id("f0", d_));
+      // An entry's attributes unknown, and for a readdirplus "."'s too:
+      // refreshed by the request.
+      InterruptedSetup([&] { Chmod(f0, S_IFREG | 0600); });
+      if (scenario != "lookup_refresh") {
+        InterruptedSetup([&] { Chmod(d_, S_IFDIR | 0700); });
+      }
+    }
+    if (scenario == "readdirplus_parent") {
+      // d's own dentry unknown: ".." is asked of the backing filesystem.
+      InterruptedSetup([&] { Rename(kRootInode, "d", kRootInode, "d2"); });
+    }
+    if (scenario == "getattr") {
+      InterruptedSetup([&] { Chmod(f_, S_IFREG | 0600); });
+    }
+  }
+
+  // The scenario's request; the errno it replied (0: success).
+  int Request(std::string_view scenario) {
+    if (scenario.starts_with("lookup")) return -Lookup(d_, "f0").first.error;
+    if (scenario.starts_with("readdir_")) {
+      return ErrnoOf(List(d_, false).status());
+    }
+    if (scenario.starts_with("readdirplus")) {
+      return ErrnoOf(List(d_, true).status());
+    }
+    if (scenario == "getattr") return -Getattr(f_).first.error;
+    if (scenario == "create") return -Mkdir(kRootInode, "new").first.error;
+    if (scenario == "unlink") return -Unlink(kRootInode, "f").error;
+    if (scenario == "rename") {
+      return -Rename(kRootInode, "f", kRootInode, "g").error;
+    }
+    if (scenario == "attrchange") return -Chmod(f_, S_IFREG | 0600).error;
+    return -Fsyncdir(kRootInode).error;  // "sync"
+  }
+
+  void TestBody() override {}
+
+  BackingCallSweep sweep_;
+  InodeId d_ = 0;
+  InodeId f_ = 0;
+};
+
+struct InterruptCase {
+  std::string scenario;
+  // Its backing call hooks after an interrupt, besides a listing's
+  // getdents64 calls and probes: the longest stretch of them with no
+  // interruption point before one, less the one the interrupt arrives at.
+  int run = 0;
+  // Sweep only the first this many backing calls (-1: all).
+  int max_at = -1;
+};
+
+// The runs, in hooks (an OpenNode is three: open_by_handle_at, its
+// identity statx and ReadGeneration; a refresh is an OpenNode and a
+// statx), with the model's Run(kind) they stand for:
+//  - a population (a lookup's or a readdir's; the model's 0, PD_read an
+//    interruption point): the rest of its OpenNode and the directory's
+//    statx, after the interruption point at its start; then one before
+//    each getdents64 and each batch of probes;
+//  - a lookup's reply entry, refreshed (outside the model's lookup, which
+//    has replied: formal/README.md, "Timely interrupts"): a refresh, with
+//    no interruption point;
+//  - a readdirplus (the model's 0, RDP_stat an interruption point) and a
+//    getattr (0, GA_stat): the rest of one refresh, or of ParentOf's
+//    OpenNode and its parent's probe, each after its interruption point;
+//  - the mutations (the model's 1, or a create's 2, after its syscall):
+//    from the interruption point to the reply, the opens between it and
+//    the syscall included, as the model's syscall step holds them: a
+//    create's syscall, its probe (2 hooks) and the parent's statx; an
+//    unlink's and a rename's syscall and refreshes (a rename's of the
+//    moved object too); an attribute change's target OpenNode before its
+//    syscall, and after it a refresh and the side-effect xattr read
+//    (OpenNode, XattrOf);
+//  - a sync point (the model's 0): after the interruption point before
+//    its syncfs, the read-only check (fstatvfs).
+const InterruptCase kInterruptCases[] = {
+    {.scenario = "lookup", .run = 3},
+    {.scenario = "readdir_uncached", .run = 3},
+    {.scenario = "readdir_empty", .run = 3},
+    // Its listing's first calls only: the probes after are as above.
+    {.scenario = "readdir_large", .run = 3, .max_at = 8},
+    {.scenario = "create", .run = 4},
+    {.scenario = "unlink", .run = 4},
+    {.scenario = "rename", .run = 8},
+    {.scenario = "attrchange", .run = 11},
+    {.scenario = "sync", .run = 1},
+};
+
+// What `c`'s request did after an interrupt that arrived at its `at`-th
+// backing call (-1: before the first), and whether that is within its run.
+struct SweepRun {
+  std::string what;
+  size_t after = 0;
+  bool within = true;
+};
+SweepRun RunInterrupted(const InterruptCase &c, int at, int total) {
+  constexpr int64_t kProbesPerBatch = 16;  // backing.cc's
+  InterruptRun run;
+  run.Begin(c.scenario);
+  const InterruptRun::Outcome outcome = run.Run(c.scenario, at);
+  run.End();
+  const std::vector<std::string> &after = outcome.after;
+  const int64_t getdents = absl::c_count(after, "getdents64");
+  const int64_t probes = absl::c_count(after, "ProbeChild");
+  const int64_t other = static_cast<int64_t>(after.size()) - getdents - probes;
+  return {
+      .what = absl::StrCat(
+          c.scenario, " interrupted ",
+          at == -1 ? "before its first backing call"
+                   : absl::StrCat("at backing call ", at),
+          " of ", total, ", replied ",
+          outcome.error == 0 ? "OK" : ErrnoToErrorName(outcome.error),
+          ", then: ", absl::StrJoin(after, "; ")),
+      .after = after.size(),
+      .within = getdents == 0 && probes <= kProbesPerBatch - 1 &&
+                other <= c.run &&
+                (outcome.error == 0 || outcome.error == EINTR),
+  };
+}
+
+TEST(InterruptSweepTest, BackingCallsAfterAnInterruptStayWithinTheRun) {
+  std::vector<std::string> findings;
+  for (const InterruptCase &c : kInterruptCases) {
+    std::vector<std::string> every;
+    {
+      InterruptRun run;
+      run.Begin(c.scenario);
+      every = run.Run(c.scenario, std::nullopt).every;
+      run.End();
+    }
+    const int total = static_cast<int>(every.size());
+    const int n = c.max_at < 0 ? total : std::min(total, c.max_at);
+    SweepRun worst;
+    for (int at = -1; at < n; ++at) {
+      SweepRun r = RunInterrupted(c, at, total);
+      if (!r.within) findings.push_back(r.what);
+      if (r.after >= worst.after) worst = std::move(r);
+    }
+    // For the log: the request's calls, and its longest run after an
+    // interrupt.
+    std::cout << "INTERRUPT-SWEEP " << c.scenario << ": " << total
+              << " backing calls ("
+              << absl::StrJoin(every.begin(),
+                               every.begin() + std::min(total, 12), "; ")
+              << (total > 12 ? "; ..." : "")
+              << "); the longest run after an interrupt: " << worst.what
+              << '\n';
+  }
+  EXPECT_THAT(findings, ::testing::IsEmpty());
+}
 
 // --- The fault sweep (step 26.6) ---------------------------------------------
 //

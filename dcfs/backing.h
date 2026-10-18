@@ -308,6 +308,10 @@ absl::StatusOr<struct statvfs> StatFilesystem(Context &ctx, InodeId id);
 // attributes, symlink target and xattrs only if the same holds for that
 // child (its row is upserted regardless, attributes unknown). The result
 // says whether the listing was recorded, and what it found.
+//
+// Interruptible (dcfs/interruption_point.h): an interruption point before
+// its first backing read, before each getdents64 and before each batch of
+// probes; interrupted, it records nothing and fails with EINTR.
 struct Populated {
   // Whether `dir`'s listing was recorded (and `dir` is now complete).
   bool cached = false;

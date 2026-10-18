@@ -1159,9 +1159,9 @@ qemu_cc_test(
     # "Guest memory").
     asan_mem = 1088,
     srcs = ["dir_cache_fs_test.cc"],
-    # The fault sweep, the slope tests and the poisoned backing have targets
-    # of their own.
-    args = ["--gtest_filter=-FaultSitesTest.*:SlopeTest.*:PoisonedBackingTest.*"],
+    # The fault sweep, the interrupt sweep, the slope tests and the poisoned
+    # backing have targets of their own.
+    args = ["--gtest_filter=-FaultSitesTest.*:InterruptSweepTest.*:SlopeTest.*:PoisonedBackingTest.*"],
     disks = [("vdb", "ext4", "32M")],  # InitRoot needs FS_IOC_GETFSUUID
     linkopts = DIR_CACHE_FS_TEST_WRAPS,
     deps = DIR_CACHE_FS_TEST_DEPS,
@@ -1220,6 +1220,22 @@ qemu_cc_test(
     deps = DIR_CACHE_FS_TEST_DEPS,
 )
 
+# Step 22.5: the interrupt sweep (InterruptSweepTest in dir_cache_fs_test.cc):
+# each request scenario interrupted at every backing call, the backing calls
+# after it counted against the request kind's run (formal/dcfs.tla's
+# InterruptBound, in the code's calls).
+qemu_cc_test(
+    name = "dir_cache_fs_interrupt_sweep_test",
+    size = "small",
+    timeout = "moderate",
+    asan_mem = 896,
+    srcs = ["dir_cache_fs_test.cc"],
+    args = ["--gtest_filter=InterruptSweepTest.*"],
+    disks = [("vdb", "ext4", "32M")],
+    linkopts = DIR_CACHE_FS_TEST_WRAPS,
+    deps = DIR_CACHE_FS_TEST_DEPS,
+)
+
 # Trace validation (formal/README.md): runs :dir_cache_fs_test's guest and
 # checks the trace of every test that records one (StartTrace) against
 # formal/Trace.tla (and the files', nodeids' and identity models). The harness
@@ -1266,10 +1282,10 @@ TRACE_GROUP_B = [
 TRACE_GROUP_FILTERS = {
     "a": ":".join(TRACE_GROUP_A),
     "b": ":".join(TRACE_GROUP_B),
-    # Not the fault sweep, the slope tests and the poisoned backing either:
-    # they record no trace and have targets of their own (as in
-    # dir_cache_fs_test's filter).
-    "c": "*-" + ":".join(TRACE_GROUP_A + TRACE_GROUP_B + ["FaultSitesTest.*", "SlopeTest.*", "PoisonedBackingTest.*"]),
+    # Not the fault sweep, the interrupt sweep, the slope tests and the
+    # poisoned backing either: they record no trace and have targets of
+    # their own (as in dir_cache_fs_test's filter).
+    "c": "*-" + ":".join(TRACE_GROUP_A + TRACE_GROUP_B + ["FaultSitesTest.*", "InterruptSweepTest.*", "SlopeTest.*", "PoisonedBackingTest.*"]),
 }
 
 [

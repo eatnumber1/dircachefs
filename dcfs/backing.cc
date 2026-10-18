@@ -450,13 +450,20 @@ absl::StatusOr<std::vector<std::pair<std::string, std::string>>> XattrsOf(
 }
 
 // The names in directory `dir_fd` (which must be at offset 0), without "."
-// and "..".
-absl::StatusOr<std::vector<std::string>> ReadDirNames(int dir_fd) {
+// and "..". EINTR at the interruption point before any getdents64.
+absl::StatusOr<std::vector<std::string>> ReadDirNames(Context &ctx,
+                                                      int dir_fd) {
   // uint64_t elements keep the buffer 8-byte aligned, which the kernel's
   // linux_dirent64 records (and so the casts below) rely on.
   absl::FixedArray<uint64_t> buf(kDirentBufferBytes / sizeof(uint64_t));
   std::vector<std::string> names;
   while (true) {
+    // An interruption point before each read of the listing: interrupted,
+    // the population stops here and records nothing (formal/dcfs.tla's
+    // PopulateRead is all of the population's reads in one step, between
+    // its PD_read and PD_commit interruption points).
+    RETURN_IF_ERROR(CheckInterrupted(ctx, "a directory's names"));
+    BackingCall(ctx, "getdents64");
     ASSIGN_OR_RETURN(ssize_t nbytes,
                      syscalls::getdents64(dir_fd, buf.data(),
                                           buf.size() * sizeof(uint64_t)));
@@ -1416,6 +1423,9 @@ absl::StatusOr<InodeId> RecordChild(Context &ctx, cache::FillSnapshot snapshot,
 }  // namespace
 
 absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
+  // Before the population's I/O, a lookup's or a readdir's alike
+  // (formal/dcfs.tla's Interrupt at PD_read).
+  RETURN_IF_ERROR(CheckInterrupted(ctx, "listing a directory"));
   // Phase A: all the I/O, no transaction.
   ASSIGN_OR_RETURN(FileDescriptor dir_fd,
                    OpenNode(ctx, dir, O_RDONLY | O_DIRECTORY));
@@ -1430,8 +1440,7 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
   ASSIGN_OR_RETURN(struct statx dir_stx,
                    syscalls::statx(*dir_fd, "", AT_EMPTY_PATH, kMountIdMask));
   ASSIGN_OR_RETURN(cache::CachedAttr dir_attr, cache::GetAttr(ctx, dir));
-  BackingCall(ctx, "getdents64");
-  ASSIGN_OR_RETURN(std::vector<std::string> names, ReadDirNames(*dir_fd));
+  ASSIGN_OR_RETURN(std::vector<std::string> names, ReadDirNames(ctx, *dir_fd));
 
   // A child left out of `children` below is either a vanished dirent
   // (raced ENOENT), dropped entirely, or a refused mount/subvolume boundary
@@ -1601,11 +1610,10 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
                               resolve_alone ? events::LookupOutcome::kResolve
                                             : events::LookupOutcome::kPopulate,
                               0);
-    // Before the probe or the population's I/O (formal/dcfs.tla's
-    // Interrupt at RN_probe, PD_read).
-    RETURN_IF_ERROR(CheckInterrupted(
-        ctx, resolve_alone ? "resolving a name" : "listing a directory"));
     if (resolve_alone) {
+      // Before the probe (formal/dcfs.tla's Interrupt at RN_probe); a
+      // population has its own (PD_read).
+      RETURN_IF_ERROR(CheckInterrupted(ctx, "resolving a name"));
       ASSIGN_OR_RETURN(result, ResolveName(ctx, parent, name));
       return WithStub(result, parent, name);
     }
