@@ -131,7 +131,8 @@ detached HEAD) and `running`. Its agent type, model and effort are each the
 values of every agent on the lane joined by `, ` in launch order (e.g.
 `dcfs-reviewer, dcfs-style-reviewer` / `opus, sonnet` / `high, medium`); when
 an agent stops, the row shows the rest. An `agy` process whose working
-directory is the lane adds `agy, sandboxed` to those lists, with its `--model`
+directory is the lane adds `agy` (plus `, read-only` with `--mode plan`,
+plus `, sandboxed` only with `--sandbox`) to those lists, with its `--model`
 (a trailing `-low|-medium|-high` moved to the effort column). A lane with an
 `agy` process and no agent shows just that. An override (`lane-state`) displays
 its state and note instead of idle or running. Otherwise the lane is `idle`.

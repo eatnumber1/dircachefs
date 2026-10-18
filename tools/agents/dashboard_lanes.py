@@ -520,7 +520,11 @@ def run_meter(cmd, runner, env, **kwargs):
             return None
         return res
     except subprocess.CalledProcessError as e:
-        err = (e.stderr or "").strip() if hasattr(e, "stderr") and e.stderr else str(e)
+        err = (
+            (e.stderr or "").strip()
+            if hasattr(e, "stderr") and e.stderr
+            else str(e)
+        )
         env.stderr.write(
             "dashboard_lanes: %s exited %d: %s\n"
             % (cmd_name, e.returncode, err)
@@ -563,11 +567,7 @@ def quota(env):
     )
 
     existing = load_json(env.path("quota.json"), [])
-    by_pool = {
-        r["pool"]: r
-        for r in existing
-        if isinstance(r, dict) and "pool" in r
-    }
+    by_pool = {r["pool"]: r for r in existing if "pool" in r}
 
     if claude_out is not None:
         try:
@@ -603,15 +603,23 @@ def quota(env):
         local_dt = now_dt.astimezone(local_tz)
         label = local_dt.strftime("%a %H:%M")
         budget = load_json(env.path("budget.json"), [])
-        budget.append({
-            "when": when,
-            "label": label,
-            "target": None,
-            "actual": actual,
-        })
-        write_atomic(
-            env.path("budget.json"), json.dumps(budget, indent=2) + "\n"
-        )
+        readings_before = [
+            r for r in budget
+            if r.get("when", "") <= when and r.get("actual") is not None
+        ]
+        if not readings_before or readings_before[-1].get("actual") != actual:
+            idx = 0
+            while idx < len(budget) and budget[idx].get("when", "") <= when:
+                idx += 1
+            budget.insert(idx, {
+                "when": when,
+                "label": label,
+                "target": None,
+                "actual": actual,
+            })
+            write_atomic(
+                env.path("budget.json"), json.dumps(budget, indent=2) + "\n"
+            )
 
     return ""
 
@@ -645,27 +653,17 @@ def lanes_material_changed(env):
     up_path = env.path("lanes.uploaded.json")
     if not os.path.exists(up_path):
         return True
-    try:
-        up_rows = json.loads(read_text(up_path))
-    except (ValueError, json.JSONDecodeError):
-        return True
+    up_rows = json.loads(read_text(up_path))
 
     cur_states = load_json(env.path("lane_states.json"), {})
     up_states = load_json(env.path("lane_states.uploaded.json"), {})
     if cur_states != up_states:
         return True
 
-    try:
-        cur_rows = json.loads(read_text(lanes_path))
-    except (ValueError, json.JSONDecodeError):
-        return True
+    cur_rows = json.loads(read_text(lanes_path))
 
-    cur_by_lane = {
-        r["lane"]: r for r in cur_rows if isinstance(r, dict) and "lane" in r
-    }
-    up_by_lane = {
-        r["lane"]: r for r in up_rows if isinstance(r, dict) and "lane" in r
-    }
+    cur_by_lane = {r["lane"]: r for r in cur_rows if "lane" in r}
+    up_by_lane = {r["lane"]: r for r in up_rows if "lane" in r}
 
     for name, cur in cur_by_lane.items():
         if name == "orchestrator":
@@ -782,7 +780,7 @@ def step_of(branch):
 
 
 def agy_processes(env):
-    """Maps a working directory to the --model of an agy running there."""
+    """Maps a working directory to (model, label) of an agy running there."""
     found = {}
     for pid in os.listdir(env.proc_root):
         try:
@@ -794,13 +792,26 @@ def agy_processes(env):
         if os.path.basename(argv[0]) != "agy":
             continue
         model = ""
+        mode = ""
+        sandboxed = False
         for i, arg in enumerate(argv):
             if arg == "--model" and i + 1 < len(argv):
                 model = argv[i + 1]
             elif arg.startswith("--model="):
                 model = arg.removeprefix("--model=")
+            elif arg == "--mode" and i + 1 < len(argv):
+                mode = argv[i + 1]
+            elif arg.startswith("--mode="):
+                mode = arg.removeprefix("--mode=")
+            elif arg == "--sandbox":
+                sandboxed = True
+        label = "agy"
+        if mode == "plan":
+            label += ", read-only"
+        if sandboxed:
+            label += ", sandboxed"
         cwd = os.path.realpath(os.path.join(env.proc_root, pid, "cwd"))
-        found[cwd] = model
+        found[cwd] = (model, label)
     return found
 
 
@@ -841,9 +852,9 @@ def build_rows(env):
         shown = [(r["subagent_type"], r["model"], r["effort"])
                  for r in records]
         if os.path.realpath(lane_dir) in agy:
-            model = agy[os.path.realpath(lane_dir)]
+            model, label = agy[os.path.realpath(lane_dir)]
             effort = EFFORT_SUFFIX.match(model)
-            shown.append(("agy, sandboxed",
+            shown.append((label,
                           effort.group(1) if effort else model,
                           effort.group(2) if effort else ""))
         if shown:
@@ -1209,6 +1220,8 @@ def launch_quota(env):
     cmd = [sys.executable, "-I", os.path.abspath(__file__), "quota"]
     launcher = getattr(env, "launcher", None) or subprocess.Popen
     log_path = env.path("quota.log")
+    child_env = dict(env.environ) if env.environ else dict(os.environ)
+    child_env["DCFS_DASHBOARD_DIR"] = env.dashboard_dir
     try:
         with open(os.devnull, "r") as devnull, open(
             log_path, "a", encoding="utf-8"
@@ -1219,6 +1232,7 @@ def launch_quota(env):
                 stdout=log_file,
                 stderr=log_file,
                 start_new_session=True,
+                env=child_env,
             )
     except (OSError, subprocess.SubprocessError) as e:
         env.stderr.write("dashboard_lanes: launch quota: %r\n" % e)
@@ -1360,7 +1374,6 @@ def main(argv, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
         IndexError,
         TypeError,
         AttributeError,
-        json.JSONDecodeError,
         subprocess.SubprocessError,
     ) as e:
         stderr.write("dashboard_lanes: %s: %r\n" % (argv[0] if argv else "", e))

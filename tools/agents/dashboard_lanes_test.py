@@ -250,7 +250,7 @@ class AgyTest(Fixture):
         self.make_agy(43, "lane-2", ["--model=gemini-y"])
         self.launch(prompt="none")
         rows = self.rows()
-        self.assertEqual(rows["lane-1"]["agent"], "agy, sandboxed")
+        self.assertEqual(rows["lane-1"]["agent"], "agy")
         self.assertEqual(rows["lane-1"]["model"], "gemini-x")
         self.assertEqual(rows["lane-1"]["state"], "running")
         self.assertEqual(rows["lane-2"]["model"], "gemini-y")
@@ -311,7 +311,7 @@ class AgyTest(Fixture):
         self.launch(agent_id="a2", subagent_type="dcfs-reviewer")
         row = self.rows()["lane-2"]
         self.assertEqual(row["agent"],
-                         "dcfs-implementer, dcfs-reviewer, agy, sandboxed")
+                         "dcfs-implementer, dcfs-reviewer, agy")
         self.assertEqual(row["model"], "sonnet, opus, gemini-x")
         self.assertEqual(row["effort"], "medium, high, high")
         self.assertEqual(row["step"], "main")
@@ -321,8 +321,22 @@ class AgyTest(Fixture):
         self.launch()
         self.run_hook("subagent-stop", {"agent_id": "a1"})
         row = self.rows()["lane-2"]
-        self.assertEqual(row["agent"], "agy, sandboxed")
+        self.assertEqual(row["agent"], "agy")
         self.assertEqual(row["state"], "running")
+
+    def test_agy_labels_with_mode_and_sandbox(self):
+        self.make_agy(42, "lane-1", ["--mode", "plan"])
+        self.make_agy(43, "lane-2", ["--sandbox"])
+        self.launch(prompt="none")
+        rows = self.rows()
+        self.assertEqual(rows["lane-1"]["agent"], "agy, read-only")
+        self.assertEqual(rows["lane-2"]["agent"], "agy, sandboxed")
+
+    def test_agy_labels_with_both_mode_plan_and_sandbox(self):
+        self.make_agy(42, "lane-1", ["--mode=plan", "--sandbox"])
+        self.launch(prompt="none")
+        self.assertEqual(self.rows()["lane-1"]["agent"],
+                         "agy, read-only, sandboxed")
 
 
 class BranchTest(Fixture):
@@ -1205,6 +1219,69 @@ class QuotaCommandTest(Fixture):
         self.assertIn("dashboard_lanes", err_output)
         self.assertIn("claude_usage.py", err_output)
 
+    def test_budget_plan_preserved_and_reading_inserted_in_order(self):
+        os.makedirs(self.dash, exist_ok=True)
+        plan = [
+            {
+                "when": "2026-10-17T07:00:00Z",
+                "label": "Fri end",
+                "target": None,
+                "actual": 22,
+            },
+            {
+                "when": "2026-10-18T07:00:00Z",
+                "label": "Sat end",
+                "target": 60,
+                "actual": None,
+            },
+        ]
+        self.write(self.env.path("budget.json"), json.dumps(plan))
+        dashboard_lanes.main(
+            ["quota"], stdin=io.StringIO(""), stdout=io.StringIO(),
+            stderr=io.StringIO(), env=self.env
+        )
+        with open(self.env.path("budget.json"), encoding="utf-8") as f:
+            budget = json.load(f)
+        self.assertEqual(len(budget), 3)
+        self.assertEqual(budget[0]["when"], "2026-10-17T07:00:00Z")
+        self.assertEqual(budget[0]["actual"], 22)
+        self.assertEqual(budget[1]["when"], "2026-10-17T15:00:00Z")
+        self.assertEqual(budget[1]["actual"], 57)
+        self.assertEqual(budget[2]["when"], "2026-10-18T07:00:00Z")
+        self.assertEqual(budget[2]["target"], 60)
+        self.assertIsNone(budget[2]["actual"])
+
+    def test_budget_repeat_reading_adds_nothing(self):
+        os.makedirs(self.dash, exist_ok=True)
+        plan = [
+            {
+                "when": "2026-10-17T07:00:00Z",
+                "label": "Fri end",
+                "target": None,
+                "actual": 22,
+            },
+            {
+                "when": "2026-10-17T14:00:00Z",
+                "label": "Sat 07:00",
+                "target": None,
+                "actual": 57,
+            },
+            {
+                "when": "2026-10-18T07:00:00Z",
+                "label": "Sat end",
+                "target": 60,
+                "actual": None,
+            },
+        ]
+        self.write(self.env.path("budget.json"), json.dumps(plan))
+        dashboard_lanes.main(
+            ["quota"], stdin=io.StringIO(""), stdout=io.StringIO(),
+            stderr=io.StringIO(), env=self.env
+        )
+        with open(self.env.path("budget.json"), encoding="utf-8") as f:
+            budget = json.load(f)
+        self.assertEqual(budget, plan)
+
 
 class QuotaStopAndUploadTest(Fixture):
 
@@ -1213,7 +1290,9 @@ class QuotaStopAndUploadTest(Fixture):
         self.current_time_str = "2026-10-17T15:00:00Z"
         self.env.now = lambda: self.current_time_str
         self.launched = []
-        self.env.launcher = lambda cmd, **kwargs: self.launched.append((cmd, kwargs))
+        self.env.launcher = lambda cmd, **kwargs: (
+            self.launched.append((cmd, kwargs))
+        )
 
         def fake_runner(cmd, **kwargs):
             if cmd == ["python3", "-I", "tools/agents/claude_usage.py"]:
@@ -1230,7 +1309,9 @@ class QuotaStopAndUploadTest(Fixture):
 
     def test_stop_launches_reader_when_read_at_missing_or_hourly(self):
         # Env runner should never be called by stop hook.
-        self.env.runner = lambda *args, **kwargs: self.fail("stop() must never call meters directly")
+        self.env.runner = lambda *args, **kwargs: self.fail(
+            "stop() must never call meters directly"
+        )
 
         # 1. read_at is missing: stop() launches reader and writes read_at.
         out, _ = self.run_hook("stop", {"stop_hook_active": False})
@@ -1238,6 +1319,9 @@ class QuotaStopAndUploadTest(Fixture):
         cmd, kwargs = self.launched[0]
         self.assertIn("quota", cmd)
         self.assertTrue(kwargs.get("start_new_session"))
+        self.assertEqual(
+            kwargs.get("env", {}).get("DCFS_DASHBOARD_DIR"), self.dash
+        )
         read_at_path = self.env.path("quota.read_at")
         self.assertTrue(os.path.exists(read_at_path))
         with open(read_at_path, encoding="utf-8") as f:
