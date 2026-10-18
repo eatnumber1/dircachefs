@@ -681,6 +681,20 @@ expires or dcfs invalidates them.
   the chattr case's synchronous attribute invalidation) is separate and
   unchanged.
 
+- **Handle opens go by identity, not names** (russ, 2026-10-18: "does
+  open_by_handle need entry invalidation?"). `open_by_handle_at` reaches
+  an object through the export operations by nodeid and generation, not
+  by name, so entry expiry and invalidation do not affect it. The kernel's
+  handle-decoding path checks the generation: `fuse_fh_to_dentry`
+  (`fs/fuse/inode.c:1132`) calls `fuse_get_dentry` (`fs/fuse/inode.c:1054`),
+  which answers ESTALE when `inode->i_generation` differs from the handle's
+  (`fs/fuse/inode.c:1085`); verified at v7.3-rc7-245-g32c52ec87d62. Guest
+  test (native differential): `open_by_handle_at` on the dcfs mount after a
+  removal, a rename and an inode-number reuse gives the same results as
+  native, ESTALE where native gives it. If the kernel did not check the
+  generation, pause and bring it to russ (the same condition as the 12.24
+  symlink check).
+
 Owner: dcfs-protocol, after 25.28b and 22.5 (all three touch dcfs.tla).
 
 ## 12.21 The model's environment assumptions, registered and enforced (russ, 2026-10-17: "I agree with your proposals"; queued)
@@ -867,5 +881,10 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
   read fresh. If that test fails, stop and bring it to russ before changing
   dcfs (russ, 2026-10-18: "I'll be surprised if it doesn't use the
   generation. If you find that it doesn't, pause and let's discuss.").
-  Also set `READDIRPLUS_AUTO` explicitly in Init as a deliberate choice,
-  with its reason in the comment (the step records the value and why).
+  russ, 2026-10-18, on setting `READDIRPLUS_AUTO` explicitly: "No. Rely on
+  defaults, but test that our relied-upon defaults are true. That way prod
+  code is minimized while still having protections." So dcfs leaves
+  `READDIRPLUS_AUTO` at libfuse's default, as it leaves the other libfuse
+  defaults it relies on (ASYNC_READ, AUTO_INVAL_DATA, ...), and a guest
+  test asserts each relied-upon default's value in the negotiated
+  connection.

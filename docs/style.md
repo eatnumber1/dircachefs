@@ -1398,6 +1398,14 @@ necessary, but if you think one is necessary, come to me."
 - **Existing loops** are listed in `docs/plan/notes/retry-loops-2026-10-10.md`
   for russ's ruling; the list only shrinks.
 
+### 1.13 Rely on library defaults, and test the ones we rely on
+
+- **Rely on a library default rather than restating it in production
+  code.** A test asserts every default dcfs relies on, so a library change
+  that flips one fails a test (russ, 2026-10-18: "Rely on defaults, but
+  test that our relied-upon defaults are true. That way prod code is
+  minimized while still having protections.").
+
 ## 2. Tests
 
 - **Test first.** Write the test, run it on the unchanged code, quote the

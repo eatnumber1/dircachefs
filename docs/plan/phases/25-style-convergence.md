@@ -1451,6 +1451,22 @@ Steps:
      `docs/plan/review-findings.tsv` do not exist yet. The orchestrator
      appends findings through `review_findings.py`; the script is a step
      item here.
+5. Diff coverage in CI. Every line and branch that a change adds or
+   touches is covered by a test, or is listed in `docs/coverage.md` with
+   its reason (AGENTS.md: "new code arrives fully covered"). Today's gate
+   checks only that the total does not drop below the baseline, so a new
+   uncovered branch passes while the total stays above it. This catches
+   code that never runs: 25.34's untested `RET_CHECK` in `syscalls::system`
+   and 22.5's interrupted-getattr branch. It is a Bazel target with declared
+   inputs (AGENTS.md: "Everything goes through Bazel"), so its results cache
+   soundly and CI runs it like any test; no script outside the graph.
+6. Mutation runs on changed code as a routine merge gate, with
+   `tools/mutation/mutate.py` run through Bazel as in item 5. A surviving
+   mutant blocks the merge (style 1.10a). This catches code that runs but
+   that no test checks: 25.34's `setgroups` never asserted, both-sides-fail
+   comparisons, and `InodeOf`'s dropped status. Evidence:
+   `docs/plan/review-findings.tsv`, where test-gap is the largest
+   substantive category (8 of 54 on 2026-10-17).
 
 ## 25.40 Support FUSE_STATX (russ, 2026-10-17; queued, M2)
 

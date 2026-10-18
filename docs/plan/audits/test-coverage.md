@@ -50,7 +50,6 @@ are not behavioral bugs, so "does a regression test cover them" does not apply.
 | 26 | `(device, ino, generation)` alone did not identify an object: generation 0 covers symlinks/specials/no-ioctl filesystems, and btrfs can reissue an identical handle after its own power loss (crash-audit F5/F6) | `3ec9a92` (4.10) | `MetadataCacheTest.DifferentHandleOrBirthTimeIsANewObject`, `dcfs/metadata_cache_test.cc` | **COVERED** | Exercises all three sub-cases the fix introduces: different handle bytes at the same (dev,ino,gen=0) creates a new row and invalidates the old one; identical handle but different birth time also creates a new row; and a birth time missing on either side matches (no false invalidation). |
 | 27 | `RecordAttrs` could cache `nlink=0` as "current" for a still-open unlinked file; a crash between that and `Release`'s row deletion left it served as valid instead of unknown (crash-audit F8) | `3ec9a92` (4.10) | `BackingTest.AttrsWithNoLinksLeftStayUnknown`, `dcfs/backing_test.cc` | **COVERED** | Opens a file, unlinks it, refreshes attrs from the fd, and asserts the cached row is `valid=false` (unknown) with `nlink=0` — i.e., never served as current. |
 | 28 | `test/qemu/BUILD.bazel` left in a broken state by a bad rebase-conflict resolution | `9052480` (3.5) | whole test suite (build must succeed) | **COVERED** | Infra fix; nothing builds without it. |
-| 29 | libfuse's carried `FUSE_ATTR_GENERATION` patch used a stale bit (pre-7.46-io_uring-rebase) instead of matching the actual kernel's bit 44 (protocol 7.47) | `36e5fa9` (0.3) | none found directly; indirectly, any test relying on NFS generation numbers (`handles_test`, `nfs_test`) | **WEAK** | If the kernel and the libfuse patch both used a *consistently* wrong bit, no test would notice (both sides would silently agree on the wrong meaning) since the kernel source and the carried patch are both vendored together at a matching commit. Nothing directly asserts the capability bit value itself; coverage is incidental at best. |
 | 30 | Guest test scripts truncated their last serial output line on `reboot -f` right after `sync` (which does not flush the emulated UART), causing flaky `ALL-TESTS-PASSED` detection | `771a008`, `75ec504` (5.1b) | every `qemu_test`'s verdict-detection mechanism in `run-qemu.sh` | **COVERED** | Infra/flake fix; verified in the commit by 3x back-to-back runs of 5 different tests with zero flakes after the change. A regression would show as intermittent CI flakiness across the whole suite, which is the kind of thing that "visibly breaks" over a few runs, if not deterministically on the first one. |
 | 31 | Missing `/etc/mtab` crashed `rpc.mountd` via a NULL deref; `nfsd` pins the old vfsmount across a dcfs restart, requiring `exportfs -f` | `111502a` (5.3) | `nfs.sh`/`//test/qemu:nfs_test` — the entire test depends on `rpc.mountd` starting; `restart_daemon`'s `exportfs -f` call is exercised by the restart-then-access checks | **COVERED** | Both fixes are infra baked into the same commit that introduces the test; without the `/etc/mtab` symlink, `nfs_test` cannot boot `rpc.mountd` at all (visible, total failure); without `exportfs -f` after restart, the post-restart NFS access checks would see stale export state. |
 
@@ -149,13 +148,6 @@ are not behavioral bugs, so "does a regression test cover them" does not apply.
      simulating a broken FUSE channel, which is out of proportion to the bug (a lost errno name
      in a log line). Documented here for completeness; recommend leaving as-is unless a real
      incident surfaces needing it.
-
-6. **`36e5fa9`'s FUSE protocol bit correctness (#29).** WEAK, low priority.
-   - If ever worth hardening: a small unit test could statically assert
-     `FUSE_ATTR_GENERATION == (1ULL << 44)` against the vendored kernel header's
-     `include/uapi/linux/fuse.h` value (a `static_assert` comparing the two macros, if both
-     are visible in one translation unit) so a future libfuse bump can't silently drift back
-     to a stale bit without a build break.
 
 ---
 

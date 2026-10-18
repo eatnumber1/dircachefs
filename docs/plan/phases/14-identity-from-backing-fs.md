@@ -31,8 +31,7 @@ mismatch.
   while dcfs still holds the object (the removed-object records added in the original
   plan's step 6.3, audit crash F10, keep an fd until the kernel's last
   FORGET), so the kernel never sees one nodeid for two live objects.
-  Out-of-band recycling stays unsupported (this is where the kernel
-  FUSE_ATTR_GENERATION patch would add protection).
+  Out-of-band recycling stays unsupported.
 
 **Decisions (russ, 2026-10-04).**
 1. Backing filesystems without a known handle format are not supported:
@@ -101,9 +100,7 @@ handle decoding (`fuse_get_dentry` → LOOKUP(".")) make the kernel compare
 generations; a GETATTR/OPEN/READ on a held inode carries none. So 14.4
 must, for a nodeid held in this mount without a row, reopen with (or
 compare against) the generation it handed out in this mount, else answer
-ESTALE. russ's FUSE_ATTR_GENERATION kernel patch (protocol 7.47) makes
-attribute replies carry the generation and would close this kernel-side;
-the Phase 14 design should say which it relies on. The identity model's
+ESTALE. The identity model's
 `IdentTrace.tla` encodes today's AUTOINCREMENT nodeids ("no reply after
 the row went") and `T_IdReply` needs relaxing when nodeid = inode number.
 

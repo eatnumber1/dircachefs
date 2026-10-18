@@ -7,10 +7,10 @@ differ, the plan governs:
   never sends entry invalidations" describes today's state, not the plan.
 - `FUSE_CAP_NO_OPENDIR_SUPPORT` is skipped: 22.7 stream handles need
   per-handle state.
-- `FUSE_ATTR_GENERATION` (Linux 7.1+, protocol 7.47) is tracked as future
-  work; it is related to russ's FUSE generation work.
-- `READDIRPLUS_AUTO` is to be set explicitly in Init as a deliberate
-  choice (12.24), not left to the default.
+- `READDIRPLUS_AUTO` is not set in Init: dcfs relies on libfuse's default,
+  and a test asserts the default (12.24; russ, 2026-10-18: "No. Rely on
+  defaults, but test that our relied-upon defaults are true. That way prod
+  code is minimized while still having protections.").
 
 ---
 
@@ -38,7 +38,6 @@ Evaluations are anchored in dcfs core architectural principles from `docs/design
 | **STATX** | Not found in changelog (protocol 7.39; Linux 6.6) | None (`FUSE_STATX = 52` opcode; `fuse_lowlevel_ops::statx`, `fuse_reply_statx`) | **Not implemented** (`ops.statx = nullptr` in `fuse_ops.cc`) | dcfs already fetches `STATX_BASIC_STATS \| STATX_BTIME` from backing and caches `btime` in SQLite; lacking `statx` prevents serving `btime` to clients. | **Adopt**: Implement `ops.statx` to serve cached birth time (`btime`) directly to `statx(2)` callers. | Linux 6.6 (Met: $\le 6.9$) |
 | **NO_OPENDIR_SUPPORT** | Not found in changelog (protocol 7.29; Linux 5.1) | `FUSE_CAP_NO_OPENDIR_SUPPORT` (1UL << 24) | **Not mentioned** (off by default in libfuse) | dcfs's `Opendir` only checks `S_ISDIR` and `Releasedir` is a pure no-op (`ReplyErrno(0)`). Zero-message opendir eliminates 2 roundtrips per opened directory. | **Consider**: Benchmarking zero-message opendir can shave two FUSE round-trips for every directory opened or used as `dirfd`. | Linux 5.1 (Met: $\le 6.9$) |
 | **READDIRPLUS_AUTO** | Not found in changelog (protocol 7.21; Linux 3.14) | `FUSE_CAP_READDIRPLUS_AUTO` (1UL << 14) | **On by default** (set by libfuse default; not mentioned in `dcfs::Init`) | Makes `READDIRPLUS` adaptive: kernel uses plain `READDIR` if caller does not stat entries (e.g. `ls` vs `ls -l`), conserving entry cache leases. | **Consider**: Explicitly configure in `Init()` to make adaptive behavior an intentional policy decision. | Linux 3.14 (Met: $\le 6.9$) |
-| **ATTR_GENERATION** | Not found in changelog (protocol 7.47; Linux 7.1+) | None (`init_out.flags2` bit 44; `fuse_attr_out.generation`) | **Not mentioned** | Returns backing inode generation on GETATTR/SETATTR replies so kernel dcache detects inode reuse. | **Consider (future)**: Excellent fit for dcfs generation-tracking model, but requires kernel > 7.0. | Linux 7.1+ (Exceeds 6.9 and 7.0) |
 | **ALLOW_IDMAP** | Not found in changelog (protocol 7.41; Linux 6.11) | None (`init_out.flags2` bit 40) | **Not mentioned** | Permits idmapped mounts (`mount_setattr`) on top of dcfs for user-namespace containers. | **Consider (future)**: Useful if dcfs is exported into user namespaces, but requires Linux 6.11+ and raw flags2 manipulation. | Linux 6.11 (Exceeds 6.9 floor; met on 7.0) |
 | **PARALLEL_DIROPS** | Not found in changelog (protocol 7.25; Linux 4.9) | `FUSE_CAP_PARALLEL_DIROPS` (1UL << 18) | **Not mentioned** (off by default; documented in `docs/design.md:1601-1603`) | Drops directory `i_rwsem` in kernel for concurrent lookups/readdirs; dcfs daemon is strictly single-threaded with un-synchronized state. | **Skip (today)**: Concurrency model today relies on kernel directory serialization; reconsider only when async/coroutines land. | Linux 4.9 (Met: $\le 6.9$) |
 | **REQUEST_TIMEOUT** | Not found in changelog (protocol 7.43; Linux 6.14) | None (`init_out.flags2` bit 42; `conn.request_timeout` field) | **Not mentioned** (`conn.request_timeout = 0`) | Kernel aborts requests taking longer than timeout; backing disk operations or spin-ups may stall, and aborting risks tri-state protocol corruption. | **Skip**: Conflicts with backing filesystem semantics where operations wait, and exceeds Linux 6.9 floor. | Linux 6.14 (Exceeds 6.9 floor; met on 7.0) |
@@ -97,9 +96,6 @@ Evaluations are anchored in dcfs core architectural principles from `docs/design
    - **Why**: Currently enabled implicitly via libfuse default. Making it explicit in `Init()` codifies dcfs's directory caching policy.
 
 ### Priority 3: Candidates for Future Architectural Phases
-6. **`ATTR_GENERATION` (Flags2 bit 44, Linux 7.1+ / Protocol 7.47)**:
-   - **Recommendation**: **Consider in future**.
-   - **Why**: Carries inode generation numbers in GETATTR/SETATTR replies, matching dcfs's generation tracking to catch stale dcache dentries. Needs kernel > 7.0.
-7. **`ALLOW_IDMAP` (Flags2 bit 40, Linux 6.11 / Protocol 7.41)**:
+6. **`ALLOW_IDMAP` (Flags2 bit 40, Linux 6.11 / Protocol 7.41)**:
    - **Recommendation**: **Consider in future**.
    - **Why**: Needed only if dcfs mounts are used with container user namespaces and idmapped mounts. Requires kernel > 6.9 floor.

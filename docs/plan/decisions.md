@@ -6,12 +6,6 @@ and amendments 1-20) are in `history.md`. "russ" is the maintainer.
 
 ## Identity and the kernel patch
 
-- **The FUSE_ATTR_GENERATION kernel patch is dropped** (Phase 3). dcfs
-  never changes a nodeid's generation, so generations in attribute
-  replies give it nothing. The kernel already rejects stale NFS handles:
-  `fuse_get_dentry` (fs/fuse/inode.c) sends `LOOKUP(nodeid, ".")` and
-  compares the reply's generation with the handle's, returning ESTALE on
-  a mismatch.
 - **Identity comes from the backing filesystem** (Phase 14): nodeid =
   backing inode number, generation decoded from the backing file handle,
   as amir73il's libfuse_passthrough does (see `notes/libfuse-passthrough.md`).
