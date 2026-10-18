@@ -75,7 +75,7 @@ The repository carries forward the history of a 2023 experiment called
   and xfs report that identity through `FS_IOC_GETFSUUID` directly; btrfs
   does not answer `FS_IOC_GETFSUUID` (it sets `sb->s_uuid`,
   `fs/btrfs/disk-io.c:3557`, but never `sb->s_uuid_len`, and the generic ioctl
-  returns `ENOTTY` when that is 0, `fs/ioctl.c:460`; Linux v7.3-rc4), so dcfs
+  returns `ENOTTY` when that is 0, `fs/ioctl.c:460`; Linux v7.3-rc7), so dcfs
   falls back to
   `BTRFS_IOC_FS_INFO`'s `fsid` field there instead -- the same UUID
   `btrfs filesystem show`/`blkid` report, reached through a btrfs-specific
@@ -742,7 +742,7 @@ dcfs itself failed at; warnings are what it noticed or survived.
 | ERROR `could not probe recovered inode N ...` | During that recovery the backing filesystem could not be read for an entry (printed for the first ten). The entry stays dirty and is re-checked on access. Check the backing filesystem's health. |
 | WARNING `forgot N rows of objects removed by mutations the last run's end cut short` | Recovery housekeeping after a crash; informational. |
 | WARNING `periodic sync of the backing filesystems failed, keeping the dirty set: ...` | `syncfs` of the backing filesystem failed: the filesystem has errors, went read-only or is gone. Nothing is lost in dcfs (the entries stay dirty and cost a larger re-read after a crash). Look at the kernel log; it is retried at the next request past the interval. |
-| WARNING `sync point: fsync of the cache's WAL failed; the cache's commits since its last durable point may not survive a power loss: ...` | The fsync that makes the cache's recent work durable failed: the cache database's disk has an I/O error. Linux reports a failed writeback to one fsync only; later fsyncs return 0, while the pages it could not write may never reach the disk (`Documentation/filesystems/vfs.rst:711`, Linux v7.3-rc7), and SQLite's recovery stops at the first WAL frame that is missing. So for the rest of the run a power loss can take away every cache commit since the last good durable point, the dirty set's marks included: entries changed in that time can then be stale after the restart, not only re-read. (An `fsync` through dcfs whose fsync of the WAL fails returns `EIO`.) Fix the cache's disk. |
+| WARNING `sync point: fsync of the cache's WAL failed; the cache's commits since its last durable point may not survive a power loss: ...` | The fsync that makes the cache's recent work durable failed: the cache database's disk has an I/O error. Linux reports a failed writeback to one fsync only; later fsyncs return 0, while the pages it could not write may never reach the disk (`Documentation/filesystems/vfs.rst:718`, Linux v7.3-rc7), and SQLite's recovery stops at the first WAL frame that is missing. So for the rest of the run a power loss can take away every cache commit since the last good durable point, the dirty set's marks included: entries changed in that time can then be stale after the restart, not only re-read. (An `fsync` through dcfs whose fsync of the WAL fails returns `EIO`.) Fix the cache's disk. |
 | INFO `The daemon of an earlier mount (device M:N) is still shutting down (/run/dcfs/M_N.lock is locked); waiting for it to exit` | A mount got the device number an earlier mount had, and that mount's daemon is still finishing (syncing, closing its database). The new daemon waits for it, with no timeout, and goes on; the mount point is not served until then. Ctrl-C ends `mount`, not the daemon: `kill` it to cancel. See [Limitations](#limitations). |
 | WARNING `clean shutdown incomplete, the next start will recover the dirty set: ...` | The last sync at shutdown failed (same causes as the line above). The next start recovers by itself. |
 | ERROR `OP: the backing change happened, but recording it in the cache failed; leaving it unknown: ...` | The change is on the backing filesystem but the cache database could not record it (disk full or I/O error on the cache's disk). The entry is re-read later. Free space or fix the cache's disk. |
@@ -1160,7 +1160,7 @@ to re-reading the entries changed, and what was cached, in the last few
 seconds. A file that was only read is in the dirty set
 too, for its access time only: that alone makes no `syncfs` run until the
 kernel's own dirtytime expiry (12 hours by default,
-`fs/fs-writeback.c:64`, Linux v7.3-rc4), and after a
+`fs/fs-writeback.c:64`, Linux v7.3-rc7), and after a
 crash it costs only that file's attributes. A new file or directory is
 created dirty until the next sync point, like a real filesystem's: a crash
 before then re-checks it at the next start (and forgets it if the backing
@@ -1186,7 +1186,7 @@ recovery protocol, concurrency, and the test strategy.
   the daemon.** The kernel does not wait for the daemon of a plain FUSE mount
   (it sends FUSE_DESTROY and waits for the answer only for `fuseblk` and
   virtiofs: `fs/fuse/inode.c:1964`, `:1936` and `fs/fuse/virtio_fs.c:1558`,
-  Linux v7.3-rc4), so `umount -i`, `fusermount -u`, a program calling `umount2`, a
+  Linux v7.3-rc7), so `umount -i`, `fusermount -u`, a program calling `umount2`, a
   plain `umount PATH` without the optional `umount.fuse` link (see
   [Building](#building)), and an installation without any link return while
   the daemon is still syncing the backing filesystem and closing the cache
@@ -1305,8 +1305,7 @@ recovery protocol, concurrency, and the test strategy.
   does. A backing syscall already blocked in the kernel (a disk spinning
   up, a hung network mount, a long `fsync`) is waited out first. A change
   that already reached the backing filesystem is completed and reported as
-  done, never as `EINTR`.
-  See
+  done, never as `EINTR`. See
   docs/design.md, "Cancellation".
 - **Exclusive access to the backing tree is required.** Everything that
   changes the backing tree must go through dcfs. There is no fanotify
@@ -1350,7 +1349,7 @@ recovery protocol, concurrency, and the test strategy.
   whose backing inode number is in it). A 32-bit program built without
   large-file support cannot list a directory that holds a stub: the
   kernel's compat `getdents` returns `EOVERFLOW` for its inode number
-  (`fs/readdir.c:519`, Linux v7.3-rc4). The stub can be looked up, `stat`ed and used as a
+  (`fs/readdir.c:519`, Linux v7.3-rc7). The stub can be looked up, `stat`ed and used as a
   mount point; anything inside it (listing it, looking up, creating,
   opening) fails with `ENOTSUP`, logged once per stub, removing it with
   `EBUSY` (as a mount point), and renaming it
@@ -1464,7 +1463,7 @@ recovery protocol, concurrency, and the test strategy.
   xattrs work, an unlinked file can be reopened through
   `/proc/<pid>/fd/<n>`), and linking one back gets the local filesystem's
   answer: `ENOENT` for a file with no link left (Linux links such a file
-  only if `O_TMPFILE` made it, `fs/namei.c:5916`, Linux v7.3-rc4, which works
+  only if `O_TMPFILE` made it, `fs/namei.c:5916`, Linux v7.3-rc7, which works
   through dcfs), `EPERM` for a
   directory.
 - **Access times of directories and symlinks are dcfs's own.** A regular
@@ -1494,7 +1493,7 @@ recovery protocol, concurrency, and the test strategy.
   kernel answers `FICLONE`, `FICLONERANGE` and `FIDEDUPERANGE` itself and
   FUSE has no way to forward them (`fs/ioctl.c:540`; FUSE's
   `file_operations` has `.copy_file_range`, `fs/fuse/file.c:3094`, and no
-  `.remap_file_range`; Linux v7.3-rc4), so `cp --reflink=always` fails on every
+  `.remap_file_range`; Linux v7.3-rc7), so `cp --reflink=always` fails on every
   backing filesystem. `copy_file_range` does reach the backing filesystem,
   which on btrfs and xfs shares the extents as a reflink would:
   `cp --reflink=auto` (coreutils' default) gets that. Of the other

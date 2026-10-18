@@ -755,7 +755,7 @@ populated. Every configuration but `MC_long_names.cfg` sets it to `{}`.
 | `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes; `ReplyObservable` | 10,239,570 | ~20 min unloaded (CI 634 s on 2026-10-08 before step 12.6b's daemon crash; 27 min alone at load 11 without `ReplyObservable`, 64 min with it at load 9-12, 2026-10-08) |
 | `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; the three effect-point properties (since step 12.12a) and `ReplyObservable` (lookups and listings overlap mutations here) | 8,224,822 | ~6 min unloaded (CI 506 s before step 12.6b's daemon crash, for 6.37M states; 19 min alone at load 11, 2026-10-08) |
 | `MC_nolock_small.cfg` | `nolock_small_test` (medium) | step 12.12a (the audit's G4): as nolock with no crash and only `NolockGuardRequests` (lookups, listings, creates, unlinks, renames), so that `Mutation::Owns`, the phase-1 verification and the fill guards meeting a mutation bite before the large tier (`known_bug_rename_stale_source_nolock_small_test` finds R4 in these bounds); all invariants and the four action properties | 343,294 | ~1.5 min (load 8-14, 2026-10-10); with every kind but readdirplus 1,990,812 (6 min), with sync points added 1,185,567 |
-| `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` and `InterruptBound` (step 22.5) | 547,645 (280,869 before step 22.5; 1,134,929 with arrival anywhere and round 1's interruption points) | ~2 min at load 2, 3.4 min at load 60 (2026-10-18) |
+| `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` and `InterruptBound` (step 22.5) | 757,278 (547,645 before step 25.28b; 280,869 before step 22.5; 1,134,929 with arrival anywhere and round 1's interruption points) | ~2 min at load 2, 3.4 min at load 60 (2026-10-18) |
 | `MC_long_names.cfg` | `long_names_test` (medium) | as small with `LongNames = {"b"}`, 1 mutation | 429,426 | ~1 min |
 | `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one); `ReplyObservable`, `InterruptBound` | 1,755,235 (892,708; 3,908,815 with arrival anywhere) | 18.9 min at load 65 (2026-10-18) |
 | `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable`, `InterruptBound` | 2,622,519 (1,036,982; 4,207,066 with arrival anywhere) | 33.7 min at load 65 (2026-10-18) |
@@ -2837,9 +2837,9 @@ A durable point that fails is not repaired by a later one. Linux reports
 a writeback error to one fsync only: "After an error has been reported on
 one request, subsequent requests on the same file descriptor should
 return 0, unless further writeback errors have occurred"
-(`Documentation/filesystems/vfs.rst:711`, Linux v7.3-rc7), and the pages
+(`Documentation/filesystems/vfs.rst:718`, Linux v7.3-rc7), and the pages
 it could not write may never reach the disk (ext4 ends their writeback
-without dirtying them again, `fs/ext4/page-io.c:112`). SQLite's recovery
+without dirtying them again, `fs/ext4/page-io.c:114`). SQLite's recovery
 stops at the first WAL frame whose checksum chain breaks, so every commit
 after the gap is lost with it, kSync commits included. So `failed` stays
 set until `PowerLossAndRestart`, and every durable point after a failure

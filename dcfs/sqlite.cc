@@ -364,7 +364,7 @@ absl::Status Connection::MakeDurable() {
   // recovered after a power loss, as long as no earlier fsync of the WAL
   // failed: Linux reports a writeback error once and later fsyncs return 0,
   // while the pages it could not write may never reach the disk
-  // (Documentation/filesystems/vfs.rst:711, Linux v7.3-rc7), and recovery
+  // (Documentation/filesystems/vfs.rst:718, Linux v7.3-rc7), and recovery
   // stops at that gap. SQLITE_SYNC_NORMAL is what SQLite's own WAL syncs
   // pass at synchronous=NORMAL or FULL.
   if (int rc = wal->pMethods->xSync(wal, SQLITE_SYNC_NORMAL); rc != SQLITE_OK) {

@@ -685,7 +685,7 @@ void DirCacheFS::FinishSyncPoint() {
   // Carries on, though a later durable point does not repair this: Linux
   // reports a writeback error to one fsync and returns 0 to later ones,
   // while the pages it could not write may never reach the disk
-  // (Documentation/filesystems/vfs.rst:711, Linux v7.3-rc7), and SQLite's
+  // (Documentation/filesystems/vfs.rst:718, Linux v7.3-rc7), and SQLite's
   // recovery stops at the first missing WAL frame. So until the next start
   // a power loss may take every later commit too, kSync ones and their dirty
   // marks included (step 25.28d poisons the cache instead).

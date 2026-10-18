@@ -1658,10 +1658,10 @@ again, but that does not repair it. Linux reports a writeback error to
 one fsync only: "After an error has been reported on one request,
 subsequent requests on the same file descriptor should return 0, unless
 further writeback errors have occurred"
-(`Documentation/filesystems/vfs.rst:711`, Linux v7.3-rc7), and the pages
+(`Documentation/filesystems/vfs.rst:718`, Linux v7.3-rc7), and the pages
 the failed writeback could not write may never reach the disk (ext4, for
 one, records the error and ends the folio's writeback without dirtying it
-again, so nothing writes it later: `fs/ext4/page-io.c:112`). SQLite's
+again, so nothing writes it later: `fs/ext4/page-io.c:114`). SQLite's
 recovery stops at the first frame whose checksum chain breaks, so every
 commit after the gap is lost with it, kSync commits included. Until the
 next start, then, a power loss can take away any commit since the last
