@@ -33,6 +33,7 @@
 #include "dcfs/migrate.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/ret_check.h"
+#include "dcfs/sql_statements.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
 
@@ -97,8 +98,7 @@ absl::Status NoInode(InodeId id) {
 // NotFound unless `id` has a row. Write paths check this up front so that a
 // stale id reports NotFound rather than a foreign-key constraint failure.
 absl::Status RequireInode(Context &ctx, InodeId id) {
-  ASSIGN_OR_RETURN(Statement * stmt,
-                   Query(ctx, "SELECT 1 FROM inodes WHERE id = ?", id));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlRequireInode, id));
   ASSIGN_OR_RETURN(
       bool found, ReadOne(*stmt, [](Statement &) { return absl::OkStatus(); }));
   if (!found) return NoInode(id);
@@ -106,54 +106,8 @@ absl::Status RequireInode(Context &ctx, InodeId id) {
 }
 
 absl::Status MarkIncomplete(Context &ctx, InodeId dir) {
-  return Execute(ctx,
-                 "UPDATE directories SET children_complete = 0, "
-                 "epoch = epoch + 1 WHERE inode = ?",
-                 dir)
-      .status();
+  return Execute(ctx, kSqlMarkIncomplete, dir).status();
 }
-
-// The attribute columns, in the order BindAttrs() binds them. A macro
-// (rather than a constant) so it can be spliced into SQL string literals,
-// which keeps each statement's text a compile-time constant.
-#define DCFS_ATTR_VALUES                                                \
-  "mode = ?, nlink = ?, uid = ?, gid = ?, rdev = ?, "                   \
-  "size = ?, blocks = ?, blksize = ?, atime_s = ?, atime_ns = ?, "      \
-  "mtime_s = ?, mtime_ns = ?, ctime_s = ?, ctime_ns = ?, btime_s = ?, " \
-  "btime_ns = ?"
-// An inode row's: DCFS_ATTR_VALUES, except that (step 23.8) a directory's
-// or a symlink's cached access time is kept when it is the later one: the
-// stamp TouchAtime makes (a listing, a readlink) never reaches the backing
-// filesystem, so a record from it must not take the stamp back (an explicit
-// atime set first drops it: DropAtimeStamp). The CASE reads the row's old
-// values (SQLite evaluates every SET expression against the row before the
-// update); the named parameters take the positions DCFS_ATTR_VALUES's ?s
-// had (a ? is numbered one past the largest number before it), so BindAttrs
-// binds them unchanged.
-#define DCFS_KEEP_STAMP                                                    \
-  "(mode & 61440) IN (16384, 40960) AND (mode & 61440) = (:mode & 61440) " \
-  "AND (atime_s > :atime_s OR (atime_s = :atime_s AND atime_ns > :atime_ns))"
-#define DCFS_ATTR_ASSIGNMENTS                                           \
-  "attrs_valid = 1, "                                                   \
-  "mode = :mode, nlink = ?, uid = ?, gid = ?, rdev = ?, "               \
-  "size = ?, blocks = ?, blksize = ?, "                                 \
-  "atime_s = CASE WHEN " DCFS_KEEP_STAMP                                \
-  " THEN atime_s ELSE :atime_s END, "                                   \
-  "atime_ns = CASE WHEN " DCFS_KEEP_STAMP                               \
-  " THEN atime_ns ELSE :atime_ns "                                      \
-  "END, "                                                               \
-  "mtime_s = ?, mtime_ns = ?, ctime_s = ?, ctime_ns = ?, btime_s = ?, " \
-  "btime_ns = ?"
-#define DCFS_ATTR_COLUMNS                                                   \
-  "mode, nlink, uid, gid, rdev, size, blocks, blksize, atime_s, atime_ns, " \
-  "mtime_s, mtime_ns, ctime_s, ctime_ns, btime_s, btime_ns"
-// One NULL for each DCFS_ATTR_COLUMNS column (the stub half of ListDir's
-// union has no inode row; a different count fails to prepare).
-#define DCFS_ATTR_NULLS                                                      \
-  "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, " \
-  "NULL, NULL, NULL, NULL"
-#define DCFS_ATTR_PLACEHOLDERS "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
-constexpr int kNumAttrColumns = 16;
 
 // Binds `stx`'s attributes to parameters first..first+15, in
 // DCFS_ATTR_COLUMNS order. Everything is converted to int64 explicitly:
@@ -209,13 +163,8 @@ absl::StatusOr<FilesystemRow> ReadFilesystemRow(Statement &row) {
 
 absl::StatusOr<LookupResult> Lookup(Context &ctx, InodeId parent,
                                     std::string_view name) {
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx,
-            "SELECT d.state, d.inode, s.id FROM dentries d "
-            "LEFT JOIN stubs s ON s.parent = d.parent AND s.name = d.name "
-            "WHERE d.parent = ? AND d.name = ?",
-            parent, Blob(name)));
+  ASSIGN_OR_RETURN(Statement * stmt,
+                   Query(ctx, kSqlLookup, parent, Blob(name)));
   LookupResult result;
   ASSIGN_OR_RETURN(
       bool found, ReadOne(*stmt, [&](Statement &row) -> absl::Status {
@@ -279,12 +228,7 @@ absl::Status DecodeAttr(Statement &row, int base, CachedAttr &attr) {
 }
 
 absl::StatusOr<CachedAttr> GetAttr(Context &ctx, InodeId id) {
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx,
-            "SELECT attrs_valid, fuse_gen, device_id, backing_ino, "
-            "backing_gen, " DCFS_ATTR_COLUMNS " FROM inodes WHERE id = ?",
-            id));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlGetAttr, id));
   CachedAttr attr;
   ASSIGN_OR_RETURN(bool found,
                    ReadOne(*stmt, [&](Statement &row) -> absl::Status {
@@ -295,11 +239,7 @@ absl::StatusOr<CachedAttr> GetAttr(Context &ctx, InodeId id) {
 }
 
 absl::StatusOr<StubRow> GetStub(Context &ctx, InodeId id) {
-  ASSIGN_OR_RETURN(Statement * stmt,
-                   Query(ctx,
-                         "SELECT parent, name, fuse_gen, " DCFS_ATTR_COLUMNS
-                         " FROM stubs WHERE id = ?",
-                         id));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlGetStub, id));
   StubRow stub;
   ASSIGN_OR_RETURN(
       bool found, ReadOne(*stmt, [&](Statement &row) -> absl::Status {
@@ -369,8 +309,7 @@ bool SameAttrs(const CachedAttr &attr, const struct statx &stx) {
 }
 
 absl::StatusOr<uint32_t> GetGeneration(Context &ctx, InodeId id) {
-  ASSIGN_OR_RETURN(Statement * stmt,
-                   Query(ctx, "SELECT fuse_gen FROM inodes WHERE id = ?", id));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlGetGeneration, id));
   uint32_t gen = 0;
   ASSIGN_OR_RETURN(bool found, ReadOne(*stmt, [&](Statement &row) {
                      gen = static_cast<uint32_t>(row.Column<int64_t>(0));
@@ -407,25 +346,7 @@ absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
     // sort, and the merge reads only as far as the LIMIT. The attribute
     // columns of a stub are NULL: its row is not an inode's.
     ASSIGN_OR_RETURN(Statement * stmt,
-                     Query(ctx,
-                           "SELECT d.rowid, d.name, d.inode, i.attrs_valid, "
-                           "i.fuse_gen, "
-                           "i.device_id, i.backing_ino, "
-                           "i.backing_gen, " DCFS_ATTR_COLUMNS  // no clash with
-                                                                // dentries'
-                                                                // columns
-                           " FROM dentries d JOIN inodes i ON i.id = d.inode "
-                           "WHERE d.parent = ?1 AND d.rowid > ?2 AND d.state = "
-                           "'present' "
-                           "UNION ALL "
-                           "SELECT d.rowid, d.name, s.id, NULL, NULL, NULL, "
-                           "NULL, NULL, " DCFS_ATTR_NULLS " FROM dentries d "
-                           "JOIN stubs s ON s.parent = d.parent AND s.name = "
-                           "d.name "
-                           "WHERE d.parent = ?1 AND d.rowid > ?2 AND d.state = "
-                           "'refused' "
-                           "ORDER BY 1 LIMIT ?3",
-                           dir, cursor, limit));
+                     Query(ctx, kSqlListDir, dir, cursor, limit));
     RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) -> absl::Status {
       Entry entry{row.Column<int64_t>(0), row.Column<std::string>(1),
                   row.Column<int64_t>(2), std::nullopt};
@@ -452,10 +373,7 @@ absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
 }
 
 absl::StatusOr<bool> ChildrenComplete(Context &ctx, InodeId dir) {
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx, "SELECT children_complete FROM directories WHERE inode = ?",
-            dir));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlChildrenComplete, dir));
   bool complete = false;
   RETURN_IF_ERROR(ReadOne(*stmt, [&](Statement &row) {
                     complete = row.Column<bool>(0);
@@ -468,13 +386,7 @@ absl::StatusOr<bool> IsDirComplete(Context &ctx, InodeId dir) {
   // ChildrenComplete, and a listing must not leave out (or list) a name
   // whose state is unknown: one statement (a missing directories row counts
   // as incomplete, as in ChildrenComplete).
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx,
-            "SELECT children_complete AND NOT EXISTS ("
-            "SELECT 1 FROM dentries WHERE parent = ?1 AND state = 'unknown') "
-            "FROM directories WHERE inode = ?1",
-            dir));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlIsDirComplete, dir));
   bool complete = false;
   RETURN_IF_ERROR(ReadOne(*stmt, [&](Statement &row) {
                     complete = row.Column<bool>(0);
@@ -484,9 +396,7 @@ absl::StatusOr<bool> IsDirComplete(Context &ctx, InodeId dir) {
 }
 
 absl::StatusOr<std::string> Readlink(Context &ctx, InodeId id) {
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx, "SELECT target FROM symlinks WHERE inode = ?", id));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlReadLink, id));
   std::string target;
   ASSIGN_OR_RETURN(bool found, ReadOne(*stmt, [&](Statement &row) {
                      target = row.Column<std::string>(0);
@@ -502,9 +412,7 @@ namespace {
 
 // nullopt if there is no row for `id`.
 absl::StatusOr<std::optional<bool>> XattrsComplete(Context &ctx, InodeId id) {
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx, "SELECT xattrs_complete FROM inodes WHERE id = ?", id));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlXattrsComplete, id));
   std::optional<bool> complete;
   RETURN_IF_ERROR(ReadOne(*stmt, [&](Statement &row) {
                     complete = row.Column<bool>(0);
@@ -521,22 +429,13 @@ absl::StatusOr<std::optional<std::vector<std::string>>> ListXattrs(Context &ctx,
   if (!complete.has_value()) return NoInode(id);
   if (!*complete) return std::nullopt;
   // A listing must not leave out a name whose presence is unknown.
-  ASSIGN_OR_RETURN(
-      Statement * unknown_stmt,
-      Query(ctx,
-            "SELECT 1 FROM xattrs WHERE inode = ? AND state = 'unknown' "
-            "LIMIT 1",
-            id));
+  ASSIGN_OR_RETURN(Statement * unknown_stmt,
+                   Query(ctx, kSqlAnyXattrUnknown, id));
   ASSIGN_OR_RETURN(bool any_unknown, ReadOne(*unknown_stmt, [](Statement &) {
                      return absl::OkStatus();
                    }));
   if (any_unknown) return std::nullopt;
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx,
-            "SELECT name FROM xattrs WHERE inode = ? AND state = 'present' "
-            "ORDER BY name",
-            id));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlListPresentXattrs, id));
   std::vector<std::string> names;
   RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) {
     names.push_back(row.Column<std::string>(0));
@@ -547,10 +446,7 @@ absl::StatusOr<std::optional<std::vector<std::string>>> ListXattrs(Context &ctx,
 
 absl::StatusOr<std::optional<std::string>> GetXattr(Context &ctx, InodeId id,
                                                     std::string_view name) {
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx, "SELECT state, value FROM xattrs WHERE inode = ? AND name = ?",
-            id, Blob(name)));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlGetXattr, id, Blob(name)));
   std::optional<std::string> state;
   std::optional<std::string> value;
   RETURN_IF_ERROR(ReadOne(*stmt, [&](Statement &row) {
@@ -580,11 +476,7 @@ absl::StatusOr<std::optional<std::string>> GetXattr(Context &ctx, InodeId id,
 }
 
 absl::StatusOr<FileHandle> GetHandle(Context &ctx, InodeId id) {
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx,
-            "SELECT device_id, handle_type, handle FROM inodes WHERE id = ?",
-            id));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlGetHandle, id));
   std::optional<FileHandle> handle;
   ASSIGN_OR_RETURN(
       bool found, ReadOne(*stmt, [&](Statement &row) -> absl::Status {
@@ -612,23 +504,15 @@ absl::StatusOr<NamesToAsk> NamesToAskAbout(Context &ctx, InodeId id,
                                    .name = row.Column<std::string>(1)});
     return absl::OkStatus();
   };
-  ASSIGN_OR_RETURN(
-      Statement * present,
-      Query(ctx,
-            "SELECT parent, name FROM dentries WHERE inode = ? AND "
-            "state = 'present' LIMIT 1",
-            id));
+  ASSIGN_OR_RETURN(Statement * present,
+                   Query(ctx, kSqlPresentDentryByInode, id));
   RETURN_IF_ERROR(present->ForEachRow(collect));
   if (!result.names.empty()) {
     result.present = true;
     return result;
   }
-  ASSIGN_OR_RETURN(
-      Statement * unknown,
-      Query(ctx,
-            "SELECT parent, name FROM dentries WHERE state = 'unknown' "
-            "LIMIT ?",
-            static_cast<int64_t>(limit) + 1));
+  ASSIGN_OR_RETURN(Statement * unknown, Query(ctx, kSqlSelectUnknownDentries,
+                                              static_cast<int64_t>(limit) + 1));
   RETURN_IF_ERROR(unknown->ForEachRow(collect));
   if (result.names.size() > limit) {
     result.names.resize(limit);
@@ -643,13 +527,7 @@ absl::StatusOr<std::optional<InodeId>> ParentOf(Context &ctx, InodeId dir) {
   // RequireInode says) and its parents: the LEFT JOIN gives one NULL row for
   // an inode with no present dentry and none for a missing inode. LIMIT 2 is
   // enough to tell "one" from "more than one".
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx,
-            "SELECT d.parent FROM inodes i LEFT JOIN dentries d "
-            "ON d.inode = i.id AND d.state = 'present' WHERE i.id = ? "
-            "LIMIT 2",
-            dir));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlParentOf, dir));
   bool inode_exists = false;
   std::vector<InodeId> parents;
   RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) {
@@ -667,11 +545,7 @@ absl::StatusOr<std::optional<InodeId>> ParentOf(Context &ctx, InodeId dir) {
 }
 
 absl::StatusOr<std::vector<FilesystemRow>> ListFilesystems(Context &ctx) {
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx,
-            "SELECT device_id, fstype, parent_inode, boundary_name "
-            "FROM filesystems ORDER BY rowid"));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlListFilesystems));
   std::vector<FilesystemRow> result;
   RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) -> absl::Status {
     ASSIGN_OR_RETURN(FilesystemRow fs, ReadFilesystemRow(row));
@@ -683,12 +557,8 @@ absl::StatusOr<std::vector<FilesystemRow>> ListFilesystems(Context &ctx) {
 
 absl::StatusOr<FilesystemRow> GetFilesystem(Context &ctx,
                                             const DeviceId &device) {
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx,
-            "SELECT device_id, fstype, parent_inode, boundary_name "
-            "FROM filesystems WHERE device_id = ?",
-            Blob(device.Serialize())));
+  ASSIGN_OR_RETURN(Statement * stmt,
+                   Query(ctx, kSqlGetFilesystem, Blob(device.Serialize())));
   std::optional<FilesystemRow> result;
   ASSIGN_OR_RETURN(bool found,
                    ReadOne(*stmt, [&](Statement &row) -> absl::Status {
@@ -726,13 +596,8 @@ struct MatchingRows {
 absl::StatusOr<MatchingRows> FindMatchingRows(
     Context &ctx, const std::string &device, uint64_t ino,
     const FileHandle &handle, uint64_t backing_gen, const struct statx &stx) {
-  ASSIGN_OR_RETURN(
-      Statement * find,
-      Query(ctx,
-            "SELECT id, fuse_gen, backing_gen, handle_type, handle, "
-            "btime_s, btime_ns FROM inodes "
-            "WHERE device_id = ? AND backing_ino = ?",
-            Blob(device), ino));
+  ASSIGN_OR_RETURN(Statement * find,
+                   Query(ctx, kSqlFindMatchingInodes, Blob(device), ino));
   const bool new_btime_known =
       (stx.stx_mask & STATX_BTIME) != 0 &&
       (stx.stx_btime.tv_sec != 0 || stx.stx_btime.tv_nsec != 0);
@@ -775,10 +640,7 @@ absl::StatusOr<MatchingRows> FindMatchingRows(
 absl::Status UpdateMatchingRow(Context &ctx, InodeId id,
                                const FileHandle &handle,
                                const struct statx &stx) {
-  ASSIGN_OR_RETURN(
-      Statement * update,
-      ctx.db.Prepared("UPDATE inodes SET handle_type = ?, handle = "
-                      "?, " DCFS_ATTR_ASSIGNMENTS " WHERE id = ?"));
+  ASSIGN_OR_RETURN(Statement * update, ctx.db.Prepared(kSqlUpdateMatchingRow));
   RETURN_IF_ERROR(BindHandle(*update, 1, handle));
   RETURN_IF_ERROR(BindAttrs(*update, 3, stx));
   RETURN_IF_ERROR(update->Bind(3 + kNumAttrColumns, id));
@@ -795,13 +657,7 @@ absl::StatusOr<UpsertResult> InsertNewRow(Context &ctx,
   // Random, never 0 (the root's): see schema.sql's identity model.
   const uint32_t fuse_gen = absl::Uniform(absl::IntervalClosedClosed, ctx.rng,
                                           uint32_t{1}, UINT32_MAX);
-  ASSIGN_OR_RETURN(
-      Statement * insert,
-      ctx.db.Prepared("INSERT INTO inodes (device_id, backing_ino, "
-                      "backing_gen, fuse_gen, handle_type, handle, "
-                      "attrs_valid, " DCFS_ATTR_COLUMNS
-                      ") VALUES (?, ?, ?, ?, ?, ?, 1, " DCFS_ATTR_PLACEHOLDERS
-                      ")"));
+  ASSIGN_OR_RETURN(Statement * insert, ctx.db.Prepared(kSqlInsertNewRow));
   RETURN_IF_ERROR(insert->BindAll(Blob(device), ino, backing_gen,
                                   static_cast<int64_t>(fuse_gen)));
   RETURN_IF_ERROR(BindHandle(*insert, 5, handle));
@@ -816,13 +672,7 @@ absl::StatusOr<UpsertResult> InsertNewRow(Context &ctx,
 absl::Status ReinstateInode(Context &ctx, InodeId id, uint32_t fuse_gen,
                             const FileHandle &handle, const struct statx &stx,
                             uint64_t backing_gen) {
-  ASSIGN_OR_RETURN(
-      Statement * insert,
-      ctx.db.Prepared(
-          "INSERT INTO inodes (id, device_id, backing_ino, "
-          "backing_gen, fuse_gen, handle_type, handle, "
-          "attrs_valid, " DCFS_ATTR_COLUMNS
-          ") VALUES (?, ?, ?, ?, ?, ?, ?, 1, " DCFS_ATTR_PLACEHOLDERS ")"));
+  ASSIGN_OR_RETURN(Statement * insert, ctx.db.Prepared(kSqlReinstateInode));
   const std::string device = handle.device.Serialize();
   RETURN_IF_ERROR(insert->BindAll(id, Blob(device),
                                   static_cast<uint64_t>(stx.stx_ino),
@@ -840,8 +690,7 @@ absl::StatusOr<UpsertResult> UpsertInode(Context &ctx, const FileHandle &handle,
   UpsertResult result;
   RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     ASSIGN_OR_RETURN(Statement * fs_stmt,
-                     Query(ctx, "SELECT 1 FROM filesystems WHERE device_id = ?",
-                           Blob(device)));
+                     Query(ctx, kSqlFilesystemExists, Blob(device)));
     ASSIGN_OR_RETURN(bool fs_known, ReadOne(*fs_stmt, [](Statement &) {
                        return absl::OkStatus();
                      }));
@@ -884,12 +733,9 @@ absl::Status UpsertRoot(Context &ctx, const FileHandle &handle,
     // from before the number was recycled into the root; it would also
     // collide with the root's new identity.
     const std::string device = handle.device.Serialize();
-    ASSIGN_OR_RETURN(
-        Statement * find,
-        Query(ctx,
-              "SELECT id FROM inodes "
-              "WHERE device_id = ? AND backing_ino = ? AND id != ?",
-              Blob(device), static_cast<uint64_t>(stx.stx_ino), kRootInode));
+    ASSIGN_OR_RETURN(Statement * find,
+                     Query(ctx, kSqlFindStaleRootInodes, Blob(device),
+                           static_cast<uint64_t>(stx.stx_ino), kRootInode));
     std::vector<InodeId> stale;
     RETURN_IF_ERROR(find->ForEachRow([&](Statement &row) {
       stale.push_back(row.Column<int64_t>(0));
@@ -899,11 +745,7 @@ absl::Status UpsertRoot(Context &ctx, const FileHandle &handle,
       RETURN_IF_ERROR(InvalidateInode(ctx, id));
     }
 
-    ASSIGN_OR_RETURN(
-        Statement * update,
-        ctx.db.Prepared("UPDATE inodes SET backing_ino = ?, backing_gen = ?, "
-                        "handle_type = ?, handle = ?, " DCFS_ATTR_ASSIGNMENTS
-                        " WHERE id = ?"));
+    ASSIGN_OR_RETURN(Statement * update, ctx.db.Prepared(kSqlUpdateRoot));
     RETURN_IF_ERROR(
         update->BindAll(static_cast<uint64_t>(stx.stx_ino), backing_gen));
     RETURN_IF_ERROR(BindHandle(*update, 3, handle));
@@ -921,13 +763,7 @@ namespace {
 // (whose cursor is a rowid) see a renamed-over name twice.
 absl::Status PutDentry(Context &ctx, InodeId parent, std::string_view name,
                        std::string_view state, std::optional<InodeId> child) {
-  return Execute(ctx,
-                 "INSERT INTO dentries (parent, name, state, inode) "
-                 "VALUES (?, ?, ?, ?) "
-                 "ON CONFLICT (parent, name) DO UPDATE SET "
-                 "state = excluded.state, inode = excluded.inode",
-                 parent, Blob(name), state, child)
-      .status();
+  return Execute(ctx, kSqlPutDentry, parent, Blob(name), state, child).status();
 }
 
 }  // namespace
@@ -960,18 +796,14 @@ absl::StatusOr<InodeId> SetRefused(Context &ctx, InodeId parent,
     // with its nodeid and generation (the kernel's revalidation of the name
     // must find the nodeid it holds).
     RETURN_IF_ERROR(PutDentry(ctx, parent, name, "refused", std::nullopt));
-    ASSIGN_OR_RETURN(
-        Statement * existing,
-        Query(ctx, "SELECT id FROM stubs WHERE parent = ? AND name = ?", parent,
-              Blob(name)));
+    ASSIGN_OR_RETURN(Statement * existing,
+                     Query(ctx, kSqlFindStub, parent, Blob(name)));
     ASSIGN_OR_RETURN(bool found, ReadOne(*existing, [&](Statement &row) {
                        stub = row.Column<int64_t>(0);
                        return absl::OkStatus();
                      }));
     if (found) {
-      ASSIGN_OR_RETURN(Statement * update,
-                       ctx.db.Prepared("UPDATE stubs SET " DCFS_ATTR_VALUES
-                                       " WHERE id = ?"));
+      ASSIGN_OR_RETURN(Statement * update, ctx.db.Prepared(kSqlUpdateStubAttr));
       RETURN_IF_ERROR(BindAttrs(*update, 1, root));
       RETURN_IF_ERROR(update->Bind(1 + kNumAttrColumns, stub));
       return update->ExecuteOnce();
@@ -980,9 +812,7 @@ absl::StatusOr<InodeId> SetRefused(Context &ctx, InodeId parent,
     // (cache_state.last_stub_id), or kFirstStubId (2^63): never one a
     // stub that went had, which a kernel may still hold
     // (formal/lifetime.tla's NodeidStable).
-    ASSIGN_OR_RETURN(
-        Statement * last,
-        Query(ctx, "SELECT last_stub_id FROM cache_state WHERE id = 1"));
+    ASSIGN_OR_RETURN(Statement * last, Query(ctx, kSqlGetLastStubId));
     std::optional<int64_t> highest;
     ASSIGN_OR_RETURN(bool has_state, ReadOne(*last, [&](Statement &row) {
                        highest = row.Column<std::optional<int64_t>>(0);
@@ -993,17 +823,10 @@ absl::StatusOr<InodeId> SetRefused(Context &ctx, InodeId parent,
       return ResourceExhaustedErrorBuilder() << "No boundary stub nodeid left";
     }
     stub = highest.has_value() ? *highest + 1 : kFirstStubId;
-    RETURN_IF_ERROR(
-        Execute(ctx, "UPDATE cache_state SET last_stub_id = ? WHERE id = 1",
-                stub)
-            .status());
+    RETURN_IF_ERROR(Execute(ctx, kSqlSetLastStubId, stub).status());
     const uint32_t fuse_gen = absl::Uniform(absl::IntervalClosedClosed, ctx.rng,
                                             uint32_t{1}, UINT32_MAX);
-    ASSIGN_OR_RETURN(
-        Statement * insert,
-        ctx.db.Prepared(
-            "INSERT INTO stubs (id, parent, name, fuse_gen, " DCFS_ATTR_COLUMNS
-            ") VALUES (?, ?, ?, ?, " DCFS_ATTR_PLACEHOLDERS ")"));
+    ASSIGN_OR_RETURN(Statement * insert, ctx.db.Prepared(kSqlInsertStub));
     RETURN_IF_ERROR(insert->BindAll(stub, parent, Blob(name),
                                     static_cast<int64_t>(fuse_gen)));
     RETURN_IF_ERROR(BindAttrs(*insert, 5, root));
@@ -1038,20 +861,12 @@ absl::Status RenameDentry(Context &ctx, InodeId parent, std::string_view name,
 absl::Status MarkDirComplete(Context &ctx, InodeId dir, bool complete) {
   return ctx.db.Transaction([&]() -> absl::Status {
     RETURN_IF_ERROR(RequireInode(ctx, dir));
-    return Execute(ctx,
-                   "INSERT INTO directories (inode, children_complete) "
-                   "VALUES (?, ?) ON CONFLICT (inode) DO UPDATE SET "
-                   "children_complete = excluded.children_complete, "
-                   "epoch = epoch + (excluded.children_complete = 0)",
-                   dir, complete)
-        .status();
+    return Execute(ctx, kSqlMarkDirComplete, dir, complete).status();
   });
 }
 
 absl::StatusOr<int64_t> DirEpoch(Context &ctx, InodeId dir) {
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx, "SELECT epoch FROM directories WHERE inode = ?", dir));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlDirEpoch, dir));
   int64_t epoch = 0;
   RETURN_IF_ERROR(ReadOne(*stmt, [&](Statement &row) {
                     epoch = row.Column<int64_t>(0);
@@ -1063,11 +878,7 @@ absl::StatusOr<int64_t> DirEpoch(Context &ctx, InodeId dir) {
 absl::Status EnsureDirectory(Context &ctx, InodeId dir) {
   return ctx.db.Transaction([&]() -> absl::Status {
     RETURN_IF_ERROR(RequireInode(ctx, dir));
-    return Execute(ctx,
-                   "INSERT INTO directories (inode, children_complete) "
-                   "VALUES (?, 0) ON CONFLICT (inode) DO NOTHING",
-                   dir)
-        .status();
+    return Execute(ctx, kSqlEnsureDirectory, dir).status();
   });
 }
 
@@ -1078,9 +889,8 @@ absl::Status PruneDentriesNotIn(Context &ctx, InodeId dir,
   // and splitting a NOT IN into batches would not be a set difference.
   const absl::flat_hash_set<std::string_view> keep(names.begin(), names.end());
   return ctx.db.Transaction([&]() -> absl::Status {
-    ASSIGN_OR_RETURN(
-        Statement * stmt,
-        Query(ctx, "SELECT name FROM dentries WHERE parent = ?", dir));
+    ASSIGN_OR_RETURN(Statement * stmt,
+                     Query(ctx, kSqlSelectDentryNamesInParent, dir));
     std::vector<std::string> doomed;
     RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) {
       std::string name = row.Column<std::string>(0);
@@ -1088,10 +898,7 @@ absl::Status PruneDentriesNotIn(Context &ctx, InodeId dir,
       return absl::OkStatus();
     }));
     for (const std::string &name : doomed) {
-      RETURN_IF_ERROR(
-          Execute(ctx, "DELETE FROM dentries WHERE parent = ? AND name = ?",
-                  dir, Blob(name))
-              .status());
+      RETURN_IF_ERROR(Execute(ctx, kSqlDeleteDentry, dir, Blob(name)).status());
     }
     return absl::OkStatus();
   });
@@ -1111,28 +918,18 @@ absl::Status MarkUnknown(Context &ctx, InodeId parent,
 absl::Status ForgetNegativeDentries(Context &ctx, InodeId dir) {
   return ctx.db.Transaction([&]() -> absl::Status {
     RETURN_IF_ERROR(RequireInode(ctx, dir));
-    RETURN_IF_ERROR(
-        Execute(ctx,
-                "DELETE FROM dentries WHERE parent = ? AND state = 'absent'",
-                dir)
-            .status());
+    RETURN_IF_ERROR(Execute(ctx, kSqlDeleteAbsentDentries, dir).status());
     // A refusal is forgotten, not deleted: its stub stays (schema.sql), so
     // that the relisting, if it finds the name refused again, keeps its
     // nodeid and generation.
-    RETURN_IF_ERROR(Execute(ctx,
-                            "UPDATE dentries SET state = 'unknown' "
-                            "WHERE parent = ? AND state = 'refused'",
-                            dir)
-                        .status());
+    RETURN_IF_ERROR(Execute(ctx, kSqlRefusedDentriesToUnknown, dir).status());
     return MarkIncomplete(ctx, dir);
   });
 }
 
 absl::Status MarkAttrsUnknown(Context &ctx, InodeId id) {
   return ctx.db.Transaction([&]() -> absl::Status {
-    ASSIGN_OR_RETURN(
-        int64_t changed,
-        Execute(ctx, "UPDATE inodes SET attrs_valid = 0 WHERE id = ?", id));
+    ASSIGN_OR_RETURN(int64_t changed, Execute(ctx, kSqlInvalidateAttr, id));
     if (changed == 0) return NoInode(id);
     return absl::OkStatus();
   });
@@ -1140,9 +937,7 @@ absl::Status MarkAttrsUnknown(Context &ctx, InodeId id) {
 
 absl::Status UpdateAttr(Context &ctx, InodeId id, const struct statx &stx) {
   return ctx.db.Transaction([&]() -> absl::Status {
-    ASSIGN_OR_RETURN(Statement * update,
-                     ctx.db.Prepared("UPDATE inodes SET " DCFS_ATTR_ASSIGNMENTS
-                                     " WHERE id = ?"));
+    ASSIGN_OR_RETURN(Statement * update, ctx.db.Prepared(kSqlUpdateAttr));
     RETURN_IF_ERROR(BindAttrs(*update, 1, stx));
     RETURN_IF_ERROR(update->Bind(1 + kNumAttrColumns, id));
     RETURN_IF_ERROR(update->ExecuteOnce());
@@ -1152,12 +947,9 @@ absl::Status UpdateAttr(Context &ctx, InodeId id, const struct statx &stx) {
 }
 
 absl::Status DropAtimeStamp(Context &ctx, InodeId id) {
-  return Execute(ctx,
-                 "UPDATE inodes SET atime_s = ?, atime_ns = 0 "
-                 "WHERE id = ? AND attrs_valid = 0 AND (mode & ?) IN (?, ?)",
-                 std::numeric_limits<int64_t>::min(), id,
-                 static_cast<int64_t>(S_IFMT), static_cast<int64_t>(S_IFDIR),
-                 static_cast<int64_t>(S_IFLNK))
+  return Execute(ctx, kSqlDropAtimeStamp, std::numeric_limits<int64_t>::min(),
+                 id, static_cast<int64_t>(S_IFMT),
+                 static_cast<int64_t>(S_IFDIR), static_cast<int64_t>(S_IFLNK))
       .status();
 }
 
@@ -1166,12 +958,8 @@ absl::StatusOr<bool> TouchAtime(Context &ctx, InodeId id,
   // Read first, outside any transaction: almost every listing or readlink
   // finds the atime recent (relatime), and a write transaction for each
   // would take the database's write lock for nothing (review L7).
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx,
-            "SELECT attrs_valid, atime_s, atime_ns, mtime_s, mtime_ns, "
-            "ctime_s, ctime_ns FROM inodes WHERE id = ?",
-            id));
+  ASSIGN_OR_RETURN(Statement * stmt,
+                   Query(ctx, kSqlSelectTimesForTouchAtime, id));
   bool valid = false;
   struct timespec atime{}, mtime{}, ctime{};
   ASSIGN_OR_RETURN(bool found, ReadOne(*stmt, [&](Statement &row) {
@@ -1198,15 +986,11 @@ absl::StatusOr<bool> TouchAtime(Context &ctx, InodeId id,
   // calls either, and the compare keeps it right regardless).
   int64_t changed = 0;
   RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
-    ASSIGN_OR_RETURN(changed,
-                     Execute(ctx,
-                             "UPDATE inodes SET atime_s = ?, atime_ns = ? "
-                             "WHERE id = ? AND attrs_valid = 1 AND atime_s = ? "
-                             "AND atime_ns = ?",
-                             static_cast<int64_t>(now.tv_sec),
-                             static_cast<int64_t>(now.tv_nsec), id,
-                             static_cast<int64_t>(atime.tv_sec),
-                             static_cast<int64_t>(atime.tv_nsec)));
+    ASSIGN_OR_RETURN(
+        changed, Execute(ctx, kSqlUpdateAtime, static_cast<int64_t>(now.tv_sec),
+                         static_cast<int64_t>(now.tv_nsec), id,
+                         static_cast<int64_t>(atime.tv_sec),
+                         static_cast<int64_t>(atime.tv_nsec)));
     return absl::OkStatus();
   }));
   return changed > 0;
@@ -1215,11 +999,7 @@ absl::StatusOr<bool> TouchAtime(Context &ctx, InodeId id,
 absl::Status SetSymlink(Context &ctx, InodeId id, std::string_view target) {
   return ctx.db.Transaction([&]() -> absl::Status {
     RETURN_IF_ERROR(RequireInode(ctx, id));
-    return Execute(ctx,
-                   "INSERT INTO symlinks (inode, target) VALUES (?, ?) "
-                   "ON CONFLICT (inode) DO UPDATE SET target = excluded.target",
-                   id, Blob(target))
-        .status();
+    return Execute(ctx, kSqlUpsertSymlink, id, Blob(target)).status();
   });
 }
 
@@ -1231,12 +1011,7 @@ absl::Status PutXattr(Context &ctx, InodeId id, std::string_view name,
                       std::string_view state,
                       std::optional<std::string_view> value) {
   ASSIGN_OR_RETURN(Statement * stmt,
-                   Query(ctx,
-                         "INSERT INTO xattrs (inode, name, state, value) "
-                         "VALUES (?, ?, ?, ?) "
-                         "ON CONFLICT (inode, name) DO UPDATE SET "
-                         "state = excluded.state, value = excluded.value",
-                         id, Blob(name), state));
+                   Query(ctx, kSqlPutXattr, id, Blob(name), state));
   if (value.has_value()) {
     RETURN_IF_ERROR(stmt->Bind(4, Blob(*value)));
   } else {
@@ -1246,9 +1021,7 @@ absl::Status PutXattr(Context &ctx, InodeId id, std::string_view name,
 }
 
 absl::Status SetXattrsComplete(Context &ctx, InodeId id, bool complete) {
-  return Execute(ctx, "UPDATE inodes SET xattrs_complete = ? WHERE id = ?",
-                 complete, id)
-      .status();
+  return Execute(ctx, kSqlSetXattrsComplete, complete, id).status();
 }
 
 }  // namespace
@@ -1261,8 +1034,7 @@ absl::Status ReplaceXattrs(
   // mutation's result.
   return ctx.db.Transaction([&]() -> absl::Status {
     RETURN_IF_ERROR(RequireInode(ctx, id));
-    RETURN_IF_ERROR(
-        Execute(ctx, "DELETE FROM xattrs WHERE inode = ?", id).status());
+    RETURN_IF_ERROR(Execute(ctx, kSqlDeleteAllXattrs, id).status());
     for (const auto &[name, value] : xattrs) {
       RETURN_IF_ERROR(PutXattr(ctx, id, name, "present", value));
     }
@@ -1295,8 +1067,7 @@ absl::Status ForgetXattr(Context &ctx, InodeId id, std::string_view name) {
 absl::Status MarkXattrsUnknown(Context &ctx, InodeId id) {
   return ctx.db.Transaction([&]() -> absl::Status {
     RETURN_IF_ERROR(RequireInode(ctx, id));
-    RETURN_IF_ERROR(
-        Execute(ctx, "DELETE FROM xattrs WHERE inode = ?", id).status());
+    RETURN_IF_ERROR(Execute(ctx, kSqlDeleteAllXattrs, id).status());
     return SetXattrsComplete(ctx, id, false);
   });
 }
@@ -1308,7 +1079,7 @@ absl::Status InvalidateInode(Context &ctx, InodeId id) {
     ctx.events->InodeForgetting(ctx, id);
     // The schema's inodes_delete_unknowns trigger makes every dentry that
     // pointed at it unknown; its own dentries (if a directory) cascade.
-    return Execute(ctx, "DELETE FROM inodes WHERE id = ?", id).status();
+    return Execute(ctx, kSqlDeleteInode, id).status();
   }));
   // Not a step of the protocol model: see ProtocolEvents::InodeForgotten.
   ctx.events->InodeForgotten(ctx, id);
@@ -1334,11 +1105,8 @@ absl::Status AddFilesystem(Context &ctx, const DeviceId &device, int64_t fstype,
     }
     std::optional<std::span<const uint8_t>> name;
     if (boundary_name.has_value()) name = Blob(*boundary_name);
-    return Execute(ctx,
-                   "INSERT INTO filesystems "
-                   "(device_id, fstype, parent_inode, boundary_name) "
-                   "VALUES (?, ?, ?, ?)",
-                   Blob(device.Serialize()), fstype, parent, name)
+    return Execute(ctx, kSqlInsertFilesystem, Blob(device.Serialize()), fstype,
+                   parent, name)
         .status();
   });
 }
@@ -1348,9 +1116,8 @@ absl::Status PurgeFilesystem(Context &ctx, const DeviceId &device) {
     ASSIGN_OR_RETURN(DeviceId source, GetSourceDeviceId(ctx.db));
     RET_CHECK(device != source) << "cannot purge the source filesystem";
     ASSIGN_OR_RETURN(FilesystemRow fs, GetFilesystem(ctx, device));
-    RETURN_IF_ERROR(Execute(ctx, "DELETE FROM filesystems WHERE device_id = ?",
-                            Blob(device.Serialize()))
-                        .status());
+    RETURN_IF_ERROR(
+        Execute(ctx, kSqlDeleteFilesystem, Blob(device.Serialize())).status());
     // The cascade above deleted the filesystem's inodes, and the schema's
     // inodes_delete_unknowns trigger made the boundary dentry pointing at
     // its root unknown (the mount point is not absent, merely forgotten), so
@@ -1393,11 +1160,7 @@ void RegisterMutation(Context &ctx, std::span<const InodeId> ids,
 
 absl::Status MarkAtimeDirty(Context &ctx, InodeId id, GuardTouch touch) {
   // A mutation's row stays one (its reason is the stronger).
-  RETURN_IF_ERROR(Execute(ctx,
-                          "INSERT INTO dirty (inode, atime_only) "
-                          "VALUES (?, 1) ON CONFLICT (inode) DO NOTHING",
-                          id)
-                      .status());
+  RETURN_IF_ERROR(Execute(ctx, kSqlMarkAtimeDirty, id).status());
   ctx.dirty.atime = true;
   ++ctx.dirty.inserts;
   if (ctx.dirty.atime_since == absl::InfiniteFuture()) {
@@ -1550,12 +1313,7 @@ namespace {
 
 absl::Status InsertDirty(Context &ctx, std::span<const InodeId> ids) {
   for (InodeId id : ids) {
-    RETURN_IF_ERROR(
-        Execute(ctx,
-                "INSERT INTO dirty (inode, atime_only) VALUES (?, 0) "
-                "ON CONFLICT (inode) DO UPDATE SET atime_only = 0",
-                id)
-            .status());
+    RETURN_IF_ERROR(Execute(ctx, kSqlInsertDirty, id).status());
   }
   // ClearDirty's fast path (the 12.12 audit's G15): a phase 1's insert
   // advances the clock anyway (RegisterMutation), but MarkDirty's does not
@@ -1720,26 +1478,20 @@ absl::Status MarkDirty(Context &ctx, std::span<const InodeId> ids) {
 }
 
 absl::StatusOr<bool> IsDirty(Context &ctx, InodeId id) {
-  ASSIGN_OR_RETURN(Statement * stmt,
-                   Query(ctx, "SELECT 1 FROM dirty WHERE inode = ?", id));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlIsInodeDirty, id));
   return ReadOne(*stmt, [](Statement &) { return absl::OkStatus(); });
 }
 
 absl::StatusOr<bool> HasMutationMark(Context &ctx, InodeId id) {
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx, "SELECT 1 FROM dirty WHERE inode = ? AND atime_only = 0", id));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlIsInodeMutationDirty, id));
   return ReadOne(*stmt, [](Statement &) { return absl::OkStatus(); });
 }
 
 absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx,
                                                bool mutations_only) {
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      mutations_only
-          ? Query(ctx,
-                  "SELECT inode FROM dirty WHERE atime_only = 0 ORDER BY inode")
-          : Query(ctx, "SELECT inode FROM dirty ORDER BY inode"));
+  ASSIGN_OR_RETURN(Statement * stmt,
+                   mutations_only ? Query(ctx, kSqlSelectMutationDirtyInodes)
+                                  : Query(ctx, kSqlSelectInodeFromDirty));
   std::vector<InodeId> ids;
   RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) {
     ids.push_back(row.Column<int64_t>(0));
@@ -1750,9 +1502,7 @@ absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx,
 
 absl::StatusOr<SyncSnapshot> BeginSync(Context &ctx) {
   SyncSnapshot snapshot{.fills = BeginFill(ctx)};
-  ASSIGN_OR_RETURN(
-      Statement * rows,
-      Query(ctx, "SELECT inode, atime_only FROM dirty ORDER BY inode"));
+  ASSIGN_OR_RETURN(Statement * rows, Query(ctx, kSqlSelectDirtySnapshot));
   RETURN_IF_ERROR(rows->ForEachRow([&](Statement &row) {
     const InodeId id = row.Column<int64_t>(0);
     snapshot.dirty.push_back(id);
@@ -1780,11 +1530,7 @@ struct DirtyFlags {
   bool atime = true;
 };
 absl::StatusOr<DirtyFlags> CountDirty(Context &ctx) {
-  ASSIGN_OR_RETURN(
-      Statement * stmt,
-      Query(ctx,
-            "SELECT EXISTS (SELECT 1 FROM dirty WHERE atime_only = 0), "
-            "EXISTS (SELECT 1 FROM dirty WHERE atime_only = 1)"));
+  ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlHasDirtyRows));
   DirtyFlags flags;
   RETURN_IF_ERROR(ReadOne(*stmt, [&](Statement &row) {
                     flags.any = row.Column<int64_t>(0) != 0;
@@ -1845,7 +1591,7 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
   RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     removed = 0;
     if (nothing_moved) {
-      RETURN_IF_ERROR(Execute(ctx, "DELETE FROM dirty").status());
+      RETURN_IF_ERROR(Execute(ctx, kSqlClearAllDirty).status());
       removed = static_cast<int64_t>(synced.dirty.size());
       // Put back the kept rows that were there (and only those: a kept
       // inode that was not dirty must not become dirty), each with its
@@ -1862,9 +1608,7 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
                 ? 1
                 : 0;
         RETURN_IF_ERROR(
-            Execute(ctx, "INSERT INTO dirty (inode, atime_only) VALUES (?, ?)",
-                    id, atime_only)
-                .status());
+            Execute(ctx, kSqlInsertDirtyRow, id, atime_only).status());
         --removed;
       }
     } else {
@@ -1880,14 +1624,10 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
         // row.)
         if (!CanFill(ctx, synced.fills, id)) continue;
         if (kept_open.contains(id)) {
-          RETURN_IF_ERROR(
-              Execute(ctx, "UPDATE dirty SET atime_only = 1 WHERE inode = ?",
-                      id)
-                  .status());
+          RETURN_IF_ERROR(Execute(ctx, kSqlUpdateDirtyAtimeOnly, id).status());
           continue;
         }
-        RETURN_IF_ERROR(
-            Execute(ctx, "DELETE FROM dirty WHERE inode = ?", id).status());
+        RETURN_IF_ERROR(Execute(ctx, kSqlClearDirtyInode, id).status());
         ++removed;
       }
     }
@@ -1913,15 +1653,9 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
 absl::StatusOr<int64_t> ForgetUnnamedRows(Context &ctx) {
   int64_t count = 0;
   RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
-    ASSIGN_OR_RETURN(
-        count,
-        Execute(ctx,
-                "DELETE FROM inodes WHERE id != ? AND nlink = 0 "
-                "AND (mode & ?) != ? "
-                "AND NOT EXISTS (SELECT 1 FROM dentries "
-                "WHERE dentries.inode = inodes.id AND state = 'present')",
-                kRootInode, static_cast<int64_t>(S_IFMT),
-                static_cast<int64_t>(S_IFDIR)));
+    ASSIGN_OR_RETURN(count, Execute(ctx, kSqlSweepUnlinkedInodes, kRootInode,
+                                    static_cast<int64_t>(S_IFMT),
+                                    static_cast<int64_t>(S_IFDIR)));
     return absl::OkStatus();
   }));
   return count;
@@ -1930,8 +1664,7 @@ absl::StatusOr<int64_t> ForgetUnnamedRows(Context &ctx) {
 absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {
   int64_t count = 0;
   RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
-    ASSIGN_OR_RETURN(Statement * stmt,
-                     Query(ctx, "SELECT COUNT(*) FROM dirty"));
+    ASSIGN_OR_RETURN(Statement * stmt, Query(ctx, kSqlCountDirty));
     RETURN_IF_ERROR(ReadOne(*stmt, [&](Statement &row) {
                       count = row.Column<int64_t>(0);
                       return absl::OkStatus();
@@ -1939,46 +1672,20 @@ absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {
     if (count == 0) return absl::OkStatus();
     // A dirty directory's listing: any name may have changed, including
     // ones nothing cached (only a directory has dentries of its own).
-    RETURN_IF_ERROR(
-        Execute(ctx,
-                "UPDATE directories SET children_complete = 0, "
-                "epoch = epoch + 1 "
-                "WHERE inode IN (SELECT inode FROM dirty WHERE atime_only = 0)")
-            .status());
-    RETURN_IF_ERROR(Execute(ctx,
-                            "DELETE FROM dentries WHERE parent IN "
-                            "(SELECT inode FROM dirty WHERE atime_only = 0)")
-                        .status());
+    RETURN_IF_ERROR(Execute(ctx, kSqlRecoverResetDirectories).status());
+    RETURN_IF_ERROR(Execute(ctx, kSqlRecoverResetDentries).status());
     // A dirty inode's own names elsewhere (it may have been renamed or
     // unlinked): unknown.
-    RETURN_IF_ERROR(
-        Execute(ctx,
-                "UPDATE dentries SET state = 'unknown', inode = NULL "
-                "WHERE inode IN (SELECT inode FROM dirty WHERE atime_only = 0)")
-            .status());
-    RETURN_IF_ERROR(
-        Execute(ctx,
-                "UPDATE inodes SET attrs_valid = 0, xattrs_complete = 0 "
-                "WHERE id IN (SELECT inode FROM dirty WHERE atime_only = 0)")
-            .status());
+    RETURN_IF_ERROR(Execute(ctx, kSqlRecoverResetDentriesUnknown).status());
+    RETURN_IF_ERROR(Execute(ctx, kSqlRecoverInvalidateInodes).status());
     // An atime-only row (step 23.8: a file that was only read, or held open
     // while recorded) stands for its attributes alone (the access time the
     // backing filesystem may have lost or kept): nothing else is forgotten.
-    RETURN_IF_ERROR(
-        Execute(ctx,
-                "UPDATE inodes SET attrs_valid = 0 "
-                "WHERE id IN (SELECT inode FROM dirty WHERE atime_only = 1)")
-            .status());
+    RETURN_IF_ERROR(Execute(ctx, kSqlRecoverInvalidateInodesAtime).status());
     // GetXattr serves a present or absent row even when the set is
     // incomplete, so the rows must go, not just the completeness flag.
-    RETURN_IF_ERROR(Execute(ctx,
-                            "DELETE FROM xattrs WHERE inode IN "
-                            "(SELECT inode FROM dirty WHERE atime_only = 0)")
-                        .status());
-    RETURN_IF_ERROR(Execute(ctx,
-                            "DELETE FROM symlinks WHERE inode IN "
-                            "(SELECT inode FROM dirty WHERE atime_only = 0)")
-                        .status());
+    RETURN_IF_ERROR(Execute(ctx, kSqlRecoverResetXattrs).status());
+    RETURN_IF_ERROR(Execute(ctx, kSqlRecoverResetSymlinks).status());
     // The dirty set itself stays until a sync point's syncfs and ClearDirty
     // (step 12.6b): the crashed run's backing changes may not be durable
     // yet, and the start's probe (backing::Startup) reads the same rows.
@@ -1995,11 +1702,5 @@ absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {
       flags.atime ? ctx.clock->TimeNow() : absl::InfiniteFuture();
   return count;
 }
-
-#undef DCFS_ATTR_ASSIGNMENTS
-#undef DCFS_KEEP_STAMP
-#undef DCFS_ATTR_VALUES
-#undef DCFS_ATTR_COLUMNS
-#undef DCFS_ATTR_PLACEHOLDERS
 
 }  // namespace dcfs::cache

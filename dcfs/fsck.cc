@@ -30,6 +30,7 @@
 #include "dcfs/fd.h"
 #include "dcfs/migrate.h"
 #include "dcfs/mount_dcfs.h"
+#include "dcfs/sql_statements.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
@@ -203,10 +204,8 @@ Finding Inspect(const std::string &path) {
   size_t dirty = 0;
   std::vector<std::string> missing;
   absl::Status read = [&]() -> absl::Status {
-    ASSIGN_OR_RETURN(
-        sqlite3::Statement * stmt,
-        db.Prepared("SELECT inode, inode NOT IN (SELECT id FROM inodes) "
-                    "FROM dirty ORDER BY inode"));
+    ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
+                     db.Prepared(kSqlFsckInspectDirty));
     return stmt->ForEachRow([&](sqlite3::Statement &row) {
       ++dirty;
       if (row.Column<int>(1) != 0 && missing.size() < 3) {

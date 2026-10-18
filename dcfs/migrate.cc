@@ -15,6 +15,7 @@
 #include "dcfs/device_id.h"
 #include "dcfs/ret_check.h"
 #include "dcfs/schema.h"
+#include "dcfs/sql_statements.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
 
@@ -33,9 +34,7 @@ std::span<const uint8_t> AsBlob(const std::string &s) {
 
 absl::StatusOr<bool> TableExists(sqlite3::Connection &db,
                                  std::string_view name) {
-  ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
-                   db.Prepared("SELECT 1 FROM sqlite_master "
-                               "WHERE type = 'table' AND name = ?"));
+  ASSIGN_OR_RETURN(sqlite3::Statement * stmt, db.Prepared(kSqlTableExists));
   RETURN_IF_ERROR(stmt->Bind(1, name));
   ASSIGN_OR_RETURN(bool exists, stmt->Step());
   RETURN_IF_ERROR(stmt->Reset());
@@ -63,9 +62,8 @@ absl::StatusOr<T> ReadCacheState(sqlite3::Connection &db, std::string_view sql,
 absl::StatusOr<int> ExistingSchemaVersion(sqlite3::Connection &db) {
   ASSIGN_OR_RETURN(bool has_state, TableExists(db, "cache_state"));
   if (has_state) return GetSchemaVersion(db);
-  ASSIGN_OR_RETURN(
-      sqlite3::Statement * stmt,
-      db.Prepared("SELECT value FROM meta WHERE key = 'schema_version'"));
+  ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
+                   db.Prepared(kSqlMigrateSelectMetaSchemaVersion));
   ASSIGN_OR_RETURN(bool has_row, stmt->Step());
   std::string value = has_row ? stmt->Column<std::string>(0) : "";
   RETURN_IF_ERROR(stmt->Reset());
@@ -79,8 +77,7 @@ absl::StatusOr<int> ExistingSchemaVersion(sqlite3::Connection &db) {
 }
 
 absl::StatusOr<bool> RootInodeExists(sqlite3::Connection &db) {
-  ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
-                   db.Prepared("SELECT 1 FROM inodes WHERE id = 1"));
+  ASSIGN_OR_RETURN(sqlite3::Statement * stmt, db.Prepared(kSqlRootInodeExists));
   ASSIGN_OR_RETURN(bool exists, stmt->Step());
   RETURN_IF_ERROR(stmt->Reset());
   return exists;
@@ -90,39 +87,27 @@ absl::Status CreateSchema(sqlite3::Connection &db, const RootIdentity &root) {
   RETURN_IF_ERROR(db.ExecScript(kSchemaSql));
 
   std::string device_id_bytes = root.device_id.Serialize();
-  ASSIGN_OR_RETURN(
-      sqlite3::Statement * state_stmt,
-      db.Prepared("INSERT INTO cache_state "
-                  "(id, schema_version, source_device_id, clean_shutdown, "
-                  " boot_id) VALUES (1, ?, ?, 1, NULL)"));
+  ASSIGN_OR_RETURN(sqlite3::Statement * state_stmt,
+                   db.Prepared(kSqlCreateSchemaState));
   RETURN_IF_ERROR(state_stmt->Bind(1, kSchemaVersion));
   RETURN_IF_ERROR(state_stmt->Bind(2, AsBlob(device_id_bytes)));
   RETURN_IF_ERROR(state_stmt->ExecuteOnce());
 
-  ASSIGN_OR_RETURN(
-      sqlite3::Statement * fs_stmt,
-      db.Prepared("INSERT INTO filesystems "
-                  "(device_id, fstype, parent_inode, boundary_name) "
-                  "VALUES (?, ?, NULL, NULL)"));
+  ASSIGN_OR_RETURN(sqlite3::Statement * fs_stmt,
+                   db.Prepared(kSqlCreateSchemaFilesystem));
   RETURN_IF_ERROR(fs_stmt->Bind(1, AsBlob(device_id_bytes)));
   RETURN_IF_ERROR(fs_stmt->Bind(2, root.fstype));
   RETURN_IF_ERROR(fs_stmt->ExecuteOnce());
 
-  ASSIGN_OR_RETURN(
-      sqlite3::Statement * inode_stmt,
-      db.Prepared("INSERT INTO inodes "
-                  "(id, device_id, backing_ino, backing_gen, fuse_gen, "
-                  " attrs_valid) "
-                  "VALUES (1, ?, ?, ?, 0, 0)"));
+  ASSIGN_OR_RETURN(sqlite3::Statement * inode_stmt,
+                   db.Prepared(kSqlCreateSchemaInode));
   RETURN_IF_ERROR(inode_stmt->Bind(1, AsBlob(device_id_bytes)));
   RETURN_IF_ERROR(inode_stmt->Bind(2, root.backing_ino));
   RETURN_IF_ERROR(inode_stmt->Bind(3, root.backing_gen));
   RETURN_IF_ERROR(inode_stmt->ExecuteOnce());
 
-  ASSIGN_OR_RETURN(
-      sqlite3::Statement * dir_stmt,
-      db.Prepared("INSERT INTO directories (inode, children_complete) "
-                  "VALUES (1, 0)"));
+  ASSIGN_OR_RETURN(sqlite3::Statement * dir_stmt,
+                   db.Prepared(kSqlCreateSchemaDirectory));
   return dir_stmt->ExecuteOnce();
 }
 
@@ -271,8 +256,7 @@ absl::Status MigrateV3ToV4(sqlite3::Connection &db) {
 // has it keeps it.
 absl::Status MigrateV4ToV5(sqlite3::Connection &db) {
   ASSIGN_OR_RETURN(sqlite3::Statement * column,
-                   db.Prepared("SELECT 1 FROM pragma_table_info('cache_state') "
-                               "WHERE name = 'last_stub_id'"));
+                   db.Prepared(kSqlMigrateV4CheckColumn));
   ASSIGN_OR_RETURN(bool has_column, column->Step());
   RETURN_IF_ERROR(column->Reset());
   if (!has_column) {
@@ -307,8 +291,7 @@ absl::Status MigrateV4ToV5(sqlite3::Connection &db) {
 // above.
 absl::Status MigrateV5ToV6(sqlite3::Connection &db) {
   ASSIGN_OR_RETURN(sqlite3::Statement * column,
-                   db.Prepared("SELECT 1 FROM pragma_table_info('dirty') "
-                               "WHERE name = 'atime_only'"));
+                   db.Prepared(kSqlMigrateV5CheckColumn));
   ASSIGN_OR_RETURN(bool has_column, column->Step());
   RETURN_IF_ERROR(column->Reset());
   if (!has_column) {
@@ -384,32 +367,30 @@ absl::Status Migrate(sqlite3::Connection &db, const RootIdentity &root) {
 
 absl::StatusOr<int> GetSchemaVersion(sqlite3::Connection &db) {
   return ReadCacheState<int>(
-      db, "SELECT schema_version FROM cache_state WHERE id = 1",
+      db, kSqlGetSchemaVersion,
       [](sqlite3::Statement &row) { return row.Column<int>(0); });
 }
 
 absl::StatusOr<DeviceId> GetSourceDeviceId(sqlite3::Connection &db) {
-  ASSIGN_OR_RETURN(
-      std::string bytes,
-      ReadCacheState<std::string>(
-          db, "SELECT source_device_id FROM cache_state WHERE id = 1",
-          [](sqlite3::Statement &row) {
-            std::vector<uint8_t> blob = row.Column<std::vector<uint8_t>>(0);
-            return std::string(blob.begin(), blob.end());
-          }));
+  ASSIGN_OR_RETURN(std::string bytes,
+                   ReadCacheState<std::string>(
+                       db, kSqlGetSourceDeviceId, [](sqlite3::Statement &row) {
+                         std::vector<uint8_t> blob =
+                             row.Column<std::vector<uint8_t>>(0);
+                         return std::string(blob.begin(), blob.end());
+                       }));
   return DeviceId::Parse(bytes);
 }
 
 absl::StatusOr<bool> GetCleanShutdown(sqlite3::Connection &db) {
   return ReadCacheState<bool>(
-      db, "SELECT clean_shutdown FROM cache_state WHERE id = 1",
+      db, kSqlGetCleanShutdown,
       [](sqlite3::Statement &row) { return row.Column<bool>(0); });
 }
 
 absl::Status SetCleanShutdown(sqlite3::Connection &db, bool clean) {
-  ASSIGN_OR_RETURN(
-      sqlite3::Statement * stmt,
-      db.Prepared("UPDATE cache_state SET clean_shutdown = ? WHERE id = 1"));
+  ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
+                   db.Prepared(kSqlSetCleanShutdown));
   RETURN_IF_ERROR(stmt->Bind(1, clean));
   RETURN_IF_ERROR(stmt->ExecuteOnce());
   RET_CHECK_EQ(db.Changes(), 1) << "the cache_state row is missing";
@@ -418,16 +399,13 @@ absl::Status SetCleanShutdown(sqlite3::Connection &db, bool clean) {
 
 absl::StatusOr<std::optional<std::string>> GetBootId(sqlite3::Connection &db) {
   return ReadCacheState<std::optional<std::string>>(
-      db, "SELECT boot_id FROM cache_state WHERE id = 1",
-      [](sqlite3::Statement &row) {
+      db, kSqlGetBootId, [](sqlite3::Statement &row) {
         return row.Column<std::optional<std::string>>(0);
       });
 }
 
 absl::Status SetBootId(sqlite3::Connection &db, std::string_view boot_id) {
-  ASSIGN_OR_RETURN(
-      sqlite3::Statement * stmt,
-      db.Prepared("UPDATE cache_state SET boot_id = ? WHERE id = 1"));
+  ASSIGN_OR_RETURN(sqlite3::Statement * stmt, db.Prepared(kSqlSetBootId));
   RETURN_IF_ERROR(stmt->Bind(1, boot_id));
   RETURN_IF_ERROR(stmt->ExecuteOnce());
   RET_CHECK_EQ(db.Changes(), 1) << "the cache_state row is missing";

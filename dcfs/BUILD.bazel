@@ -722,6 +722,7 @@ cc_library(
       ":escape",
       ":migrate",
       ":mount_dcfs",
+      ":sql_statements",
       ":sqlite",
       ":status",
       ":syscalls",
@@ -1555,6 +1556,12 @@ cc_library(
     hdrs = ["schema.h"],
 )
 
+# Step 26.41: all SQL statement string constants dcfs prepares.
+cc_library(
+    name = "sql_statements",
+    hdrs = ["sql_statements.h"],
+)
+
 cc_library(
     name = "migrate",
     visibility = ["//dcfs/testonly:__pkg__"],
@@ -1564,6 +1571,7 @@ cc_library(
       ":device_id",
       ":ret_check",
       ":schema",
+      ":sql_statements",
       ":sqlite",
       ":status",
       "@absl//absl/status",
@@ -1661,6 +1669,7 @@ cc_library(
       ":file_handle",
       ":migrate",
       ":ret_check",
+      ":sql_statements",
       ":sqlite",
       ":status",
       "@absl//absl/cleanup",
@@ -1699,6 +1708,32 @@ qemu_cc_test(
       "@absl//absl/strings",
       "@googletest//:gtest_main",
       "@sqlite//:sqlite3",
+    ],
+)
+
+# Step 26.41: check all SQL statements for unindexed full-table scans.
+qemu_cc_test(
+    name = "query_plan_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["query_plan_test.cc"],
+    data = ["query_plan_allowlist.txt"],
+    deps = [
+      ":device_id",
+      ":migrate",
+      ":sql_statements",
+      ":sqlite",
+      ":status",
+      "//dcfs/testonly:assert_ok_and_assign",
+      "//dcfs/testonly:files",
+      "@absl//absl/container:flat_hash_map",
+      "@absl//absl/container:flat_hash_set",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/status:status_matchers",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@googletest//:gtest_main",
     ],
 )
 

@@ -1,0 +1,80 @@
+# Allowlist of SQL statements in dcfs that perform full-table scans.
+# Each entry is formatted as:
+#   <sql>
+#   | <reason>
+# Or on a single line:
+#   <sql> | <reason>
+#
+# Comments start with #. Blank lines are ignored.
+# Lines must not exceed 80 columns.
+
+SELECT parent, name FROM dentries WHERE state = 'unknown' LIMIT ?
+| Scans partial index dentries_unknown, which is typically empty.
+
+SELECT device_id, fstype, parent_inode, boundary_name FROM filesystems ORDER
+BY rowid
+| Table filesystems contains only mount points under source (< 10 rows).
+
+DELETE FROM inodes WHERE id = ?
+| Foreign-key cascade check on unindexed filesystems.parent_inode (< 10 rows).
+
+SELECT inode FROM dirty WHERE atime_only = 0 ORDER BY inode
+| Scans table dirty to enumerate mutation-dirty inodes at sync/recovery.
+
+SELECT inode FROM dirty ORDER BY inode
+| Scans table dirty to enumerate all dirty inodes.
+
+SELECT inode, atime_only FROM dirty ORDER BY inode
+| Scans table dirty to snapshot dirty set at BeginSync.
+
+SELECT EXISTS (SELECT 1 FROM dirty WHERE atime_only = 0), EXISTS (SELECT 1
+FROM dirty WHERE atime_only = 1)
+| Table dirty has no index on atime_only; table is bounded by dirty set.
+
+DELETE FROM inodes WHERE id != ? AND nlink = 0 AND (mode & ?) != ? AND NOT
+EXISTS (SELECT 1 FROM dentries WHERE dentries.inode = inodes.id AND state =
+'present')
+| Foreign-key cascade check on unindexed filesystems.parent_inode (< 10 rows).
+
+SELECT COUNT(*) FROM dirty
+| Scans table dirty to check if crash recovery has any dirty inodes.
+
+UPDATE directories SET children_complete = 0, epoch = epoch + 1 WHERE inode IN
+(SELECT inode FROM dirty WHERE atime_only = 0)
+| Subquery scans table dirty to reset completeness for dirty directories.
+
+DELETE FROM dentries WHERE parent IN (SELECT inode FROM dirty WHERE atime_only
+= 0)
+| Subquery scans table dirty to drop dentries of dirty directories.
+
+UPDATE dentries SET state = 'unknown', inode = NULL WHERE inode IN (SELECT
+inode FROM dirty WHERE atime_only = 0)
+| Subquery scans table dirty to mark dentries pointing to dirty inodes.
+
+UPDATE inodes SET attrs_valid = 0, xattrs_complete = 0 WHERE id IN (SELECT
+inode FROM dirty WHERE atime_only = 0)
+| Subquery scans table dirty to invalidate attributes of dirty inodes.
+
+UPDATE inodes SET attrs_valid = 0 WHERE id IN (SELECT inode FROM dirty WHERE
+atime_only = 1)
+| Subquery scans table dirty to invalidate attributes of atime-dirty inodes.
+
+DELETE FROM xattrs WHERE inode IN (SELECT inode FROM dirty WHERE atime_only =
+0)
+| Subquery scans table dirty to drop cached xattrs of dirty inodes.
+
+DELETE FROM symlinks WHERE inode IN (SELECT inode FROM dirty WHERE atime_only
+= 0)
+| Subquery scans table dirty to drop cached symlink targets of dirty inodes.
+
+SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?
+| Migration probe checks SQLite catalog table which has no user indexes.
+
+SELECT 1 FROM pragma_table_info('cache_state') WHERE name = 'last_stub_id'
+| Migration probe queries SQLite virtual table pragma_table_info.
+
+SELECT 1 FROM pragma_table_info('dirty') WHERE name = 'atime_only'
+| Migration probe queries SQLite virtual table pragma_table_info.
+
+SELECT inode, inode NOT IN (SELECT id FROM inodes) FROM dirty ORDER BY inode
+| Fsck inspects all rows in table dirty to verify referential integrity.
