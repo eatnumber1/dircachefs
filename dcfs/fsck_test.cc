@@ -88,9 +88,7 @@ namespace dcfs {
 namespace {
 
 using ::absl_testing::IsOk;
-using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
-using ::testing::Field;
 using ::testing::HasSubstr;
 using ::testing::Not;
 using ::testing::SizeIs;
@@ -423,7 +421,8 @@ TEST(CheckCacheDatabaseTest, ADatabaseSQLiteHasLockedIsReportedNotTouched) {
   for (FsckMode mode : {FsckMode::kReport, FsckMode::kRepair}) {
     CacheReport report = CheckCacheDatabase(path, mode);
     EXPECT_EQ(report.status, kFsckOperational) << Joined(report);
-    EXPECT_THAT(Joined(report), HasSubstr("is locked: UNAVAILABLE: "));
+    EXPECT_THAT(Joined(report), HasSubstr("is locked: database is locked"));
+    EXPECT_THAT(Joined(report), Not(HasSubstr("UNAVAILABLE")));
     EXPECT_TRUE(Exists(path)) << "a locked database is never deleted";
   }
 }

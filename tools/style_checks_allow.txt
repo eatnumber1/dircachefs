@@ -168,7 +168,6 @@ dcfs/fsck.cc|Inspect|readability-function-cognitive-complexity|1
 dcfs/fsck.cc|ParseFsckArgs|readability-function-cognitive-complexity|1
 dcfs/fsck.cc|RunProgram|misc-include-cleaner|4
 dcfs/fsck_test.cc|<file scope>|misc-include-cleaner|1
-dcfs/fsck_test.cc|<file scope>|misc-unused-using-decls|3
 dcfs/fsck_test.cc|TestFile|concurrency-mt-unsafe|1
 dcfs/fuse_ops.cc|Ioctl|misc-unused-parameters|1
 dcfs/fuse_request.cc|FuseRequest::Caller|bugprone-narrowing-conversions|2

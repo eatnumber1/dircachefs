@@ -647,21 +647,40 @@ repeating itself, because each added piece says something new.
 include the Status if you have one in the message. Dropping a Status without
 logging or returning it silently suppresses the root cause of errors! Also an
 aside: Status implements AbslStringify. So it should be `StrCat("open ",
-path, ": ", status)`."). A failed `Status` that is not returned is logged or
-put into the message that replaces it, whole: `absl::StrCat(what, ": ",
-status)` or `LOG(...) << status`, for a `StatusOr` its `.status()`. In one-line
-user-facing text (a report line, a benchmark row), `status.ToString()`: the code
-and payload without the source-location trace; logs print the whole status.
-Never `status.message()`, which drops the code and the payloads (the errno), and
-never a fixed text (`SkipWithError("open failed")`) where a status was in
-hand. This holds for bench diagnostics, fsck's findings, tests and tools as
-much as for the daemon. Tests assert on a status with `StatusIs(code,
-message_matcher)`, not on `.message()`. Mechanical: the `status_message`
-matcher (`tools/style_matchers/status_message.query`) refuses every call of
-`absl::Status::message()` in `dcfs/`, `tools/` and `bench/`, with no
-allowlist; `status_dropped` reports a failure branch (`if (!s.ok()) return
-false;`) that never mentions the status (report only: some are answers, such
-as a predicate that is false when the probe failed).
+path, ": ", status)`.").
+
+There are three kinds of message (russ: "there's three types of messages: 1. I
+succeeded in doing the thing 2. I failed in doing the thing 3. The infrastructure
+underneath me failed ... It's really 3 where the full debugging payload for a
+Status comes into play"; and "finding a corrupt database is fsck working, not
+failing. So `.ToString()` or even `.message()` is appropriate (assuming Status
+is warranted at all)"):
+1. **Success**: I succeeded in doing the thing.
+2. **Domain outcomes**: I failed in doing the thing (fsck findings, benchmark
+   skips). These stop carrying a Status where practical: fsck findings become
+   plain results (the `CacheReport`'s words), and benchmark skips say what could
+   not be measured. Where a lower layer's `Status` is itself the domain answer,
+   convert it through one helper, `FindingText(const absl::Status&)` returning
+   its `.message()`, which the `status_message` matcher exempts; nothing else
+   calls `.message()`.
+3. **Infrastructure failures**: The infrastructure underneath me failed. A
+   failed `Status` that is not returned is logged or put into the message that
+   replaces it, whole: `absl::StrCat(what, ": ", status)` or `LOG(...) <<
+   status`, for a `StatusOr` its `.status()`, keeping the whole Status with its
+   full debugging payload in logs and in report lines alike. In one-line
+   console output where the trace cannot be split across lines (the invariant
+   checker), `status.ToString()`.
+
+Never call `status.message()` directly, which drops the code and payloads (the
+errno); and never use fixed text (`SkipWithError("open failed")`) where a
+status was an infrastructure failure in hand. Tests assert on a status with
+`StatusIs(code, message_matcher)`, not on `.message()`. Mechanical: the
+`status_message` matcher (`tools/style_matchers/status_message.query`) refuses
+every call of `absl::Status::message()` in `dcfs/`, `tools/` and `bench/`, with
+no allowlist except `FindingText(const absl::Status&)`; `status_dropped` reports
+a failure branch (`if (!s.ok()) return false;`) that never mentions the status
+(report only: some are legitimate domain answers, such as a predicate that is
+false when the probe failed).
 
 **Return a failed status or log it, never both** (1.7).
 

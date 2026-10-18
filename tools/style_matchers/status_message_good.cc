@@ -1,7 +1,9 @@
 // Known-good input of status_message.query: a Status is put into a message
 // whole (it implements AbslStringify), and absl::string_view::size and other
-// classes' message() are not the Status's.
+// classes' message() are not the Status's; and FindingText(const absl::Status&)
+// is the one exempt helper for domain answers.
 #include <string>
+#include <string_view>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -13,6 +15,10 @@ absl::StatusOr<int> Count();
 struct Greeting {
   std::string message() const { return "hello"; }
 };
+
+std::string_view FindingText(const absl::Status &status) {
+  return status.message();
+}
 
 std::string Describe(const Greeting &greeting) {
   absl::Status status = Fetch();
