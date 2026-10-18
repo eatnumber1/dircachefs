@@ -1909,7 +1909,10 @@ ext4, xfs and btrfs.
   directly on the backing raises no event on the mount (the exclusive-access
   limitation). Nothing in it depends on timing: events are queued in the
   syscall and the checks count and order them. The differential half runs in
-  `/src/native`, a directory dcfs never touches.
+  `src/native` on the test's disk, a directory dcfs never touches. The three
+  targets are tagged `manual`: they pin kernel facts and change only when the
+  guest kernel does, so they run in the weekly `noisy` job
+  (`.github/workflows/ci.yml`), not in the fast, presubmit or per-push tiers.
 - `lifecycle_test` (`guest/lifecycle.sh`): step 3.5's daemon lifecycle and
   CLI -- usage/option validation, a missing or non-directory SOURCE, a
   cache database refused because it belongs to a different filesystem,

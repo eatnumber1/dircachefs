@@ -2,9 +2,15 @@
 #include "test/qemu/guest/guest.h"
 
 #include <fcntl.h>
-#include <signal.h>  // NOLINT(modernize-deprecated-headers): include-cleaner finds SIGKILL here
-#include <stdio.h>  // NOLINT(modernize-deprecated-headers): include-cleaner finds SEEK_SET here
-#include <stdlib.h>  // NOLINT(modernize-deprecated-headers): include-cleaner finds WIFEXITED here
+// include-cleaner looks for SIGKILL in <signal.h>, not <csignal>.
+// NOLINTNEXTLINE(modernize-deprecated-headers): the macro's header
+#include <signal.h>
+// include-cleaner looks for SEEK_SET in <stdio.h>, not <cstdio>.
+// NOLINTNEXTLINE(modernize-deprecated-headers): the macro's header
+#include <stdio.h>
+// include-cleaner looks for WIFEXITED in <stdlib.h>, not <cstdlib>.
+// NOLINTNEXTLINE(modernize-deprecated-headers): the macro's header
+#include <stdlib.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -28,7 +34,6 @@
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
-#include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
@@ -48,13 +53,10 @@
 #include "dcfs/testonly/files.h"
 #include "dcfs/testonly/process.h"
 #include "dcfs/testonly/status_wire.h"
-#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 namespace dcfs {
 namespace {
-
-using ::absl_testing::IsOk;
 
 absl::StatusOr<int> Wait(pid_t pid) {
   int wait_status = 0;
@@ -93,9 +95,10 @@ enum class MountWait { kMounted, kDaemonExited };
 
 // Whether `mountpoint` is in the table that `mounts` (an open
 // /proc/self/mounts) reads, or the process `pidfd` is of exits first. The
-// daemon's exit is the event to wait on, not a timer: the kernel wakes the
-// poll when the table changes (it compares with the table as last read) or
-// the process exits.
+// daemon's exit is the event to wait on, not a timer. poll(2) on
+// /proc/self/mounts reports POLLPRI|POLLERR when the mount table changed since
+// the open or the last report (fs/proc_namespace.c:32 (Linux v7.3-rc7); the
+// open records the table's event count, fs/proc_namespace.c:272).
 absl::StatusOr<MountWait> WaitForMount(int mounts, int pidfd,
                                        std::string_view mountpoint) {
   std::string needle = absl::StrCat(" ", mountpoint, " ");
@@ -120,7 +123,7 @@ absl::StatusOr<std::string> RunAs(
     absl::FunctionRef<absl::StatusOr<std::string>()> fn,
     absl::optional_ref<const Identity> as) {
   if (as.has_value()) {
-    RETURN_IF_ERROR(SetIdentity(*as)) << "The child could not become the user";
+    RETURN_IF_ERROR(SetIdentity(*as)) << "the child could not become the user";
   }
   return fn();
 }
@@ -163,18 +166,26 @@ absl::StatusOr<std::string> InChild(
   auto &[parent_end, child_end] = ends;
   ASSIGN_OR_RETURN(pid_t pid, syscalls::fork());
   if (pid == 0) RunChild(*child_end, fn, as);
-  // With the child's end closed here, the parent's read ends at the child's
-  // exit.
-  RET_CHECK_OK(child_end.Close());
-  absl::StatusOr<std::string> got = testonly::ReadAll(*parent_end);
-  RETURN_IF_ERROR(got.status());
+  // On an early return the child is killed and reaped, so none outlives the
+  // call.
+  absl::Cleanup reap = [pid] {
+    syscalls::kill(pid, SIGKILL).IgnoreError();
+    Wait(pid).status().IgnoreError();
+  };
+  {
+    // With the child's end closed here, the parent's read ends at the child's
+    // exit.
+    FileDescriptor closing = std::move(child_end);
+  }
+  ASSIGN_OR_RETURN(std::string got, testonly::ReadAll(*parent_end));
   ASSIGN_OR_RETURN(int wait_status, Wait(pid));
+  std::move(reap).Cancel();
   if (!WIFEXITED(wait_status) || WEXITSTATUS(wait_status) != 0) {
     return InternalErrorBuilder()
            << "The child " << testonly::DescribeWaitStatus(wait_status)
            << " before its function returned";
   }
-  return DecodeChildMessage(*got);
+  return DecodeChildMessage(got);
 }
 
 DcfsMount::DcfsMount(MountSpec spec, pid_t pid, std::string log_path)
@@ -182,17 +193,26 @@ DcfsMount::DcfsMount(MountSpec spec, pid_t pid, std::string log_path)
 
 // NOLINTNEXTLINE(bugprone-exception-escape): dcfs does not use exceptions
 DcfsMount::~DcfsMount() {
-  absl::Status status;
+  // Every step runs, whatever the one before it did.
   if (pid_.has_value()) {
-    status.Update(syscalls::kill(*pid_, SIGKILL));
-    status.Update(Wait(*pid_).status());
-    status.Update(
-        testonly::RunCommand({"/bin/umount", "-l", spec_.mountpoint}));
+    if (absl::Status s = syscalls::kill(*pid_, SIGKILL); !s.ok()) {
+      LOG(ERROR) << "Cleaning up the dcfs mount on " << spec_.mountpoint << ": "
+                 << s;
+    }
+    if (absl::Status s = Wait(*pid_).status(); !s.ok()) {
+      LOG(ERROR) << "Cleaning up the dcfs mount on " << spec_.mountpoint << ": "
+                 << s;
+    }
+    if (absl::Status s =
+            testonly::RunCommand({"/bin/umount", "-l", spec_.mountpoint});
+        !s.ok()) {
+      LOG(ERROR) << "Cleaning up the dcfs mount on " << spec_.mountpoint << ": "
+                 << s;
+    }
   }
-  status.Update(syscalls::unlink(log_path_));
-  if (!status.ok()) {
+  if (absl::Status s = syscalls::unlink(log_path_); !s.ok()) {
     LOG(ERROR) << "Cleaning up the dcfs mount on " << spec_.mountpoint << ": "
-               << status;
+               << s;
   }
 }
 
@@ -228,8 +248,10 @@ absl::StatusOr<std::unique_ptr<DcfsMount> absl_nonnull> DcfsMount::Spawn(
 
 absl::StatusOr<std::unique_ptr<DcfsMount> absl_nonnull> DcfsMount::Start(
     MountSpec spec) {
-  // The table is read before the daemon starts: a change after this read wakes
-  // the poll in WaitForMount, whatever the daemon does in between.
+  // The table is opened, not read, before the daemon starts: the open records
+  // the table's event count, so a mount that happens after it is reported by
+  // the poll in WaitForMount, whatever the daemon does in between. That
+  // ordering is what makes the wait race-free.
   ASSIGN_OR_RETURN(FileDescriptor mounts,
                    syscalls::open("/proc/self/mounts", O_RDONLY));
   ASSIGN_OR_RETURN(std::unique_ptr<DcfsMount> daemon, Spawn(std::move(spec)));
@@ -260,10 +282,11 @@ absl::StatusOr<pid_t> DcfsMount::Running() const {
 
 absl::Status DcfsMount::DaemonEnded(int wait_status,
                                     std::string_view when) const {
-  ASSIGN_OR_RETURN(std::string log, Log());
+  absl::StatusOr<std::string> log = Log();
   return InternalErrorBuilder()
          << "dcfs " << testonly::DescribeWaitStatus(wait_status) << " " << when
-         << "; its stderr: " << log;
+         << "; its stderr: "
+         << (log.ok() ? *log : absl::StrCat("unreadable (", log.status(), ")"));
 }
 
 absl::Status DcfsMount::Unmount() {
@@ -293,12 +316,8 @@ std::string TestTmp() {
   return std::string(absl::StripSuffix(::testing::TempDir(), "/"));
 }
 
-void Mkdir(std::string_view path) {
-  ASSERT_THAT(syscalls::mkdir(path, 0755), IsOk());
-}
-
-void Touch(std::string_view path, std::string_view contents) {
-  EXPECT_THAT(WriteFile(path, contents), IsOk());
+absl::Status Mkdir(std::string_view path) {
+  return syscalls::mkdir(path, 0755);
 }
 
 absl::Status WriteFile(std::string_view path, std::string_view contents) {

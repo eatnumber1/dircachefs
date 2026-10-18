@@ -38,6 +38,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/no_destructor.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/fixed_array.h"
 #include "absl/status/status.h"
@@ -58,12 +59,11 @@
 #include "gtest/gtest.h"
 #include "test/qemu/guest/guest.h"
 
+namespace dcfs {
 namespace {
 
-namespace syscalls = ::dcfs::syscalls;
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
-using ::dcfs::FileDescriptor;
 using ::testing::Contains;
 using ::testing::ElementsAre;
 
@@ -72,13 +72,13 @@ constexpr std::string_view kMnt = "/mnt";
 // The backing directory (on the test's disk, so on the file system under test)
 // and, inside it, the directory dcfs never touches.
 const std::string &Src() {
-  static const std::string *const src =
-      new std::string(absl::StrCat(dcfs::TestTmp(), "/src"));
+  static const absl::NoDestructor<std::string> src(
+      absl::StrCat(TestTmp(), "/src"));
   return *src;
 }
 const std::string &Native() {
-  static const std::string *const native =
-      new std::string(absl::StrCat(Src(), "/native"));
+  static const absl::NoDestructor<std::string> native(
+      absl::StrCat(Src(), "/native"));
   return *native;
 }
 constexpr size_t kPage = 4096;
@@ -91,7 +91,7 @@ std::string Path(std::string_view dir, std::string_view name) {
 template <typename T>
 std::string Outcome(const absl::StatusOr<T> &result) {
   if (result.ok()) return absl::StrCat(*result);
-  int err = dcfs::StatusToErrno(result.status());
+  int err = StatusToErrno(result.status());
   if (err == EINVAL) return "-1 EINVAL";
   return absl::StrCat("-1 errno ", err);
 }
@@ -360,7 +360,7 @@ class Notifier {
     for (;;) {
       absl::StatusOr<size_t> n = syscalls::read(*fd_, buf, sizeof(buf));
       if (!n.ok()) {
-        if (dcfs::StatusToErrno(n.status()) == EAGAIN) return events;
+        if (StatusToErrno(n.status()) == EAGAIN) return events;
         return n.status();
       }
       for (size_t at = 0; at < *n;) {
@@ -418,9 +418,9 @@ class Notifier {
 
 // The operations whose events the first inotify test compares, in `dir`.
 absl::Status ChangeTree(std::string_view dir) {
-  const std::string f = Path(dir, "f");
-  const std::string g = Path(dir, "g");
-  const std::string d = Path(dir, "d");
+  std::string f = Path(dir, "f");
+  std::string g = Path(dir, "g");
+  std::string d = Path(dir, "d");
   {
     ASSIGN_OR_RETURN(FileDescriptor fd,
                      syscalls::open(f, O_CREAT | O_WRONLY, 0644));
@@ -537,8 +537,8 @@ TEST(InotifyTest, ABackingChangeRaisesNoEventOnTheMount) {
   ASSERT_THAT(backing_watch.Watch(Src(), kDirEvents), IsOk());
   ASSERT_THAT(backing_watch.Watch(Path(Src(), "oob"), kDirEvents), IsOk());
 
-  const std::string oob = Path(Src(), "oob");
-  const std::string created = Path(Src(), "oob_created");
+  std::string oob = Path(Src(), "oob");
+  std::string created = Path(Src(), "oob_created");
   {
     ASSERT_OK_AND_ASSIGN(FileDescriptor fd, syscalls::open(oob, O_WRONLY));
     ASSERT_THAT(syscalls::write(*fd, "x", 1), IsOkAndHolds(1u));
@@ -578,18 +578,11 @@ TEST(InotifyTest, ABackingChangeRaisesNoEventOnTheMount) {
 // scanned by kswapd and by direct reclaim).
 class FactsEnvironment : public ::testing::Environment {
  public:
-  void SetUp() override {
-    ASSERT_OK_AND_ASSIGN(reclaim_before_, PagesScanned());
-    dcfs::Mkdir(Src());
-    dcfs::Mkdir(Native());
-    ASSERT_OK_AND_ASSIGN(
-        mount_, dcfs::DcfsMount::Start({.source = Src(),
-                                        .mountpoint = std::string(kMnt),
-                                        .cache_db = "/cache/dcfs.db"}));
-  }
+  void SetUp() override { ASSERT_THAT(Prepare(), IsOk()); }
 
   void TearDown() override {
-    EXPECT_THAT(mount_->Unmount(), IsOk());
+    // SetUp may have failed before it mounted.
+    if (mount_ != nullptr) EXPECT_THAT(mount_->Unmount(), IsOk());
     ASSERT_OK_AND_ASSIGN(uint64_t reclaim_after, PagesScanned());
     EXPECT_EQ(reclaim_after, reclaim_before_)
         << "the kernel reclaimed memory during the run: cached pages were "
@@ -597,9 +590,19 @@ class FactsEnvironment : public ::testing::Environment {
   }
 
  private:
+  absl::Status Prepare() {
+    ASSIGN_OR_RETURN(reclaim_before_, PagesScanned());
+    RETURN_IF_ERROR(Mkdir(Src()));
+    RETURN_IF_ERROR(Mkdir(Native()));
+    ASSIGN_OR_RETURN(mount_, DcfsMount::Start({.source = Src(),
+                                               .mountpoint = std::string(kMnt),
+                                               .cache_db = "/cache/dcfs.db"}));
+    return absl::OkStatus();
+  }
+
   static absl::StatusOr<uint64_t> PagesScanned() {
     ASSIGN_OR_RETURN(std::string vmstat,
-                     dcfs::testonly::ReadFileToString("/proc/vmstat"));
+                     testonly::ReadFileToString("/proc/vmstat"));
     uint64_t scanned = 0;
     for (std::string_view line : absl::StrSplit(vmstat, '\n')) {
       std::vector<std::string_view> kv = absl::StrSplit(line, ' ');
@@ -613,7 +616,7 @@ class FactsEnvironment : public ::testing::Environment {
     return scanned;
   }
 
-  std::unique_ptr<dcfs::DcfsMount> mount_;
+  std::unique_ptr<DcfsMount> mount_;
   uint64_t reclaim_before_ = 0;
 };
 
@@ -621,3 +624,4 @@ class FactsEnvironment : public ::testing::Environment {
     ::testing::AddGlobalTestEnvironment(new FactsEnvironment);
 
 }  // namespace
+}  // namespace dcfs

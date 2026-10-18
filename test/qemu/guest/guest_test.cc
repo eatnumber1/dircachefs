@@ -17,6 +17,7 @@
 #include "absl/status/status_macros.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
@@ -43,13 +44,13 @@ using ::testing::StartsWith;
 
 // A source directory on the guest's disk, a cache database and a mount point
 // (/mnt is guest/init's).
-MountSpec NewSpec(std::string_view name) {
+absl::StatusOr<MountSpec> NewSpec(std::string_view name) {
   MountSpec spec = {.source = absl::StrCat(TestTmp(), "/", name, "-src"),
                     .mountpoint = absl::StrCat("/mnt/", name),
                     .cache_db = absl::StrCat("/tmp/", name, "-cache/db")};
-  Mkdir(spec.source);
-  Mkdir(spec.mountpoint);
-  Mkdir(absl::StrCat("/tmp/", name, "-cache"));
+  RETURN_IF_ERROR(Mkdir(spec.source));
+  RETURN_IF_ERROR(Mkdir(spec.mountpoint));
+  RETURN_IF_ERROR(Mkdir(absl::StrCat("/tmp/", name, "-cache")));
   return spec;
 }
 
@@ -102,9 +103,8 @@ TEST(InChildTest, AnErrnoStatusArrivesWithItsMessageAndItsErrno) {
       InChild([]() -> absl::StatusOr<std::string> {
         return ErrnoToStatus(ENOENT, "open x");
       });
-  ASSERT_FALSE(got.ok());
-  EXPECT_EQ(got.status().message(), "open x: No such file or directory");
-  EXPECT_EQ(got.status().code(), absl::StatusCode::kNotFound);
+  EXPECT_THAT(got, StatusIs(absl::StatusCode::kNotFound,
+                            "open x: No such file or directory"));
   EXPECT_EQ(StatusToErrno(got.status()), ENOENT);
 }
 
@@ -146,7 +146,7 @@ TEST(WriteFileTest, CreatesAndTruncates) {
 
 TEST(SnapshotTest, OneLinePerEntryWithTheContentsOfFiles) {
   std::string dir = absl::StrCat(TestTmp(), "/snap");
-  Mkdir(dir);
+  ASSERT_THAT(Mkdir(dir), IsOk());
   ASSERT_THAT(syscalls::mkdir(absl::StrCat(dir, "/d"), 0700), IsOk());
   ASSERT_THAT(WriteFile(absl::StrCat(dir, "/d/f"), "abc"), IsOk());
   ASSERT_THAT(syscalls::symlinkat("d/f", AT_FDCWD, absl::StrCat(dir, "/l")),
@@ -164,8 +164,8 @@ class CompareTreesTest : public ::testing::Test {
         ::testing::UnitTest::GetInstance()->current_test_info()->name();
     a_ = absl::StrCat(TestTmp(), "/", test, "-a");
     b_ = absl::StrCat(TestTmp(), "/", test, "-b");
-    Mkdir(a_);
-    Mkdir(b_);
+    ASSERT_THAT(Mkdir(a_), IsOk());
+    ASSERT_THAT(Mkdir(b_), IsOk());
     ASSERT_THAT(WriteFile(absl::StrCat(a_, "/f"), "one"), IsOk());
   }
   std::string a_, b_;
@@ -198,7 +198,7 @@ TEST(ExpectSameAsBackingTest, DifferentAnswersFailAndShowBoth) {
 }
 
 TEST(DcfsMountTest, ServesTheBackingAndUnmountsCleanly) {
-  MountSpec spec = NewSpec("serve");
+  ASSERT_OK_AND_ASSIGN(MountSpec spec, NewSpec("serve"));
   ASSERT_THAT(WriteFile(absl::StrCat(spec.source, "/f"), "data"), IsOk());
   absl::StatusOr<std::unique_ptr<DcfsMount>> mount = DcfsMount::Start(spec);
   ASSERT_THAT(mount, IsOk());
@@ -213,7 +213,7 @@ TEST(DcfsMountTest, ServesTheBackingAndUnmountsCleanly) {
 }
 
 TEST(DcfsMountTest, ACrashedDaemonLeavesTheBackingAndItCanBeMountedAgain) {
-  MountSpec spec = NewSpec("crash");
+  ASSERT_OK_AND_ASSIGN(MountSpec spec, NewSpec("crash"));
   absl::StatusOr<std::unique_ptr<DcfsMount>> mount = DcfsMount::Start(spec);
   ASSERT_THAT(mount, IsOk());
   ASSERT_THAT(WriteFile(absl::StrCat(spec.mountpoint, "/f"), "x"), IsOk());
@@ -227,22 +227,22 @@ TEST(DcfsMountTest, ACrashedDaemonLeavesTheBackingAndItCanBeMountedAgain) {
   EXPECT_THAT((*again)->Unmount(), IsOk());
 }
 
-TEST(DcfsMountTest, ADaemonThatExitsWithoutMountingIsReportedWithItsLog) {
-  MountSpec spec = NewSpec("bad");
-  spec.source += "-missing";
+TEST(DcfsMountTest, ADaemonThatExitsWithoutMountingIsReported) {
+  ASSERT_OK_AND_ASSIGN(MountSpec spec, NewSpec("bad"));
+  absl::StrAppend(&spec.source, "-missing");
   EXPECT_THAT(DcfsMount::Start(spec), StatusIs(absl::StatusCode::kInternal,
                                                HasSubstr("without mounting")));
 }
 
 TEST(DcfsMountTest, TheErrorCarriesWhatTheDaemonWrote) {
-  MountSpec spec = NewSpec("log");
+  ASSERT_OK_AND_ASSIGN(MountSpec spec, NewSpec("log"));
   spec.flags = {"no_such_option"};
   EXPECT_THAT(DcfsMount::Start(spec), StatusIs(absl::StatusCode::kInternal,
                                                HasSubstr("no_such_option")));
 }
 
 TEST(DcfsMountTest, AMountThatIsGoneCannotBeUnmountedOrCrashedAgain) {
-  MountSpec spec = NewSpec("twice");
+  ASSERT_OK_AND_ASSIGN(MountSpec spec, NewSpec("twice"));
   absl::StatusOr<std::unique_ptr<DcfsMount>> mount = DcfsMount::Start(spec);
   ASSERT_THAT(mount, IsOk());
   ASSERT_THAT((*mount)->Unmount(), IsOk());
@@ -254,8 +254,8 @@ TEST(DcfsMountTest, AMountThatIsGoneCannotBeUnmountedOrCrashedAgain) {
                        HasSubstr("already unmounted or crashed")));
 }
 
-TEST(DcfsMountTest, ADaemonKilledAtUnmountIsReportedWithItsLog) {
-  MountSpec spec = NewSpec("killed");
+TEST(DcfsMountTest, ADaemonKilledAtUnmountIsReported) {
+  ASSERT_OK_AND_ASSIGN(MountSpec spec, NewSpec("killed"));
   absl::StatusOr<std::unique_ptr<DcfsMount>> mount = DcfsMount::Start(spec);
   ASSERT_THAT(mount, IsOk());
   ASSERT_THAT(testonly::RunCommand({"/bin/busybox", "killall", "-9", "dcfs"}),
@@ -265,8 +265,28 @@ TEST(DcfsMountTest, ADaemonKilledAtUnmountIsReportedWithItsLog) {
                        HasSubstr("was killed by signal 9 at unmount")));
 }
 
+TEST(DcfsMountTest, ALogThatCannotBeReadIsSaidSoInTheError) {
+  ASSERT_OK_AND_ASSIGN(MountSpec spec, NewSpec("nolog"));
+  absl::StatusOr<std::unique_ptr<DcfsMount>> mount = DcfsMount::Start(spec);
+  ASSERT_THAT(mount, IsOk());
+  // The only log in /tmp is this mount's: the others are gone with theirs.
+  ASSERT_OK_AND_ASSIGN(std::vector<std::string> names,
+                       testonly::ListDirectory("/tmp"));
+  for (const std::string &name : names) {
+    if (absl::StartsWith(name, "dcfs-")) {
+      ASSERT_THAT(syscalls::unlink(absl::StrCat("/tmp/", name)), IsOk());
+    }
+  }
+  ASSERT_THAT(testonly::RunCommand({"/bin/busybox", "killall", "-9", "dcfs"}),
+              IsOk());
+  EXPECT_THAT((*mount)->Unmount(),
+              StatusIs(absl::StatusCode::kInternal,
+                       AllOf(HasSubstr("was killed by signal 9 at unmount"),
+                             HasSubstr("its stderr: unreadable ("))));
+}
+
 TEST(DcfsMountTest, ADestroyedMountThatCannotBeCleanedUpSaysSo) {
-  MountSpec spec = NewSpec("leftover");
+  ASSERT_OK_AND_ASSIGN(MountSpec spec, NewSpec("leftover"));
   absl::StatusOr<std::unique_ptr<DcfsMount>> mount = DcfsMount::Start(spec);
   ASSERT_THAT(mount, IsOk());
   // The daemon exits by itself; the destructor's lazy umount then finds

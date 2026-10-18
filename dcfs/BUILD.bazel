@@ -263,7 +263,7 @@ cc_library(
       "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
-      "@absl//absl/time",
+        "@absl//absl/time",
     ],
 )
 
@@ -278,11 +278,11 @@ cc_library(
     visibility = [
       "//bench:__pkg__",
       "//dcfs/testonly:__pkg__",
-      "//test/qemu:__pkg__",
+        "//test/qemu:__pkg__",
     ],
     deps = [
       ":status",
-      "@absl//absl/container:fixed_array",
+        "@absl//absl/container:fixed_array",
       "@absl//absl/status",
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
@@ -380,7 +380,7 @@ qemu_cc_test(
       "@absl//absl/log",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
-      "@absl//absl/time",
+        "@absl//absl/time",
       "@googletest//:gtest_main",
     ],
 )
@@ -1955,9 +1955,7 @@ cc_binary(
         "//conditions:default": ["fully_static_link"],
     }),
     linkstatic = True,
-    visibility = [
-        "//test/qemu:__pkg__",
-    ],
+    visibility = ["//test/qemu:__pkg__"],
     deps = MAIN_DEPS + ["//dcfs/testonly:main_invariant_checker"],
 )
 

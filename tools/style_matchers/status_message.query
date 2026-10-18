@@ -2,10 +2,10 @@
 # returned is logged or put into the message that replaces it, whole:
 # absl::StrCat(what, ": ", status) or LOG(...) << status. Status::message()
 # drops the code and the payload (the errno), so a call of it on an
-# absl::Status (a StatusOr's status() included) is refused in dcfs/, tools/
-# and bench/, tests included; exempted only in StatusToString(const absl::Status&),
+# absl::Status (a StatusOr's status() included) is refused in dcfs/, tools/,
+# bench/ and test/qemu/guest/, tests included; exempted only in StatusToString(const absl::Status&),
 # where a lower layer's Status is itself the domain answer, and in
 # testonly::SerializeStatus, which serializes the whole Status (the message
 # is one field of it, the payloads are the others).
 let inExempt hasAncestor(functionDecl(hasAnyName("StatusToString", "SerializeStatus")))
-match cxxMemberCallExpr(callee(cxxMethodDecl(hasName("message"), ofClass(hasName("::absl::Status")))), unless(inExempt), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("status_message")
+match cxxMemberCallExpr(callee(cxxMethodDecl(hasName("message"), ofClass(hasName("::absl::Status")))), unless(inExempt), isExpansionInFileMatching("(^|/)(dcfs|tools|bench|test/qemu/guest)/")).bind("status_message")

@@ -1670,7 +1670,7 @@ Owner: dcfs-implementer. Dependencies: none.
 
 - Helpers: `test/qemu/guest/guest.h` (`DcfsMount::{Start,Unmount,Crash,Log}`,
   `InChild` with an optional `Identity`, `Snapshot`, `CompareTrees`,
-  `ExpectSameAsBacking`, `Mkdir`, `Touch`); a command runs through
+  `ExpectSameAsBacking`, `Mkdir`, `WriteFile`); a command runs through
   `testonly::RunCommand` (argv, no shell, `dcfs/testonly/process.h`, built on
   the `syscalls::` fork/execv/waitpid wrappers). `InChild` carries the child's
   Status whole (payloads included) with `testonly::SerializeStatus` and
@@ -1704,16 +1704,16 @@ needs only the helpers above plus what is named):
    `create.sh` (460), `setattr.sh` (426): `DcfsMount`, `ExpectSameAsBacking`;
    rename and lifecycle also `Crash`; setattr needs a `Stat`-comparing helper.
 3. 25.34c `nfs.sh` (735), `nfs_backing.sh` (376): a Debian chroot and an NFS
-   server; need a chroot (`syscalls::system`).
+   server; need a chroot (`testonly::RunCommand`).
 4. 25.34d `mount_dcfs.sh` (905), `mount_dcfs_systemd.sh` (961),
    `systemd_install.sh`/`systemd_run.sh`: the mount helper with options, a
-   systemd image; `syscalls::system` throughout.
+   systemd image; `testonly::RunCommand` throughout.
 5. 25.34e `fault_power.sh` (708), `fault_ace.sh` (724), `fault_recover.sh`
    (714), `fault_shutdown.sh` (675), `fault_freeze.sh` (462), `fault_lib.sh`
    (257), `fault_dcfs_lib.sh` (220), `fault_backing.sh`, `fault_cache.sh`,
    `fault_selftest.sh`, `crash.sh` (305), `power.sh` (256): `Crash`, a power
    cut helper (the harness), dm-flakey/dm-log-writes, `Snapshot`/
-   `ExpectSameTree`; 26.36 is editing some of these.
+   `CompareTrees`; 26.36 is editing some of these.
 6. 25.34f `credentials.sh` (570, after 17.2e), `cache_permissions.sh` (473):
    `InChild` with `Identity`.
 7. 25.34g `sqlite_durability.sh` (941) and its lib, `handles.sh` (446),

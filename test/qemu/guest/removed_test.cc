@@ -23,7 +23,7 @@
 #include <string_view>
 #include <vector>
 
-#include "absl/base/nullability.h"
+#include "absl/base/no_destructor.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/status_matchers.h"
@@ -101,7 +101,6 @@ absl::Status Rmdir(const std::string &path) {
   return syscalls::unlinkat(AT_FDCWD, path, AT_REMOVEDIR);
 }
 
-// chdir into `dir` and remove it: the process's working directory is removed.
 absl::Status RemoveCwd(const std::string &dir) {
   RETURN_IF_ERROR(syscalls::chdir(dir));
   return Rmdir(dir);
@@ -114,7 +113,6 @@ std::string ReadBack(int fd) {
   return absl::StrCat(" read=", std::string_view(buf, *n));
 }
 
-// open(2)s `path` O_PATH, unlinks it, then fstat(2)s the descriptor.
 absl::StatusOr<std::string> OpathUnlinkStat(const std::string &path) {
   ASSIGN_OR_RETURN(FileDescriptor fd,
                    syscalls::open(path, O_PATH | O_NOFOLLOW));
@@ -124,8 +122,6 @@ absl::StatusOr<std::string> OpathUnlinkStat(const std::string &path) {
   return absl::StrFormat("nlink=%d size=%d", st->st_nlink, st->st_size);
 }
 
-// A process whose working directory was removed: stat("."), open(".") and one
-// getdents64 on it.
 absl::StatusOr<std::string> RemovedCwd(const std::string &dir) {
   RETURN_IF_ERROR(RemoveCwd(dir));
   absl::StatusOr<struct stat> st = syscalls::stat(".");
@@ -142,7 +138,6 @@ absl::StatusOr<std::string> RemovedCwd(const std::string &dir) {
       out, " open=ok getdents=", n.ok() ? "ok" : ErrText(n.status()));
 }
 
-// What listing a directory that was removed under the process answers.
 absl::StatusOr<std::string> RemovedCwdListing(const std::string &dir) {
   RETURN_IF_ERROR(RemoveCwd(dir));
   absl::StatusOr<std::vector<std::string>> names = testonly::ListDirectory(".");
@@ -157,29 +152,34 @@ absl::StatusOr<std::string> UnlinkedMutate(const std::string &path) {
   RETURN_IF_ERROR(syscalls::unlink(path));
   std::array<struct timespec, 2> times = MutateTimes();
   std::string out = "fd";
-  out += Step("truncate", syscalls::ftruncate(*fd, 3));
-  out += Step("chmod", syscalls::fchmod(*fd, 0600));
-  out += Step("chown", syscalls::fchownat(*fd, "", 1000, 1000, AT_EMPTY_PATH));
-  out += Step("utimens", syscalls::futimens(*fd, times.data()));
-  out +=
-      Step("setxattr", syscalls::fsetxattr(*fd, "user.dcfs", Bytes("v1"), 0));
-  out += StepGetxattr(syscalls::fgetxattr(*fd, "user.dcfs", buf, sizeof(buf)),
-                      std::string_view(buf, sizeof(buf)));
-  out += Step("removexattr", syscalls::fremovexattr(*fd, "user.dcfs"));
-  out += StepGetxattr(syscalls::fgetxattr(*fd, "user.dcfs", buf, sizeof(buf)),
-                      std::string_view(buf, sizeof(buf)));
-  out += Step("fsync", syscalls::fsync(*fd));
-  out += StatText(syscalls::fstat(*fd), /*with_times=*/true);
+  absl::StrAppend(&out, Step("truncate", syscalls::ftruncate(*fd, 3)));
+  absl::StrAppend(&out, Step("chmod", syscalls::fchmod(*fd, 0600)));
+  absl::StrAppend(&out, Step("chown", syscalls::fchownat(*fd, "", 1000, 1000,
+                                                         AT_EMPTY_PATH)));
+  absl::StrAppend(&out, Step("utimens", syscalls::futimens(*fd, times.data())));
+  absl::StrAppend(&out, Step("setxattr", syscalls::fsetxattr(*fd, "user.dcfs",
+                                                             Bytes("v1"), 0)));
+  absl::StrAppend(&out, StepGetxattr(syscalls::fgetxattr(*fd, "user.dcfs", buf,
+                                                         sizeof(buf)),
+                                     std::string_view(buf, sizeof(buf))));
+  absl::StrAppend(
+      &out, Step("removexattr", syscalls::fremovexattr(*fd, "user.dcfs")));
+  absl::StrAppend(&out, StepGetxattr(syscalls::fgetxattr(*fd, "user.dcfs", buf,
+                                                         sizeof(buf)),
+                                     std::string_view(buf, sizeof(buf))));
+  absl::StrAppend(&out, Step("fsync", syscalls::fsync(*fd)));
+  absl::StrAppend(&out, StatText(syscalls::fstat(*fd), /*with_times=*/true));
   absl::StatusOr<FileDescriptor> again = syscalls::open(ProcFd(*fd), O_RDONLY);
-  out += Step("reopen", again.status());
-  if (again.ok()) out += ReadBack(**again);
+  absl::StrAppend(&out, Step("reopen", again.status()));
+  if (again.ok()) absl::StrAppend(&out, ReadBack(**again));
   return out;
 }
 
 void AppendMutateWrite(int fd, std::string &out) {
-  out += Step("write", syscalls::pwrite(fd, "J", 1, 0).status());
-  out += ReadBack(fd);
-  out += Step("fsync", syscalls::fsync(fd));
+  absl::StrAppend(&out,
+                  Step("write", syscalls::pwrite(fd, "J", 1, 0).status()));
+  absl::StrAppend(&out, ReadBack(fd));
+  absl::StrAppend(&out, Step("fsync", syscalls::fsync(fd)));
 }
 
 absl::StatusOr<std::string> OpathUnlinkedMutate(const std::string &path) {
@@ -195,20 +195,25 @@ absl::StatusOr<std::string> OpathUnlinkedMutate(const std::string &path) {
   std::string proc = ProcFd(*fd);
   std::array<struct timespec, 2> times = MutateTimes();
   std::string out = "opath";
-  out += Step("truncate", syscalls::truncate(proc, 4));
-  out += Step("chmod", syscalls::fchmodat(AT_FDCWD, proc, 0640, 0));
-  out += Step("chown", syscalls::fchownat(AT_FDCWD, proc, 1000, 1000, 0));
-  out += Step("utimens", syscalls::utimensat(AT_FDCWD, proc, times.data(), 0));
-  out +=
-      Step("setxattr", syscalls::setxattr(proc, "user.dcfs", Bytes("v2"), 0));
-  out += StepGetxattr(syscalls::getxattr(proc, "user.dcfs", buf, sizeof(buf)),
-                      std::string_view(buf, sizeof(buf)));
-  out += Step("removexattr", syscalls::removexattr(proc, "user.dcfs"));
+  absl::StrAppend(&out, Step("truncate", syscalls::truncate(proc, 4)));
+  absl::StrAppend(&out,
+                  Step("chmod", syscalls::fchmodat(AT_FDCWD, proc, 0640, 0)));
+  absl::StrAppend(
+      &out, Step("chown", syscalls::fchownat(AT_FDCWD, proc, 1000, 1000, 0)));
+  absl::StrAppend(&out, Step("utimens", syscalls::utimensat(AT_FDCWD, proc,
+                                                            times.data(), 0)));
+  absl::StrAppend(&out, Step("setxattr", syscalls::setxattr(proc, "user.dcfs",
+                                                            Bytes("v2"), 0)));
+  absl::StrAppend(&out, StepGetxattr(syscalls::getxattr(proc, "user.dcfs", buf,
+                                                        sizeof(buf)),
+                                     std::string_view(buf, sizeof(buf))));
+  absl::StrAppend(
+      &out, Step("removexattr", syscalls::removexattr(proc, "user.dcfs")));
   absl::StatusOr<FileDescriptor> again = syscalls::open(proc, O_RDWR);
-  out += Step("reopen", again.status());
+  absl::StrAppend(&out, Step("reopen", again.status()));
   if (again.ok()) AppendMutateWrite(**again, out);
   // The write after utimensat set mtime to now: no times.
-  out += StatText(syscalls::fstat(*fd), /*with_times=*/false);
+  absl::StrAppend(&out, StatText(syscalls::fstat(*fd), /*with_times=*/false));
   return out;
 }
 
@@ -217,19 +222,23 @@ absl::StatusOr<std::string> RemovedCwdMutate(const std::string &dir) {
   RETURN_IF_ERROR(RemoveCwd(dir));
   std::array<struct timespec, 2> times = MutateTimes();
   std::string out = "cwd";
-  out += Step("chmod", syscalls::fchmodat(AT_FDCWD, ".", 0700, 0));
-  out += Step("chown", syscalls::fchownat(AT_FDCWD, ".", 1000, 1000, 0));
-  out += Step("utimens", syscalls::utimensat(AT_FDCWD, ".", times.data(), 0));
-  out += Step("setxattr", syscalls::setxattr(".", "user.dcfs", Bytes("v3"), 0));
-  out += StepGetxattr(syscalls::getxattr(".", "user.dcfs", buf, sizeof(buf)),
-                      std::string_view(buf, sizeof(buf)));
-  out += Step("removexattr", syscalls::removexattr(".", "user.dcfs"));
-  out += StatText(syscalls::stat("."), /*with_times=*/true);
+  absl::StrAppend(&out,
+                  Step("chmod", syscalls::fchmodat(AT_FDCWD, ".", 0700, 0)));
+  absl::StrAppend(
+      &out, Step("chown", syscalls::fchownat(AT_FDCWD, ".", 1000, 1000, 0)));
+  absl::StrAppend(&out, Step("utimens", syscalls::utimensat(AT_FDCWD, ".",
+                                                            times.data(), 0)));
+  absl::StrAppend(&out, Step("setxattr", syscalls::setxattr(".", "user.dcfs",
+                                                            Bytes("v3"), 0)));
+  absl::StrAppend(
+      &out, StepGetxattr(syscalls::getxattr(".", "user.dcfs", buf, sizeof(buf)),
+                         std::string_view(buf, sizeof(buf))));
+  absl::StrAppend(&out,
+                  Step("removexattr", syscalls::removexattr(".", "user.dcfs")));
+  absl::StrAppend(&out, StatText(syscalls::stat("."), /*with_times=*/true));
   return out;
 }
 
-// Holds `path` (a file or a directory) with an O_PATH descriptor, removes it,
-// and links it back as <path>.back through /proc/self/fd/<n>.
 absl::StatusOr<std::string> RemovedLink(const std::string &path) {
   ASSIGN_OR_RETURN(FileDescriptor fd,
                    syscalls::open(path, O_PATH | O_NOFOLLOW));
@@ -241,8 +250,6 @@ absl::StatusOr<std::string> RemovedLink(const std::string &path) {
   return link.ok() ? "link=ok" : absl::StrCat("link=", ErrText(link));
 }
 
-// Opens an O_TMPFILE file in `dir`, holds it with an O_PATH descriptor, closes
-// the file, and links it as <dir>/<name> through the descriptor's magic link.
 absl::StatusOr<std::string> TmpfileLink(const std::string &dir,
                                         const std::string &name) {
   ASSIGN_OR_RETURN(FileDescriptor file,
@@ -258,82 +265,92 @@ absl::StatusOr<std::string> TmpfileLink(const std::string &dir,
   return absl::StrFormat("link=ok nlink=%d", st->st_nlink);
 }
 
-// Makes the kernel forget every inode and dentry it can.
 absl::Status DropCaches() {
   ASSIGN_OR_RETURN(FileDescriptor fd,
                    syscalls::open("/proc/sys/vm/drop_caches", O_WRONLY));
   return syscalls::write(*fd, "2", 1).status();
 }
 
+struct References {
+  std::string working_directory;
+  std::string unlinked_file;
+  std::string listing;
+  std::string unlinked_mutation;
+  std::string opath_mutation;
+  std::string working_directory_mutation;
+  std::string linked_file;
+  std::string linked_directory;
+  std::string tmpfile_link;
+};
+
 // The suite is one mount: the references are measured on the backing
 // filesystem first, then dcfs mounts it and each test does the same through
 // the mount.
+struct SuiteState {
+  std::string src;
+  References ref;
+  std::unique_ptr<DcfsMount> mount;
+};
+
+SuiteState &Suite() {
+  static absl::NoDestructor<SuiteState> state;
+  return *state;
+}
+
+// A path on the backing filesystem.
+std::string Src(std::string_view name) {
+  return absl::StrCat(Suite().src, "/", name);
+}
+
+absl::Status MeasureReferences() {
+  References &ref = Suite().ref;
+  RETURN_IF_ERROR(Mkdir(Suite().src));
+
+  RETURN_IF_ERROR(Mkdir(Src("ref_cwd")));
+  ASSIGN_OR_RETURN(ref.working_directory,
+                   InChild([] { return RemovedCwd(Src("ref_cwd")); }));
+  RETURN_IF_ERROR(WriteFile(Src("ref_file"), "data\n"));
+  ASSIGN_OR_RETURN(ref.unlinked_file,
+                   InChild([] { return OpathUnlinkStat(Src("ref_file")); }));
+  RETURN_IF_ERROR(Mkdir(Src("ref_ls")));
+  ASSIGN_OR_RETURN(ref.listing,
+                   InChild([] { return RemovedCwdListing(Src("ref_ls")); }));
+  ASSIGN_OR_RETURN(ref.unlinked_mutation,
+                   InChild([] { return UnlinkedMutate(Src("ref_umut")); }));
+  ASSIGN_OR_RETURN(ref.opath_mutation, InChild([] {
+                     return OpathUnlinkedMutate(Src("ref_omut"));
+                   }));
+  RETURN_IF_ERROR(Mkdir(Src("ref_cmut")));
+  ASSIGN_OR_RETURN(ref.working_directory_mutation,
+                   InChild([] { return RemovedCwdMutate(Src("ref_cmut")); }));
+  // Linking a removed object back: ENOENT for a file, EPERM for a directory
+  // (linkat(2): the object has no link count left to raise).
+  RETURN_IF_ERROR(WriteFile(Src("ref_lfile"), "data\n"));
+  ASSIGN_OR_RETURN(ref.linked_file,
+                   InChild([] { return RemovedLink(Src("ref_lfile")); }));
+  RETURN_IF_ERROR(Mkdir(Src("ref_ldir")));
+  ASSIGN_OR_RETURN(ref.linked_directory,
+                   InChild([] { return RemovedLink(Src("ref_ldir")); }));
+  RETURN_IF_ERROR(Mkdir(Src("ref_tdir")));
+  ASSIGN_OR_RETURN(ref.tmpfile_link,
+                   InChild([] { return TmpfileLink(Src("ref_tdir"), "t"); }));
+  syscalls::sync();
+  return absl::OkStatus();
+}
+
 class RemovedTest : public ::testing::Test {
  protected:
-  struct References {
-    std::string cwd, file, ls, umut, omut, cmut, lfile, ldir, tlink;
-  };
-
-  struct State {
-    std::string src;
-    References ref;
-    std::unique_ptr<DcfsMount> mount;
-  };
-
   static void SetUpTestSuite() {
-    state_ = new State;
-    state_->src = absl::StrCat(TestTmp(), "/src");
-    Mkdir(state_->src);
-
-    Mkdir(Src("ref_cwd"));
-    ASSERT_OK_AND_ASSIGN(state_->ref.cwd,
-                         InChild([] { return RemovedCwd(Src("ref_cwd")); }));
-    Touch(Src("ref_file"), "data\n");
-    ASSERT_OK_AND_ASSIGN(state_->ref.file, InChild([] {
-                           return OpathUnlinkStat(Src("ref_file"));
-                         }));
-    Mkdir(Src("ref_ls"));
-    ASSERT_OK_AND_ASSIGN(state_->ref.ls, InChild([] {
-                           return RemovedCwdListing(Src("ref_ls"));
-                         }));
-    ASSERT_OK_AND_ASSIGN(state_->ref.umut, InChild([] {
-                           return UnlinkedMutate(Src("ref_umut"));
-                         }));
-    ASSERT_OK_AND_ASSIGN(state_->ref.omut, InChild([] {
-                           return OpathUnlinkedMutate(Src("ref_omut"));
-                         }));
-    Mkdir(Src("ref_cmut"));
-    ASSERT_OK_AND_ASSIGN(state_->ref.cmut, InChild([] {
-                           return RemovedCwdMutate(Src("ref_cmut"));
-                         }));
-    // Linking a removed object back: ENOENT for a file, EPERM for a
-    // directory (linkat(2): the object has no link count left to raise).
-    Touch(Src("ref_lfile"), "data\n");
-    ASSERT_OK_AND_ASSIGN(state_->ref.lfile,
-                         InChild([] { return RemovedLink(Src("ref_lfile")); }));
-    Mkdir(Src("ref_ldir"));
-    ASSERT_OK_AND_ASSIGN(state_->ref.ldir,
-                         InChild([] { return RemovedLink(Src("ref_ldir")); }));
-    Mkdir(Src("ref_tdir"));
-    ASSERT_OK_AND_ASSIGN(state_->ref.tlink, InChild([] {
-                           return TmpfileLink(Src("ref_tdir"), "t");
-                         }));
-    syscalls::sync();
-
-    ASSERT_OK_AND_ASSIGN(state_->mount,
-                         DcfsMount::Start({.source = state_->src,
+    Suite().src = absl::StrCat(TestTmp(), "/src");
+    ASSERT_THAT(MeasureReferences(), IsOk());
+    ASSERT_OK_AND_ASSIGN(Suite().mount,
+                         DcfsMount::Start({.source = Suite().src,
                                            .mountpoint = std::string(kMnt),
                                            .cache_db = "/cache/dcfs.db"}));
   }
 
   static void TearDownTestSuite() {
-    if (state_->mount != nullptr) EXPECT_THAT(state_->mount->Unmount(), IsOk());
-    delete state_;
-  }
-
-  // A path on the backing filesystem.
-  static std::string Src(std::string_view name) {
-    return absl::StrCat(state_->src, "/", name);
+    if (Suite().mount != nullptr) EXPECT_THAT(Suite().mount->Unmount(), IsOk());
   }
 
   // A name that is gone for good once the references are gone.
@@ -345,43 +362,39 @@ class RemovedTest : public ::testing::Test {
                 StatusIs(absl::StatusCode::kNotFound))
         << name << ": still exists on the backing filesystem";
   }
-
-  static State *absl_nullable state_;
 };
-
-RemovedTest::State *absl_nullable RemovedTest::state_ = nullptr;
 
 // removed-cwd
 TEST_F(RemovedTest, ARemovedWorkingDirectoryAnswersAsTheBackingDoes) {
-  Mkdir(Mnt("cwd"));
+  ASSERT_THAT(Mkdir(Mnt("cwd")), IsOk());
   ASSERT_OK_AND_ASSIGN(std::string served,
                        InChild([] { return RemovedCwd(Mnt("cwd")); }));
-  ExpectSameAsBacking(state_->ref.cwd, served);
+  ExpectSameAsBacking(Suite().ref.working_directory, served);
   ExpectGone("cwd");
 }
 
 // removed-file-link
 TEST_F(RemovedTest, LinkingARemovedFileBackAnswersAsTheBackingDoes) {
-  Touch(Mnt("lfile"), "data\n");
+  ASSERT_THAT(WriteFile(Mnt("lfile"), "data\n"), IsOk());
   ASSERT_OK_AND_ASSIGN(std::string served,
                        InChild([] { return RemovedLink(Mnt("lfile")); }));
-  ExpectSameAsBacking(state_->ref.lfile, served);
+  ExpectSameAsBacking(Suite().ref.linked_file, served);
 }
 
 // removed-dir-link
 TEST_F(RemovedTest, LinkingARemovedDirectoryBackAnswersAsTheBackingDoes) {
-  Mkdir(Mnt("ldir"));
+  ASSERT_THAT(Mkdir(Mnt("ldir")), IsOk());
   ASSERT_OK_AND_ASSIGN(std::string served,
                        InChild([] { return RemovedLink(Mnt("ldir")); }));
-  ExpectSameAsBacking(state_->ref.ldir, served);
+  ExpectSameAsBacking(Suite().ref.linked_directory, served);
 }
 
 // closed-tmpfile-link
 TEST_F(RemovedTest, ALinkedClosedTmpfileAnswersAsTheBackingDoes) {
-  Mkdir(Mnt("tdir"));
+  ASSERT_THAT(Mkdir(Mnt("tdir")), IsOk());
   ASSERT_OK_AND_ASSIGN(std::string served,
                        InChild([] { return TmpfileLink(Mnt("tdir"), "t"); }));
-  ExpectSameAsBacking(state_->ref.tlink, served);
+  ExpectSameAsBacking(Suite().ref.tmpfile_link, served);
   ASSERT_OK_AND_ASSIGN(struct stat mnt_st, syscalls::stat(Mnt("tdir/t")));
   ASSERT_OK_AND_ASSIGN(struct stat src_st, syscalls::stat(Src("tdir/t")));
   EXPECT_EQ(mnt_st.st_ino, src_st.st_ino);
@@ -389,43 +402,43 @@ TEST_F(RemovedTest, ALinkedClosedTmpfileAnswersAsTheBackingDoes) {
 
 // unlinked-opath-file
 TEST_F(RemovedTest, AnUnlinkedOpathFileAnswersAsTheBackingDoes) {
-  Touch(Mnt("file"), "data\n");
+  ASSERT_THAT(WriteFile(Mnt("file"), "data\n"), IsOk());
   ASSERT_OK_AND_ASSIGN(std::string served,
                        InChild([] { return OpathUnlinkStat(Mnt("file")); }));
-  ExpectSameAsBacking(state_->ref.file, served);
+  ExpectSameAsBacking(Suite().ref.unlinked_file, served);
   ExpectGone("file");
 }
 
 // removed-cwd-ls
 TEST_F(RemovedTest, ListingARemovedWorkingDirectoryAnswersAsTheBackingDoes) {
-  Mkdir(Mnt("ls"));
+  ASSERT_THAT(Mkdir(Mnt("ls")), IsOk());
   ASSERT_OK_AND_ASSIGN(std::string served,
                        InChild([] { return RemovedCwdListing(Mnt("ls")); }));
-  ExpectSameAsBacking(state_->ref.ls, served);
+  ExpectSameAsBacking(Suite().ref.listing, served);
   ExpectGone("ls");
 }
 
 // removed-listed-cwd: the directory was listed through dcfs first (its row
 // and listing are cached), so the cached state cannot answer by accident.
 TEST_F(RemovedTest, ARemovedListedWorkingDirectoryAnswersAsTheBackingDoes) {
-  Mkdir(Mnt("listed"));
-  Touch(Mnt("listed/x"));
+  ASSERT_THAT(Mkdir(Mnt("listed")), IsOk());
+  ASSERT_THAT(WriteFile(Mnt("listed/x")), IsOk());
   ASSERT_THAT(testonly::ListDirectory(Mnt("listed")), IsOk());
   ASSERT_THAT(syscalls::unlink(Mnt("listed/x")), IsOk());
   ASSERT_OK_AND_ASSIGN(std::string served,
                        InChild([] { return RemovedCwd(Mnt("listed")); }));
-  ExpectSameAsBacking(state_->ref.cwd, served);
+  ExpectSameAsBacking(Suite().ref.working_directory, served);
   ExpectGone("listed");
 }
 
 // unlinked-statted-file: the file was stat'ed first (its attributes are
 // cached).
 TEST_F(RemovedTest, AnUnlinkedStattedFileAnswersAsTheBackingDoes) {
-  Touch(Mnt("statted"), "data\n");
+  ASSERT_THAT(WriteFile(Mnt("statted"), "data\n"), IsOk());
   ASSERT_THAT(syscalls::stat(Mnt("statted")), IsOk());
   ASSERT_OK_AND_ASSIGN(std::string served,
                        InChild([] { return OpathUnlinkStat(Mnt("statted")); }));
-  ExpectSameAsBacking(state_->ref.file, served);
+  ExpectSameAsBacking(Suite().ref.unlinked_file, served);
   ExpectGone("statted");
 }
 
@@ -433,17 +446,17 @@ TEST_F(RemovedTest, AnUnlinkedStattedFileAnswersAsTheBackingDoes) {
 TEST_F(RemovedTest, ChangingAnUnlinkedOpenFileAnswersAsTheBackingDoes) {
   ASSERT_OK_AND_ASSIGN(std::string served,
                        InChild([] { return UnlinkedMutate(Mnt("umut")); }));
-  ExpectSameAsBacking(state_->ref.umut, served);
+  ExpectSameAsBacking(Suite().ref.unlinked_mutation, served);
   ExpectGone("umut");
 }
 
 // unlinked-open-mutate-statted: with the attributes cached first.
 TEST_F(RemovedTest, ChangingAnUnlinkedStattedFileAnswersAsTheBackingDoes) {
-  Touch(Mnt("umut2"), "x\n");
+  ASSERT_THAT(WriteFile(Mnt("umut2"), "x\n"), IsOk());
   ASSERT_THAT(syscalls::stat(Mnt("umut2")), IsOk());
   ASSERT_OK_AND_ASSIGN(std::string served,
                        InChild([] { return UnlinkedMutate(Mnt("umut2")); }));
-  ExpectSameAsBacking(state_->ref.umut, served);
+  ExpectSameAsBacking(Suite().ref.unlinked_mutation, served);
   ExpectGone("umut2");
 }
 
@@ -452,47 +465,50 @@ TEST_F(RemovedTest, ChangingAnUnlinkedOpathFileAnswersAsTheBackingDoes) {
   ASSERT_OK_AND_ASSIGN(std::string served, InChild([] {
                          return OpathUnlinkedMutate(Mnt("omut"));
                        }));
-  ExpectSameAsBacking(state_->ref.omut, served);
+  ExpectSameAsBacking(Suite().ref.opath_mutation, served);
   ExpectGone("omut");
 }
 
 // removed-cwd-mutate
 TEST_F(RemovedTest, ChangingARemovedWorkingDirectoryAnswersAsTheBackingDoes) {
-  Mkdir(Mnt("cmut"));
+  ASSERT_THAT(Mkdir(Mnt("cmut")), IsOk());
   ASSERT_OK_AND_ASSIGN(std::string served,
                        InChild([] { return RemovedCwdMutate(Mnt("cmut")); }));
-  ExpectSameAsBacking(state_->ref.cmut, served);
+  ExpectSameAsBacking(Suite().ref.working_directory_mutation, served);
   ExpectGone("cmut");
 }
 
 // removed-cwd-mutate-listed: with the directory listed first.
 TEST_F(RemovedTest, ChangingARemovedListedWorkingDirectoryAnswersLikewise) {
-  Mkdir(Mnt("cmut2"));
+  ASSERT_THAT(Mkdir(Mnt("cmut2")), IsOk());
   ASSERT_THAT(testonly::ListDirectory(Mnt("cmut2")), IsOk());
   ASSERT_OK_AND_ASSIGN(std::string served,
                        InChild([] { return RemovedCwdMutate(Mnt("cmut2")); }));
-  ExpectSameAsBacking(state_->ref.cmut, served);
+  ExpectSameAsBacking(Suite().ref.working_directory_mutation, served);
   ExpectGone("cmut2");
 }
 
 // still-serving: after the removals, a change through dcfs still reaches the
 // backing filesystem.
 TEST_F(RemovedTest, ATreeKeepsServingAfterTheRemovals) {
-  Mkdir(Mnt("after"));
+  ASSERT_THAT(Mkdir(Mnt("after")), IsOk());
   EXPECT_THAT(syscalls::stat(Src("after")), IsOk());
 }
 
 // lookup-counts: dcfs counts the kernel's lookups to know when the last
 // reference to a removed object is gone, and logs a FORGET of more lookups
-// than it counted as an error. Walk the tree (lookups and readdirplus), make
-// the kernel forget what it can, then ask for a name the daemon has not seen:
-// its answer is served after the forgets, and the log is read after that.
+// than it counted as an error. The lookup of a name the daemon has not seen
+// is the last request, and the daemon reads the forgets queued before it first
+// when the pending list holds nothing else (fs/fuse/dev.c:1598-1603 (Linux
+// v7.3-rc7): forget_pending, then `list_empty(&fiq->pending)`). The test is
+// the only client of the mount, so the list is empty; the log is read after
+// the lookup's answer, which is served after the forgets.
 TEST_F(RemovedTest, TheKernelNeverForgetsMoreLookupsThanDcfsCounted) {
-  Mkdir(Mnt("tree"));
-  Mkdir(Mnt("tree/a"));
-  Mkdir(Mnt("tree/a/b"));
-  Touch(Mnt("tree/a/f1"));
-  Touch(Mnt("tree/a/b/f2"));
+  ASSERT_THAT(Mkdir(Mnt("tree")), IsOk());
+  ASSERT_THAT(Mkdir(Mnt("tree/a")), IsOk());
+  ASSERT_THAT(Mkdir(Mnt("tree/a/b")), IsOk());
+  ASSERT_THAT(WriteFile(Mnt("tree/a/f1")), IsOk());
+  ASSERT_THAT(WriteFile(Mnt("tree/a/b/f2")), IsOk());
   ASSERT_THAT(syscalls::linkat(AT_FDCWD, Mnt("tree/a/f1"), AT_FDCWD,
                                Mnt("tree/a/b/f1link"), 0),
               IsOk());
@@ -503,7 +519,7 @@ TEST_F(RemovedTest, TheKernelNeverForgetsMoreLookupsThanDcfsCounted) {
   ASSERT_THAT(DropCaches(), IsOk());
   EXPECT_THAT(syscalls::stat(Mnt("never-seen")),
               StatusIs(absl::StatusCode::kNotFound));
-  ASSERT_OK_AND_ASSIGN(std::string log, state_->mount->Log());
+  ASSERT_OK_AND_ASSIGN(std::string log, Suite().mount->Log());
   EXPECT_THAT(log, Not(::testing::HasSubstr("lookups of nodeid")));
 }
 

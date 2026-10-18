@@ -26,6 +26,8 @@
 namespace dcfs {
 
 // Who a function runs as: setresgid, setgroups, then setresuid, in that order.
+// It is not dcfs::Credentials, which also carries a umask this helper would
+// silently ignore.
 struct Identity {
   uid_t uid;
   gid_t gid;
@@ -100,14 +102,11 @@ class DcfsMount {
 // The guest's disk (TEST_TMPDIR), without the trailing slash.
 std::string TestTmp();
 
-// A gtest failure unless `path` is created as a directory (0755).
-void Mkdir(std::string_view path);
-
-// A gtest failure unless `path` is created (0644) or truncated and written.
-void Touch(std::string_view path, std::string_view contents = "");
+// Creates the directory `path` (mode 0755).
+absl::Status Mkdir(std::string_view path);
 
 // Writes `contents` to `path`, which is created (mode 0644) or truncated.
-absl::Status WriteFile(std::string_view path, std::string_view contents);
+absl::Status WriteFile(std::string_view path, std::string_view contents = "");
 
 // One line per entry under `dir`, sorted by path, with the path escaped:
 // "<path> <type> <size> <mode> <links>" and, for a regular file, the checksum
