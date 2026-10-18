@@ -138,7 +138,7 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	should	commit-hygiene	7 commit trailer and body	aed1cd2e	5 of 8 commits lack Co-Authored-By; aed1cd2e has no body and a process-narrating subject; 9df84d9b subject 77 cols	could	decided
 2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	1.1 direct deps	dcfs/testonly/BUILD.bazel:status_wire	cord.h included but absl/strings:cord not a dep	could	fixed/merged
 2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	1.1 NOLINT form; Google 80 columns	test/qemu/guest/guest.cc:5	NOLINT trailing comments make 96-98 column lines	could	decided
-2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	abseil-utilities 3 q4	test/qemu/guest/guest_test.cc:79	hand-rolled comma join	no	fixed/merged
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	abseil-utilities 3 q4	test/qemu/guest/guest_test.cc:79	hand-rolled comma join	no	not done: not found
 2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	abseil-utilities 3 q1	dcfs/testonly/files_test.cc:41	string built with +	no	fixed/merged
 2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	comment-accuracy	1.9	test/qemu/guest/removed_test.cc:117	doc comments narrate the body	no	fixed/merged
 2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	status-handling	1.6 message rule 4	test/qemu/guest/guest.cc:123	added-context capitalisation; RET_CHECK message case	no	fixed/merged
@@ -155,7 +155,7 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	test-shape	1.6b ASSERT in void helper	test/qemu/guest/guest.cc:297	fatal ASSERT in void helper	could	fixed/merged
 2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	correctness	1.10a	test/qemu/guest/kernel_facts_test.cc:586	TearDown dereferences mount_ after failed SetUp; leaked new std::string statics	no	fixed/merged
 2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	3	dcfs/BUILD.bazel:1957	visibility reflow; 6-space items	could	fixed/merged
-2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	test-gap	AGENTS.md coverage	test/qemu/guest/guest.cc:151	_exit(112) branch and RET_CHECK_EQ untested	no	fixed/merged
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	test-gap	AGENTS.md coverage	test/qemu/guest/guest.cc:151	_exit(112) branch and RET_CHECK_EQ untested	no	not done: optional
 2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	1.2 suite state; nullability	test/qemu/guest/removed_test.cc:349	State *absl_nullable dereferenced unchecked, raw new/delete	no	decided
 2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	1.1 include-cleaner vs modernize-deprecated-headers	test/qemu/guest/guest.cc:5	NOLINT of C headers for POSIX macros	no	decided
 2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	naming	silent	test/qemu/guest/guest.h:29	Identity duplicates dcfs::Credentials minus umask	no	decided

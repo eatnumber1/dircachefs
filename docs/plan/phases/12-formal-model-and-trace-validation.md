@@ -931,24 +931,37 @@ counted each as 1 CPU. That drove the load to 55 on 8 cores.
 - The numbers come from the time analysis's TLC scaling measurements
   (`docs/plan/notes/time-analysis-2026-10-18.md`, section 4.1). Classes, with
   GC threads equal to the workers in every class:
-  - tiny, under 50 k distinct states (79 small and about 25 medium targets):
-    1 worker, `cpu:1`, `-Xmx256m` (not measured at this size),
-    `resources:memory:400`.
-  - medium, 50 k to 500 k (interrupt, liveness, nolock_small, and the atime,
-    lifetime, crash and reval targets): 2 workers, `cpu:2`, `-Xmx1g`,
-    `resources:memory:1300` (measured: 512 MB and 1 GB pass at 0.67 to 1.05 GB
-    RSS).
-  - 0.5 M to 2 M (small_test, interrupt_muts2, nolock, rename_stale_source,
-    atime_view): 4 workers, `cpu:4`, `-Xmx1536m`, `resources:memory:2000`
-    (small_test measured at 1.5 GB).
-  - large, 6 M to 10 M (large_test, nolock_test): 4 workers, `cpu:4`, `-Xmx3g`,
-    `resources:memory:3500` (not re-measured today; lane-5's 2.66 GB run of
+  - Classes, revised 2026-10-18 from the low-load measurement (below), which
+    supersedes the loaded numbers this step first recorded:
+  - default (every target not listed below, 50 k to 2 M distinct states):
+    2 workers, `cpu:2`, `-Xmx1g`, `resources:memory:1300` (measured: 512 MB and
+    1 GB pass at 0.67 to 1.05 GB RSS).
+  - small (under 100 k distinct states, as the time analysis counted them):
+    1 worker, `cpu:1`, `-Xmx512m`, `resources:memory:700` (measured at 512 MB:
+    0.37 to 0.65 GB RSS).
+  - largest (large_test and nolock_test, 6 M to 10 M states; only configs near
+    their timeouts get 4 workers): 4 workers, `cpu:4`, `-Xmx3g`,
+    `resources:memory:3500` (not re-measured; lane-5's 2.66 GB run of
     2026-10-07 passed).
-- Findings: CPU per state is flat across worker counts (interrupt_test 293 to
-  325 CPU s for 1 to 8 workers), so no TLC throughput gain is claimed. The gain
-  is about 80 % less TLC memory (the default heap is 14.3 GB; RSS 5.7 to 6.2 GB
-  per JVM) and honest CPU accounting in Bazel. CI wall is unchanged: large
-  keeps 4 workers, equal to a CI runner's vCPUs.
+- Findings, loaded machine (superseded by the low-load measurement below): CPU
+  per state was taken as flat across worker counts (interrupt_test 293 to
+  325 CPU s for 1 to 8 workers). The gain claimed was about 80 % less TLC
+  memory (the default heap is 14.3 GB; RSS 5.7 to 6.2 GB per JVM) and honest
+  CPU accounting in Bazel. CI wall is unchanged: large keeps 4 workers, equal
+  to a CI runner's vCPUs.
+- Low-load measurement (2026-10-18; Gemini Flash via foreman; load under 4
+  before each run; nproc 8; full tables in
+  `docs/plan/notes/tlc-scaling-lowload-2026-10-18.md`):
+  - CPU per state rises with workers at low load: MC_interrupt 0.32 ms per
+    state at 1 worker, 0.64 at 8; liveness 0.84 at 1 worker, 1.41 at 8. This
+    corrects the loaded finding above, which said flat. Machine-wide throughput
+    is therefore best with few workers per checker and more checkers in
+    parallel (russ's aim): 2 workers give about 1.8 times the wall speed-up for
+    about 1.1 times the CPU; 8 workers give 3.2 times for 2 times the CPU.
+  - `-Xmx` from 512 MB to 4 GB never slowed TLC (512 MB and 1 GB were
+    marginally faster) and cut RSS from about 5.6 GB to 0.65 to 1.2 GB (safety)
+    and from about 4.3 GB to 0.37 to 0.5 GB (liveness).
+  - The measurement run is not a step and is done.
 - No test is weakened: the same configs and the same state counts.
 - Measure on a quiet machine before choosing classes (russ, 2026-10-18):
   states per second at 1, 2, 4 and 8 workers, and run time with and without
@@ -957,3 +970,30 @@ counted each as 1 CPU. That drove the load to 55 on 8 cores.
 
 Owner: dcfs-implementer. The time analysis reported on 2026-10-18; the numbers
 above are its measurements.
+
+## 12.26 Faster model checking without weaker checks (russ, 2026-10-18: "Is there anything we can do to speed up model checking?"; queued, not started)
+
+Each item keeps every config's premises and known_bugs variants; none trades
+a check for speed.
+
+1. **SYMMETRY on the large safety configs.** Only 18 of 185 configs declare
+   it. For each large safety config (large, nolock, interrupt_*, small,
+   crash_*), add symmetry over truly interchangeable sets (Procs; the Names
+   classes). Never in liveness configs: TLC's liveness checking is unsound
+   under symmetry. Evidence per config: the state count drop, every known_bugs
+   variant still found, premises still pass. Owner: dcfs-protocol.
+2. **Profile and rewrite the hot operators.** Profile with TLC `-coverage` and
+   rewrite the costliest definitions. State counts stay unchanged, and the
+   evidence is the same count before and after. Owner: dcfs-protocol.
+3. **Measured TLC classes.** Apply 12.25's low-load classes (2 workers and
+   `cpu:2` with `-Xmx1g` by default; small configs 1 worker with `-Xmx512m`;
+   only the largest configs near their timeouts get 4 workers). Owner:
+   dcfs-implementer.
+4. **Pre-review runs.** Agents' pre-review runs: small and medium configs run
+   exhaustively; large configs get a bounded `-simulate` pass; exhaustive large
+   runs stay in CI. Owner: dcfs-implementer.
+5. **Later: split `dcfs.tla`.** Split it so each config depends only on the
+   modules it uses, so Bazel's cache skips configs a change does not affect.
+   Not started; after items 1 to 4.
+
+Russ's question is answered by items 1 to 4; item 5 waits for them.

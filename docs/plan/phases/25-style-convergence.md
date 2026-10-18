@@ -1083,45 +1083,81 @@ while dcfs's cache has not yet reached its durable point.
 
 Owner: dcfs-protocol.
 
-## 25.28f The periodic sync point syncs the database, not the backing (russ, 2026-10-18; queued after 25.28b merges, not started; owner dcfs-protocol)
+## 25.28f The periodic sync point fsyncs its dirty directories, not the backing's syncfs (russ, 2026-10-18; queued after 25.28b merges, not started; owner dcfs-protocol)
 
 russ, 2026-10-18: "our periodic writeback should sync the database, not the
 filesystem the database is on ... I'm expecting us to run syncfs only one
 time: when the user runs syncfs on us."
+russ, 2026-10-18, on the options: "Yes. Do option 1."
 
 Today the periodic sync point runs syncfs on the backing, then ClearDirty,
-then the cache's durable point (one WAL fsync). After this step:
+then the cache's durable point (one WAL fsync).
 
-- The periodic sync point keeps only the cache's durable point. It does no
-  backing I/O, so an idle or read-mostly daemon never spins up a disk. A
-  native filesystem's user space never forces a syncfs, and dcfs behaves
-  like the backing, only faster (`docs/design.md`, "Behave like the
-  backing").
+Decided design (option 1). The periodic sync point does, in order:
+
+1. For each directory D in the dirty set, fsync D on the backing. If that
+   fsync succeeds, ClearDirty(D). A failed fsync keeps D's mark.
+2. Make the cache durable (the WAL fsync, or a database checkpoint).
+
+Why: a dirty mark says a mutation in D may not yet be durable on the backing.
+Clearing it needs D's entries durable, and a directory fsync gives exactly that
+on ext4, xfs and btrfs. syncfs also writes back unrelated data (client file
+data through passthrough), so it does more I/O than the guarantee needs. The
+point does I/O only when something was mutated, so an idle or read-mostly
+daemon never spins up a disk, and dcfs behaves like the backing, only faster
+(`docs/design.md`, "Behave like the backing").
+
 - syncfs runs only where the kernel asks for it: FUSE_SYNCFS (a client's
   syncfs(2) or sync(2)) and, if the design needs it there, a clean unmount.
-- The dirty set is cleared only after a syncfs dcfs actually ran (a client's
-  SYNCFS, a clean shutdown), plus any narrower clearing the model's regimes
-  make legitimate (for example, an FSYNCDIR of D makes D's entries durable on
-  the supported backings). The model states each one.
-- Between syncfs calls the dirty set grows with the directories mutated.
-  After a power loss, recovery re-probes those directories. The bound is
-  what the backing itself could have lost.
+- The dirty set is cleared only after the backing made D durable: by the
+  periodic point's fsync of D, by a SYNCFS the client asked for, or by a clean
+  shutdown, plus any narrower clearing the model's regimes make legitimate.
+  The model states each one.
+- Between sync points the dirty set grows with the directories mutated. After
+  a power loss, recovery re-probes those directories. The bound is what the
+  backing itself could have lost.
 - Terms (russ's 2026-10-18 ruling, recorded in `docs/plan/log.md`): FSYNC and
-  FSYNCDIR are sync points of a file. They are not syncfs points. The
-  periodic sync point is no longer a syncfs point after this step.
+  FSYNCDIR are sync points of a file. They are not syncfs points. The periodic
+  sync point is no longer a syncfs point after this step.
+- Rejected, recorded: clearing only on a client's syncfs or a clean shutdown
+  (the dirty set and recovery grow between them); keeping syncfs (unrelated
+  writeback).
+
+**Measurement sub-step 25.28f.1, before the design is final** (russ, 2026-10-18:
+"is per-directory fsync slower than syncfs?"). The design above is decided;
+the benchmark checks its cost, and the result goes in a note under
+`docs/plan/notes/`.
+
+- Benchmark the periodic sync point on ext4, xfs and btrfs with 1, 100 and
+  10,000 dirty directories: per-directory fsync against one syncfs.
+- Count backing I/O (block-layer writes and flushes) as well as time, with
+  client file data dirty on the backing, to show syncfs's unrelated writeback.
+- Expectations to verify, with kernel citations (v7.3-rc7): on ext4 and xfs the
+  first directory fsync forces a journal or log commit carrying all pending
+  metadata, so later directories already committed are cheap. On btrfs a
+  directory fsync goes through the log tree and can be costly for large
+  directories, or fall back to a full transaction commit.
+- If btrfs is slow at large counts, fix within the design (ordering, spreading
+  the fsyncs over periods) before any syncfs fallback.
 
 Consequences to design and model in the same change (AGENTS.md, "The
 protocol has a model"):
 
-- `docs/design.md`, the TLA+ model (SyncDriven and the periodic sync, the
-  ClearDirty guards), trace validation, the fault_power scenarios and the
-  ClockTests.
+- `docs/design.md`: the periodic sync point and the rule that a mark clears
+  only after its directory's fsync.
+- The TLA+ model: a per-directory durable step (which fsync persists what,
+  under each backing regime), ClearDirty guarded by that fsync (SyncDriven and
+  the periodic sync, the ClearDirty guards), a failed directory fsync keeping
+  the mark (interacting with 25.28d's failed-fsync handling), and a
+  `formal/known_bugs/` variant that clears without the fsync. Trace validation,
+  the fault_power scenarios and the ClockTests follow.
 - The five guest tests that drive the periodic point with `date -s` change
   with it: `fault_ace.sh:188`, `fault_power.sh:430` and `:613`,
   `sqlite_durability.sh:294`, `syscall_traces.sh:416`.
 - Test first: a fake backing that records calls shows the periodic sync point
-  issues no syncfs and FUSE_SYNCFS still issues one. It fails on the current
-  code.
+  issues one fsync per dirty directory, clears each only after its fsync
+  succeeds, issues no syncfs, and that FUSE_SYNCFS still issues one; a
+  directory whose fsync fails keeps its mark. It fails on the current code.
 
 Interacts with 25.28c (the interval clock), 25.28d (a failed fsync poisons
 the cache) and 25.28e (O_SYNC and O_DSYNC opens). Ordering: after 25.28b
@@ -1449,8 +1485,7 @@ Kind 3 infrastructure failures retain the whole status; `waitexit` unit test
   25.41: a guest_test variant with a `-Wl,--wrap` fake of `read` that fails,
   asserting the child is reaped (no zombie: `waitid` reports it gone). After
   25.41: `InChild` takes `LocalSyscalls`, and the test injects a failing
-  read. Queued, not started. Owner: dcfs-implementer (default; russ to
-  confirm). Cross-referenced from 25.41's migration list (step 9).
+  read. Queued, not started. Owner: dcfs-implementer. Cross-referenced from 25.41's migration list (step 9).
 
 ## 25.35 Strong types for IDs and sentinels (russ, 2026-10-17; queued, M2)
 
