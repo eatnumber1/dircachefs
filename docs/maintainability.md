@@ -13,11 +13,13 @@ It does not restate the rules. [`docs/style.md`](style.md) is the rulebook,
 [`docs/design.md`](design.md) holds the design decisions and their reasons.
 How the code is shown to be correct (test tiers, the TLA+ model, crash tests,
 differential tests, coverage in depth) is the subject of
-[`docs/testing.md`](testing.md); this document touches it only where it is a
-maintainability matter (dead code, untested branches).
+[`docs/testing.md`](testing.md) (written on a sibling branch that merges with
+this one); this document touches it only where it is a maintainability matter
+(dead code, untested branches).
 
-Numbers were counted from the tree at commit `44676d75` (2026-10-18) unless a
-number says otherwise. The plan, [`docs/plan/README.md`](plan/README.md), is
+Numbers were counted from the tree at commit `ac3374df` (2026-10-18) unless a
+number says otherwise. Line numbers cited in other files are at that commit
+and drift. The plan, [`docs/plan/README.md`](plan/README.md), is
 where a step number such as 25.39 is defined; steps are cited as "25.39" and
 live in [`docs/plan/phases/`](plan/phases/).
 
@@ -32,12 +34,13 @@ The honest short version.
   build-graph rule that confines backing-filesystem syscalls to one layer,
   twelve repository-shape rules, and a commit-subject gate. A gate is required
   to carry a self-check that feeds it known-bad input (step 26.1); the style
-  gates under `tools/` mostly do (eight `*_self_check_test` targets, and a bad and a
-  good fixture for each matcher). The clang-tidy and repo_shape allowlists of
-  known violations are keyed by file, function and check (or by count per
-  file), so an unrelated edit does not disturb them, and their tests fail both
-  when a new violation appears and when a listed one is fixed but not
-  removed, so they can only shrink.
+  gates under `tools/` mostly do (eight `*_self_check_test` targets, and a
+  bad and a good fixture for each matcher). The clang-tidy and repo_shape
+  allowlists of known violations are keyed by file, function and check (or
+  by count per file), so an unrelated edit does not disturb them, and their
+  tests fail both when a new violation appears and when a listed one is fixed
+  but not removed. That the lists do not grow is a review policy, not a check
+  (section 3).
 - **What is weaker than the documents suggest.** The compiler gate is
   `-Werror` plus one extra warning, not the `-Weverything` that `AGENTS.md`
   and `docs/style.md` describe as the goal (step 7.3, not started). The
@@ -46,18 +49,21 @@ The honest short version.
   C and C++ only: Bazel files, shell, Python and Markdown are not under a
   pinned formatter. Several `docs/style.md` rules say "mechanically: ..." for
   a check that is planned, not built (the section "Where `docs/style.md`
-  runs ahead of the tree" lists them).
+  and other documents run ahead of the tree" lists them).
 - **What is review only.** The rules about comments, naming, reachable
   causes, one abstraction over variants, test-first, and the contract
   citations. The review is structured (a style reviewer on every diff, a
   findings ledger) and a plan step (25.39) aims to mechanize every remaining
-  rule, but today these rules depend on a reviewer. About 60 % of
-  should-or-blocker review findings are style, comment or citation findings
-  (25.39's own estimate), which is evidence of where the gaps are.
-- **By count.** Of 50 rule groups the author distinguished (Appendix), 28
-  (56 %) are enforced by something that fails, 3 are report-only and 19
-  (38 %) are review only. Of 166 review findings in the ledger, 66 (40 %) were
-  marked as checkable by a tool.
+  rule, but today these rules depend on a reviewer. Step 25.39 estimates
+  that about 60 % of should-or-blocker review findings are style, docs,
+  comment or citation findings. The ledger at `ac3374df` gives 40 of 79
+  (51 %) with docs and 35 of 79 (44 %) without, which is evidence of where
+  the gaps are.
+- **By count.** Of 59 rule groups distinguished (Appendix), 28 (47 %) are
+  enforced by something that fails, 3 are report-only and 28 are review only
+  or not done. The share moves with how the rules are grouped; a narrower
+  grouping of 50 rows gave 56 %. Of 176 review findings in the ledger, 68
+  (39 %) were marked as checkable by a tool.
 - **How to read the rest.** "Enforced" below means a test, build action or CI
   job fails when the rule is broken. "Report-only" means a tool prints
   findings and nothing fails. "Review" means a person (or a reviewer agent)
@@ -75,7 +81,7 @@ can tell a considered rule from an accident of the code.
 | Mechanical enforcement over review | A rule that a tool can check is a failing test, not a reviewer's task. "Keep it. Mechanical invariant enforcement is more valuable." (russ, 2026-10-09, on keeping three syscall libraries so the build graph can prove who reaches the backing filesystem). | `docs/design.md`, "Syscall fault injection stays link-time"; `docs/style.md` 1.1; step 25.39 |
 | Gates carry self-checks | A gate (a test whose job is to reject something) ships a known-bad input that it must reject, so it cannot rot into a vacuous pass. | `test/qemu/README.md`, "Gates and their self-checks" (step 26.1); `docs/plan/process.md` step 5 |
 | Types over comments | "It's easy to ignore a comment. The compiler enforces types. Express it in the type system." (russ, 2026-10-17). Also: move logic to compile time where possible. | `docs/style.md` 1.4 and 1.1; steps 25.35, 25.36, 25.38 |
-| One way to do each thing | A change that adds a mechanism must say whether it subsumes an existing one and remove the old one in the same change. Prompted by a duplicate xattr-write path (russ, 2026-10-10). | `.claude/agents/*.md` (every implementer and reviewer definition carries the text); `docs/style.md` 1.10 |
+| One way to do each thing | A change that adds a mechanism must say whether it subsumes an existing one and remove the old one in the same change. Prompted by a duplicate xattr-write path (russ, 2026-10-10). | `.claude/agents/dcfs-implementer.md`, `dcfs-investigator.md`, `dcfs-mechanical.md`, `dcfs-protocol.md` and `dcfs-reviewer.md` carry the text (the style reviewer's definition does not); `docs/style.md` 1.10 |
 | No unnecessary code | Every branch names an input, syscall answer or event that reaches it. Code for the impossible is false documentation; the alternative is a `RET_CHECK` naming the invariant. A surviving mutant blocks a merge. | `docs/style.md` 1.10a; step 25.13 |
 | No test-only code in production | A seam a test needs is a real feature with a production default. Zero "only used in tests" comments. Test code is in `*_test.cc` or `testonly/` targets marked `testonly = 1`. | `AGENTS.md`, "Tests"; `docs/style.md` section 8; steps 25.7, 25.7b |
 | Fakes, not mocks | Dependencies are injected and replaced by small hand-written fakes. Syscall fault injection uses link-time `-Wl,--wrap` fakes. | `AGENTS.md`, "Tests"; `docs/design.md`, "Syscall fault injection stays link-time"; `docs/style.md` section 2 |
@@ -168,9 +174,10 @@ Source: [`.clang-tidy`](../.clang-tidy),
   `bazel test --config=fast //tools/...`. It reads the output of Bazel
   *actions* (`tools/style_checks.bzl`): the pinned LLVM's `clang-tidy` and
   `clang-query` are run per source file over the real compile command, in the
-  sandbox, cached by content. A no-op rerun is seconds; a change to a core
-  header re-runs about 200 actions (9 minutes cold at 4 jobs, measured by the
-  step 25.21 author).
+  sandbox, cached by content. A no-op rerun is seconds. At landing, a change
+  to a core header cost 9 minutes cold and a no-op 26 s (`docs/plan/log.md`, the 25.21 merge entry,
+  2026-10-10); that figure is from before later steps changed the scope and
+  the check set, and was not re-measured for this document.
 - **What is covered.** C++ in `dcfs/`, `dcfs/testonly/`, `test/qemu/guest/`,
   `bench/` and `tools/` (the five `style_findings` targets listed in the
   test's `data`). Third-party code and external repositories are not.
@@ -220,9 +227,15 @@ Source: [`.clang-tidy`](../.clang-tidy),
 - **Suppressions.** A `NOLINT`, `NOLINTNEXTLINE` or `NOLINTBEGIN` must name
   its check in parentheses and carry a reason at the site; a bare one, a
   wildcard, or a check name with no reason fails the test
-  (`suppression_problems` in `tools/style_checks.py`, step 25.30). There are
-  59 lines mentioning `NOLINT` in our sources (counted with `git grep`,
-  fixture directory excluded), each of which is thus a recorded exception.
+  (`suppression_problems` in `tools/style_checks.py`, step 25.30). A `git
+  grep` for `NOLINT` (fixture directory excluded) finds 59 lines. 31 are the checker's
+  own code and test strings (`tools/style_checks*.py`, `.bzl`). The other 28
+  are in C++ and make 18 suppressions: 9 `NOLINTBEGIN`/`NOLINTEND` pairs in
+  `dcfs/testonly/` (link-time fakes that need external linkage), 4 in
+  `test/qemu/guest/guest.cc`, 1 in `dcfs/dir_cache_fs_test.cc:529`, 3 in the
+  macro in `dcfs/ret_check.h:119-144` and 1 in `dcfs/testonly/process.cc:4`.
+  One more line (`ret_check.h:114`) is prose naming them. No production
+  `.cc` file has one.
 
 ### The clang-query matchers
 
@@ -240,7 +253,7 @@ with the `docs/style.md` section it enforces, and each has a `_bad.cc` and a
 | `dcfs_qualified_inside_dcfs` | no `dcfs::` qualifier inside `namespace dcfs` (1.3); replaced a regex that guessed the namespace | enforced; zero sites |
 | `check_in_production` | no `CHECK`, `LOG(FATAL)`, `assert`, `abort`, `exit` and similar outside tests (1.6b) | enforced; zero sites (25.9 removed all 23) |
 | `status_message` | never `absl::Status::message()`, which drops the code and errno payload (1.6, 1.7) | enforced |
-| `backing_door_guard` | every backing syscall wrapper calls `BackingDoor` before its syscall, so a poisoned door refuses them all (1.6b) | enforced |
+| `backing_door_guard` | every backing syscall wrapper has a statement calling `BackingDoor` in its body (not that it comes before the syscall; `SyscallsBackingTest` shows the order), so a poisoned door refuses them all (1.6b) | enforced |
 | `capturing_mutating_lambda` | a lambda that mutates a by-reference capture hides state change from its caller (1.12) | enforced; 91 backlog findings |
 | `happy_path_nested` | an `if (x.ok()) { ...three or more statements }` holds the rest of the function (1.6a) | enforced; heuristic; 1 backlog finding |
 | `pointer_without_nullability` | every pointer parameter, member or return says whether it may be null (1.2) | **report-only**; 455 findings; waits for step 25.16 |
@@ -259,7 +272,10 @@ There is no line number in a key, so editing code above a finding does not
 disturb it. The test fails if a finding is not listed, if a listed key has
 more findings than its count (a new finding in the same function), or if a
 listed key has fewer (it was fixed and the line must come off). The file's
-header says: "Do not add a line for new code; fix the code."
+header says: "Do not add a line for new code; fix the code." That the list
+never grows is review policy, not a check: nothing compares the list with
+its previous version, so a change that adds a violation and a matching
+allowlist line passes the test and relies on a reviewer to refuse the line.
 
 Today:
 
@@ -312,8 +328,9 @@ is not a trend of one quantity: checks were also added and fixed in between.
   guide) and Markdown. `docs/style.md` section 3 says the BUILD list layout is
   "enforced by `//tools:format_test`"; that is not true today because the
   test's file filter is C and C++ only (`tools/format.py`, `wanted()`).
-  Pinning buildifier, shfmt and shellcheck is step 7.6b (parked). No
-  pre-commit hook exists (`.githooks`, row F4 of the guide's appendix).
+  Pinning buildifier, shfmt and shellcheck is step 7.6b (in milestone M2,
+  not started). No pre-commit hook exists (`.githooks`, row F4 of the guide's
+  appendix).
 - Include order within a file is whatever clang-format's Google style
   produces; "include what you use" is checked by `misc-include-cleaner`
   (71 backlog findings), not by `layering_check` (section 2).
@@ -347,12 +364,15 @@ test calls separately:
 
 Notes for a skeptic:
 
-- The allowlist shape is the same everywhere: a count per file with a reason;
-  the count must be *equal* to the file's, so both new violations and
-  forgotten removals fail. A shrinking guest-shell list is the clearest sign
-  of direction: 124 scripts, 18,588 lines of shell under `test/` (section
-  12), is the size of the shell-to-C++ conversion still to do, and the rule
-  stops it growing.
+- The count-based allowlists (sleeps, fixed arrays, `ABSL_` macros) hold a
+  count per file with a reason, and the count must be *equal* to the file's,
+  so both new violations and forgotten removals fail. The guest-shell list
+  has a different shape: one path per line, each of which must exist. That
+  the lists only shrink is a header convention that nothing compares with
+  the previous version (section 3). The guest-shell list is the clearest
+  sign of direction: 124 scripts, 18,622 lines of shell under `test/`
+  (section 15), is the size of the shell-to-C++ conversion still to do, and
+  the rule stops it growing.
 - Rule 3's allowlist is what is left of an earlier rule ("no timers") in the
   test scripts; 50 bare sleeps remain, each with a stated reason (time is the
   subject, a background process that waits for nothing, a settle to be
@@ -361,6 +381,11 @@ Notes for a skeptic:
   A rule that needed the AST was moved to a matcher: step 25.21's
   `dcfs_qualified_inside_dcfs` replaced a repo_shape regex that guessed the
   enclosing namespace from brace depth.
+
+A separate branch (the rules-index branch, not merged when this was
+written) adds a `repo_shape` rule, `rule_index`, and a check that the guide
+does not restate a rule. Rule counts and the table above change when it
+merges; the counts here are those of `ac3374df`.
 
 Other repository-level checks, each a `small` Bazel test with a self-check:
 
@@ -387,8 +412,9 @@ fails if
   it (something outside the Bazel graph, glibc or libc++, pulled it in).
 
 This is a check on the artifact, not on source text, so a rule broken through
-a macro, a template or a transitive dependency is still caught. The ban lines
-are grouped by the rule behind them:
+a macro, a template or a transitive dependency is still caught. The 69 lines
+are patterns, many of them globs or mangled names, and are grouped by the
+rule behind them:
 
 - **No paths after startup:** `realpath`, `getcwd`, `nftw`, `fts_open`,
   `glob`, `std::filesystem`. Once the daemon runs, objects are reached by
@@ -402,6 +428,10 @@ are grouped by the rule behind them:
 - **No timers (style 1.11):** `sleep`, `usleep`, `nanosleep`,
   `clock_nanosleep`, `alarm`, `timer_create`, `timerfd_create`,
   `sqlite3_busy_timeout`, `sqlite3_busy_handler`.
+- **The time comes from `Context::clock`:** `clock_gettime`, `gettimeofday`,
+  `time`, `absl::Now` (step 26.10).
+- **Statuses carry the message; output goes through Abseil:** `strerror`,
+  `strerror_r`, and the `printf` family and `puts`.
 - **No intentional crashes (style 1.6b):** `abort`, `exit`, `__assert_fail`,
   `std::terminate`, and Abseil's fatal and debug-fatal log messages (the
   symbols behind `CHECK` and `LOG(FATAL)`). Abseil's headers put
@@ -414,7 +444,11 @@ The `allow` lines are the visible exceptions: 17 have the origin `<runtime>`
 references), and the other 64 name the objects or functions that may reference
 a symbol (for example, the `__assert_fail` that Abseil's headers put into
 every object). The self-check (`//tools:banned_symbols_self_check_test`)
-links a fixture that makes each banned call and shows each is found.
+links a fixture (`tools/banned_symbols_fixture.cc`) that references five of
+the 69 patterns (`realpath`, `sleep`, `usleep`, `alarm`, `nftw64`), by a call,
+by a reference from data alone, and by a definition with no reference, and
+shows each is found. The other 64 patterns are not exercised by the
+self-check.
 
 Limits: the check sees what the shipped binary links, so test code, bench
 code and shell are out of its scope; a banned behavior reachable only by
@@ -442,7 +476,10 @@ The reachable-cause rule (style 1.10a) has no mechanical check yet. Step
 25.13 specified a comment-phrase check ("cannot happen", "just in case",
 "defensive", "paranoia") in `repo_shape.py` and a rule that surviving
 mutants fail the per-push job; neither exists. A case-insensitive `git grep`
-for those phrases in production comments found 2 hits when this was written.
+for those phrases in production comments found 2 hits when this was written:
+`dcfs/file_handle.cc:155` ("just in case") and `dcfs/backing.cc:2078-79`
+("be exact anyway", in `GetGroups`, the example style 1.10a is written
+around).
 See section 14.
 
 ## 8. The syscall layer
@@ -482,8 +519,9 @@ How the rules about it are held:
   compile; a bare call to a wrapper that returns void is "correct by
   construction" (style 1.5, 1.6a).
 - **Wrappers are thin.** Names are the manpage names; no composition, retry
-  or policy. Helpers built on them live in `backing.cc`. This is review plus
-  the `backing_door_guard` matcher.
+  or policy. Helpers built on them live in `backing.cc`. This is review; the
+  `backing_door_guard` matcher checks only that each backing wrapper calls
+  the door.
 - **Fault injection is link-time.** The 49-site fault sweep and the unit
   tests use `-Wl,--wrap` fakes (`docs/design.md`, "Syscall fault injection
   stays link-time"). A wrap needs a comment at the BUILD rule (style 3).
@@ -592,24 +630,26 @@ mechanized (`checked`, `could`, `no`), and outcome.
 block on stdin, `summary` prints statistics) and has a unit test. The
 committed file is counted here; the main checkout's working copy may be ahead
 of it. It is young: all
-173 rows are from 2026-10-17 and 2026-10-18, covering five steps (25.34 with
-77 findings, 22.5 with 40, 25.28b with 23, 17.6 with 16, 12.24 with 11) and
-a few others. Treat the percentages below as indications.
+183 rows are from 2026-10-17 and 2026-10-18. 176 are findings, from six
+steps (25.34 with 77, 22.5 with 40, 25.28b with 23, 17.6 with 16, 12.24 with
+10, 17.2e with 10); the other 7 are clean-review rows (severity `none`: four
+`agents`, one each for 12.24, 25.33 and 25.33b). Treat the percentages below
+as indications.
 
 | Cut | Counts |
 |---|---|
-| Severity | nit 93, should 64, blocker 9, none (clean review) 7 |
-| Category (all) | style-other 49, comment-accuracy 27, test-shape 14, docs 14, test-gap 12, contract-claim 10, correctness 9, commit-hygiene 8, status-handling 6, naming 6, model-gap 6, dead-code 5 |
-| Category (should + blocker only, 73) | style-other 15, comment-accuracy 13, test-gap 11, correctness 7, model-gap 6, contract-claim 6, test-shape 4, docs 4, dead-code 3, status-handling 2, commit-hygiene 2 |
-| Could a tool have caught it (166 findings, excluding clean reviews) | no 100, could 50, checked 16 (already caught by a gate) |
-| Outcome | fixed/merged 143, decided 17, open 8, other 5 |
-| Reviewer | `dcfs-style-reviewer` 116, `dcfs-reviewer` 32, Gemini-family reviewers 25 |
+| Severity | nit 97, should 70, blocker 9, none (clean review) 7 |
+| Category (176 findings, clean reviews excluded) | style-other 50, comment-accuracy 28, docs 16, test-shape 14, test-gap 13, correctness 12, contract-claim 12, commit-hygiene 8, status-handling 6, naming 6, model-gap 6, dead-code 5 |
+| Category (should + blocker only, 79) | style-other 15, comment-accuracy 13, test-gap 12, correctness 10, contract-claim 7, model-gap 6, docs 5, test-shape 4, dead-code 3, status-handling 2, commit-hygiene 2 |
+| Could a tool have caught it (176 findings) | no 108, could 52, checked 16 (already caught by a gate) |
+| Outcome (183 rows) | fixed/merged 143, decided 17, open 18, other 5 |
+| Reviewer | `dcfs-style-reviewer` 116, `dcfs-reviewer` 42, Gemini-family reviewers 25 |
 
-What this says. About 40 % of the findings (66 of 166) are rules a tool
+What this says. About 39 % of the findings (68 of 176) are rules a tool
 could check or already does, which is the concrete argument for step 25.39.
 `comment-accuracy` is the second largest category after style-other: comments
-are the thing the mechanical set least covers. Correctness findings (9) are
-a small share, and test gaps (12) and model gaps (6) are the ones that
+are the thing the mechanical set least covers. Correctness findings (12) are
+a small share, and test gaps (13) and model gaps (6) are the ones that
 weight the review of risky code. The dead-code category (5) is why a
 "no production caller" check is in 25.39.
 
@@ -636,7 +676,7 @@ weight the review of risky code. The dead-code category (5) is why a
   fast-forward from a lane clone.
 - **The plan and the log are the design history.** `docs/plan/phases/` (one
   file per phase, with each step's text, rulings and "As built" notes),
-  `docs/plan/log.md` (4,225 lines of dated entries, including merge records
+  `docs/plan/log.md` (4,235 lines of dated entries, including merge records
   and the evidence behind each), `docs/plan/decisions.md`,
   `docs/plan/notes/` (investigations, audits and handoffs), and
   `docs/plan/audits/` (the original read-only audits, including a
@@ -679,7 +719,9 @@ weight the review of risky code. The dead-code category (5) is why a
   docstring that restates the function's name; length limits. Review only.
 - **Not enforced:** the Markdown style (fenced-block languages, 80-column
   wrap). Appendix A of the guide counts 37 bare fences and 21 over-long prose
-  lines as of its date. No Markdown lint target exists: querying the
+  lines as of 2026-10-07; those numbers are stale (the fact-check of this
+  document found about 207 over-long lines now), and the current counts were
+  not taken here. No Markdown lint target exists: querying the
   test targets for `doc`, `markdown` or `link` finds only unrelated names
   (`warning_flags_link_test`, `*unlink*` formal tests, the `abseil_tips`
   index tests).
@@ -689,25 +731,31 @@ weight the review of risky code. The dead-code category (5) is why a
 The correctness reasons for these gates are in `docs/testing.md`. Here the
 question is only whether they keep untested or dead code out.
 
-- **Coverage.** Source-based clang coverage over `dcfs/`, `bench/` and
-  `tools/`, merged across the QEMU guests (step 7.2, `.bazelrc`). CI job
-  `coverage` runs `tools/coverage_gate.sh` against the committed baseline
-  `dcfs/coverage_baseline.txt` (97.27 % lines, 83.97 % branches today). The
-  gate fails below the baseline on either number and reports a rise; the
+- **Coverage.** Source-based clang coverage is measured over `dcfs/`,
+  `bench/` and `tools/`, merged across the QEMU guests (step 7.2,
+  `.bazelrc`). CI job `coverage` runs `tools/coverage_gate.sh` (with
+  `--config=presubmit`, so the small and medium tiers only) against the
+  committed baseline `dcfs/coverage_baseline.txt` (97.27 % lines, 83.97 %
+  branches today). **The gate covers `dcfs/*.cc` only:** headers, `bench/`
+  and `tools/` are printed, not gated (`tools/coverage_gate.sh`, lines 7-8
+  and 55-58). The gate fails below the baseline on either number and
+  reports a rise; the
   baseline only moves up by policy (`AGENTS.md`). Gaps that cannot be covered
   are listed with reasons in `docs/coverage.md`. **The limit:** the gate is on
   the total, so a new uncovered branch passes while the total stays above the
   floor. A per-change gate is item 5 of step 25.39 (planned).
 - **Mutation.** `tools/mutation/mutate.py` mutates clang AST sites of
-  `dcfs/metadata_cache.cc`, `dcfs/backing.cc` and the protocol paths of
-  `dcfs/dir_cache_fs.cc` (and, separately, the TLA+ model). A mutant that no
+  `dcfs/metadata_cache.cc`, `dcfs/backing.cc`, the protocol paths of
+  `dcfs/dir_cache_fs.cc` and the sync-point calls in `dcfs/fuse_ops.cc`
+  (`tools/mutation/scope.txt`: four files; the TLA+ model is mutated
+  separately). A mutant that no
   test kills is a missing test or unnecessary code. CI runs it per push for
   the functions the push touches (`mutation-changed`, at most 30 mutants) and
   weekly in full (`mutation.yml`). **The limit:** the job lists survivors in
   the summary and fails only on a tooling error. `AGENTS.md` and style 1.10a
   say a survivor blocks the merge; today the block is applied by the
   orchestrator, not by the job (step 25.13 item 1 and 25.39 item 6 are the
-  planned change), and the scope is three files.
+  planned change), and the scope is four files.
 - **Dead code.** `-Weverything` is not on, so the compiler finds only unused
   statics, locals and parameters of the default set; clang-tidy's
   `misc-unused-parameters` has 44 backlog findings. Nothing detects a public
@@ -721,25 +769,26 @@ spare-disk trial and the quota reset (`docs/plan/README.md`, Queue item 6).
 
 | Debt | Size or evidence | Addressed by | State |
 |---|---|---|---|
-| `-Weverything` is not on | one extra warning beyond defaults | 7.3 | parked |
+| `-Weverything` is not on | one extra warning beyond defaults | 7.3 | parked (Queue item 6) |
 | clang-tidy backlog | 558 findings / 330 keys (210 in dcfs production code) | 25.23, 25.25 (function-shape sweep), 25.20 (candidates sweep), ordinary edits ("the backlog shrinks as code is touched for other reasons, not as a campaign") | 25.23 done; 25.25, 25.20 parked |
-| Report-only findings | 455 nullability, 23 dropped statuses, 18 uninitialized | 25.16 (nullability on every pointer). The 23 dropped-status sites (matcher added by 25.33) have no step of their own that I could find | 25.16 parked |
-| `layering_check` off | nothing stops a target using a header of a transitive dep | 7.3 / 7.7 | parked |
-| Bazel, shell, Python, Markdown not formatted by a gate | 18,588 lines of shell under `test/`; 17,035 lines of Python (section 15) | 7.6b (pin buildifier, shfmt, shellcheck), 7.7 | parked |
-| Guest shell not yet converted to C++ | 124 scripts on the allowlist | 25.34 (rule and first port, merged), 26.18 (e2e oracles in C++), the shell ports | ongoing, M2 |
+| Report-only findings | 455 nullability, 23 dropped statuses, 18 uninitialized | 25.16 (nullability on every pointer). The 23 dropped-status sites (matcher added by 25.33) have no step of their own that was found | 25.16 parked |
+| `layering_check` off | nothing stops a target using a header of a transitive dep | 7.7 | parked (Queue item 6) |
+| Bazel, shell, Python, Markdown not formatted by a gate | 18,622 lines of shell under `test/`; 17,035 lines of Python (section 15) | 7.6b (pin buildifier, shfmt, shellcheck; in M2), 7.7 (parked) | not started |
+| Guest shell not yet converted to C++ | 124 scripts on the allowlist | 25.34 (rule and first port, merged), the shell ports (M2), 26.18 (e2e oracles in C++; parked) | ongoing |
 | Bare sleeps in guest scripts | 50 sleeps in 26 files | 6.5 scrub | allowlist shrinking |
-| Bounded retries in the daemon | 6 `kAttempts` references in `dcfs/dir_cache_fs.cc` (the unlink, rename and readdir paths) | 25.10 (retry loops out; the model gains a liveness property) | queued (Queue item 5) |
+| Retry loops in the daemon | Three bounded `kAttempts` loops in `dcfs/dir_cache_fs.cc` (unlink, rename, readdir: lines 1194, 1323, 2342); two ERANGE loops of 4 attempts in `dcfs/backing.cc` (`ListXattrOPath` at :163, `GetXattrOPath` at :181); and `GetGroups` (`backing.cc:2073`), an unbounded `while (true)` whose comment ("be exact anyway") is style 1.10a's own example. The plan's 25.10 text counts six loops | 25.10 (retry loops out; the model gains a liveness property) | queued (Queue item 5) |
+| Duplicate mechanism: xattr writes | `ApplyXattrOpOn` in `dcfs/backing.cc` reopens regular files and directories for `fsetxattr` while every other type uses the `/proc/self/fd` path form, which already serves reads; this is the case that produced the "one way to do each thing" rule | 25.11 | parked (Queue item 6) |
 | Confession-phrase check, "survivors block" as a job failure | 2 hits by grep; the job reports only | 25.13 | parked (Queue item 6) |
-| `docs/style.md` rules that say "mechanically" for checks that do not exist | `const_local_value` matcher, the function-pointer matcher, the `char *` matcher (25.24), the `ABSL_FLAG`-outside-main repo_shape rule (25.20), the nullability warnings as errors (25.16), `layering_check`, buildifier in `format_test` | 25.39 (inventory every rule with its mechanism today) | queued, raised in priority 2026-10-18 |
+| `docs/style.md` rules that say "mechanically" for checks that do not exist | `const_local_value` matcher, the function-pointer matcher, the `char *` matcher (25.24), the `ABSL_FLAG`-outside-main repo_shape rule (25.20), the nullability warnings as errors (25.16), `layering_check`, buildifier in `format_test` | 25.39 (inventory every rule with its mechanism today). 25.39 comes after 25.38, which comes after 25.37 and the dependency-injection step (25.41, awaiting russ), so it is late in M2 | queued, raised in priority 2026-10-18 |
 | Rules enforced by review only | comments (1.9), names, one-abstraction (1.10), reachable cause (1.10a), fakes not mocks, kernel-citation form, time as `absl::Time`, in-band sentinels, `std::optional<std::string_view>` | 25.39: kernel citation checker, time-type ban, sentinel comparisons, TLA+ comment length, host-path grep; strong types 25.35, 25.36, 25.38 | queued, M2 |
 | No dead-code check | `syscalls::kill` and `syscalls::waitpid` had no production caller | 25.39 item: link shipped binaries with `-ffunction-sections --gc-sections --print-gc-sections` and fail on any discarded function of ours not in a reasoned allowlist | queued |
 | No diff-coverage gate | the floor is on the total | 25.39 item 5 | queued |
-| Mutation is advisory per push and covers three files | | 25.13, 25.39 item 6 | queued |
-| No duplicate-code detection | duplicates found by review (three fork/exec copies and others) | 25.27 | parked; reassigned to an agent 2026-10-17 |
+| Mutation is advisory per push and covers four files | | 25.13, 25.39 item 6 | queued |
+| No duplicate-code detection | duplicates found by review (three fork/exec copies and others) | 25.27 | listed in M2; its phase text says parked; reassigned to an agent 2026-10-17 |
 | Link-time `--wrap` fakes | works (49-site fault sweep) but is the only way to fake syscalls; fixed in the linker's naming | 25.41 | drafted, awaiting russ |
-| Stale text in the style guide | the Appendix A convergence table is dated at `e680508` (2026-10-07), several of its rows (D1, D2, C3) describe states that may have changed; `docs/style.md` 1.7 still lists `FATAL (CHECK)` as a log level beside 1.6b's no-crash rule; section 1.1 describes `-Weverything` and `layering_check` as present | none specific; 25.39 item 1 would reconcile | open |
-| Young review ledger | 173 rows over two days | accumulates | ongoing |
-| Plan bookkeeping is large | `log.md` is 4,225 lines; phase 25's file is 1,905 lines and carries stale text (for example, 25.39 item 4 says the findings ledger does not exist, and it does) | orchestrator's clerk | ongoing |
+| Stale text in the style guide and elsewhere | Appendix A of `docs/style.md` is dated at `e680508` (2026-10-07); its rows F1, F2 and F6 are false now (the format test, pinned clang-format and `.clang-tidy` exist); C3 is 9 lines, not 92; C13 is 642, not 292; D2 is about 207, not 21; N1's `cache` namespace is gone. Other items are in "Where `docs/style.md` and other documents run ahead of the tree" | none specific; 25.39 item 1 would reconcile; another branch is restructuring `docs/style.md` and `AGENTS.md` | open |
+| Young review ledger | 183 rows over two days; 18 rows are still `open` | accumulates | ongoing |
+| Plan bookkeeping is large | `log.md` is 4,235 lines; phase 25's file is 1,905 lines and carries stale text (for example, 25.39 item 4 says the findings ledger does not exist, and it does) | orchestrator's clerk | ongoing |
 | Style reviews depend on agents | reviewer quality is a variable; the ledger shows reviewers disagree with each other about tests | 25.39 reduces the surface | structural |
 | Enforcement tooling is itself large | `tools/` and the rest outside `dcfs/`, `test/` and `formal/` is 25,157 SLOC against 14,837 SLOC of production code (section 15) | none; a cost of the approach | structural |
 
@@ -752,14 +801,15 @@ Things to worry about, in one list, in the order a reader should weigh them:
 2. The compiler is not the strongest line of defence; clang-tidy is, and it
    is a separate analysis with a backlog. A broken rule inside the backlog
    keys passes.
-3. About half of the SLOC (45,934 of 91,462) is test code, and 18,588 lines
+3. About half of the SLOC (45,968 of 91,496) is test code, and 18,622 lines
    of it are shell the project intends to convert; those lines are the least
    checked code in the tree
    (shell has no formatter or linter gate).
 4. The review step is carried out mostly by AI agents, with russ's rulings
    feeding back. The ledger exists to measure that; its sample is small.
-5. Some safety properties (mutation scope, diff coverage) are policy, applied
-   by the orchestrator, not by CI.
+5. Some safety properties (allowlists never growing, a surviving mutant
+   blocking a merge, diff coverage) are policy, applied by the orchestrator,
+   not by CI.
 
 ## 15. Metrics
 
@@ -768,7 +818,7 @@ non-blank, non-comment lines over `git ls-files`, by area and language.
 Its areas: **prod** (`dcfs/` minus tests and `testonly/`), **test**
 (`dcfs/*_test.cc`, `dcfs/testonly/`, `test/`), **model** (`formal/`), and
 **tools** (everything else, including `bench/`, `third_party/` overlays and
-`.github/`). Run at `44676d75`:
+`.github/`). Run at `ac3374df`:
 
 | Area | Language | SLOC |
 |---|---|---|
@@ -776,11 +826,11 @@ Its areas: **prod** (`dcfs/` minus tests and `testonly/`), **test**
 | prod | Starlark | 1,777 |
 | **prod** | | **14,837** |
 | test | C++ | 22,892 |
-| test | shell | 18,588 |
+| test | shell | 18,622 |
 | test | Starlark | 2,719 |
 | test | Python | 1,107 |
 | test | C | 628 |
-| **test** | | **45,934** |
+| **test** | | **45,968** |
 | model | TLA+ | 3,762 |
 | model | Starlark | 1,476 |
 | model | shell | 296 |
@@ -795,8 +845,9 @@ Its areas: **prod** (`dcfs/` minus tests and `testonly/`), **test**
 | **tools** | | **25,157** |
 
 Test code is about 3.1 times production code by this count. The repository
-has 1,097 tracked files; `dcfs/` has 31 production `.cc` files and 38 test
-`.cc` files, with 742 `TEST`, `TEST_F` or `TEST_P` cases in them.
+has 1,098 tracked files; `dcfs/` has 31 production `.cc` files and 38 test
+`.cc` files (42 counting `dcfs/testonly/`), with 787 `TEST`, `TEST_F` or
+`TEST_P` cases in them (292, 494 and 1).
 
 **Backlogs** (section 3, 5): clang-tidy allowlist 558 findings in 330 keys
 (1354 in 719 keys at first run), report-only 496, guest shell 124 scripts,
@@ -860,11 +911,11 @@ grep -c '^ban ' tools/banned_symbols.txt    # banned symbols
 grep -c '^allow ' tools/banned_symbols.txt  # allow lines
 
 # The repo_shape allowlists (section 5).
-grep -vc '^#' tools/repo_shape_guest_shell.txt
+grep -v '^#' tools/repo_shape_guest_shell.txt | grep -c .
 grep -v '^#' tools/repo_shape_sleeps.txt | awk 'NF {n++; s+=$2} END {print n, "files,", s, "sleeps"}'
 
 # The review ledger (section 10).
-python3 tools/agents/review_findings.py summary
+python3 tools/agents/review_findings.py summary --repo .
 
 # SLOC by area (section 15).
 python3 -I -c 'import importlib.util as u; s=u.spec_from_file_location("d","tools/agents/dashboard_lanes.py"); d=u.module_from_spec(s); s.loader.exec_module(d); [print(r) for r in d.compute_sloc_rows(".")]'
@@ -883,24 +934,62 @@ f;` to a `dcfs/*.cc` file and the `banned_std` matcher fails
 `fixed a thing` and `commit_subjects.sh` fails. (Such edits are for a working
 tree; nothing in this document asks you to commit them.)
 
-## Where `docs/style.md` runs ahead of the tree
+## Where `docs/style.md` and other documents run ahead of the tree
 
-A reader moving between this document and the guide will meet statements in
-the guide that read as if a check exists. As of `44676d75` these do not:
+A reader moving between this document and the guide will meet statements
+that read as if a check or a state exists. Line numbers are at `ac3374df`
+and drift. Another branch is restructuring `docs/style.md` and `AGENTS.md`,
+and this list is the input to that work; nothing here edits them.
 
-- Section 1.1, warnings: "from phase 7 `-Weverything -Werror`" and the
-  `layering_check` bullet. Neither is on (section 2).
-- Section 3, BUILD style "enforced by `//tools:format_test`": the test
-  covers C and C++ only (section 4).
-- Section 1.2: matchers `const_local_value`, the function-pointer matcher,
-  `char_pointer_string`, and the `repo_shape.py` refusal of `ABSL_FLAG` /
-  `absl::GetFlag` outside main files are described in the present tense and
-  are listed as steps 25.20 and 25.24 (parked).
-- Section 1.2: `-Wnullability-completeness` and
-  `-Wnullable-to-nonnull-conversion` as errors, step 25.16.
-- Section 1.10a: the confession-phrase check in `repo_shape.py` (25.13).
-- Sections 4, 5 and 7: shfmt, shellcheck, Python and Markdown formatting are
-  conventions only.
+Statements in the present tense that are false today:
+
+- `docs/style.md:158-162`: the nullability warnings "as errors (7.3's
+  `-Weverything` set)"; neither is enabled (step 25.16).
+- `docs/style.md:165`: "today 0 annotations"; 7 exist.
+- `docs/style.md:124-131`: "the injected syscall interfaces
+  (`BackingSyscalls`, `LocalSyscalls`, `ProcessSyscalls`)"; none exist (step
+  25.41 is a draft).
+- `docs/style.md:1093`: `FATAL` (`CHECK`) as a log level, beside 1.6b's
+  no-crash rule.
+- `docs/style.md:1677`: shfmt "run by `//tools:format_test`"; the test covers
+  C and C++ only. The same applies to the BUILD-layout claim of section 3
+  (buildifier "enforced by `//tools:format_test`").
+- `docs/style.md:1074-1076`: `happy_path_nested` is described as report-only
+  (a count, not a failure); it is enforced, with one backlog finding.
+- `docs/style.md:77-78`: names two report-only matchers
+  (`status_uninitialized`, `pointer_without_nullability`); `status_dropped`
+  is a third.
+- `docs/style.md:70`: the checked directories omit `dcfs/testonly/` and
+  `test/qemu/guest/`.
+- `docs/style.md:1653-1655`: shell and Python line counts are stale (section
+  15 has current ones).
+- `docs/style.md:1708-1713`: the thin-glue ruling for a new guest script,
+  superseded by the `no_new_guest_shell` rule (repo_shape rule 4).
+- `docs/style.md`, Appendix A: rows F1, F2 and F6 are false; C3 (9 lines, not
+  92), C13 (642, not 292) and D2 (about 207, not 21) are stale; N1's `cache`
+  namespace is gone.
+- `test/qemu/README.md:1747` and `docs/plan/phases/25-style-convergence.md:1671`
+  speak of `-Weverything` as if it were on.
+- `AGENTS.md:34-36`: "every test declares `size` and `timeout` explicitly"; a
+  reviewer counted 72 of 663 tests without an explicit `timeout`. That count
+  was not re-measured for this document.
+
+Mechanisms described in the present tense for checks that do not exist
+(planned in the step named):
+
+- `docs/style.md` 1.2: matchers `const_local_value` and for function and
+  member pointers, `char_pointer_string`, and the `repo_shape.py` refusal of
+  `ABSL_FLAG` / `absl::GetFlag` outside main files (steps 25.20 and 25.24,
+  parked).
+- `docs/style.md` 1.10a: the confession-phrase check in `repo_shape.py`
+  (25.13, parked).
+- `docs/style.md` 1.1: `layering_check` as an include rule (7.7).
+- Sections 4, 5 and 7 of the guide: shfmt, shellcheck, Python and Markdown
+  formatting are conventions only.
+
+Statements that are plans, not errors: `docs/style.md:109-111` and
+`AGENTS.md` say `-Weverything -Werror` comes "from phase 7". That is the plan
+for step 7.3 and is accurate as a plan; section 2 says it has not landed.
 
 The same sections also describe real checks accurately; the matchers in
 section 3 and the `repo_shape` rules in section 5 were each read against the
@@ -912,21 +1001,22 @@ guide's text with the tree is item 1 of step 25.39.
 This is the share question answered with a count. `docs/style.md` has no
 inventory of its rules by mechanism (producing one is item 1 of step 25.39),
 so the table below is the author's own reading of `AGENTS.md` and the guide,
-grouped into 50 rules. It is a judgement of grouping, not a count the tree
+grouped into 59 rules. It is a judgement of grouping, not a count the tree
 can reproduce; another reader would split or merge some rows. The mechanism
 column is checked against the code cited in the sections above.
 
 States: **E** a test, build action or CI job fails when the rule is broken
 (an allowlist of old violations may exist); **R** report-only, a tool prints
 findings and nothing fails; **V** review only (a person or a reviewer agent
-must notice); **P** E or V today, with a different mechanism planned (the
-step is named). A rule with a backlog is still E.
+must notice); **N** not done: the rule is stated, no mechanism exists and
+review is not the intended one either; **P** a different or additional
+mechanism is planned (the step is named). A rule with a backlog is still E.
 
 | # | Rule | Mechanism today | State |
 |---|---|---|---|
 | 1 | C and C++ formatting (Google, `PointerAlignment: Right`) | clang-format, `//tools:format_test` | E |
 | 2 | Warnings are errors in our code; links fail on warnings | `.bazelrc`, `//dcfs:warning_flags_*_test` | E (narrow set) |
-| 3 | The wide warning set (`-Weverything`) | none | P (7.3) |
+| 3 | The wide warning set (`-Weverything`) | none | N, P (7.3) |
 | 4 | Google/Abseil/bugprone/cert/modernize/performance/readability structural rules | clang-tidy, `//tools:style_checks_test` | E (558 backlog) |
 | 5 | Every suppression names its check and reason | `suppression_problems` | E |
 | 6 | No `std::function`, `std::unordered_*`, `std::chrono` | `banned_std` matcher | E |
@@ -946,7 +1036,7 @@ step is named). A rule with a backlog is still E.
 | 20 | No intentional crashes in production | `check_in_production` matcher, banned symbols | E |
 | 21 | No timers in the daemon | banned symbols | E |
 | 22 | No sleeps in guest scripts | repo_shape rule 3 | E (50 allowlisted) |
-| 23 | No retry loops | `capturing_mutating_lambda`, SQLite busy-handler ban; 6 `kAttempts` references remain | V, P (25.10) |
+| 23 | No retry loops | `capturing_mutating_lambda`, SQLite busy-handler ban; the loops listed in section 14 remain | V, P (25.10) |
 | 24 | No paths after startup; no subprocesses or plugins | banned symbols | E |
 | 25 | Every syscall through `syscalls::` | `//tools:raw_syscalls_test` | E |
 | 26 | Only the backing layer reaches the backing filesystem | `//tools:syscalls_backing_users_test`, `backing_door_guard` | E |
@@ -973,18 +1063,33 @@ step is named). A rule with a backlog is still E.
 | 47 | Tips of the Week numbers are real | `//tools:totw_citations_test` | E |
 | 48 | Licence headers; third-party READMEs | repo_shape rules 12, 1 | E |
 | 49 | What the daemon links is a golden; no known-vulnerable shipped dependency | `shipped_deps_test`, `sbom_test`, CI `osv` | E |
-| 50 | Formatting of Bazel, shell, Python, Markdown | none | V, P (7.6b, 7.7) |
+| 50 | Formatting of Bazel, shell, Python, Markdown | none | N, P (7.6b, 7.7) |
+| 51 | Errors are built with the `StatusBuilder` helpers, not `absl::XError(StrCat(...))` | review | V |
+| 52 | An errno becomes a Status through `ErrnoToStatus` / `ProducedErrnoToStatus`, never `absl::ErrnoToStatus` | indirect (wrappers do it); a direct use is not checked | V |
+| 53 | Log levels: ERROR means dcfs produced the failure | review; some end-to-end tests assert at `--v` levels | V |
+| 54 | Three kinds of message; the whole Status goes into a replacement message | `status_message` covers `.message()` only; review for the rest | V |
+| 55 | One Status serializer | review | V |
+| 56 | No `char *` for strings (25.24) | none | V, P (25.24) |
+| 57 | No function pointers or pointers to members for callables (25.20) | none | V, P (25.20) |
+| 58 | Locals are non-const by default (`misc-const-correctness` is denied) | none | V, P (25.20) |
+| 59 | Flags are defined only in main files | none | V, P (25.20) |
 
 Counting the table: **E** is rows 1, 2, 4 to 12, 15 to 17, 19 to 22, 24 to
-26, 28, 31, 32, 45 and 47 to 49: 28 of 50 rules (56 %). **R** (report-only)
-is rows 13, 14 and 18: 3 rules (6 %). The other 19 rules (38 %) are review
-only: rows 3, 23, 27, 29, 30, 33 to 44, 46 and 50. Ten rows name a planned
-step that would move them (rows 3, 18, 19, 23, 36, 37, 38, 42, 43, 50).
-The split by
-rule count says little about risk: the enforced rows are the structural ones
-and most of the review-only rows are the ones the review ledger shows
-generating the most findings (comments, style-other, test shape). Section 10
-gives 66 of 166 findings as tool-checkable ("could" or "checked").
+26, 28, 31, 32, 45 and 47 to 49: 28 of 59 rules (47 %). **R** (report-only)
+is rows 13, 14 and 18: 3 rules (5 %). **N** (not done) is rows 3 and 50: 2
+rules. The other 26 rules (44 %) are review only: rows 23, 27, 29, 30, 33 to
+44, 46 and 51 to 59. Fourteen rows name a planned step that would move them
+(rows 3, 18, 19, 23, 36, 37, 38, 42, 43, 50 and 56 to 59).
+
+The share depends on grouping: the first draft of this table had 50 rows
+(without rows 51 to 59, which are conventions of section 7 and style 1.2
+rules with no check) and gave 56 %. Counting rules the guide states and
+nothing checks lowers the share; counting broad, well-checked groups such as
+row 4 as one rule raises it. The split by rule count says little about
+risk: the enforced rows are the structural ones and most of the review-only
+rows are the ones the review ledger shows generating the most findings
+(comments, style-other, test shape). Section 10 gives 68 of 176 findings as
+tool-checkable ("could" or "checked").
 
 Rule 3 is the cheapest gap to see and the guide's description of the compiler
 gate is the one most likely to mislead; sections 2 and 14 say so.
