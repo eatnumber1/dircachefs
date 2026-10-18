@@ -41,6 +41,8 @@ guards, then a straight line, with undo as cancellable Cleanups
 reason, hand-written undo in an error branch, or a nested happy path is a
 finding.
 
+Before you review, read every rule index in `docs/rules/` (`index-code`, `index-style`, `index-tests`, `index-protocol`, `index-process`): you review against all of them.
+
 Report findings ranked by severity, each with file:line, the concrete
 failure scenario, and a suggested fix. Separate what you verified from what
 you suspect. Say plainly when you found nothing.

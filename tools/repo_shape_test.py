@@ -50,7 +50,7 @@ class RepoShapeTest(unittest.TestCase):
     def test_no_production_class_befriends_a_testonly_class(self):
         self.assertEqual([], repo_shape.no_testonly_friends(ROOT["root"]))
 
-    def test_every_ratified_rule_is_indexed_in_agents_md(self):
+    def test_every_ratified_rule_is_in_exactly_one_index(self):
         self.assertEqual([], repo_shape.rule_index(ROOT["root"]))
 
     def test_every_source_file_has_an_spdx_licence(self):

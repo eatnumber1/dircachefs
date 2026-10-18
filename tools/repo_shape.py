@@ -29,11 +29,11 @@ Each function takes the root of a source tree and returns a list of problems
   *_test.cc and not testonly/) has a comment that gives tests as the reason
   for code, or a ForTest / _for_test name (docs/style.md, "No test-only
   things in production code", step 25.7);
-- rule_index: every ratified rule is indexed in AGENTS.md. A rule in
+- rule_index: every ratified rule is in exactly one rule index. A rule in
   docs/style.md, docs/design.md, docs/plan/process.md or CLAUDE.md is marked
-  by an anchor `<a id="rule-NAME"></a>`; AGENTS.md has an entry that links to
-  `<file>#rule-NAME` for every marker, and every such link in AGENTS.md has
-  its marker (russ, 2026-10-18: AGENTS.md is the complete index).
+  by an anchor `<a id="rule-NAME"></a>`; exactly one docs/rules/index-*.md
+  links to `<file>#rule-NAME` for every marker, every such link has its
+  marker, and AGENTS.md links to every index (russ, 2026-10-18).
 
 (The fourth rule, commit subjects, needs git: .github/ci/commit_subjects.sh.)
 """
@@ -626,18 +626,44 @@ def rule_index(root):
                         "marker is unique in its file" %
                         (path, name, marked[(path, name)], number))
                 marked[(path, name)] = number
-    linked = set(RULE_LINK.findall(read(root, "AGENTS.md")))
+    indexes = rule_indexes(root)
+    in_indexes = {}
+    for index in indexes:
+        base = os.path.dirname(index)
+        for target, name in RULE_LINK.findall(read(root, index)):
+            path = os.path.normpath(os.path.join(base, target))
+            if (path, name) not in marked:
+                problems.append(
+                    "%s links to %s#rule-%s, which no file marks: fix or "
+                    "remove the entry" % (index, path, name))
+                continue
+            in_indexes.setdefault((path, name), set()).add(index)
     for (path, name), number in sorted(marked.items()):
-        if (path, name) not in linked:
+        found = in_indexes.get((path, name), set())
+        if not found:
             problems.append(
-                "%s marks rule %s (line %d) but AGENTS.md has no entry "
-                "linking to it: add a line to AGENTS.md" %
+                "%s marks rule %s (line %d) but no docs/rules/index-*.md "
+                "links to it: add a line to the index it belongs to" %
                 (path, name, number))
-    for path, name in sorted(linked - set(marked)):
-        problems.append(
-            "AGENTS.md links to %s#rule-%s, which no file marks: fix or "
-            "remove the entry" % (path, name))
+        elif len(found) > 1:
+            problems.append(
+                "rule %s of %s is in %d indexes (%s): a rule is in exactly "
+                "one" % (name, path, len(found), ", ".join(sorted(found))))
+    agents = read(root, "AGENTS.md")
+    for index in indexes:
+        if index not in agents:
+            problems.append(
+                "%s is not linked from AGENTS.md: add it to the table of "
+                "what to read" % index)
     return problems
+
+
+def rule_indexes(root):
+    directory = os.path.join(root, "docs", "rules")
+    if not os.path.isdir(directory):
+        return []
+    return sorted("docs/rules/" + name for name in os.listdir(directory)
+                  if name.startswith("index-") and name.endswith(".md"))
 
 
 def all_problems(root):

@@ -63,9 +63,12 @@ def good_tree(root):
     write(root, "docs/design.md", "# Design\n")
     write(root, "docs/plan/process.md", "# Process\n")
     write(root, "CLAUDE.md", "# Claude\n")
+    write(root, "docs/rules/index-style.md",
+          "- No timers. [style](../style.md#rule-no-timers)\n"
+          "- Test first. [style](../style.md#rule-test-first)\n")
     write(root, "AGENTS.md",
-          "# Rules\n\n- No timers. [style](docs/style.md#rule-no-timers)\n"
-          "- Test first. [style](docs/style.md#rule-test-first)\n")
+          "# Rules\n\n| Task | Read |\n|---|---|\n"
+          "| Style | [style](docs/rules/index-style.md) |\n")
 
 
 class RepoShapeSelfCheckTest(unittest.TestCase):
@@ -81,32 +84,48 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
     def test_good_tree_has_no_problems(self):
         self.assertEqual([], repo_shape.all_problems(self.root))
 
-    def test_a_rule_with_no_agents_entry_is_reported(self):
+    def test_a_rule_in_no_index_is_reported(self):
         write(self.root, "docs/design.md",
               '# Design\n\n<a id="rule-bounded-memory"></a>\n'
               '### Bounded memory\n')
         problems = repo_shape.rule_index(self.root)
         self.assertEqual(1, len(problems), problems)
         self.assertIn("docs/design.md marks rule bounded-memory", problems[0])
-        self.assertIn("AGENTS.md has no entry linking to it", problems[0])
+        self.assertIn("no docs/rules/index-*.md links to it", problems[0])
 
-    def test_an_entry_for_a_rule_that_is_gone_is_reported(self):
+    def test_a_rule_in_two_indexes_is_reported(self):
+        write(self.root, "docs/rules/index-code.md",
+              "- Test first. [style](../style.md#rule-test-first)\n")
         write(self.root, "AGENTS.md",
-              "- No timers. [style](docs/style.md#rule-no-timers)\n"
-              "- Test first. [style](docs/style.md#rule-test-first)\n"
-              "- Gone. [process](docs/plan/process.md#rule-gone)\n")
+              "[a](docs/rules/index-style.md) [b](docs/rules/index-code.md)\n")
         problems = repo_shape.rule_index(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("AGENTS.md links to docs/plan/process.md#rule-gone",
+        self.assertIn("rule test-first of docs/style.md is in 2 indexes",
+                      problems[0])
+
+    def test_an_index_entry_for_a_rule_that_is_gone_is_reported(self):
+        write(self.root, "docs/rules/index-style.md",
+              "- No timers. [style](../style.md#rule-no-timers)\n"
+              "- Test first. [style](../style.md#rule-test-first)\n"
+              "- Gone. [process](../plan/process.md#rule-gone)\n")
+        problems = repo_shape.rule_index(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("docs/rules/index-style.md links to "
+                      "docs/plan/process.md#rule-gone", problems[0])
+
+    def test_an_index_that_agents_md_does_not_link_is_reported(self):
+        write(self.root, "docs/rules/index-code.md", "Nothing yet.\n")
+        problems = repo_shape.rule_index(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("docs/rules/index-code.md is not linked from AGENTS.md",
                       problems[0])
 
     def test_a_marker_used_twice_in_a_file_is_reported(self):
         write(self.root, "CLAUDE.md",
               '- <a id="rule-x"></a>One.\n- <a id="rule-x"></a>Two.\n')
-        write(self.root, "AGENTS.md",
-              "- No timers. [style](docs/style.md#rule-no-timers)\n"
-              "- Test first. [style](docs/style.md#rule-test-first)\n"
-              "- X. [claude](CLAUDE.md#rule-x)\n")
+        write(self.root, "docs/rules/index-style.md",
+              "[a](../style.md#rule-no-timers) "
+              "[b](../style.md#rule-test-first) [c](../../CLAUDE.md#rule-x)\n")
         problems = repo_shape.rule_index(self.root)
         self.assertEqual(1, len(problems), problems)
         self.assertIn("CLAUDE.md marks rule x twice", problems[0])
