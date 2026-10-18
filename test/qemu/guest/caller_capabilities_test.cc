@@ -11,10 +11,12 @@
 #include <linux/capability.h>
 #include <linux/prctl.h>
 #include <sched.h>
-#include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 #include <cstdint>
 #include <cstring>
+#include <future>
 #include <memory>
 #include <span>
 #include <string>
@@ -22,6 +24,7 @@
 #include <utility>
 
 #include "absl/base/no_destructor.h"
+#include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/status_matchers.h"
@@ -154,6 +157,62 @@ absl::StatusOr<MountSpec> SpareMount(std::string_view name) {
   return spec;
 }
 
+// Writes `text` to the procfs file `path` in one write(2), as a user
+// namespace's map must be written (user_namespaces(7)).
+absl::Status WriteProc(std::string_view path, std::string_view text) {
+  ASSIGN_OR_RETURN(FileDescriptor fd, syscalls::open(path, O_WRONLY));
+  return syscalls::write(*fd, text.data(), text.size()).status();
+}
+
+// Reads a pid from `socket`, maps that process's user namespace (uid 0 alone,
+// and the gids of `gid_map`), and tells it so with one byte.
+absl::Status MapUserNamespace(int socket, std::string_view gid_map) {
+  pid_t pid = 0;
+  ASSIGN_OR_RETURN(size_t n, syscalls::read(socket, &pid, sizeof(pid)));
+  if (n != sizeof(pid)) {
+    return InternalErrorBuilder()
+           << "The child sent no pid (" << n << " bytes)";
+  }
+  RETURN_IF_ERROR(WriteProc(absl::StrCat("/proc/", pid, "/uid_map"), "0 0 1"));
+  RETURN_IF_ERROR(WriteProc(absl::StrCat("/proc/", pid, "/gid_map"), gid_map));
+  return syscalls::write(socket, "m", 1).status();
+}
+
+// What `fn` returns, run in a child that is the root of a user namespace of
+// its own, mapping uid 0 and the gids of `gid_map` to themselves, with no
+// supplementary groups. It holds every capability in that namespace and none
+// outside it. A map of more than the creator's own ids takes a writer with
+// CAP_SETUID and CAP_SETGID over the parent namespace (user_namespaces(7)),
+// so a thread of this process writes the maps once the child has unshared.
+absl::StatusOr<std::string> InUserNamespace(
+    std::string_view gid_map,
+    absl::FunctionRef<absl::StatusOr<std::string>()> fn) {
+  ASSIGN_OR_RETURN(auto ends, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  auto &[here, there] = ends;
+  std::future<absl::Status> mapped =
+      std::async(std::launch::async, MapUserNamespace, *here, gid_map);
+  absl::StatusOr<std::string> result =
+      InChild([&]() -> absl::StatusOr<std::string> {
+        RETURN_IF_ERROR(syscalls::unshare(CLONE_NEWUSER));
+        pid_t pid = syscalls::getpid();
+        RETURN_IF_ERROR(syscalls::write(*there, &pid, sizeof(pid)).status());
+        char ack = 0;
+        ASSIGN_OR_RETURN(size_t n, syscalls::read(*there, &ack, 1));
+        if (n != 1) {
+          return InternalErrorBuilder() << "The user namespace was not mapped";
+        }
+        RETURN_IF_ERROR(syscalls::setgroups({}));
+        return fn();
+      });
+  {
+    // The mapper's read ends, if the child sent nothing, once no end of
+    // `there` is left: the child's went with it.
+    FileDescriptor closing = std::move(there);
+  }
+  RETURN_IF_ERROR(mapped.get());
+  return result;
+}
+
 // bob's chown(path, -1, -1) of root's setuid file with security.capability,
 // in a group bob is not in. Natively it fails with EPERM before the
 // capability is touched: setuid's removal is a mode change (notify_change,
@@ -239,20 +298,7 @@ TEST(CallerCapabilitiesTest, ADaemonWithoutCapSysPtraceReadsGroupsButNotCaps) {
 // RequireInitUserNamespace).
 TEST(CallerCapabilitiesTest, MountDcfsRefusesAChildUserNamespace) {
   ASSERT_OK_AND_ASSIGN(MountSpec spec, SpareMount("userns"));
-  // A user namespace mapping only uid and gid 0 to themselves, which its
-  // creator may write itself after denying setgroups (user_namespaces(7)).
-  auto write_proc = [](std::string_view path,
-                       std::string_view text) -> absl::Status {
-    ASSIGN_OR_RETURN(FileDescriptor fd, syscalls::open(path, O_WRONLY));
-    return syscalls::write(*fd, text.data(), text.size()).status();
-  };
-  EXPECT_THAT(InChild([&]() -> absl::StatusOr<std::string> {
-                RETURN_IF_ERROR(syscalls::unshare(CLONE_NEWUSER));
-                RETURN_IF_ERROR(write_proc("/proc/self/setgroups", "deny"));
-                RETURN_IF_ERROR(write_proc("/proc/self/uid_map", "0 0 1"));
-                RETURN_IF_ERROR(write_proc("/proc/self/gid_map", "0 0 1"));
-                return StartOutcome(spec);
-              }),
+  EXPECT_THAT(InUserNamespace("0 0 1", [&] { return StartOutcome(spec); }),
               IsOkAndHolds(HasSubstr("must run in the init user namespace")));
 }
 
@@ -267,6 +313,45 @@ TEST(CallerCapabilitiesTest, MountDcfsRefusesADaemonWithoutCapFsetid) {
                 return StartOutcome(spec);
               }),
               IsOkAndHolds(HasSubstr("needs CAP_FSETID")));
+}
+
+// The root of a user namespace that maps a file's owner (0) and group (2000),
+// outside that group, holds CAP_FSETID there but not in the init namespace.
+// Natively its truncate and write keep setgid: setattr_should_drop_sgid asks
+// in_group_or_capable (fs/attr.c:42), whose capable_wrt_inode_uidgid
+// (fs/inode.c:3040) is ns_capable in the caller's own namespace with the
+// inode's ids mapped there (kernel/capability.c:493-496); setuid goes, as
+// setattr_should_drop_suidgid's capable() asks the init one (fs/attr.c:75).
+// The FUSE side asks capable() too (a truncate's FATTR_KILL_SUIDGID,
+// fs/fuse/dir.c:2241-2243; a write's removal, which also clears setuid, as
+// natively), and dcfs, which learns no more than that the caller lacks
+// CAP_FSETID in the init namespace, clears setgid as for a caller outside the
+// group (all Linux v7.3-rc7): a price on the safe side (docs/design.md,
+// "Caller credentials").
+TEST(CallerCapabilitiesTest, ANamespacedCapFsetidHolderLosesSetgidThroughDcfs) {
+  for (std::string_view dir : {std::string_view(Native()), kMnt}) {
+    ASSERT_THAT(MakeFile(Path(dir, "userns-truncate"), 0, 2000, 02666), IsOk());
+    ASSERT_THAT(MakeFile(Path(dir, "userns-write"), 0, 2000, 06666), IsOk());
+  }
+  EXPECT_THAT(
+      InUserNamespace(
+          "0 0 1\n2000 2000 1\n",
+          [&]() -> absl::StatusOr<std::string> {
+            std::string done;
+            for (std::string_view dir : {std::string_view(Native()), kMnt}) {
+              absl::StrAppend(
+                  &done,
+                  Outcome(syscalls::truncate(Path(dir, "userns-truncate"), 4)),
+                  " ", Outcome(Append(Path(dir, "userns-write"))), " ");
+            }
+            return done;
+          }),
+      IsOkAndHolds("ok ok ok ok "));
+  for (std::string_view name : {"userns-truncate", "userns-write"}) {
+    EXPECT_EQ(ModeAndCapability(Path(Native(), name)), "2666 ENODATA") << name;
+    EXPECT_EQ(ModeAndCapability(Path(kMnt, name)), "666 ENODATA") << name;
+    EXPECT_EQ(ModeAndCapability(Path(Src(), name)), "666 ENODATA") << name;
+  }
 }
 
 class CallerCapabilitiesEnvironment : public ::testing::Environment {

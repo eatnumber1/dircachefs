@@ -1272,8 +1272,11 @@ recovery protocol, concurrency, and the test strategy.
   `CAP_FSETID` unless it is root: a non-root holder loses setgid of a file
   without group execute outside its group (its `chown(path, -1, -1)` of
   another's such file fails with `EPERM`), and root without it keeps
-  that setgid, both where the backing filesystem does the opposite. And
-  for a file with file capabilities, a writer that dcfs cannot confirm
+  that setgid, both where the backing filesystem does the opposite. A
+  process holding `CAP_FSETID` only in a user namespace of its own that
+  maps the file's owner and group loses setgid on a truncate (and on a
+  write of a file that is setuid too) where the backing filesystem keeps
+  it. And for a file with file capabilities, a writer that dcfs cannot confirm
   from `/proc` holds `CAP_FSETID` (a process outside dcfs's pid
   namespace, a kernel service such as nfsd writing for a client, or, with
   dcfs running without `CAP_SYS_PTRACE`, root) loses the bits even where

@@ -2613,10 +2613,21 @@ write first asked for `security.capability` with a `GETXATTR` round trip
 kernel sends with it:
 
 - A truncate arrives as a SETATTR of the size, never with a mode, and with
-  `FATTR_KILL_SUIDGID` exactly when the caller lacks `CAP_FSETID`: the
-  kernel's own `capable(CAP_FSETID)` (`fuse_do_setattr`,
-  fs/fuse/dir.c:2241-2243 (Linux v7.3-rc7)), exact across user namespaces
-  (libfuse hands it over as `FUSE_SET_ATTR_KILL_SUID`). So does an
+  `FATTR_KILL_SUIDGID` exactly when the caller lacks `CAP_FSETID` in the
+  init user namespace: the kernel's own `capable(CAP_FSETID)`
+  (`fuse_do_setattr`, fs/fuse/dir.c:2241-2243 (Linux v7.3-rc7)) (libfuse
+  hands it over as `FUSE_SET_ATTR_KILL_SUID`). That is not all the native
+  rule asks: a caller holding `CAP_FSETID` only in a user namespace of its
+  own that maps the file's owner and group keeps setgid natively, outside
+  the group too (`setattr_should_drop_sgid`'s `in_group_or_capable`,
+  fs/attr.c:42, asks `capable_wrt_inode_uidgid`, fs/inode.c:3040, which is
+  `ns_capable` in the caller's namespace with the inode's ids mapped there,
+  kernel/capability.c:493-496 (Linux v7.3-rc7)). The flag cannot say so,
+  and dcfs clears setgid for it as for any caller outside the group, on a
+  truncate and on a write whose removal the kernel sends for setuid
+  (`caller_capabilities_test`'s
+  `ANamespacedCapFsetidHolderLosesSetgidThroughDcfs`: native 2666, mount
+  666): a price on the safe side. So does an
   `O_TRUNC` open's (dcfs leaves `FUSE_CAP_ATOMIC_O_TRUNC` off, so the
   kernel strips `O_TRUNC` from the OPEN, and `FUSE_OPEN_KILL_SUIDGID` with
   it). dcfs obeys the flag both ways, whatever the uid: the ftruncate,
