@@ -52,7 +52,7 @@ STRACE_TRACE='%file,%desc,%fstat,%fstatfs,ioctl,getdents64,copy_file_range,fallo
 # $DCFS_SANITIZER (the guest's init sets it from the kernel command line; ""
 # for a plain build) turns on the "sanitizer" kind when it is "ubsan".
 strace_reduce() {
-	awk -v src="$1" -v cache="$2" -v san="${DCFS_SANITIZER:-}" -v fdonly="^($STRACE_FD_ONLY)\$" '
+  awk -v src="$1" -v cache="$2" -v san="${DCFS_SANITIZER:-}" -v fdonly="^($STRACE_FD_ONLY)\$" '
 	function under(p, dir) {
 		return p == dir || substr(p, 1, length(dir) + 1) == dir "/"
 	}
@@ -166,14 +166,14 @@ strace_reduce() {
 
 # strace_backing: strace_reduce output on stdin; the lines of the golden.
 strace_backing() {
-	grep -E '^[a-z_0-9]+\((backing|procfd|other)\)'
+  grep -E '^[a-z_0-9]+\((backing|procfd|other)\)'
 }
 
 # strace_counts: strace_reduce output on stdin; "kind count" per kind, in a
 # fixed order (zero counts included), then "sync N": the fsync, fdatasync and
 # syncfs calls of any kind. These are what step 26.4 ratchets.
 strace_counts() {
-	awk '
+  awk '
 	{
 		k = $1; sub(/^[^(]*\(/, "", k); sub(/\).*/, "", k); n[k]++
 		if ($1 ~ /^(fsync|fdatasync|syncfs)\(/) sync++
@@ -188,13 +188,13 @@ strace_counts() {
 # strace_compare GOLDEN ACTUAL: 0 when identical; else prints the unified
 # diff (golden first) and returns 1.
 strace_compare() {
-	if command diff -u "$1" "$2" >/tmp/strace-compare.diff 2>&1; then
-		rm -f /tmp/strace-compare.diff
-		return 0
-	fi
-	cat /tmp/strace-compare.diff
-	rm -f /tmp/strace-compare.diff
-	return 1
+  if command diff -u "$1" "$2" >/tmp/strace-compare.diff 2>&1; then
+    rm -f /tmp/strace-compare.diff
+    return 0
+  fi
+  cat /tmp/strace-compare.diff
+  rm -f /tmp/strace-compare.diff
+  return 1
 }
 
 STRACE_DIR=/tmp/strace
@@ -205,7 +205,7 @@ STRACE_DIR=/tmp/strace
 # $DCFS_COUNTERS_FILE: dcfs/testonly/cost_counter.h, step 26.4b); 0 if it
 # has none.
 counter_value() {
-	awk -v k="$1" '$1 == k { v = $2 } END { print v + 0 }' "$STRACE_COUNTERS" 2>/dev/null || echo 0
+  awk -v k="$1" '$1 == k { v = $2 } END { print v + 0 }' "$STRACE_COUNTERS" 2>/dev/null || echo 0
 }
 
 # strace_op NAME COMMAND...: with the daemon (DAEMON_PID, SRC and DB set)
@@ -214,66 +214,66 @@ counter_value() {
 # Returns COMMAND's exit status (1 if strace never attached). The command's
 # own output goes to $STRACE_DIR/NAME.out.
 strace_op() {
-	so_name=$1
-	shift
-	mkdir -p "$STRACE_DIR"
-	quiesce_daemon "$DAEMON_PID"
-	rm -f "$STRACE_DIR/$so_name.raw"
-	if [ -n "${STRACE_COUNTERS:-}" ]; then
-		so_stmts=$(counter_value steps)
-		so_txns=$(counter_value transactions)
-	fi
-	strace -f -y -qq -e "trace=$STRACE_TRACE" -o "$STRACE_DIR/$so_name.raw" \
-		-p "$DAEMON_PID" 2>"$STRACE_DIR/$so_name.err" &
-	so_pid=$!
-	so_n=0
-	while [ "$so_n" -lt 100 ]; do
-		so_tracer=$(awk '/^TracerPid:/ {print $2}' "/proc/$DAEMON_PID/status")
-		[ "$so_tracer" = "$so_pid" ] && break
-		sleep 0.1
-		so_n=$((so_n + 1))
-	done
-	if [ "$so_tracer" != "$so_pid" ]; then
-		kill "$so_pid" 2>/dev/null || true
-		wait "$so_pid" 2>/dev/null || true
-		echo "strace_op $so_name: strace did not attach: $(cat "$STRACE_DIR/$so_name.err")"
-		return 1
-	fi
-	if "$@" >"$STRACE_DIR/$so_name.out" 2>&1; then
-		so_rc=0
-	else
-		so_rc=$?
-	fi
-	quiesce_daemon "$DAEMON_PID"
-	kill -TERM "$so_pid" 2>/dev/null || true
-	wait "$so_pid" 2>/dev/null || true
-	strace_reduce "$SRC" "$(dirname "$DB")" <"$STRACE_DIR/$so_name.raw" >"$STRACE_DIR/$so_name.all"
-	strace_backing <"$STRACE_DIR/$so_name.all" >"$STRACE_DIR/$so_name.trace"
-	strace_counts <"$STRACE_DIR/$so_name.all" >"$STRACE_DIR/$so_name.counts"
-	if [ -n "${STRACE_COUNTERS:-}" ]; then
-		echo "sql_stmts $(($(counter_value steps) - so_stmts))" >>"$STRACE_DIR/$so_name.counts"
-		echo "sql_txns $(($(counter_value transactions) - so_txns))" >>"$STRACE_DIR/$so_name.counts"
-	fi
-	return "$so_rc"
+  so_name=$1
+  shift
+  mkdir -p "$STRACE_DIR"
+  quiesce_daemon "$DAEMON_PID"
+  rm -f "$STRACE_DIR/$so_name.raw"
+  if [ -n "${STRACE_COUNTERS:-}" ]; then
+    so_stmts=$(counter_value steps)
+    so_txns=$(counter_value transactions)
+  fi
+  strace -f -y -qq -e "trace=$STRACE_TRACE" -o "$STRACE_DIR/$so_name.raw" \
+    -p "$DAEMON_PID" 2>"$STRACE_DIR/$so_name.err" &
+  so_pid=$!
+  so_n=0
+  while [ "$so_n" -lt 100 ]; do
+    so_tracer=$(awk '/^TracerPid:/ {print $2}' "/proc/$DAEMON_PID/status")
+    [ "$so_tracer" = "$so_pid" ] && break
+    sleep 0.1
+    so_n=$((so_n + 1))
+  done
+  if [ "$so_tracer" != "$so_pid" ]; then
+    kill "$so_pid" 2>/dev/null || true
+    wait "$so_pid" 2>/dev/null || true
+    echo "strace_op $so_name: strace did not attach: $(cat "$STRACE_DIR/$so_name.err")"
+    return 1
+  fi
+  if "$@" >"$STRACE_DIR/$so_name.out" 2>&1; then
+    so_rc=0
+  else
+    so_rc=$?
+  fi
+  quiesce_daemon "$DAEMON_PID"
+  kill -TERM "$so_pid" 2>/dev/null || true
+  wait "$so_pid" 2>/dev/null || true
+  strace_reduce "$SRC" "$(dirname "$DB")" <"$STRACE_DIR/$so_name.raw" >"$STRACE_DIR/$so_name.all"
+  strace_backing <"$STRACE_DIR/$so_name.all" >"$STRACE_DIR/$so_name.trace"
+  strace_counts <"$STRACE_DIR/$so_name.all" >"$STRACE_DIR/$so_name.counts"
+  if [ -n "${STRACE_COUNTERS:-}" ]; then
+    echo "sql_stmts $(($(counter_value steps) - so_stmts))" >>"$STRACE_DIR/$so_name.counts"
+    echo "sql_txns $(($(counter_value transactions) - so_txns))" >>"$STRACE_DIR/$so_name.counts"
+  fi
+  return "$so_rc"
 }
 
 # strace_golden CHECK NAME: compares NAME's reduced trace with the golden on
 # stdin (a heredoc; empty for "no backing syscall"); reports TEST CHECK PASS,
 # or FAIL with the diff and the counts.
 strace_golden() {
-	sg_check=$1
-	sg_name=$2
-	cat >"$STRACE_DIR/$sg_name.golden"
-	if sg_diff=$(strace_compare "$STRACE_DIR/$sg_name.golden" "$STRACE_DIR/$sg_name.trace"); then
-		pass "$sg_check"
-	else
-		fail "$sg_check" "backing syscalls differ from the golden (- golden, + observed); counts: $(tr '\n' ' ' <"$STRACE_DIR/$sg_name.counts")"
-		echo "$sg_diff"
-		echo "--- full trace of $sg_name ---"
-		cat "$STRACE_DIR/$sg_name.all"
-		echo "--- strace output of $sg_name ---"
-		cat "$STRACE_DIR/$sg_name.raw"
-	fi
+  sg_check=$1
+  sg_name=$2
+  cat >"$STRACE_DIR/$sg_name.golden"
+  if sg_diff=$(strace_compare "$STRACE_DIR/$sg_name.golden" "$STRACE_DIR/$sg_name.trace"); then
+    pass "$sg_check"
+  else
+    fail "$sg_check" "backing syscalls differ from the golden (- golden, + observed); counts: $(tr '\n' ' ' <"$STRACE_DIR/$sg_name.counts")"
+    echo "$sg_diff"
+    echo "--- full trace of $sg_name ---"
+    cat "$STRACE_DIR/$sg_name.all"
+    echo "--- strace output of $sg_name ---"
+    cat "$STRACE_DIR/$sg_name.raw"
+  fi
 }
 
 # --- budgets (step 26.4) -----------------------------------------------------
@@ -304,7 +304,7 @@ COST_DISK_COUNT_HEADROOM_PCT=2
 COST_DISK_COUNT_HEADROOM_KINDS="reads writes sectors_read sectors_written dcfs_reads dcfs_writes"
 
 strace_budget_compare() {
-	awk -v op="$3" -v file="${4:-syscall_budgets.txt}" -v tol="${5:-0}" -v hp="$COST_DISK_COUNT_HEADROOM_PCT" -v hk="$COST_DISK_COUNT_HEADROOM_KINDS" '
+  awk -v op="$3" -v file="${4:-syscall_budgets.txt}" -v tol="${5:-0}" -v hp="$COST_DISK_COUNT_HEADROOM_PCT" -v hk="$COST_DISK_COUNT_HEADROOM_KINDS" '
 	FNR == NR {
 		if ($1 == op && $1 !~ /^#/) { want[$2] = $3; n++ }
 		next
@@ -362,7 +362,7 @@ COST_WALL_FACTOR=3
 # cost_wall_allowance CPU_BUDGETS IO_BUDGETS TARGET: that many whole seconds
 # (rounded up; 0 for a target with no budget lines).
 cost_wall_allowance() {
-	awk -v t="$3" -v tol="$COST_CPU_TOLERANCE_PCT" -v io="$COST_IO_LATENCY_MS" -v fl="$COST_FLUSH_LATENCY_MS" -v factor="$COST_WALL_FACTOR" '
+  awk -v t="$3" -v tol="$COST_CPU_TOLERANCE_PCT" -v io="$COST_IO_LATENCY_MS" -v fl="$COST_FLUSH_LATENCY_MS" -v factor="$COST_WALL_FACTOR" '
 		$1 != t { next }
 		$2 == "cpu_us" { ms += $3 / 1000 * (100 + tol) / 100 }
 		$2 == "reads" || $2 == "writes" { ms += $3 * io }
@@ -377,22 +377,22 @@ cost_wall_allowance() {
 # writeback). run-qemu.sh passes the line it boots with, a guest script its
 # /proc/cmdline.
 budget_unheld_reason() {
-	case " $1 " in
-	*" dcfs_accel=tcg "*) echo "TCG" ;;
-	*" dcfs_noisy=1 "*) echo "noisy kernel" ;;
-	*" dcfs_sanitizer=asan "*) echo "asan build" ;;
-	*" dcfs_sanitizer=ubsan "*) echo "ubsan build" ;;
-	*" dcfs_cov="*) echo "coverage build" ;;
-	esac
+  case " $1 " in
+  *" dcfs_accel=tcg "*) echo "TCG" ;;
+  *" dcfs_noisy=1 "*) echo "noisy kernel" ;;
+  *" dcfs_sanitizer=asan "*) echo "asan build" ;;
+  *" dcfs_sanitizer=ubsan "*) echo "ubsan build" ;;
+  *" dcfs_cov="*) echo "coverage build" ;;
+  esac
 }
 
 # strace_budget CHECK NAME: the budget check of NAME's counts, reported as
 # TEST CHECK PASS/FAIL. The budgets file is $STRACE_BUDGETS.
 strace_budget() {
-	echo "  counts $2: $(tr '\n' ' ' <"$STRACE_DIR/$2.counts")"
-	if sb_out=$(strace_budget_compare "$STRACE_BUDGETS" "$STRACE_DIR/$2.counts" "$2"); then
-		pass "$1"
-	else
-		fail "$1" "$sb_out"
-	fi
+  echo "  counts $2: $(tr '\n' ' ' <"$STRACE_DIR/$2.counts")"
+  if sb_out=$(strace_budget_compare "$STRACE_BUDGETS" "$STRACE_DIR/$2.counts" "$2"); then
+    pass "$1"
+  else
+    fail "$1" "$sb_out"
+  fi
 }

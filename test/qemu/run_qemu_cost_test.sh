@@ -17,8 +17,8 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 fail() {
-	echo "FAIL: $*" >&2
-	exit 1
+  echo "FAIL: $*" >&2
+  exit 1
 }
 
 mkdir "$WORK/bin" "$WORK/out"
@@ -38,7 +38,7 @@ cat "$(dirname "$0")/../canned"
 exit 0
 E
 for t in mke2fs mkfs-xfs mkfs-btrfs; do
-	printf '#!/bin/sh\nexit 0\n' >"$WORK/bin/$t"
+  printf '#!/bin/sh\nexit 0\n' >"$WORK/bin/$t"
 done
 chmod +x "$WORK"/bin/*
 : >"$WORK/kernel"
@@ -69,12 +69,12 @@ EOT
 
 # canned COST-LINE: a guest that passed, with the COST line given ("" for none).
 canned() {
-	{
-		echo "TEST first PASS"
-		[ -z "$1" ] || echo "$1"
-		echo "MEM total=268435456 min_avail=200000000 peak_used=50000000 peak_shmem=1000000"
-		echo "DCFS-TEST-EXIT=0"
-	} >"$WORK/canned"
+  {
+    echo "TEST first PASS"
+    [ -z "$1" ] || echo "$1"
+    echo "MEM total=268435456 min_avail=200000000 peak_used=50000000 peak_shmem=1000000"
+    echo "DCFS-TEST-EXIT=0"
+  } >"$WORK/canned"
 }
 
 # The budget files run() holds a target to: these tests' own, set below, or the
@@ -85,23 +85,23 @@ IO_FILE="$WORK/io_budgets.txt"
 # run TARGET [ENV=VALUE... [-- run-qemu.sh flags]]: run-qemu.sh --unit on the
 # canned log as the target TARGET, budgets given; sets RC.
 run() {
-	r_target=$1
-	shift
-	RC=0
-	rm -f "$WORK/out/serial.log"
-	env -u DCFS_NOISY -u DCFS_FORCE_TCG -u DCFS_PIN_NON_SMT DCFS_PRESSURE_FILE="$WORK/quiet-psi" TEST_TARGET="$r_target" "$@" TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
-		sh "$RUN_QEMU" --unit --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
-		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
-		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
-		--budget-lib "$BUDGET_LIB" --cpu-budgets "$CPU_FILE" --io-budgets "$IO_FILE" \
-		"$WORK/kernel" "$WORK/initrd" >"$WORK/stdout" 2>&1 || RC=$?
+  r_target=$1
+  shift
+  RC=0
+  rm -f "$WORK/out/serial.log"
+  env -u DCFS_NOISY -u DCFS_FORCE_TCG -u DCFS_PIN_NON_SMT DCFS_PRESSURE_FILE="$WORK/quiet-psi" TEST_TARGET="$r_target" "$@" TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
+    sh "$RUN_QEMU" --unit --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
+    --mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
+    --mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
+    --budget-lib "$BUDGET_LIB" --cpu-budgets "$CPU_FILE" --io-budgets "$IO_FILE" \
+    "$WORK/kernel" "$WORK/initrd" >"$WORK/stdout" 2>&1 || RC=$?
 }
 
 canned "COST cpu_us=400000"
 run //t:x
 [ "$RC" -eq 0 ] || fail "a run at its budget failed: $(cat "$WORK/stdout")"
 grep -q "run-qemu.sh: cost: dcfs CPU 0.400 s (budget 0.400 s, tolerance 100%" "$WORK/stdout" ||
-	fail "the cost line does not say the CPU and its budget: $(cat "$WORK/stdout")"
+  fail "the cost line does not say the CPU and its budget: $(cat "$WORK/stdout")"
 echo "PASS: a run at its CPU budget passes, and says what it used and what it may"
 
 canned "COST cpu_us=800000"
@@ -114,7 +114,7 @@ run //t:x
 [ "$RC" -ne 0 ] || fail "a run past budget plus tolerance passed: $(cat "$WORK/stdout")"
 grep -q "== RESULT: FAIL (over its cost budget" "$WORK/stdout" || fail "no FAIL verdict naming the budget: $(cat "$WORK/stdout")"
 grep -q "//t:x cpu_us: count rose from 400000 to 800001, past the 100% tolerance" "$WORK/stdout" ||
-	fail "the failure does not name the counts: $(cat "$WORK/stdout")"
+  fail "the failure does not name the counts: $(cat "$WORK/stdout")"
 echo "PASS: a run past its budget plus the tolerance fails, naming both numbers"
 
 # A budget of zero allows nothing: a daemon that was meant not to run.
@@ -128,7 +128,7 @@ canned "COST cpu_us=99000000"
 run //t:unlisted
 [ "$RC" -eq 0 ] || fail "a target without a budget failed: $(cat "$WORK/stdout")"
 grep -q "run-qemu.sh: cost: dcfs CPU 99.000 s (no line for //t:unlisted in cpu_budgets.txt)" "$WORK/stdout" ||
-	fail "no note that the target has no budget: $(cat "$WORK/stdout")"
+  fail "no note that the target has no budget: $(cat "$WORK/stdout")"
 echo "PASS: a target without a budget line is reported, not gated"
 
 # A target with a budget whose guest printed no COST line fails: the budget
@@ -160,29 +160,29 @@ run //t:x DCFS_FORCE_TCG=1
 grep -q "not held to the budgets: TCG)" "$WORK/stdout" || fail "no reason for the TCG run: $(cat "$WORK/stdout")"
 # run_flagged WORD: the run with WORD on the kernel command line.
 run_flagged() {
-	RC=0
-	env -u DCFS_NOISY DCFS_PRESSURE_FILE="$WORK/quiet-psi" TEST_TARGET=//t:x TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
-		sh "$RUN_QEMU" --unit --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
-		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
-		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
-		--budget-lib "$BUDGET_LIB" --cpu-budgets "$WORK/cpu_budgets.txt" --io-budgets "$WORK/io_budgets.txt" \
-		--cmdline "$1" "$WORK/kernel" "$WORK/initrd" >"$WORK/stdout" 2>&1 || RC=$?
+  RC=0
+  env -u DCFS_NOISY DCFS_PRESSURE_FILE="$WORK/quiet-psi" TEST_TARGET=//t:x TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
+    sh "$RUN_QEMU" --unit --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
+    --mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
+    --mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
+    --budget-lib "$BUDGET_LIB" --cpu-budgets "$WORK/cpu_budgets.txt" --io-budgets "$WORK/io_budgets.txt" \
+    --cmdline "$1" "$WORK/kernel" "$WORK/initrd" >"$WORK/stdout" 2>&1 || RC=$?
 }
 for flagged in "dcfs_sanitizer=asan:asan build" "dcfs_sanitizer=ubsan:ubsan build" "dcfs_cov=/dev/vdz:coverage build"; do
-	run_flagged "${flagged%%:*}"
-	[ "$RC" -eq 0 ] || fail "a run with ${flagged%%:*} was held to the budget: $(cat "$WORK/stdout")"
-	grep -q "not held to the budgets: ${flagged#*:})" "$WORK/stdout" ||
-		fail "no reason for ${flagged%%:*}: $(cat "$WORK/stdout")"
+  run_flagged "${flagged%%:*}"
+  [ "$RC" -eq 0 ] || fail "a run with ${flagged%%:*} was held to the budget: $(cat "$WORK/stdout")"
+  grep -q "not held to the budgets: ${flagged#*:})" "$WORK/stdout" ||
+    fail "no reason for ${flagged%%:*}: $(cat "$WORK/stdout")"
 done
 echo "PASS: noisy, TCG and sanitizer runs report their CPU and are not held to the budget"
 
 # The console ends its lines with a carriage return: the last count of the COST
 # line has one in the serial log, and must not be printed or compared with it.
 {
-	echo "TEST first PASS"
-	printf 'COST cpu_us=400000 %s\r\n' "reads=50 writes=7 sectors_read=400 sectors_written=900 flushes=30 dcfs_reads=3 dcfs_writes=1 dcfs_read_bytes=4096 dcfs_write_bytes=0"
-	echo "MEM total=268435456 min_avail=200000000 peak_used=50000000 peak_shmem=1000000"
-	echo "DCFS-TEST-EXIT=0"
+  echo "TEST first PASS"
+  printf 'COST cpu_us=400000 %s\r\n' "reads=50 writes=7 sectors_read=400 sectors_written=900 flushes=30 dcfs_reads=3 dcfs_writes=1 dcfs_read_bytes=4096 dcfs_write_bytes=0"
+  echo "MEM total=268435456 min_avail=200000000 peak_used=50000000 peak_shmem=1000000"
+  echo "DCFS-TEST-EXIT=0"
 } >"$WORK/canned"
 run //t:both
 [ "$RC" -eq 0 ] || fail "a COST line that ends with a carriage return failed: $(cat "$WORK/stdout")"
@@ -197,18 +197,18 @@ canned "COST cpu_us=400000 $IO_OK"
 run //t:io
 [ "$RC" -eq 0 ] || fail "a run at its I/O budgets failed: $(cat "$WORK/stdout")"
 grep -q "run-qemu.sh: cost: disk I/O 50 reads, 7 writes, 400 sectors read, 900 sectors written, 30 flushes; dcfs caused 3 reads (4096 bytes), 1 writes (0 bytes) (within the budgets in io_budgets.txt)" "$WORK/stdout" ||
-	fail "the cost line does not say the I/O and the budget: $(cat "$WORK/stdout")"
+  fail "the cost line does not say the I/O and the budget: $(cat "$WORK/stdout")"
 echo "PASS: a run at its I/O budgets passes, and says what it did"
 
 # One over, in each kind that has a budget: fails, naming both numbers; the
 # budget is not a tolerance.
 for over in flushes:31 dcfs_write_bytes:1; do
-	canned "COST cpu_us=400000 $(echo "$IO_OK" | sed "s/${over%%:*}=[0-9]*/${over%%:*}=${over#*:}/")"
-	run //t:io
-	[ "$RC" -ne 0 ] || fail "${over%%:*} one past its budget passed: $(cat "$WORK/stdout")"
-	grep -q "== RESULT: FAIL (over its cost budget" "$WORK/stdout" || fail "no FAIL verdict for ${over%%:*}: $(cat "$WORK/stdout")"
-	grep -q "^//t:io ${over%%:*}: count rose from [0-9]* to ${over#*:}; raising a budget is a deliberate edit of io_budgets.txt whose commit says why" "$WORK/stdout" ||
-		fail "the failure for ${over%%:*} does not name the counts: $(cat "$WORK/stdout")"
+  canned "COST cpu_us=400000 $(echo "$IO_OK" | sed "s/${over%%:*}=[0-9]*/${over%%:*}=${over#*:}/")"
+  run //t:io
+  [ "$RC" -ne 0 ] || fail "${over%%:*} one past its budget passed: $(cat "$WORK/stdout")"
+  grep -q "== RESULT: FAIL (over its cost budget" "$WORK/stdout" || fail "no FAIL verdict for ${over%%:*}: $(cat "$WORK/stdout")"
+  grep -q "^//t:io ${over%%:*}: count rose from [0-9]* to ${over#*:}; raising a budget is a deliberate edit of io_budgets.txt whose commit says why" "$WORK/stdout" ||
+    fail "the failure for ${over%%:*} does not name the counts: $(cat "$WORK/stdout")"
 done
 echo "PASS: an I/O count one past its budget fails, naming both numbers, with no tolerance"
 
@@ -223,11 +223,11 @@ canned "COST cpu_us=400000 $IO_HEAD"
 run //t:io
 [ "$RC" -eq 0 ] || fail "counts at their headroom failed: $(cat "$WORK/stdout")"
 for over in reads:52 writes:9 sectors_read:409 sectors_written:919 dcfs_reads:769 dcfs_writes:12; do
-	canned "COST cpu_us=400000 $(echo "$IO_HEAD" | sed "s/\(^\| \)${over%%:*}=[0-9]*/\1${over%%:*}=${over#*:}/")"
-	run //t:io
-	[ "$RC" -ne 0 ] || fail "${over%%:*} past its headroom passed: $(cat "$WORK/stdout")"
-	grep -q "^//t:io ${over%%:*}: count rose from [0-9]* to ${over#*:}" "$WORK/stdout" ||
-		fail "the failure for ${over%%:*} does not name the counts: $(cat "$WORK/stdout")"
+  canned "COST cpu_us=400000 $(echo "$IO_HEAD" | sed "s/\(^\| \)${over%%:*}=[0-9]*/\1${over%%:*}=${over#*:}/")"
+  run //t:io
+  [ "$RC" -ne 0 ] || fail "${over%%:*} past its headroom passed: $(cat "$WORK/stdout")"
+  grep -q "^//t:io ${over%%:*}: count rose from [0-9]* to ${over#*:}" "$WORK/stdout" ||
+    fail "the failure for ${over%%:*} does not name the counts: $(cat "$WORK/stdout")"
 done
 canned "COST cpu_us=400000 $(echo "$IO_HEAD" | sed 's/flushes=30/flushes=31/')"
 run //t:io
@@ -245,7 +245,7 @@ canned "COST cpu_us=800001 $(echo "$IO_OK" | sed 's/reads=50/reads=52/')"
 run //t:both
 [ "$RC" -ne 0 ] || fail "CPU and I/O both over passed"
 grep -q "^//t:both cpu_us: count rose" "$WORK/stdout" && grep -q "^//t:both reads: count rose" "$WORK/stdout" ||
-	fail "both failures are not reported: $(cat "$WORK/stdout")"
+  fail "both failures are not reported: $(cat "$WORK/stdout")"
 echo "PASS: CPU and I/O over their budgets are both reported"
 
 # A COST line without the I/O counts fails a target with an I/O budget.
@@ -301,24 +301,24 @@ if [ "$n" = 0 ]; then echo 1000.000000000; else echo "$((1000 + $(cat "$d/wall")
 E_DATE
 chmod +x "$WORK/clock/date"
 pressure_file() { # TOTAL_US: a /proc/pressure/cpu with that total
-	printf 'some avg10=0.00 avg60=0.00 avg300=0.00 total=%s\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n' "$1"
+  printf 'some avg10=0.00 avg60=0.00 avg300=0.00 total=%s\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n' "$1"
 }
 # run_loaded BEFORE_US AFTER_US [TARGET]: the run lasted 10 s and the counter
 # moved so; TARGET (default //t:unlisted) is the target under test.
 run_loaded() {
-	rm -f "$WORK/clock/n"
-	echo 10 >"$WORK/clock/wall"
-	pressure_file "$1" >"$WORK/psi"
-	pressure_file "$2" >"$WORK/psi.after"
-	run "${3:-//t:unlisted}" DCFS_PRESSURE_FILE="$WORK/psi" PATH="$WORK/clock:$PATH"
-	rm -f "$WORK/psi.after"
+  rm -f "$WORK/clock/n"
+  echo 10 >"$WORK/clock/wall"
+  pressure_file "$1" >"$WORK/psi"
+  pressure_file "$2" >"$WORK/psi.after"
+  run "${3:-//t:unlisted}" DCFS_PRESSURE_FILE="$WORK/psi" PATH="$WORK/clock:$PATH"
+  rm -f "$WORK/psi.after"
 }
 
 canned "COST cpu_us=1"
 run_loaded 5000000 8000000
 [ "$RC" -eq 0 ] || fail "a starved run failed (the flag is a diagnostic): $(cat "$WORK/stdout")"
 grep -q "run-qemu.sh: time: guest wall 10.0 s, .*host CPU pressure 3.0 s (30% of the wall)" "$WORK/stdout" ||
-	fail "the time line does not say the pressure: $(cat "$WORK/stdout")"
+  fail "the time line does not say the pressure: $(cat "$WORK/stdout")"
 grep -q "^run-qemu.sh: load-starved: " "$WORK/stdout" || fail "no load-starved line at 30%: $(cat "$WORK/stdout")"
 grep -q "^== RESULT: PASS .*\[load-starved\] ==" "$WORK/stdout" || fail "the verdict does not say load-starved: $(cat "$WORK/stdout")"
 echo "PASS: a run that lost 30% of its wall time to a loaded host says so in the time line and the verdict"
@@ -340,7 +340,7 @@ canned "COST cpu_us=800001"
 run_loaded 0 3000000 //t:x
 [ "$RC" -eq 0 ] || fail "a load-starved run was held to its CPU budget: $(cat "$WORK/stdout")"
 grep -q "run-qemu.sh: cost: dcfs CPU 0.800 s (not held to the budgets: host load-starved)" "$WORK/stdout" ||
-	fail "the cost line does not say the CPU budget is not held for the load: $(cat "$WORK/stdout")"
+  fail "the cost line does not say the CPU budget is not held for the load: $(cat "$WORK/stdout")"
 run_loaded 0 1900000 //t:x
 [ "$RC" -ne 0 ] || fail "a run below the starvation threshold was not held to its CPU budget"
 canned "COST cpu_us=400000 $(echo "$IO_OK" | sed 's/reads=50/reads=52/')"
@@ -380,7 +380,7 @@ run //t:both TIMEOUT=2
 [ "$RC" -ne 0 ] || fail "a wall allowance of 2 s was accepted for a budget that needs 3"
 grep -q "== RESULT: FAIL (timeout shorter than the budgets need" "$WORK/stdout" || fail "no FAIL verdict for the short timeout: $(cat "$WORK/stdout")"
 grep -q "wall allowance, 2 s, is shorter than the 3 s that //t:both's budgets need" "$WORK/stdout" ||
-	fail "the refusal does not name the allowance and what is needed: $(cat "$WORK/stdout")"
+  fail "the refusal does not name the allowance and what is needed: $(cat "$WORK/stdout")"
 if grep -q "guest memory" "$WORK/stdout"; then fail "the guest was booted although its timeout was refused"; fi
 echo "PASS: a wall allowance shorter than 3 x (CPU budget + tolerance + I/Os x 2 ms + flushes x 20 ms) is refused before the guest boots"
 
@@ -400,24 +400,24 @@ canned "COST cpu_us=400000"
 run //t:x
 [ "$RC" -eq 0 ] || fail "a default unpinned run failed: $(cat "$WORK/stdout")"
 grep -q "run-qemu.sh: CPU affinity: unpinned" "$WORK/out/serial.log" ||
-	fail "default run not logged as unpinned: $(cat "$WORK/out/serial.log")"
+  fail "default run not logged as unpinned: $(cat "$WORK/out/serial.log")"
 
 # DCFS_PIN_NON_SMT=0 is unpinned.
 run //t:x DCFS_PIN_NON_SMT=0
 [ "$RC" -eq 0 ] || fail "an unpinned run with DCFS_PIN_NON_SMT=0 failed: $(cat "$WORK/stdout")"
 grep -q "run-qemu.sh: CPU affinity: unpinned" "$WORK/out/serial.log" ||
-	fail "affinity not logged as unpinned with DCFS_PIN_NON_SMT=0: $(cat "$WORK/out/serial.log")"
+  fail "affinity not logged as unpinned with DCFS_PIN_NON_SMT=0: $(cat "$WORK/out/serial.log")"
 # DCFS_PIN_NON_SMT=1 pins QEMU to one logical CPU per physical core.
 run //t:x DCFS_PIN_NON_SMT=1
 [ "$RC" -eq 0 ] || fail "a pinned run failed: $(cat "$WORK/stdout")"
 if command -v taskset >/dev/null 2>&1 && [ -d /sys/devices/system/cpu ]; then
-	grep -q "run-qemu.sh: CPU affinity: pinned to non-SMT cores" "$WORK/out/serial.log" ||
-		fail "affinity not logged as pinned with DCFS_PIN_NON_SMT=1: $(cat "$WORK/out/serial.log")"
+  grep -q "run-qemu.sh: CPU affinity: pinned to non-SMT cores" "$WORK/out/serial.log" ||
+    fail "affinity not logged as pinned with DCFS_PIN_NON_SMT=1: $(cat "$WORK/out/serial.log")"
 fi
 
 # Synthetic sysfs parsing with DCFS_PIN_NON_SMT=1: thread siblings 0-1 and 2-3 yield 0,2.
 mkdir -p "$WORK/fake_cpu/cpu0/topology" "$WORK/fake_cpu/cpu1/topology" \
-	"$WORK/fake_cpu/cpu2/topology" "$WORK/fake_cpu/cpu3/topology"
+  "$WORK/fake_cpu/cpu2/topology" "$WORK/fake_cpu/cpu3/topology"
 printf "0-1\n" >"$WORK/fake_cpu/cpu0/topology/thread_siblings_list"
 printf "0-1\n" >"$WORK/fake_cpu/cpu1/topology/thread_siblings_list"
 printf "2-3\n" >"$WORK/fake_cpu/cpu2/topology/thread_siblings_list"
@@ -425,8 +425,8 @@ printf "2-3\n" >"$WORK/fake_cpu/cpu3/topology/thread_siblings_list"
 run //t:x DCFS_PIN_NON_SMT=1 DCFS_CPU_SYSFS="$WORK/fake_cpu"
 [ "$RC" -eq 0 ] || fail "a synthetic sysfs run failed: $(cat "$WORK/stdout")"
 if command -v taskset >/dev/null 2>&1; then
-	grep -q "run-qemu.sh: CPU affinity: pinned to non-SMT cores (0,2)" "$WORK/out/serial.log" ||
-		fail "synthetic affinity not logged as pinned to 0,2: $(cat "$WORK/out/serial.log")"
+  grep -q "run-qemu.sh: CPU affinity: pinned to non-SMT cores (0,2)" "$WORK/out/serial.log" ||
+    fail "synthetic affinity not logged as pinned to 0,2: $(cat "$WORK/out/serial.log")"
 fi
 echo "PASS: non-SMT pinning is off by default, enabled by DCFS_PIN_NON_SMT=1"
 
@@ -458,18 +458,16 @@ awk '
 		bad = 1
 	}
 	END { exit bad }' "$REAL_IO_BUDGETS" ||
-	fail "xfstests_1_test_ext4 must not have write-side lines in io_budgets.txt"
+  fail "xfstests_1_test_ext4 must not have write-side lines in io_budgets.txt"
 echo "PASS: xfstests_1_test_ext4 has no write-side lines in io_budgets.txt"
 for line in "$XFSTESTS_QUIET" "$XFSTESTS_LOADED"; do
-	canned "$line"
-	run //test/qemu:xfstests_1_test_ext4 TIMEOUT=3540
-	if [ "$RC" -ne 0 ]; then
-		fail "xfstests_1_test_ext4 over budgets: $(cat "$WORK/stdout")"
-	fi
+  canned "$line"
+  run //test/qemu:xfstests_1_test_ext4 TIMEOUT=3540
+  if [ "$RC" -ne 0 ]; then
+    fail "xfstests_1_test_ext4 over budgets: $(cat "$WORK/stdout")"
+  fi
 done
 echo "PASS: xfstests_1_test_ext4 is within budgets on quiet and loaded hosts"
-
-
 
 # The checked-in budgets: every line is OP KIND MAX with a number, the kind a
 # COST field, and no target twice (a second line would be ignored by the awk
