@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for foreman.py (Gemini lane foreman)."""
 
+import contextlib
+import io
 import json
 import os
 import stat
@@ -16,9 +18,21 @@ import foreman
 FAKE_AGY_SCRIPT = """#!/usr/bin/env python3
 import json
 import os
+import select
 import sys
 
 args = sys.argv[1:]
+
+
+def emit_text(text):
+  sys.stdout.write(
+      json.dumps({
+          "event": "step_update",
+          "step_update": {"step_type": "agent_response", "text_delta": text},
+      })
+      + "\\n"
+  )
+  sys.stdout.flush()
 
 log_file = os.environ.get("FAKE_AGY_LOG")
 if log_file:
@@ -76,7 +90,49 @@ if "--input-format" in args and "stream-json" in args:
     sys.stdout.flush()
     sys.exit(0)
 
+  if mode == "mention_first":
+    # JOB-COMPLETE inside a sentence is not the marker: stdin must stay open
+    # until the bare line. select is a hang guard only: it wakes at once if
+    # the foreman closed stdin, and times out if stdin stays open.
+    emit_text("I will print JOB-COMPLETE when done.\\n")
+    emit_text("More work.\\n")
+    ready, _, _ = select.select([sys.stdin], [], [], 5)
+    if ready:
+      emit_text("STDIN CLOSED EARLY\\n")
+    emit_text("JOB-COMPLETE\\n")
+    sys.stdin.read()
+    sys.stdout.write(
+        json.dumps({
+            "event": "result",
+            "result": {"status": "SUCCESS", "num_turns": 1},
+        })
+        + "\\n"
+    )
+    sys.stdout.flush()
+    sys.exit(0)
+
+  if mode == "wrong_field":
+    # Agent text is read from text_delta only; a text field is ignored.
+    sys.stdout.write(
+        json.dumps({
+            "event": "step_update",
+            "step_update": {
+                "step_type": "agent_response",
+                "text": "JOB-COMPLETE\\n",
+            },
+        })
+        + "\\n"
+    )
+    sys.stdout.flush()
+    ready, _, _ = select.select([sys.stdin], [], [], 2)
+    if ready:
+      emit_text("STDIN CLOSED EARLY\\n")
+    sys.exit(0)
+
   # Normal stream-json mode:
+  if mode == "garbage":
+    sys.stdout.write("this is not json\\n")
+    sys.stdout.flush()
   # 1. user_input step
   sys.stdout.write(
       json.dumps({
@@ -328,6 +384,85 @@ class ForemanTest(unittest.TestCase):
       summary = f.read()
     self.assertIn("## error", summary)
     self.assertIn("Resource exhausted / quota", summary)
+
+  def test_job_complete_inside_a_sentence_does_not_end_session(self):
+    env = {
+        "DCFS_MAIN_REPO": self.main_repo,
+        "FAKE_AGY_STREAM_MODE": "mention_first",
+    }
+    ret = foreman.run_foreman(
+        step="mention-step",
+        lane=self.lane,
+        branch="step-mention",
+        prompt_file=self.prompt_file,
+        out_dir=self.out_dir,
+        agy_bin=self.fake_agy_path,
+        environ=env,
+    )
+    self.assertEqual(ret, 0)
+    with open(os.path.join(self.out_dir, "worker.out"), "r",
+              encoding="utf-8") as f:
+      out_text = f.read()
+    self.assertIn("More work.", out_text)
+    self.assertNotIn("STDIN CLOSED EARLY", out_text)
+
+  def test_agent_text_is_read_from_text_delta_only(self):
+    worker_out = os.path.join(self.root, "wrong.out")
+    ok, err = foreman.run_stream_session(
+        agy_bin=self.fake_agy_path,
+        model="m",
+        prompt="p",
+        out_jsonl_path=os.path.join(self.root, "wrong.jsonl"),
+        out_txt_path=worker_out,
+        lane=self.lane,
+        environ={
+            **os.environ,
+            "FAKE_AGY_STREAM_MODE": "wrong_field",
+        },
+    )
+    self.assertFalse(ok)
+    self.assertIn("exited before JOB-COMPLETE", err)
+    with open(worker_out, "r", encoding="utf-8") as f:
+      self.assertNotIn("STDIN CLOSED EARLY", f.read())
+
+  def test_undecodable_agy_line_is_reported_and_skipped(self):
+    env = {
+        "DCFS_MAIN_REPO": self.main_repo,
+        "FAKE_AGY_STREAM_MODE": "garbage",
+    }
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+      ret = foreman.run_foreman(
+          step="garbage-step",
+          lane=self.lane,
+          branch="step-garbage",
+          prompt_file=self.prompt_file,
+          out_dir=self.out_dir,
+          agy_bin=self.fake_agy_path,
+          environ=env,
+      )
+    self.assertEqual(ret, 0)
+    self.assertIn(
+        "foreman: undecodable agy event: this is not json\n", stderr.getvalue()
+    )
+
+  def test_generate_summary_git_failure_propagates(self):
+    os.makedirs(self.out_dir)
+    with self.assertRaises(OSError):
+      foreman.generate_summary(
+          self.out_dir,
+          "s",
+          self.lane,
+          "b",
+          "base",
+          git_bin=os.path.join(self.root, "no-such-git"),
+      )
+
+  def test_read_usage_failure_is_reported(self):
+    text = foreman.read_usage(
+        os.path.join(self.root, "no-such-agy"), self.lane
+    )
+    self.assertIn("usage meter failed", text)
 
   def test_default_out_dir(self):
     self.assertEqual(

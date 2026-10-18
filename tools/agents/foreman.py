@@ -60,6 +60,11 @@ def setup_git_branch(
   ).strip()
 
 
+def has_job_complete_line(text):
+  """Returns True if some line of text is exactly JOB-COMPLETE once stripped."""
+  return any(line.strip() == "JOB-COMPLETE" for line in text.split("\n"))
+
+
 def read_usage(agy_bin, lane, timeout=120, environ=os.environ):
   """Reads usage via agy -p /usage and filters for Gemini Models."""
   cmd = [agy_bin, "-p", "/usage"]
@@ -73,12 +78,10 @@ def read_usage(agy_bin, lane, timeout=120, environ=os.environ):
         text=True,
         timeout=timeout,
     )
-    lines = [
-        line for line in res.stdout.splitlines() if "Gemini Models" in line
-    ]
-    return "\n".join(lines) + ("\n" if lines else "")
-  except (subprocess.SubprocessError, OSError):
-    return ""
+  except (subprocess.SubprocessError, OSError) as e:
+    return f"usage meter failed: {e}\n"
+  lines = [line for line in res.stdout.splitlines() if "Gemini Models" in line]
+  return "\n".join(lines) + ("\n" if lines else "")
 
 
 def run_stream_session(
@@ -96,8 +99,8 @@ def run_stream_session(
   Starts agy with --input-format stream-json --output-format stream-json and
   -p=, writes prompt as one input line with JOB-COMPLETE instruction appended,
   keeps stdin open, reads stdout events line by line, writes events to .jsonl
-  and agent text to .out, closes stdin when an agent_response contains
-  JOB-COMPLETE, and waits for agy to exit.
+  and agent text to .out, closes stdin when the agent text has a line that is
+  exactly JOB-COMPLETE, and waits for agy to exit.
 
   Returns (success: bool, error_message: str | None).
   """
@@ -138,7 +141,6 @@ def run_stream_session(
   proc.stdin.flush()
 
   saw_job_complete = False
-  stdin_closed = False
   error_result = None
   accumulated_response = ""
 
@@ -157,29 +159,23 @@ def run_stream_session(
         try:
           data = json.loads(line_str)
         except json.JSONDecodeError:
+          print(f"foreman: undecodable agy event: {line_str}", file=sys.stderr)
           continue
 
         event = data.get("event")
         if event == "step_update":
           su = data.get("step_update", {})
           if su.get("step_type") == "agent_response":
-            text = su.get("text_delta")
-            if text is None:
-              text = su.get("text")
-            if text is None:
-              text = su.get("content", "")
+            text = su.get("text_delta", "")
             if text:
               txt_f.write(text)
               txt_f.flush()
               accumulated_response += text
-              if "JOB-COMPLETE" in accumulated_response:
+              if not saw_job_complete and has_job_complete_line(
+                  accumulated_response
+              ):
                 saw_job_complete = True
-                if not stdin_closed:
-                  try:
-                    proc.stdin.close()
-                  except OSError:
-                    pass
-                  stdin_closed = True
+                proc.stdin.close()
         elif event == "result":
           res = data.get("result", {})
           if res.get("status") == "ERROR":
@@ -192,12 +188,7 @@ def run_stream_session(
       proc.stdout.close()
 
   proc.wait()
-
-  if not stdin_closed:
-    try:
-      proc.stdin.close()
-    except OSError:
-      pass
+  proc.stdin.close()
 
   if error_result:
     return False, f"agy result ERROR: {error_result}"
@@ -289,61 +280,37 @@ def generate_summary(
   if error_msg:
     lines.extend(["", "## error", error_msg])
 
-  commits = ""
-  try:
-    commits = subprocess.check_output(
-        [git_bin, "log", "--oneline", f"{base}..HEAD"],
-        cwd=lane,
-        text=True,
-    )
-  except (subprocess.SubprocessError, OSError):
-    pass
+  commits = subprocess.check_output(
+      [git_bin, "log", "--oneline", f"{base}..HEAD"],
+      cwd=lane,
+      text=True,
+  )
   lines.extend(["", "## commits", commits.rstrip("\n")])
 
-  uncommitted = ""
-  try:
-    uncommitted = subprocess.check_output(
-        [git_bin, "status", "--short"],
-        cwd=lane,
-        text=True,
-    )
-  except (subprocess.SubprocessError, OSError):
-    pass
+  uncommitted = subprocess.check_output(
+      [git_bin, "status", "--short"],
+      cwd=lane,
+      text=True,
+  )
   lines.extend(["", "## uncommitted", uncommitted.rstrip("\n")])
 
   review_files = []
-  if os.path.isdir(out_dir):
-    for f in os.listdir(out_dir):
-      if f.startswith("review") and f.endswith(".out"):
-        review_files.append(f)
+  for f in os.listdir(out_dir):
+    if f.startswith("review") and f.endswith(".out"):
+      review_files.append(f)
   review_files.sort()
   last_review_text = ""
   if review_files:
     latest_review = os.path.join(out_dir, review_files[-1])
-    try:
-      with open(latest_review, "r", encoding="utf-8") as rf:
-        rlines = rf.readlines()
-        last_review_text = "".join(rlines[-40:]).rstrip("\n")
-    except OSError:
-      pass
+    with open(latest_review, "r", encoding="utf-8") as rf:
+      rlines = rf.readlines()
+      last_review_text = "".join(rlines[-40:]).rstrip("\n")
   lines.extend(["", "## last review", last_review_text])
 
-  usage_before = ""
-  usage_after = ""
-  ub_path = os.path.join(out_dir, "usage.before")
-  ua_path = os.path.join(out_dir, "usage.after")
-  if os.path.exists(ub_path):
-    try:
-      with open(ub_path, "r", encoding="utf-8") as f:
-        usage_before = f.read()
-    except OSError:
-      pass
-  if os.path.exists(ua_path):
-    try:
-      with open(ua_path, "r", encoding="utf-8") as f:
-        usage_after = f.read()
-    except OSError:
-      pass
+  with open(os.path.join(out_dir, "usage.before"), "r", encoding="utf-8") as f:
+    usage_before = f.read()
+  with open(os.path.join(out_dir, "usage.after"), "r", encoding="utf-8") as f:
+    usage_after = f.read()
   quota_text = (usage_before + usage_after).rstrip("\n")
   lines.extend(["", "## quota before / after", quota_text])
 
