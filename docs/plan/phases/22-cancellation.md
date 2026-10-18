@@ -302,6 +302,20 @@ answer; dcfs-protocol decides, with the model, and records the answers in
      or absent after, as for a present name (the tri-state rule).
    - Model first: `listed` is a dentry state in `formal/dcfs.tla`, with its
      transitions under concurrent mutation, before any code.
+   - What a `listed` entry answers without a probe (russ, 2026-10-17):
+     anything needing only existence, d_ino and d_type. Plain READDIR from a
+     complete listing (page 0 again included). Proposed option, not
+     committed: a partial listing serves its recorded prefix from the cache
+     and resumes the stream on the backing from the last recorded d_off
+     (needs the backing's d_off per entry; POSIX permits entries changed
+     meanwhile to appear or not). Name-existence answers: EEXIST for
+     mkdir/mknod/create/symlink/link onto a listed or present name,
+     RENAME_NOREPLACE, and ENOENT for unlink/rmdir of a missing name in a
+     complete listing; state whether these are answered from the cache or
+     always sent to the backing (write-through makes the cache answer an
+     optimisation; check what the code does today). READDIRPLUS probes the
+     page's listed entries as it replies. Everything else needs a node ID,
+     so a LOOKUP, so a probe.
    This supersedes Q-2026-10-17-22 (plain pages record nothing); a plain
    page is no longer a non-recording page.
 5. *An abandoned or interrupted stream?* Proposed: the pages recorded stay
