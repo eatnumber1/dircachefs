@@ -67,10 +67,12 @@ The repository carries forward the history of a 2023 experiment called
   and says why (see [Responsibilities](#responsibilities-of-the-administrator)),
   and refuses to run as the root of a user namespace other than the
   host's, whose capabilities do not count where the kernel asks for them.
-  Without `CAP_FSETID` in its permitted set, a truncate, fallocate,
-  copy_file_range or write that dcfs serves itself (without FUSE
-  passthrough, until plan step 23.16 retires that path) fails with
-  `EPERM`.
+  It also refuses to run without `CAP_FSETID` in its permitted set: it
+  keeps that capability for every truncate, fallocate and copy_file_range
+  it makes for a caller (and for a write it serves itself, without FUSE
+  passthrough, until plan step 23.16 retires that path), so that the
+  kernel's decision on what they clear of setuid and setgid is the only
+  one.
   `CAP_SYS_PTRACE` is not needed (Docker's default set lacks it): without
   it, a write by root (or another process holding `CAP_FSETID`) to a
   setuid or setgid file with file capabilities clears the bits where the

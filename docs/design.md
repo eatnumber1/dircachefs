@@ -2574,7 +2574,12 @@ so the backing filesystem's own removal of setuid and setgid
 (`file_remove_privs`, do_truncate's `dentry_needs_remove_privs`) removes
 nothing: the kernel has decided on the FUSE side, with the caller's real
 capabilities (below). A daemon without `CAP_FSETID` in its permitted set
-fails them with `EPERM`. Phase 1 marks the attributes unknown and phase 3
+would fail them with `EPERM` (the `capset`'s), so `mount.dcfs` refuses to
+start without it (`backing::RequireCapFsetid`, beside the root and user
+namespace checks; `caller_capabilities_test`'s
+`MountDcfsRefusesADaemonWithoutCapFsetid`); a thread that dropped it later
+fails them so (`ATruncateFailsWhereTheDaemonLacksCapFsetid`). Phase 1 marks
+the attributes unknown and phase 3
 reads the mode back from the backing filesystem.
 
 **Stay root:**

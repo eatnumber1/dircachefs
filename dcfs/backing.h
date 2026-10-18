@@ -548,6 +548,13 @@ absl::StatusOr<FileDescriptor> ReopenFd(int fd, int flags);
 // The calling thread's supplementary groups (getgroups(2), sized first).
 absl::StatusOr<std::vector<gid_t>> GetGroups();
 
+// OK if `program` may keep CAP_FSETID for a caller (WriteFile, FallocateFd,
+// CopyFileRangeFd and SetAttr's truncate raise it again from the permitted
+// set): it is in this thread's permitted set. Otherwise FAILED_PRECONDITION,
+// for the startup to refuse with, rather than an EPERM for each of those
+// calls.
+absl::Status RequireCapFsetid(std::string_view program);
+
 // Run at startup, after InitRoot: forgets every non-source filesystem row,
 // whether or not its filesystem is still mounted.
 absl::Status StartupPurge(Context &ctx);

@@ -256,6 +256,19 @@ TEST(CallerCapabilitiesTest, MountDcfsRefusesAChildUserNamespace) {
               IsOkAndHolds(HasSubstr("must run in the init user namespace")));
 }
 
+// A daemon without CAP_FSETID in its permitted set could not keep it for a
+// truncate, fallocate, copy_file_range or fallback write (backing.cc's
+// AsCallerKeepingCapFsetid) and would fail each with EPERM: mount.dcfs
+// refuses to start instead.
+TEST(CallerCapabilitiesTest, MountDcfsRefusesADaemonWithoutCapFsetid) {
+  ASSERT_OK_AND_ASSIGN(MountSpec spec, SpareMount("nofsetid"));
+  EXPECT_THAT(InChild([&]() -> absl::StatusOr<std::string> {
+                RETURN_IF_ERROR(syscalls::prctl<PR_CAPBSET_DROP>(CAP_FSETID));
+                return StartOutcome(spec);
+              }),
+              IsOkAndHolds(HasSubstr("needs CAP_FSETID")));
+}
+
 class CallerCapabilitiesEnvironment : public ::testing::Environment {
  public:
   void SetUp() override { ASSERT_THAT(Prepare(), IsOk()); }

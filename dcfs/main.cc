@@ -662,6 +662,7 @@ int MountHelperMain(int argc, char *argv[]) {
   absl::Status checked = options.status();
   if (checked.ok()) checked = RequireRoot(kMountHelperName);
   if (checked.ok()) checked = RequireInitUserNamespace(kMountHelperName);
+  if (checked.ok()) checked = backing::RequireCapFsetid(kMountHelperName);
   if (checked.ok() && args->mount_namespace.has_value()) {
     checked = MarkUsageError(UnimplementedErrorBuilder()
                              << "Option -N is not supported");

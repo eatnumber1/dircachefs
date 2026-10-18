@@ -262,5 +262,15 @@ TEST_F(BackingFaultTest, AFallocateFailsWhereCapgetFails) {
   EXPECT_EQ(st.st_size, 0);
 }
 
+// The startup check reads the same capabilities: where capget(2) fails, it
+// fails with capget's errno, not with a verdict on CAP_FSETID.
+TEST_F(BackingFaultTest, TheCapFsetidCheckFailsWhereCapgetFails) {
+  EXPECT_THAT(backing::RequireCapFsetid("dcfs"), IsOk());
+  GetFaultState().capget_errno = EACCES;
+  absl::Status checked = backing::RequireCapFsetid("dcfs");
+  GetFaultState().capget_errno = 0;
+  EXPECT_EQ(StatusToErrno(checked), EACCES) << checked;
+}
+
 }  // namespace
 }  // namespace dcfs

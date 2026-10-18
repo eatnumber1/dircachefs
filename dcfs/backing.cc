@@ -2117,6 +2117,16 @@ absl::StatusOr<std::vector<gid_t>> GetGroups() {
   }
 }
 
+absl::Status RequireCapFsetid(std::string_view program) {
+  ASSIGN_OR_RETURN(syscalls::CapabilitySets sets, syscalls::capget());
+  if (sets.permitted.Has(CAP_FSETID)) return absl::OkStatus();
+  return FailedPreconditionErrorBuilder()
+         << program
+         << " needs CAP_FSETID in its permitted set: a caller's truncate, "
+            "fallocate and copy_file_range keep it, so that the kernel's "
+            "decision on what they clear of setuid and setgid is the only one";
+}
+
 absl::Status FsyncDirFd(int fd, bool datasync) {
   ASSIGN_OR_RETURN(FileDescriptor dir,
                    ReopenFd(fd, O_RDONLY | O_DIRECTORY | O_CLOEXEC));
