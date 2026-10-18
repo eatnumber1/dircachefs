@@ -21,7 +21,7 @@ does not pass a `model` override, so the type's model and effort apply.
 | `dcfs-reviewer` | Opus | xhigh | read-only review of hard steps and of the plan |
 | `dcfs-style-reviewer` | Sonnet (Opus for judgement-heavy reshaping steps) | high | read-only style review of every step's diff before merge, against `docs/style.md` incl. 1.9's comment rules (russ, 2026-10-12/16) |
 
-**The orchestrator oversees; it does not do the work** (russ, 2026-10-06).
+<a id="rule-orchestrator-delegates"></a>**The orchestrator oversees; it does not do the work** (russ, 2026-10-06).
 It decides what to do, dispatches subagents, reviews their work, merges,
 keeps the plan current and assists russ. Hands-on work (investigation,
 fixes, long test runs, doc rewrites) goes to a subagent, even when small.
@@ -40,9 +40,9 @@ up one row (implementer to protocol, mechanical to implementer).
 
 ## Working on russ's machine
 
-- Do the work in this repository: plan, notes and logs go under
+- <a id="rule-repo-is-the-notebook"></a>Do the work in this repository: plan, notes and logs go under
   `docs/plan/`, not in session scratch space or personal memory.
-- Lane checkouts for agents: `~/Sources/dircachefs-lanes/lane-{1,2}`
+- <a id="rule-no-worktree-isolation"></a>Lane checkouts for agents: `~/Sources/dircachefs-lanes/lane-{1,2}`
   (`docs/plan/process.md`). Do not use the agent tool's `isolation:
   "worktree"`: it resolved to the home-directory dotfiles repository on
   this machine and triggered ssh prompts.
@@ -50,18 +50,18 @@ up one row (implementer to protocol, mechanical to implementer).
   directly, so `sg kvm` is no longer needed anywhere (russ, 2026-10-11). A server
   started without KVM access makes every later test fall back to slow
   emulation: run `bazel shutdown` first when switching.
-- Never leave a background polling loop (`while pgrep -f ...; do sleep`,
+- <a id="rule-no-polling-loops"></a>Never leave a background polling loop (`while pgrep -f ...; do sleep`,
   `until grep -q MARKER log; do sleep`): the pattern matches the loop's
   own command line, or the marker never arrives once the run it waits for
   dies. About 90 such orphans were found on 2026-10-07. Wait in the
   foreground with the tool's timeout and rerun instead.
-- Never `pkill -f` / `pgrep -f` with a pattern that also appears in your
+- <a id="rule-no-pkill-self"></a>Never `pkill -f` / `pgrep -f` with a pattern that also appears in your
   own command line: it matches (and kills) your own shell. Prefer
   `pgrep -f '^bazel\(name\)'` anchored patterns or kill by PID.
-- Agents' shells start in the main checkout. An agent must `cd` into its
+- <a id="rule-cd-into-lane"></a>Agents' shells start in the main checkout. An agent must `cd` into its
   lane at the start of every command; a forgotten `cd` once left a
   downloaded fakeroot source tree in the main checkout (2026-10-05).
-- **Docker on this machine is production** (russ, 2026-10-06). Never stop,
+- <a id="rule-docker-is-production"></a>**Docker on this machine is production** (russ, 2026-10-06). Never stop,
   restart, remove, prune or modify containers, images, volumes or networks
   you did not create; never run `docker system prune`, `docker container
   prune`, `docker image prune`, `docker volume prune`, `docker network
@@ -73,7 +73,7 @@ up one row (implementer to protocol, mechanical to implementer).
 - The shell is zsh with `noclobber` (overwrite with `>|`); `make` and
   `diff` are broken shell functions on the command line (use `command
   make`, `command diff`).
-- Commit to `main` at sensible points without asking (russ, 2026-10-05);
+- <a id="rule-commit-to-main"></a>Commit to `main` at sensible points without asking (russ, 2026-10-05);
   subagents commit on their step branches. Never push.
 - You must not lower the coverage baseline. That's why it exists. Only ever
   increase it (russ, 2026-10-11).

@@ -78,6 +78,7 @@ Non-goals:
   [Identity model](#identity-model)).
 - **Unprivileged operation.** dcfs runs as root, full stop.
 
+<a id="rule-behave-like-backing"></a>
 ### Behave like the backing, only faster
 
 The principle behind every operation: with dcfs out of the loop, what does
@@ -162,6 +163,7 @@ A claim about what the backing, the kernel or POSIX promises cites its
 source where it is written, and a native differential test backs it where
 it can be measured (`docs/style.md` 1.12).
 
+<a id="rule-bounded-memory"></a>
 ### Bounded memory
 
 A request's working memory is O(1) in the size of the files and
@@ -194,7 +196,7 @@ the slope at zero.
   `flock(2)` on the database file for the life of the process. SQLite
   would serialize two daemons' transactions but not their three-phase
   protocols or their in-memory state.
-- **Root.** dcfs needs `CAP_DAC_READ_SEARCH` for `open_by_handle_at`,
+- <a id="rule-root-required"></a>**Root.** dcfs needs `CAP_DAC_READ_SEARCH` for `open_by_handle_at`,
   `CAP_SYS_ADMIN` to mount and to register passthrough backing files, and
   `CAP_SETUID`/`CAP_SETGID` to take on callers' filesystem credentials.
   There are no fallback paths for running without them (for example, no
@@ -406,6 +408,7 @@ owning handle encoding in the kernel, which is not needed: a wipe yields
 `ESTALE` (the new row for a reissued id has a fresh random generation),
 which is safe.
 
+<a id="rule-fds-never-paths"></a>
 ## File descriptors and handles, never paths
 
 After startup the daemon holds no path strings. This is what makes
@@ -1727,7 +1730,7 @@ readdirs per directory.
 Within one thread, nothing can interleave with a request, so today every
 request sees the cache in a consistent state between its own steps.
 
-**No interim compromises toward the coroutine design** (russ, 2026-09-27,
+<a id="rule-no-interim-compromises"></a>**No interim compromises toward the coroutine design** (russ, 2026-09-27,
 when the project was planned): the code today is simple, synchronous and
 single-threaded, and reviewable in small chunks. It does not take on
 complexity now for the sake of the planned coroutines and io_uring
@@ -1777,6 +1780,7 @@ threads (coroutines with a thread per queue) would let the rest of the
 filesystem go on, and then only for requests that touch no inode the held
 one has unknown.
 
+<a id="rule-coroutine-ready-rules"></a>
 ### Rules that hold now so that coroutines need no redesign
 
 The planned architecture (not built) runs requests as C++ coroutines over
@@ -1859,6 +1863,7 @@ flight makes every attempt fail at once (`EAGAIN`, which `rename(2)` and
 the overlapping mutation ends" there. The
 status macros embed `return` and will need `co_return` variants.
 
+<a id="rule-design-cancellation"></a>
 ## Cancellation
 
 **Goal** (Phase 22, russ 2026-10-06): a process interrupted while it waits
@@ -2608,6 +2613,7 @@ contents bypass the cache.
   backstop for what the backing filesystem does on its own. LSM relabeling
   and EVM/IMA rewrites are not covered.
 
+<a id="rule-design-names-are-bytes"></a>
 ## File names are bytes
 
 A name (a directory entry, a symlink target, an xattr name) is a sequence
@@ -3067,6 +3073,7 @@ the call chain added.
 
 ## Test strategy
 
+<a id="rule-design-everything-in-qemu"></a>
 ### Everything runs in QEMU
 
 dcfs requires root, real `open_by_handle_at`, `FS_IOC_GETFSUUID` and FUSE
@@ -3083,6 +3090,7 @@ helpers are fakes, never mocks, and live in test files or `testonly`
 targets; syscall fault injection uses link-time `--wrap` fakes, so that
 production code carries no test hooks.
 
+<a id="rule-design-test-first"></a>
 ### Test-first
 
 Every bug found (by audits, review or test failures) gets a regression
@@ -3091,6 +3099,7 @@ Where a bug cannot be reproduced deterministically (coroutine-only
 interleavings, a real power loss), the closest honest test is written and
 its limits are stated.
 
+<a id="rule-runtime-invariant-checks"></a>
 ### Runtime invariant checks
 
 The rules this document states in prose are also checked while tests run
@@ -3309,6 +3318,7 @@ None of this is built.
 - **ZFS**, once OpenZFS ships `FS_IOC_GETFSUUID`. A test gated on
   `DCFS_TEST_ZFS_PATH` documents today's `ENOTTY` and is meant to flip.
 
+<a id="rule-design-protocol-model"></a>
 ## The protocol model
 
 `formal/dcfs.tla` is a TLA+ model of the write-through protocol described
@@ -3442,6 +3452,7 @@ reports its outcome (`IdentityResolved`), and nodeids' identity traces
 from the forged-request harness are validated against it
 (`formal/README.md`, "The identity model").
 
+<a id="rule-fuse-only-fallback"></a>
 ## FUSE-only machinery is a fallback with an expiry (russ, 2026-10-11)
 
 Some of what dcfs ships exists only because it is a FUSE daemon standing
@@ -3470,6 +3481,7 @@ descriptor). Production mounts the disk by fstab at a raw path and serves it
 from there (the native-type capture that once mounted the block device itself
 was deleted in plan step 15.11).
 
+<a id="rule-link-time-fault-injection"></a>
 ## Syscall fault injection stays link-time (russ, 2026-10-16)
 
 On 2026-10-12 russ approved replacing the link-time `-Wl,--wrap` fakes with

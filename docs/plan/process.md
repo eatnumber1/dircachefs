@@ -6,7 +6,7 @@ process (its waves and file ownership table) is in `history.md`.
 
 ## Roles
 
-- **Orchestrator**: the strongest available model, in a long-running
+- <a id="rule-roles"></a>**Orchestrator**: the strongest available model, in a long-running
   session with russ. It does not write step code. It prepares each step,
   dispatches it to a subagent, reviews every diff, runs the tests, merges,
   keeps `README.md`'s status table and `log.md` current, and talks to
@@ -25,7 +25,7 @@ process (its waves and file ownership table) is in `history.md`.
 
 ## A step, start to finish
 
-1. **Prepare.** Steps run in one of two long-lived lane clones,
+1. <a id="rule-lane-clones"></a>**Prepare.** Steps run in one of two long-lived lane clones,
    `~/Sources/dircachefs-lanes/lane-1` and `lane-2` (at most two agents
    run at once). Each is a separate `git clone` of `~/Sources/dircachefs`
    (its `origin` is that local path, so fetching never touches the
@@ -40,7 +40,7 @@ process (its waves and file ownership table) is in `history.md`.
    create a new checkout per step. (Not the agent tool's automatic
    worktree isolation: on russ's machine it picked the home-directory
    dotfiles repository and triggered ssh prompts.)
-2. **Dispatch.** The subagent's prompt contains: the worktree path and
+2. <a id="rule-dispatch-prompt"></a>**Dispatch.** The subagent's prompt contains: the worktree path and
    branch; the commit-subject prefix (the plan step, `N.M:`; never a
    review-finding label: eight `N4:` commits reached main on 2026-10-08
    and the CI subject gate rightly failed the push); the step's text
@@ -55,10 +55,10 @@ process (its waves and file ownership table) is in `history.md`.
 3. **Test first.** The agent writes the step's tests, runs them, and
    records them failing on the unchanged code (quoted output), then makes
    them pass.
-4. **Report.** The agent ends with: a diff summary, the test commands it
+4. <a id="rule-agent-report"></a>**Report.** The agent ends with: a diff summary, the test commands it
    ran with results (including the failing-first run), coverage of the
    code it added (from Phase 7), and any deviation from the plan.
-5. **Review** (the `dcfs-style-reviewer` subagent plus the orchestrator,
+5. <a id="rule-step-review"></a>**Review** (the `dcfs-style-reviewer` subagent plus the orchestrator,
    in the lane; and the Opus `dcfs-reviewer` too for protocol, identity
    and oracle steps): before a step merges, its full diff is reviewed by
    `dcfs-style-reviewer` (russ, 2026-10-16: the per-step review he asked
@@ -114,7 +114,7 @@ process (its waves and file ownership table) is in `history.md`.
      a gate without one is a review finding.
    Fixes go back to the same agent with `SendMessage` (it keeps its
    context, which is cheaper than a new agent).
-6. **Merge.** In the lane: rebase the step branch on `origin/main` and
+6. <a id="rule-merge-procedure"></a>**Merge.** In the lane: rebase the step branch on `origin/main` and
    rerun the tests. Run `.github/ci/commit_subjects.sh origin/main..<branch>`
    in the lane (the CI subject gate; two pushed runs were lost to a
    `N4:` and a `12.5 review:` subject before this line existed). Then, in
@@ -148,11 +148,11 @@ process (its waves and file ownership table) is in `history.md`.
 
 ## Running tests
 
-- Run Bazel with access to `/dev/kvm`. The login session has the `kvm` group
+- <a id="rule-bazel-kvm"></a>Run Bazel with access to `/dev/kvm`. The login session has the `kvm` group
   directly, so `sg kvm` is no longer needed anywhere (russ, 2026-10-11). A
   Bazel server started without KVM silently falls back to emulation:
   `bazel shutdown` first when switching.
-- Never pipe Bazel through `tail`/`head` in an `&&` chain.
+- <a id="rule-no-pipe-bazel"></a>Never pipe Bazel through `tail`/`head` in an `&&` chain.
 - Until Phase 6 lands: `bazel test //...` runs everything, about 30
   minutes for the full ext4/xfs/btrfs matrix; `bazel test //dcfs:...` or
   single targets during development; `--config=asan` at the end of each
@@ -160,14 +160,14 @@ process (its waves and file ownership table) is in `history.md`.
 - From Phase 6: `--config=fast` while developing, `--config=presubmit`
   before review, everything (CI) before a phase is marked done.
 - From Phase 5, CI must be green on the merged commit.
-- Coverage baseline (russ, 2026-10-08, 2026-10-11): the gate fails on drops only; a
+- <a id="rule-coverage-baseline"></a>Coverage baseline (russ, 2026-10-08, 2026-10-11): the gate fails on drops only; a
   rise prints the suggested bump. The orchestrator bumps
   `dcfs/coverage_baseline.txt` to a higher value when coverage rises.
   **Never lower the coverage baseline** (russ, 2026-10-11: "You must not lower
   the coverage baseline. That's why it exists. Only ever increase it."). If a
   change would drop coverage, write tests to keep or raise the floor; never
   lower `dcfs/coverage_baseline.txt`.
-- Push points (russ, 2026-10-08): while development is fast, a push point
+- <a id="rule-push-points"></a>Push points (russ, 2026-10-08): while development is fast, a push point
   needs every merged branch green on its tiers and nothing more; CI catches
   the sanitizer-only, coverage and large-tier failures. After launch, when
   development slows, russ wants green pushes: a push point becomes a sync
@@ -175,6 +175,7 @@ process (its waves and file ownership table) is in `history.md`.
   full suite, asan, ubsan, the coverage gate, the mutation tool's changed
   mode) via one script that calls the same `.github/ci/*.sh` scripts.
 
+<a id="rule-sanitizers-do-not-block"></a>
 ## Sanitizer runs do not block steps (russ, 2026-10-06)
 
 ASan (and later UBSan) suites are slow, so they are not part of a step's
@@ -197,7 +198,7 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
 - Phases run in order; the status table in `README.md` is the source of
   truth. Steps inside a phase may run in parallel only if they touch
   disjoint files.
-- At most two building agents (Bazel builds or QEMU tests) plus two
+- <a id="rule-parallelism-and-budget"></a>At most two building agents (Bazel builds or QEMU tests) plus two
   non-building agents (reviews, docs, drafting) at a time: the dev
   machine (4 CPUs, 11 GB of RAM) is the limit, not tokens (Claude Max
   since 2026-10-05). Amended 2026-10-09 after six lanes ran for a day:
@@ -228,9 +229,9 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   `docs/plan/notes/time-analysis-2026-10-18.md` section 7). Prefer `SendMessage` follow-ups to
   new agents. Shut down agents, background loops and Bazel servers that
   are no longer needed.
-- If a step needs more than about three agent runs to land, pause and tell
+- <a id="rule-pause-after-three-runs"></a>If a step needs more than about three agent runs to land, pause and tell
   russ: something is probably wrong with the step.
-- **No backward compatibility until the first deployment** (russ, several
+- <a id="rule-no-backcompat"></a>**No backward compatibility until the first deployment** (russ, several
   times, 2026-10-10/11: "we've never shipped dcfs", "we haven't shipped. No
   need for back-compat"): a removed option, format or behaviour is simply
   gone, with no shim, deprecation message, migration or test of the old
@@ -245,11 +246,11 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   passing under the coverage gate; what pre-ship schema changes skip is
   writing a migration for the real previous version, not the tests of the
   mechanism.
-- **The order of work is `README.md`'s Queue section** (russ, 2026-10-11),
+- <a id="rule-order-of-work"></a>**The order of work is `README.md`'s Queue section** (russ, 2026-10-11),
   not the phase numbers: the spare-disk trial first, then budgets, the
   slowness, the atomicity contract, then the rest by what the trial
   teaches. New phases are frozen; a new idea goes into the parked list.
-- **The agent that wrote the code runs the style checks on it** (russ,
+- <a id="rule-agent-runs-style-checks"></a>**The agent that wrote the code runs the style checks on it** (russ,
   2026-10-10: "Make sure coders run clang-tidy before being shut down.
   Don't want to lose their context!"). Every coding agent's last act
   before its report is `bazel test --config=fast //tools/...` (which holds
@@ -258,7 +259,7 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   allowlist entries are for pre-existing code only. The orchestrator
   sends review and CI findings back to the same agent with
   `SendMessage`, not to a fresh one, for the same reason.
-- **Style review: the orchestrator decides, russ is asked rarely** (russ,
+- <a id="rule-style-review-decides"></a>**Style review: the orchestrator decides, russ is asked rarely** (russ,
   2026-10-10, after the first batch of six: "Use the style guidance you
   have, and if something's really unclear, I need more context than these
   questions are giving me. Use your judgement, but you're bringing me too
@@ -285,7 +286,7 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   in a lane after it rebases onto 7.1b (and again onto 7.1c, whose sysroot change re-extracts it) is `bazel fetch --repo=@dcfs_llvm`
   run as a background command (the Bash tool's `run_in_background`, not a
   polling loop), and nothing else runs in that lane until it returns.
-- zsh with `noclobber`: overwrite files with `>|`. `make` and `diff` are
+- <a id="rule-zsh-noclobber"></a>zsh with `noclobber`: overwrite files with `>|`. `make` and `diff` are
   broken shell functions on the command line: use `command make`,
   `command diff` (scripts with a shebang are unaffected).
 - Until Phase 3 lands, the test kernel is built from `~/Sources/linux`
@@ -294,17 +295,18 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
 
 ## Standing instructions from russ (as of 2026-10-05)
 
-- Stop and report on any permission denial; do not work around it.
-- Do not modify `~/Sources/linux`, `~/Sources/libfuse` or
+- <a id="rule-stop-on-denial"></a>Stop and report on any permission denial; do not work around it.
+- <a id="rule-dont-modify-linux"></a>Do not modify `~/Sources/linux`, `~/Sources/libfuse` or
   `~/Sources/fuse-generation-qemu` (the kernel patch's test suite, shared
   with reviewers) unless asked.
-- Never push, open pull requests or send email; russ does that.
-- Confirm destructive actions first.
-- Keep a list of failures and open questions for russ in `log.md`
+- <a id="rule-never-push"></a>Never push, open pull requests or send email; russ does that.
+- <a id="rule-confirm-destructive"></a>Confirm destructive actions first.
+- <a id="rule-needs-russ-list"></a>Keep a list of failures and open questions for russ in `log.md`
   ("Needs russ"), so russ can catch up after being away.
-- When russ is away, keep going with whatever does not need russ, and
+- <a id="rule-keep-going-when-away"></a>When russ is away, keep going with whatever does not need russ, and
   collect what does.
 
+<a id="rule-orchestrator-context"></a>
 ## The orchestrator's context is the expensive one (russ, 2026-10-17)
 
 Every orchestrator tool call re-sends its whole conversation. So: the
@@ -318,25 +320,25 @@ orchestrator's context without losing the working state.
 
 How that works in practice (russ, 2026-10-17 and 2026-10-18; each was a
 slip he caught):
-- **Queue small plan and doc edits; send one clerk batch at a natural
+- <a id="rule-clerk-batches"></a>**Queue small plan and doc edits; send one clerk batch at a natural
   pause** ("Are you remembering to use the clerk to keep your token use
   low?", 2026-10-17). Only an edit that unblocks a running agent goes out at
   once. `dashboard_lanes.py clerk-queue add "<file>: <change>"` queues an
   item; the Stop hook asks for a batch when no subagent runs or at five
   items; `clerk-queue drain` prints the brief for one dcfs-mechanical
   dispatch.
-- **A question that needs more than one lookup goes to one Explore agent
+- <a id="rule-explore-for-lookups"></a>**A question that needs more than one lookup goes to one Explore agent
   with all the sub-questions at once** ("Remember to use subagents to keep
   tool calls from wasting lots of tokens copying context!", 2026-10-18),
   even when each grep looks quick; the orchestrator only composes the answer
   from its report. CI log digging and any multi-command lookup go to one
   Haiku or Explore agent.
-- **A status update is answered from known state**, without new tool calls
+- <a id="rule-status-from-known-state"></a>**A status update is answered from known state**, without new tool calls
   unless something changed (a background `gh run watch` already reports CI).
   When the orchestrator's context is very large, it proposes a handoff and
   compaction at the next natural pause (russ, 2026-10-18: "Are you still
   using subagents for work, to save on your expensive context transfers?").
-- **Any chore of more than one tool call goes to a Haiku subagent** (russ,
+- <a id="rule-chores-to-subagents"></a>**Any chore of more than one tool call goes to a Haiku subagent** (russ,
   2026-10-18: "Use subagents!"). One cheap command, such as a
   single quota read before a dispatch, stays inline: delegating it costs a
   dispatch turn plus the clerk's tokens (russ, 2026-10-18: "Doesn't the
@@ -349,27 +351,27 @@ slip he caught):
 
 Standing preferences russ gave in conversation, collected here from the
 orchestrator's notes (2026-10-18) so that they are in the repository:
-- **File changes go through the Edit or Write tool, not a script** (russ,
+- <a id="rule-edit-tool-not-scripts"></a>**File changes go through the Edit or Write tool, not a script** (russ,
   2026-10-09: "In the future, can you use your edit tool rather than a
   python script to edit files? It's prettier and easier for me to review in
   the Claude webui."). Every file the orchestrator changes itself (plan
   bookkeeping, the dashboard page, memory notes) is one Edit or Write call
   per file; Bash is for commands (git, gh, bazel, grep). This overrides any
   harness hint to prefer Bash for edits.
-- **Until we ship, a red CI is not a problem** (russ, 2026-10-17, declining
+- <a id="rule-red-ci-until-ship"></a>**Until we ship, a red CI is not a problem** (russ, 2026-10-17, declining
   a pre-push run of the large tests a change reaches: "No. Until we ship, a
   red CI is not a problem."). The large and enormous tiers run in CI and
   failures there are fixed forward; do not propose pre-push or pre-merge
   gates for them, do not hedge a "push or not" answer on untested large
   tests: say push, watch CI and dispatch fixes for any failure. Revisit when
   dcfs ships.
-- **Review is the bottleneck, and tests are placed accordingly** (russ,
+- <a id="rule-review-is-bottleneck"></a>**Review is the bottleneck, and tests are placed accordingly** (russ,
   2026-10-18: "Code review is expensive in tokens, and that's our real
   bottleneck"): a test moves to a later CI wave only if it is not catching
   bugs before review (step 5.13). The CI cache is large and not duplicated
   (russ, 2026-10-18: "I'd prefer a large CI cache to no cache hits, as long
   as there's no duplication."; step 5.6).
-- **When a ratified principle settles a question, rule; do not ask**
+- <a id="rule-principle-settles-question"></a>**When a ratified principle settles a question, rule; do not ask**
   (russ, 2026-10-17, on Q-19 (atomic `O_TRUNC`), which "behave like the
   backing" settles: "Yeah! Why isn't this obvious and therefore something
   you automatically answer?"). Before putting a question to russ, check the
@@ -378,13 +380,13 @@ orchestrator's notes (2026-10-18) so that they are in the repository:
   report it as decided. A recorded code comment giving a convenience reason
   is not a reason to ask. Ask only when principles conflict, none applies
   or the cost is out of proportion, and say which.
-- **Propose formal-methods work unprompted** (russ, 2026-10-09: "The TLA+
+- <a id="rule-formal-methods-proposals"></a>**Propose formal-methods work unprompted** (russ, 2026-10-09: "The TLA+
   validates itself many times over. I want to expand use of formal methods",
   and "If you come up at any point with ideas for how to do even more with
   formal methods, let me know."). When a design question, a bug or a review
   turns up something a model could judge, propose the model step first and
   tell russ without being asked.
-- **Track review findings so trends show** (russ, 2026-10-17 and
+- <a id="rule-track-review-findings"></a>**Track review findings so trends show** (russ, 2026-10-17 and
   2026-10-18: "I'd like to start collecting data on issues found during code
   review, so we can look for trends." and "Remember to track reviewer
   findings so we can look for patterns."). When any review reports (Claude
@@ -395,20 +397,21 @@ orchestrator's notes (2026-10-18) so that they are in the repository:
   row); at merge, fill each finding's outcome (fixed with a commit,
   declined, or question). `review_findings.py summary` reports patterns,
   which drive which style rules to mechanize (25.39).
-- **Choose the effort on each dispatch** (russ, 2026-10-17, asking why
+- <a id="rule-effort-per-dispatch"></a>**Choose the effort on each dispatch** (russ, 2026-10-17, asking why
   every lane ran at high effort: the agent type's default had decided it).
   Pass `effort` explicitly: medium for reading, audits and verification,
   high only for protocol work and puzzling failures.
-- **The trailer names the agent that wrote the commit** (russ, 2026-10-18:
+- <a id="rule-coauthor-trailer"></a>**The trailer names the agent that wrote the commit** (russ, 2026-10-18:
   "Whichever model is the author should be listed as co-author."). A brief
   says "end with a Co-Authored-By trailer naming your model" (plus the
   session line), and never pastes a fixed trailer. The orchestrator's own
   commits carry its model (style 7).
-- **When borrowing files from another of russ's repositories, copy the files
+- <a id="rule-borrowed-files-in-full"></a>**When borrowing files from another of russ's repositories, copy the files
   in full; do not use git subtrees** (russ, 2026-09-27). `~/Sources/
   fuse-generation-qemu` stays untouched (see the standing instructions
   above).
 
+<a id="rule-agent-timers"></a>
 ## Timers (russ, 2026-10-17)
 
 Timers in the codebase stay banned (style 1.11; the dashboard tool's hourly
@@ -417,6 +420,7 @@ timers: a self-scheduled wakeup at a quota reset or a check-back on a long
 job is fine (russ, 2026-10-17: "The timer ban only applies inside our
 codebase. Not to agents themselves.").
 
+<a id="rule-questions-and-rulings"></a>
 ## Questions for russ, and rulings (russ, 2026-10-17)
 
 russ: "you can make rulings on cases that are very obvious, and also you
@@ -479,7 +483,7 @@ reading. Not for writing code, nor for subtle protocol judgement.
    a medium diff spent 56% of that pool's week and all of its five-hour
    window, and was cut off before writing anything; the pool cannot carry
    an Opus review. Use it only for small Sonnet jobs; reviews go to Argon.
-4. Safety: agy is a weaker model with shell access. Write work is allowed
+4. <a id="rule-agy-write-jobs"></a>Safety: agy is a weaker model with shell access. Write work is allowed
    (russ, 2026-10-17: "Gemini isn't so bad it must be only read-only.
    Feel free to use it. But check its work and keep an eye on it."), under
    the same rules as a Claude subagent: its own lane checkout and step
@@ -546,7 +550,7 @@ reading. Not for writing code, nor for subtle protocol judgement.
 8. Gemini's findings are treated as leads, not facts: a claim that would
    change the plan is re-verified (12.18 is the precedent: its "not
    usable" verdict was wrong).
-9. Route before each dispatch (russ, 2026-10-17: "Also are you remembering
+9. <a id="rule-route-before-dispatch"></a>Route before each dispatch (russ, 2026-10-17: "Also are you remembering
    to use Gemini when appropriate?", and 2026-10-18: "remember to use
    Gemini and 'agy Claude/GPT' too."). Ask "could Gemini Flash do this?" and
    consider the four routes: a Claude Code subagent, agy Gemini, agy Claude
@@ -556,7 +560,7 @@ reading. Not for writing code, nor for subtle protocol judgement.
    protocol and model work, reviews (Flash reviews proved too lenient) and
    judgement-heavy design. A job that needs Claude-grade judgement but not
    the session's tools can run through agy instead of a Claude Code subagent.
-10. Invoking agy (learned 2026-10-18). Use `agy --model <id> --mode plan
+10. <a id="rule-agy-invocation"></a>Invoking agy (learned 2026-10-18). Use `agy --model <id> --mode plan
    -p="$(cat prompt.txt)"`: the prompt must be attached to `-p` with `=`, or
    a bare `-p --model` swallows the flag. ALWAYS run agy with the Bash tool's
    `run_in_background: true`: a foreground call blocked the session for
@@ -566,7 +570,7 @@ reading. Not for writing code, nor for subtle protocol judgement.
    `tools/agents/foreman.py` (stream-json, held open until JOB-COMPLETE) with
    the model told to run everything in the foreground. `--mode auto` is not
    available on this account.
-11. Don't start work you can't finish (russ, 2026-10-18, offering the last of
+11. <a id="rule-dont-start-unfinishable"></a>Don't start work you can't finish (russ, 2026-10-18, offering the last of
    the week's Gemini quota): size a job to the remaining pool. With a few
    points left, pick a small bounded job (a short review), not a large one
    that could die midway. agy Opus at high effort drains its pool in minutes:
@@ -580,7 +584,7 @@ means Claude quota is more important, and you need to make sure we don't run
 out of Claude before Gemini. Plan ahead!" and "unspent Claude quota is
 wasted money." So both are spent to the end of their weeks, Claude never
 first.
-- **Readings.** Claude: `timeout 90 python3 -I tools/agents/claude_usage.py`
+- <a id="rule-live-quota-readings"></a>**Readings.** Claude: `timeout 90 python3 -I tools/agents/claude_usage.py`
   (the session and weekly panels of `/usage`, through a pseudo-terminal;
   approximate: local sessions only). Gemini, and the Claude/GPT pool inside
   Antigravity: `agy -p "/usage"`. Read both before each dispatch; log a
@@ -589,7 +593,7 @@ first.
   stale hourly readings?"): `python3 tools/agents/dashboard_lanes.py quota`
   reads Claude and agy/Gemini at once and updates `quota.json` and
   `budget.json` for the dashboard. A live read is event-driven, not a timer.
-- **The Claude plan is the scarce resource** (the orchestrator runs on it and
+- <a id="rule-pace-claude-quota"></a>**The Claude plan is the scarce resource** (the orchestrator runs on it and
   every coding agent does). Pace it so the week ends near 95%, never empty
   before its reset. russ's own interactive use outside the project happens
   throughout the week (russ, 2026-10-16: "save a little bit (maybe 5-10%?)
@@ -625,7 +629,7 @@ first.
   delegated, Opus subagents only for protocol, identity, oracle and
   security-relevant work, Sonnet for routine implementation, Haiku for
   mechanical batches.
-- **Move every read-only job off the Claude plan when a pool allows it:**
+- <a id="rule-readonly-jobs-off-claude"></a>**Move every read-only job off the Claude plan when a pool allows it:**
   reviews, investigations and audits go to agy's Claude/GPT pool first (same
   models, separate quota), then to Gemini 4 Argon (whole-repository reading),
   then to Gemini 3.8 Flash (volume reading). Only writing, and judgement the
