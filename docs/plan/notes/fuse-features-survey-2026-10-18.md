@@ -15,7 +15,7 @@ differ, the plan governs:
 ---
 
 
-This document evaluates optional FUSE features from the Linux kernel (`include/uapi/linux/fuse.h`, Linux v7.3-rc4) and `libfuse` (`include/fuse_common.h` 3.18.2) for dcfs, a write-through metadata cache over local ext4/xfs/btrfs backing filesystems.
+This document evaluates optional FUSE features from the Linux kernel (`include/uapi/linux/fuse.h`, Linux v7.3-rc7) and `libfuse` (`include/fuse_common.h` 3.18.2) for dcfs, a write-through metadata cache over local ext4/xfs/btrfs backing filesystems.
 
 Evaluations are anchored in dcfs core architectural principles from `docs/design.md`:
 1. **Behave like the backing, only faster**: POSIX semantics, error codes, attributes, and atomicity match the backing filesystem.

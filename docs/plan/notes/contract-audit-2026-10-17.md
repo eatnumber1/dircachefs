@@ -1,6 +1,6 @@
 # Contract audit (2026-10-17), main checkout, read-only
 
-Kernel tree: ~/Sources/linux (v7.3-rc4-607). Man pages: this machine.
+Kernel tree: ~/Sources/linux (v7.3-rc7-245-g32c52ec87d62). Man pages: this machine. On 2026-10-18 the kernel line numbers of V1-V7, V14-V17 and the xattr section were re-checked against that tree; the other filesystem-specific xattr lines were checked by eye, except mm/shmem.c:4276-4288, which was not.
 Coverage caveat: grep produced ~200 comment hits in dcfs/*.cc/h plus the docs; I read and checked the contract-bearing ones (about 45 claims). Claims I did not reach are NOT listed as verified. formal/limitations/ and formal/no_stronger/ were not read beyond formal/README.md's tables.
 
 Counts: FALSE 1 (with 2 derived lines), STRONGER 2, UNSOURCED 7, behaviour flags 8, VERIFIED 22.
@@ -58,12 +58,12 @@ B8. dir_cache_fs.cc:1325-1329 Rename with same_inode: dcfs handles two links to 
 
 ## VERIFIED (one line each)
 
-V1. design.md:1519-1520 / formal/README.md:810: "dcfs does not request FUSE_CAP_PARALLEL_DIROPS, so the kernel serializes lookups and readdirs per directory": fs/fuse/inode.c:591-598 fuse_lock_inode takes inode->mutex when !fc->parallel_dirops; used at fs/fuse/dir.c:632 (lookup) and fs/fuse/readdir.c:399-401 (readdir request). (It covers the request only, not the whole listing.)
+V1. design.md:1519-1520 / formal/README.md:810: "dcfs does not request FUSE_CAP_PARALLEL_DIROPS, so the kernel serializes lookups and readdirs per directory": fs/fuse/inode.c:588-598 fuse_lock_inode takes inode->mutex when !fc->parallel_dirops; used at fs/fuse/dir.c:632 (lookup) and fs/fuse/readdir.c:399-401 (readdir request). (It covers the request only, not the whole listing.)
 V2. style.md:833 "the kernel never sends a request whose uid or gid is unmapped ... fails the caller with EOVERFLOW": fs/fuse/req.c:46-47 (fuse_fill_creds). The citation "fs/fuse/dev.c" is stale; the code now lives in fs/fuse/req.c.
-V3. README.md:1162, design.md:2476-2480 "kernel waits for FUSE_DESTROY only for fuseblk and virtiofs": fs/fuse/inode.c:1945 (ctx->destroy = true under fuseblk), virtio_fs.c:1558, fuse_conn_destroy inode.c:1973.
-V4. umount_helper.h:30-40 "fuse_ctl_remove_conn runs inside fuse_conn_destroy": inode.c:1979-1984.
-V5. dir_cache_fs.cc:1326 "the kernel's vfs_rename() treats two links to one inode as a successful no-op": fs/namei.c:6092 `if (source == target) return 0;`.
-V6. dir_cache_fs.cc:1691 "do_file_open_root retries a failed open once with LOOKUP_REVAL after ESTALE": fs/namei.c:5056-5057.
+V3. README.md:1162, design.md:2476-2480 "kernel waits for FUSE_DESTROY only for fuseblk and virtiofs": fs/fuse/inode.c:1936 (ctx->destroy = true under fuseblk), virtio_fs.c:1558, fuse_conn_destroy inode.c:1960.
+V4. umount_helper.h:30-40 "fuse_ctl_remove_conn runs inside fuse_conn_destroy": inode.c:1973 (fuse_ctl_remove_conn call).
+V5. dir_cache_fs.cc:1326 "the kernel's vfs_rename() treats two links to one inode as a successful no-op": fs/namei.c:6091-6092 `if (source == target) return 0;`.
+V6. dir_cache_fs.cc:1691 "do_file_open_root retries a failed open once with LOOKUP_REVAL after ESTALE": fs/namei.c:5055-5056.
 V7. device_id.cc:117 "ioctl(2) unconditionally refuses O_PATH descriptors with EBADF": fs/ioctl.c:583-589 CLASS(fd) -> __fdget with FMODE_PATH mask (fs/file.c:1208).
 V8. fuse_request.cc:160 "fuse_passthrough_open() never returns negative": ~/Sources/libfuse lib/fuse_lowlevel.c:566-578 (returns 0 on failure).
 V9. syscalls.h:30-35 setfsuid reports no error, read back with setfsuid(-1): man 2 setfsuid BUGS.
@@ -72,8 +72,8 @@ V11. syscalls.h:43-45 umask is process-wide: man 2 umask.
 V12. style.md:1303-1304 rename atomic: man 2 rename (above).
 V13. style.md:1304-1306 listxattr/getxattr promise nothing across a concurrent writer and answer ERANGE: man 2 listxattr / getxattr (ERANGE when the buffer is too small, size can change between calls). Read from memory of the pages, not re-quoted this pass.
 V14. design.md:2282 "under default_permissions the kernel never sends ACCESS": fs/fuse/dir.c:1800-1818 (fuse_access only in the else branch of default_permissions).
-V15. dir_cache_fs.cc:1698 "the kernel calls opendir(), not open(), on a directory": fs/fuse/dir.c:2451 (.open = fuse_dir_open for directories).
-V16. design.md:989 "the kernel's attr_version discards stale READDIRPLUS attributes": fs/fuse/readdir.c:393, 232.
+V15. dir_cache_fs.cc:1698 "the kernel calls opendir(), not open(), on a directory": fs/fuse/dir.c:2442 (.open = fuse_dir_open in fuse_dir_operations).
+V16. design.md:989 "the kernel's attr_version discards stale READDIRPLUS attributes": fs/fuse/readdir.c:392, 232.
 V17. dir_cache_fs.cc:2286 "the kernel will call again from the cursor this entry's offset encodes": fs/readdir.c iterate_dir uses file->f_pos (87-118).
 V18. backing.cc:260-262, 248-252: capabilities lost when fsuid != 0 (cap_task_fix_setuid): standard capabilities(7) text on setfsuid; not re-read in security/commoncap.c this pass, so treat as plausible-from-man 7 capabilities only.
 V19. formal/README.md:643-644 "an atomic replace or create by rename without fsync before is as atomic as the backing makes it, no more": a statement about dcfs, supported by the litmus configs in the model, not by a kernel source.
@@ -81,11 +81,11 @@ V20. file_handle.h:20-23 STATX_MNT_ID_UNIQUE "promises not to reuse the value": 
 V21. docs/design.md:2288-2300 POSIX ACLs enforced by the kernel when FUSE_CAP_POSIX_ACL is set: libfuse/kernel capability; the kernel tree has fs/fuse/acl.c; not read in detail.
 V22. README.md:129 plain umount does not wait for the daemon: same as V3.
 
-## Xattr limits per filesystem (kernel v7.3-rc4, ~/Sources/linux)
+## Xattr limits per filesystem (kernel v7.3-rc7, ~/Sources/linux)
 
 Names: the VFS copies every xattr name into a fixed XATTR_NAME_MAX+1
 buffer and returns ERANGE for 256+ bytes or empty, on set, get and
-remove, before any filesystem sees it (fs/xattr.c:615-624;
+remove, before any filesystem sees it (fs/xattr.c:615-620;
 fs/internal.h:276-278; callers fs/xattr.c:637, 862, 1085,
 io_uring/xattr.c:63). The 255 includes the namespace prefix. ext4
 (fs/ext4/xattr.c:2373), f2fs (fs/f2fs/xattr.c:653) and cifs
@@ -93,9 +93,9 @@ io_uring/xattr.c:63). The 255 includes the namespace prefix. ext4
 fire. Exception: overlayfs's own trusted.overlay. and user.overlay.
 names are limited to 247 bytes, EOPNOTSUPP (fs/overlayfs/xattrs.c:156-158).
 
-Values: the VFS caps at XATTR_SIZE_MAX, E2BIG on set (fs/xattr.c:642-643),
+Values: the VFS caps at XATTR_SIZE_MAX, E2BIG on set (fs/xattr.c:641-643),
 and turns a filesystem's ERANGE at a full 64 KiB get buffer into E2BIG
-(fs/xattr.c:798-815). Per filesystem:
+(fs/xattr.c:797-815). Per filesystem:
 
 - ext4 without ea_inode: about one block, ENOSPC (fs/ext4/xattr.c:1696,
   1710).

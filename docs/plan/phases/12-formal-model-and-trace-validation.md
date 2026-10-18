@@ -664,11 +664,11 @@ expires or dcfs invalidates them.
   Expire-only is the default and expected form of entry invalidation: dcfs
   expires the dentry's timeout, the next walk revalidates with a LOOKUP,
   and the kernel invalidates the entry itself if dcfs answers gone or
-  different. Verified in the kernel tree (v7.3-rc4-607-gd530980dfbb7):
+  different. Verified in the kernel tree (v7.3-rc7-245-g32c52ec87d62):
   `FUSE_EXPIRE_ONLY` is protocol 7.38
   (`include/uapi/linux/fuse.h:202`); the flag is read in
-  `fuse_reverse_inval_entry` (`fs/fuse/dir.c:1632`) and the kernel
-  advertises `FUSE_HAS_EXPIRE_ONLY` (bit 35, `fs/fuse/inode.c:1478`), which
+  `fuse_reverse_inval_entry` (`fs/fuse/dir.c:1628`) and the kernel
+  advertises `FUSE_HAS_EXPIRE_ONLY` (bit 35, `fs/fuse/inode.c:1469`), which
   dcfs must see before it sends the flag. Lock: `fuse_reverse_inval_entry`
   takes `inode_lock_nested(parent, I_MUTEX_PARENT)` before it tests the
   flag, so expire takes the parent lock too; the earlier deadlock finding
@@ -841,7 +841,7 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
   a 64 KiB SETXATTR.
 - NAME_MAX (found 2026-10-17, missed by the audit): `LookupOrPopulate`
   (dcfs/backing.cc:1549-1564) rejects names over NAME_MAX, citing it as "the
-  generic Linux VFS limit"; the kernel says otherwise (fs/readdir.c:146-148:
+  generic Linux VFS limit"; the kernel says otherwise (fs/readdir.c:151-153:
   PATH_MAX is "the real kernel limit on a possible path component, not
   NAME_MAX"; FUSE allows FUSE_NAME_MAX = PATH_MAX - 1, fs/fuse/fuse_i.h:45).
   Behave like the backing: use the backing's own limit, statfs(2) f_namelen,
@@ -853,7 +853,7 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
   `HOST_PACKAGES` and its comment at `prepare.sh:29`, and check CI still
   passes (code change, with the CI check).
 - ZFS (2026-10-17): on Linux the VFS caps names (255) and values (64 KiB)
-  before ZFS sees a request (fs/xattr.c:615-624, 642-643, 798-815). A pool
+  before ZFS sees a request (fs/xattr.c:615-620, 641-643, 797-815). A pool
   holding a larger value (written by another OS; ZFS's own limits
   unverified: no OpenZFS source here) reads back as E2BIG. Today
   GetXattrOPath (dcfs/backing.cc:179-196) fails population on it, so one
@@ -868,14 +868,16 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
 - **Symlink identity and `READDIRPLUS_AUTO`** (russ, 2026-10-18).
   `CACHE_SYMLINKS` is on today (`dcfs/dir_cache_fs.cc:241`). Question: can a
   cached target survive when dcfs reports a reused nodeid with a new
-  generation? Verified in the kernel tree (v7.3-rc4-607-gd530980dfbb7): no.
+  generation? Verified in the kernel tree (v7.3-rc7-245-g32c52ec87d62): no.
   `fuse_iget` compares the generation through `fuse_stale_inode`
-  (`fs/fuse/inode.c:494-512`, `fs/fuse/fuse_i.h:853`); on a mismatch it
+  (`fs/fuse/inode.c:496-509`, `fs/fuse/fuse_i.h:847`); on a mismatch it
   marks the old inode bad, unhashes it and retries, so the new nodeid gets
   a fresh inode and a fresh readlink. `fuse_get_link` fails EIO on a bad
-  inode (`fs/fuse/dir.c:1870-1878`). The attribute path makes the same
-  check (`fs/fuse/dir.c:1529`, `fc->attr_generation`). So the kernel
-  distinguishes a reused nodeid by generation, and dcfs needs no
+  inode (`fs/fuse/dir.c:1870-1872`). Only LOOKUP and READDIRPLUS make this
+  check (`fs/fuse/dir.c:453`, `fs/fuse/readdir.c:212`); GETATTR and SETATTR
+  replies carry no generation (`struct fuse_attr_out`,
+  `include/uapi/linux/fuse.h:742-747`). So the kernel distinguishes a reused
+  nodeid by generation on lookup, and dcfs needs no
   `notify_inval_inode` for a new generation. Guest test: recycle an inode
   number between two symlinks with different targets; the second target is
   read fresh. If that test fails, stop and bring it to russ before changing

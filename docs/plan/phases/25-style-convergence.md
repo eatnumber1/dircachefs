@@ -1058,6 +1058,20 @@ kernel holds inode numbers that live in the database).
   cache discarded (no recovery from it); docs say so.
 
 Owner: dcfs-protocol, small.
+
+## 25.28e Durable cache for O_SYNC and O_DSYNC opens (review S5 on 25.28b, 2026-10-18; after 25.28d)
+
+Passthrough O_SYNC, O_DSYNC and RWF_SYNC writes are durable on the backing
+without a FUSE_FSYNC (fs/backing-file.c:95, 227; fs/fuse/passthrough.c:74,
+v7.3-rc7). So a client's synchronous write can be durable on the backing
+while dcfs's cache has not yet reached its durable point.
+
+- Before replying to an OPEN or CREATE with O_SYNC or O_DSYNC, make the
+  cache durable (a WAL fsync), so the cache is no less durable than the
+  backing for the writes that open allows.
+
+Owner: not yet set (orchestrator).
+
 ## 25.28c An idle daemon reaches its sync point: a one-shot timer, modelled (russ, 2026-10-17; after 25.28b)
 
 25.28 built the "periodic" checkpoint as a clock check on request arrival,
@@ -1093,6 +1107,11 @@ definitely needs to get added to the formal model too", and confirmed:
   README's idle limitation removed.
 - Coordinate with 25.10's signal handling if it moves signals to a
   `signalfd` in the same loop.
+- **Clock:** measure the sync interval on `CLOCK_MONOTONIC` (the timerfd
+  too), not the wall clock: a backward step of the wall clock would suspend
+  sync and durable points, while kernel writeback ages dirty data by jiffies
+  (fs/fs-writeback.c:2033-2037, v7.3-rc7). Review finding S4 on 25.28b,
+  2026-10-18; the orchestrator ruled it under "behave like the backing".
 
 Owner: dcfs-protocol, then an Opus review.
 ## 25.29 A pinned local copy of Google's style guides for reviewers (russ, 2026-10-17)

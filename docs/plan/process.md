@@ -473,6 +473,12 @@ first.
   and on each day the plan leaves (days left / 7) x 10% unspent for him, on
   top of a reserve for red pushes that is released on the last day. Daily
   budget = (95% - used - his reserve - red-push reserve) / days left.
+  **Thursday ramp (russ, 2026-10-18: "Since quotas reset on Friday, let's
+  ramp up spend on Thursday to try to get as close to 100% spent as possible
+  without going over. Don't worry about me doing out-of-band spend starting
+  on Thursday.")**: the Monday to Wednesday targets stay (73.4, 76.8, 80.2),
+  Thursday ends at 97%, and spend reaches about 99% by the reset (Fri 01:00
+  PT). From Thursday on no reserve is kept for russ or for red pushes.
   The orchestrator itself is the largest consumer: lean turns, hands-on work
   delegated, Opus subagents only for protocol, identity, oracle and
   security-relevant work, Sonnet for routine implementation, Haiku for

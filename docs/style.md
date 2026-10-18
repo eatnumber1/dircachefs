@@ -326,6 +326,9 @@ use it as design guidance rather than firm rules."
   step: it would restore the step the budgets count in the fastbuild; the
   checking build (26.2) is the place for one.
 
+An optional, non-owning, read-only argument is `absl::optional_ref<const T>`,
+not `const std::optional<T>&` (orchestrator ruling, 2026-10-18).
+
 ### 1.3 Namespaces
 
 All code is in `namespace dcfs`, flat: no nested namespaces, with two
@@ -482,6 +485,10 @@ without `std::`, a raw string literal containing a quote, or a local
 function that shares a name (a false positive: rename it); `remove` is not a
 listed name, because it would flag the `std::remove` algorithm (the file
 calls are `unlink` and `unlinkat`).
+
+A helper that composes wrappers (a command runner, for example) is CamelCase
+and lives in `dcfs/testonly/` when only tests use it, never in `dcfs::syscalls`
+(orchestrator ruling, 2026-10-18).
 
 ### 1.6 Errors
 
@@ -723,6 +730,10 @@ no allowlist except `FindingText(const absl::Status&)`; `status_dropped` reports
 a failure branch (`if (!s.ok()) return false;`) that never mentions the status
 (report only: some are legitimate domain answers, such as a predicate that is
 false when the probe failed).
+
+Serializing a status across a process boundary may call `.message()` to carry
+it beside its code and payloads (`EncodeChildResult` in
+`test/qemu/guest/guest.cc`, orchestrator ruling, 2026-10-18); nothing else may.
 
 **Return a failed status or log it, never both** (1.7).
 
@@ -1530,6 +1541,9 @@ necessary, but if you think one is necessary, come to me."
   the coverage baseline. That's why it exists. Only ever increase it."). CI
   fails if total coverage drops. A change that would drop coverage adds tests to
   keep or raise the baseline, never lowers `dcfs/coverage_baseline.txt`.
+- **A test ported from a script takes a behavior sentence as its name**, like
+  any test (orchestrator ruling, 2026-10-18); the script's check name may
+  appear in a comment.
 
 ## 3. Bazel
 
@@ -1614,6 +1628,9 @@ spaces."). A tab-indented file is converted, in one commit, by
 - A comment right after the shebang says what the script does and how it
   runs (63 of 63 scripts). Check names are lower case with hyphens. The zsh
   caveats belong to `CLAUDE.md`, not scripts.
+- **A guest script converts to `shfmt -i 2` in its own style** (orchestrator
+  ruling, 2026-10-18): the conversion is committed before new lines are added
+  to the script, and no new line is tab-indented.
 
 ## 5. Python
 
