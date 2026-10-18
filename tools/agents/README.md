@@ -330,6 +330,11 @@ bazel run //tools/agents:foreman -- STEP LANE BRANCH PROMPT_FILE [--model M] [--
    base commit, commits made, uncommitted changes, last review, and quota
    delta.
 
+Known issue (2026-10-18): foreman hangs on a non-JSON `AGY_ERROR` line, such as
+agy's 429 `RESOURCE_EXHAUSTED` ("undecodable agy event"), and can leave the lane
+mid-rebase. Until it is fixed, check the lane (`git status`) after a foreman
+failure and abort any rebase.
+
 The tests are `//tools/agents:foreman_test`.
 
 ## review_findings

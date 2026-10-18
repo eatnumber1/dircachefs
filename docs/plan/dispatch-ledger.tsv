@@ -91,3 +91,8 @@ a215beed3a8e2314d	2026-10-18T09:18:09Z	Clerk batch 9	mechanical	dcfs-mechanical	
 af18e51eba041743a	2026-10-18T09:26:16Z	xattr64-differential	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
 a6e8557b0384a0374	2026-10-18T10:49:06Z	17.2e round 3	protocol	dcfs-protocol	claude-opus-5-5	high									
 ad2a28436ad6131e8	2026-10-18T11:35:51Z	Clerk batch 10	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+a132135fc32669c01	2026-10-18T11:39:48Z	22.5	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
+a275f6773223d808a	2026-10-18T11:44:33Z	22.5	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+abef08bc059073a83	2026-10-18T12:05:18Z	17.6	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
+a49dbaf22c21d2507	2026-10-18T12:22:58Z	22.5	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
+a8cc95d36f05fa3cb	2026-10-18T13:22:09Z	Clerk batch 11	mechanical	dcfs-mechanical	claude-haiku-5-5	low									

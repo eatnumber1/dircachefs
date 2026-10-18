@@ -134,7 +134,12 @@ use it as design guidance rather than firm rules."
   (`absl/types/optional_ref.h`) is allowed and preferred over
   `const T* absl_nullable` (russ, 2026-10-10: "Allow it"): it cannot be
   dereferenced without a check and says "optional" in the type. (A
-  `std::optional<T>` parameter copies; `optional_ref` does not.)
+  `std::optional<T>` parameter copies; `optional_ref` does not.) A small
+  trivially copyable T (two words or less) is passed as `std::optional<T>` by
+  value; `absl::optional_ref<const T>` is for a larger or non-copyable T
+  (Abseil TotW #234 spirit; orchestrator ruling, 2026-10-18, from the 22.5
+  round 3 style review: `InterruptionPoint` is a 16-byte `string_view`
+  wrapper).
   `absl_nullability_unknown` is
   not used: it is the annotation that says nobody decided. Mechanically:
   clang's `-Wnullability-completeness` and
@@ -327,7 +332,9 @@ use it as design guidance rather than firm rules."
   checking build (26.2) is the place for one.
 
 An optional, non-owning, read-only argument is `absl::optional_ref<const T>`,
-not `const std::optional<T>&` (orchestrator ruling, 2026-10-18).
+not `const std::optional<T>&`, except that a small trivially copyable T (two
+words or less) is passed as `std::optional<T>` by value (above; orchestrator
+rulings, 2026-10-18).
 
 ### 1.3 Namespaces
 
@@ -464,8 +471,10 @@ through `dcfs/syscalls.h` and `dcfs/syscalls_backing.h`, where the failure
 is handled and converted into a `Status`: no call of a libc syscall wrapper
 outside `dcfs/syscalls.cc`, `dcfs/syscalls_backing.cc` and
 `dcfs/syscalls_process.cc`, in production code, tests, `dcfs/testonly/`,
-`bench/` and any C++ in `tools/`; and no `std::filesystem` or file stream
-(`std::ifstream`, `std::ofstream`, `std::fstream`), which open and walk files
+`bench/`, any C++ in `tools/` and any C++ under `test/qemu/` (orchestrator
+ruling, 2026-10-18, from the 17.6 style review); and no `std::filesystem` or
+file stream (`std::ifstream`, `std::ofstream`, `std::fstream`), which open and
+walk files
 behind the wrappers (`dcfs/testonly/files.h` has `ReadFileToString`,
 `ListDirectory`, `ListTree`, `RemoveAll` and `FileSize` over them). A test
 calls the `syscalls::` wrappers and checks them with
@@ -478,7 +487,8 @@ scanned: `tools/fhtest.c` is a copy of fuse-generation-qemu's
 `tools/testutil.c` is a C program for the guest, kept in C alongside it;
 neither can use the C++ wrappers; and `tools/banned_symbols_fixture.cc`
 makes banned calls on purpose. `//tools:raw_syscalls_test` enforces the rule
-over `dcfs/`, `dcfs/testonly/` and `bench/` (names in
+over `dcfs/`, `dcfs/testonly/` and `bench/` (`test/qemu/` joins it in 25.39;
+names in
 `tools/raw_syscalls_names.txt`). It cannot catch a call through a macro or
 function pointer, a name not in the list, a stream or filesystem type named
 without `std::`, a raw string literal containing a quote, or a local
@@ -709,9 +719,9 @@ is warranted at all)"):
    skips). These stop carrying a Status where practical: fsck findings become
    plain results (the `CacheReport`'s words), and benchmark skips say what could
    not be measured. Where a lower layer's `Status` is itself the domain answer,
-   convert it through one helper, `StatusToString(const absl::Status&)` returning
-   its `.message()`, which the `status_message` matcher exempts; nothing else
-   calls `.message()`.
+   convert it through one helper, `StatusToString(const absl::Status&)`
+   returning its `.message()`, which the `status_message` matcher exempts;
+   nothing else calls `.message()`.
 3. **Infrastructure failures**: The infrastructure underneath me failed. A
    failed `Status` that is not returned is logged or put into the message that
    replaces it, whole: `absl::StrCat(what, ": ", status)` or `LOG(...) <<
@@ -728,9 +738,12 @@ status was an infrastructure failure in hand. Tests assert on a status with
 every call of `absl::Status::message()` in `dcfs/`, `tools/` and `bench/`, with
 no allowlist except `StatusToString(const absl::Status&)` and `SerializeStatus`
 (`dcfs/testonly/status_wire`). Serializing a Status is an allowed use, but a
-Status carries payloads that must survive, so there is ONE place that serializes
-a Status: `SerializeStatus`/`ParseStatus` over a testonly protobuf message (code,
-message bytes, payloads), used everywhere a Status crosses a process boundary.
+Status carries payloads that must survive, so there is one place that serializes
+a Status (russ, 2026-10-18: "I'd rather we have one place that knows how to
+serialize a status, and it get used everywhere."):
+`SerializeStatus`/`ParseStatus` over a testonly protobuf message (code, message
+bytes, payloads), used everywhere a Status crosses a process boundary.
+`SerializeStatus` lands with 25.34 in `dcfs/testonly/status_wire`.
 Never rebuild a Status from its parts (`ErrnoToStatus` over a carried message
 doubles the strerror suffix). `status_dropped` reports
 a failure branch (`if (!s.ok()) return false;`) that never mentions the status
@@ -1201,7 +1214,11 @@ the obvious what or how." Apply the core principles:
   to it. No restating the code, no changelog ("fixed in step N" is the
   commit's). The length limits apply to TLA+ comments too: a model's long
   argument lives in `formal/README.md`, and the module comment points to it.
-  Ruling from the 22.5 style review, made by the orchestrator.
+  Ruling from the 22.5 style review, made by the orchestrator. A comment whose
+  content is a list of kernel citations (a kernel-facts pin) may run to about
+  20 lines, and a file whose citations all share one kernel version may state
+  that version once in its header (orchestrator ruling, 2026-10-18, from the
+  17.6 style review).
 - `/* */` only for argument names (`/*is_dir=*/false`) and in `tools/*.c`.
 
 ### 1.10 One abstraction over variants; branching is discouraged
@@ -1395,7 +1412,12 @@ necessary, but if you think one is necessary, come to me."
   where `getdents64` streams pages. A comment at each such site names the
   contract it keeps and where it is written. Behaving like the backing, only
   faster, is `docs/design.md`'s "Behave like the backing, only faster"; 22.7
-  (streamed directory population) builds on this paragraph.
+  (streamed directory population) builds on this paragraph. A claim about
+  what a signal does inside one syscall (EINTR when a signal arrives during
+  the call) may rest on the kernel code path alone when no deterministic
+  native test can place the signal, since a racy test would break
+  load-agnosticism; the citation names the kernel path and its version
+  (orchestrator ruling, 2026-10-18, from the 22.5 round 3 style review).
 - **Where the contract allows more than one answer, give the most useful
   one.** russ, 2026-10-17: "When there's ambiguity, you should be choosing
   the most _useful_ result." A readdir interrupted after it has built
@@ -1637,6 +1659,11 @@ spaces."). A tab-indented file is converted, in one commit, by
 - **A guest script converts to `shfmt -i 2` in its own style** (orchestrator
   ruling, 2026-10-18): the conversion is committed before new lines are added
   to the script, and no new line is tab-indented.
+- **A new guest script is thin glue** (orchestrator ruling, 2026-10-18, from
+  the 17.6 style review): it sources `lib.sh`, uses its helpers, defines no
+  functions and ends by running one C++ binary. Until 25.34's helpers land,
+  that binary may go in the shared initramfs; afterwards it moves to its own
+  `qemu_cc_test`.
 
 ## 5. Python
 

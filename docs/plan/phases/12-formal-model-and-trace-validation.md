@@ -928,8 +928,28 @@ counted each as 1 CPU. That drove the load to 55 on 8 cores.
 - `-XX:ParallelGCThreads=N` to match the workers.
 - An explicit `-Xmx`, with a matching `resources:memory` tag. Today no
   `-Xmx` is passed, so the JVM default (about 15.5 GB) applies.
-- The numbers come from the time-analysis agent's TLC scaling measurements
-  (states/s at 1, 2, 4 and 8 workers; peak RSS). They are not chosen here.
+- The numbers come from the time analysis's TLC scaling measurements
+  (`docs/plan/notes/time-analysis-2026-10-18.md`, section 4.1). Classes, with
+  GC threads equal to the workers in every class:
+  - tiny, under 50 k distinct states (79 small and about 25 medium targets):
+    1 worker, `cpu:1`, `-Xmx256m` (not measured at this size),
+    `resources:memory:400`.
+  - medium, 50 k to 500 k (interrupt, liveness, nolock_small, and the atime,
+    lifetime, crash and reval targets): 2 workers, `cpu:2`, `-Xmx1g`,
+    `resources:memory:1300` (measured: 512 MB and 1 GB pass at 0.67 to 1.05 GB
+    RSS).
+  - 0.5 M to 2 M (small_test, interrupt_muts2, nolock, rename_stale_source,
+    atime_view): 4 workers, `cpu:4`, `-Xmx1536m`, `resources:memory:2000`
+    (small_test measured at 1.5 GB).
+  - large, 6 M to 10 M (large_test, nolock_test): 4 workers, `cpu:4`, `-Xmx3g`,
+    `resources:memory:3500` (not re-measured today; lane-5's 2.66 GB run of
+    2026-10-07 passed).
+- Findings: CPU per state is flat across worker counts (interrupt_test 293 to
+  325 CPU s for 1 to 8 workers), so no TLC throughput gain is claimed. The gain
+  is about 80 % less TLC memory (the default heap is 14.3 GB; RSS 5.7 to 6.2 GB
+  per JVM) and honest CPU accounting in Bazel. CI wall is unchanged: large
+  keeps 4 workers, equal to a CI runner's vCPUs.
 - No test is weakened: the same configs and the same state counts.
 
-Owner: dcfs-implementer, after the time analysis reports.
+Owner: dcfs-implementer. The time analysis reported on 2026-10-18; the numbers
+above are its measurements.
