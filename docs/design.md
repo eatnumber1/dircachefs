@@ -1595,8 +1595,10 @@ dcfs is single-threaded inside libfuse's blocking loop, which has no idle
 hook, so sync points have no timer: an idle daemon keeps a non-empty dirty
 set, and unsynced cache commits, until its next request or shutdown. That
 is safe; it only makes the re-read after a crash larger. (libfuse 3.18.2
-has no `SYNCFS` handler, and the kernel only sends `SYNCFS` to fuseblk
-servers anyway.)
+has no `SYNCFS` handler, and the kernel sends `SYNCFS` only where
+`fc->sync_fs` is set (`fs/fuse/inode.c:740`, Linux v7.3-rc7): on fuseblk
+mounts (`fs/fuse/inode.c:1746`) and virtiofs (`fs/fuse/virtio_fs.c:1726`),
+not on a `/dev/fuse` mount like dcfs's.)
 
 **The cache's durable point** (step 25.28b; `DirCacheFS::MakeCacheDurable`).
 Fills and phase 3s commit at `synchronous=NORMAL`: in the WAL, not fsynced.
@@ -1611,7 +1613,8 @@ SQLite's `SQLITE_FCNTL_JOURNAL_POINTER` gives the WAL's file, and its
 the WAL by the time it returns, and SQLite's recovery keeps every frame up
 to the last commit frame whose checksums hold, so once the fsync returns
 every commit so far survives a power loss, the dirty set's clearing
-included. It is no checkpoint: copying the frames into the database file
+included, as long as no earlier fsync of the WAL failed (below). It is no
+checkpoint: copying the frames into the database file
 fsyncs that file too, and the next commit then restarts the WAL with an
 fsync of its header, three fsyncs where one does. The periodic sync point
 makes one, after its backing half if any; an `FSYNC` or `FSYNCDIR` makes
@@ -1621,8 +1624,9 @@ costs at most one cache fsync per interval.
 
 The bound: a request that starts while a commit a power loss could lose is
 one sync interval old ends with every commit durable, unless its durable
-point failed (`formal/durability.tla`'s `BoundAtRequestEnd`); a failed
-one's commits stay losable until a later one completes. So, counted at
+point, or one before it in the run, failed (`formal/durability.tla`'s
+`BoundAtRequestEnd`); after a failed one, every commit may stay losable
+until the next start (below). So, counted at
 requests, a power loss loses only about the last interval of cache commits
 before the last request's start. `fault_power_test`'s `lag` and `lagclean`
 scenarios show, on real disks, a fill older than the interval surviving a
@@ -1650,10 +1654,24 @@ A durable point that fails (the cache disk's I/O error) is logged at
 WARNING at a sync point, and fails an `FSYNC` or `FSYNCDIR` with `EIO`
 (what dcfs cached about the file may not survive a power loss). Nothing
 marked its commits durable, so the next durable point fsyncs the WAL
-again; whether the pages the failed fsync could not write are still there
-to write is the cache filesystem's to say (Linux may drop them), so those
-commits may not survive a power loss even then, and the bound has that
-exception.
+again, but that does not repair it. Linux reports a writeback error to
+one fsync only: "After an error has been reported on one request,
+subsequent requests on the same file descriptor should return 0, unless
+further writeback errors have occurred"
+(`Documentation/filesystems/vfs.rst:711`, Linux v7.3-rc7), and the pages
+the failed writeback could not write may never reach the disk (ext4, for
+one, records the error and ends the folio's writeback without dirtying it
+again, so nothing writes it later: `fs/ext4/page-io.c:112`). SQLite's
+recovery stops at the first frame whose checksum chain breaks, so every
+commit after the gap is lost with it, kSync commits included. Until the
+next start, then, a power loss can take away any commit since the last
+good durable point: fills, which cost re-reads, but also phase 1s' dirty
+marks, whose loss leaves stale entries (a row that names the state before
+a backing change that did reach the disk). `BoundAtRequestEnd` and
+`LostOnlySinceSync` hold only while no durable point has failed in the run
+(`formal/durability.tla`'s `failed` stays set until a restart). Step
+25.28d replaces this with a poison: the first failed fsync of the WAL
+discards the cache and ends the daemon.
 
 ### Why not `synchronous=FULL` everywhere
 

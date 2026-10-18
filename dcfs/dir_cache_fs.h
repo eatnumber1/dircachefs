@@ -61,9 +61,12 @@ class DirCacheFS : private events::Bookkeeping {
     // size".
     std::optional<unsigned int> max_read;
 
-    // How often, at most, a request finding the dirty set non-empty first
-    // runs a sync point (backing::SyncBacking: syncfs of the backing
-    // filesystems, then the dirty set is emptied). See MaybeSyncNow().
+    // The first request this long after the last sync point runs a new one,
+    // whether or not anything is dirty: if the dirty set may be non-empty,
+    // its backing half (backing::SyncBacking: syncfs of the backing
+    // filesystems, then the dirty set is emptied); then, after the
+    // request's reply, the cache's durable point (MakeCacheDurable()). See
+    // MaybeSyncNow() and FinishSyncPoint().
     absl::Duration sync_interval = absl::Seconds(5);
 
     // At most how many written files hold a descriptor until their last

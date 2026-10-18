@@ -3530,7 +3530,8 @@ TEST_F(ClockTest, FsyncWithNothingCommittedLeavesTheCacheAlone) {
 // An FSYNC or FSYNCDIR whose durable point fails (the WAL's fsync: an I/O
 // error of the cache disk) replies EIO: what dcfs cached about the file may
 // not survive a power loss. Nothing marked the commits durable: the next
-// durable point fsyncs the WAL again.
+// durable point fsyncs the WAL again (which does not repair the loss:
+// DirCacheFS::FinishSyncPoint says why).
 TEST_F(ClockTest, FailedDurablePointFailsTheFsync) {
   ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("gone"), 0755), IsOk());
   WriteFile(Path("f"));
@@ -3625,7 +3626,8 @@ class ScopedVerbosity {
 
 // A periodic durable point that fails (the WAL's fsync: an I/O error of the
 // cache disk) is logged, and the sync point's backing half has still
-// cleared the dirty set; the next durable point fsyncs the WAL again.
+// cleared the dirty set; the next durable point fsyncs the WAL again (which
+// does not repair the loss: DirCacheFS::FinishSyncPoint says why).
 TEST_F(ClockTest, FailedPeriodicDurablePointIsLoggedAndLeftToTheNext) {
   Start();
   auto [mkdir, d] = Mkdir(kRootInode, "d");

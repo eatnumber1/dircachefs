@@ -276,9 +276,10 @@ class Connection {
   absl::Status Checkpoint();
 
   // A durable point: fsyncs the WAL, after which every transaction committed
-  // so far survives a power loss. Internal for a database with no WAL (an
-  // in-memory one); a failed fsync is the sqlite3 error (EIO to the kernel)
-  // and leaves CommittedSinceDurable() true.
+  // so far survives a power loss, unless an earlier fsync of the WAL failed
+  // (sqlite.cc says why). Internal for a database with no WAL (an in-memory
+  // one); a failed fsync is the sqlite3 error (EIO to the kernel) and leaves
+  // CommittedSinceDurable() true.
   absl::Status MakeDurable();
 
   // Whether a transaction committed since the last MakeDurable() (or since
