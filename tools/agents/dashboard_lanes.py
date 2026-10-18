@@ -1103,16 +1103,13 @@ def launch_quota(env):
         with open(os.devnull, "r") as devnull, open(
             log_path, "a", encoding="utf-8"
         ) as log_file:
-            try:
-                launcher(
-                    cmd,
-                    stdin=devnull,
-                    stdout=log_file,
-                    stderr=log_file,
-                    start_new_session=True,
-                )
-            except TypeError:
-                launcher(cmd)
+            launcher(
+                cmd,
+                stdin=devnull,
+                stdout=log_file,
+                stderr=log_file,
+                start_new_session=True,
+            )
     except (OSError, subprocess.SubprocessError) as e:
         env.stderr.write("dashboard_lanes: launch quota: %r\n" % e)
 
@@ -1127,7 +1124,9 @@ def stop(env, event):
     regenerate(env)
     regenerate_sloc(env)
 
-    # "I approve this exception *because* I'm sometimes spending credits out-of-band" (russ, 2026-10-17).
+    # The hourly meter reading is an approved timer exception, since the
+    # meters cannot signal: "I approve this exception *because* I'm
+    # sometimes spending credits out-of-band" (russ, 2026-10-17).
     read_at_path = env.path("quota.read_at")
     should_read = True
     if os.path.exists(read_at_path):
