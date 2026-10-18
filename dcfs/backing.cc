@@ -244,7 +244,9 @@ absl::Status FutimensOPath(int fd, const struct timespec times[2]) {
 // kernel removes from the effective set while fsuid is not 0 (together
 // with every other filesystem capability: CAP_CHOWN, CAP_DAC_OVERRIDE,
 // CAP_FOWNER, CAP_FSETID, CAP_LINUX_IMMUTABLE, CAP_MAC_OVERRIDE, CAP_MKNOD;
-// cap_task_fix_setuid), and restores when it returns to 0. Reaching the
+// cap_task_fix_setuid; AsCallerKeepingCapFsetid raises CAP_FSETID again
+// for the calls whose removal of setuid and setgid the kernel has already
+// decided), and restores when it returns to 0. Reaching the
 // object is dcfs's own business (identity-checked by OpenNode); what the
 // caller may do to it is the kernel's, and default_permissions has the
 // kernel check that on the FUSE side too before the request is even sent.
@@ -333,11 +335,11 @@ absl::Status RaiseCapFsetid() {
 
 // AsCaller, keeping CAP_FSETID: for a backing write, fallocate,
 // copy_file_range or truncate, whose own removal of setuid and setgid
-// (file_remove_privs, fs/inode.c:2371-2404, and do_truncate's
-// dentry_needs_remove_privs, fs/open.c:57 (Linux v7.3-rc7)) would decide by
-// the fsuid's capabilities, none for a nonzero one, and so clear bits where
-// the kernel's own decision on the FUSE side kept them. That decision, made
-// with the caller's real capabilities, is the only one: the SETATTR that
+// (file_remove_privs_flags, fs/inode.c:2371-2395 (Linux v7.3-rc7), and
+// do_truncate's dentry_needs_remove_privs, fs/open.c:57 (Linux v7.3-rc7)) would
+// decide by the fsuid's capabilities, none for a nonzero one, and so clear bits
+// where the kernel's own decision on the FUSE side kept them. That decision,
+// made with the caller's real capabilities, is the only one: the SETATTR that
 // sets nothing before a write, fallocate or copy_file_range, and a
 // truncate's FATTR_KILL_SUIDGID (DirCacheFS::Setattr). A passthrough write
 // reaches the backing file with the daemon's credentials, CAP_FSETID
