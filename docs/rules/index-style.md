@@ -23,7 +23,7 @@ that holds its reasoning. `AGENTS.md` says which indexes to read for which task.
   [style 1.1](/docs/style.md#rule-warnings-are-errors)
 - Narrowing Google's C++ rules:
   [optional and string_view](/docs/style.md#rule-std-optional-string-view),
-  [function names](/docs/style.md#rule-function-names),
+  [function names: `syscalls::` free functions take `Context`, their members are CamelCase (russ, 2026-10-18)](/docs/style.md#rule-function-names),
   [non-const locals (russ, 2026-10-11)](/docs/style.md#rule-locals-non-const),
   [flags only in main (russ, 2026-10-11)](/docs/style.md#rule-flags-in-main-only),
   [no function pointers (russ, 2026-10-11)](/docs/style.md#rule-no-function-pointers),

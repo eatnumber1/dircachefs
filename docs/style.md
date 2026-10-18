@@ -144,14 +144,26 @@ use it as design guidance rather than firm rules."
 - <a id="rule-function-names"></a>
   **Function names**: `syscalls::` wrappers carry their libc/manpage names
   in lower case (`syscalls::setxattr`); every other function is CamelCase
-  (`SetXattr`). The two layers therefore never clash by construction. The
-  methods of the injected syscall interfaces (`BackingSyscalls`,
-  `LocalSyscalls`, `ProcessSyscalls`) are syscall wrappers too: they are
-  exempt from the CamelCase rule and named after the syscall they wrap
-  (`syscalls.read(...)`, `backing.openat(...)`, never `syscalls.Read(...)`)
-  (russ, 2026-10-18: "that's a rule here"). The protected per-op virtuals
-  behind `ioctl<OP>` and `fcntl<OP>` follow the normal CamelCase rule
-  (`IoctlGetFsUuid`).
+  (`SetXattr`). The two layers therefore never clash by construction. Call
+  sites keep calling the free functions. Every `syscalls::` free function takes
+  the `Context` as its first argument (`syscalls::write(ctx, fd, buf, n)`),
+  pulls the right Syscalls interface out of it, and calls that interface's
+  CamelCase member (`Write`). The members of the injected syscall interfaces
+  (`BackingSyscalls`, `LocalSyscalls`, `ProcessSyscalls`) follow the normal
+  CamelCase rule and are called only by the `syscalls::` free functions
+  (russ, 2026-10-18: "for the change to use a dependency-injected syscalls
+  wrapper, keep the global free functions (so call sites look like
+  syscalls::write(...)), but pass in the Context or Syscalls object. Then the
+  wrapper can call syscalls.Write(...) (and note I'm removing the function
+  naming exception for the member methods of Syscalls, since those functions
+  will now only ever be called by the free functions in syscalls::."). Then
+  (russ, 2026-10-18: "Actually, let's have the syscalls:: free functions take
+  Context. It can pull Syscalls from inside it, and it provides a uniform
+  surface for the API (syscalls functions look and feel mostly like libc, with
+  an additional Context argument)."). These replace the exemption for the member
+  methods that russ gave on 2026-10-18 ("that's a rule here"). `ioctl<OP>` and
+  `fcntl<OP>` stay free function templates that dispatch to per-op CamelCase
+  members (`IoctlGetFsUuid`).
 - **Every pointer says whether it may be null; a pointer that may not be
   null is usually a reference** (russ, 2026-10-10: "all pointers need
   either `absl_nullable` or `absl_nonnull`, including both raw pointers
@@ -1659,6 +1671,15 @@ necessary, but if you think one is necessary, come to me."
   **The kernel-facts pins test the kernel, not dcfs** (russ, 2026-10-18,
   steps 17.6 and 17.6b). `kernel_facts_test` runs only in the weekly
   workflow, never in the fast, presubmit or per-push tiers.
+- <a id="rule-kernel-invariants-pinned"></a>
+  **Every kernel invariant dcfs relies on is pinned by a test** (russ,
+  2026-10-18: "For this and everything else that we're relying on kernel
+  invariants like this, add a test. I think we have a CI stage for
+  kernel-invariant properties like this? (it's where O_DIRECT and inotify are
+  tested)"). A cited kernel invariant that lets dcfs skip work or decide a
+  result is pinned by a native `kernel_facts_test` case citing `path:line`
+  (Linux v7.3-rc7). The weekly job (`rule-kernel-facts-weekly`) runs these, so
+  a kernel change surfaces there. Step 25.46 audits the existing reliances.
 - <a id="rule-load-agnostic-tests"></a>
   **A test's verdict does not depend on host load or speed** (russ,
   2026-10-17: "in general for all our tests I'm interested in them being

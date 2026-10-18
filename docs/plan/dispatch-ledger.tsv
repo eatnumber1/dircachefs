@@ -142,3 +142,13 @@ af4827fad5679654c	2026-10-18T21:15:42Z	Upload sloc/quota/budget datasets	mechani
 a0504854946da4ac3	2026-10-18T21:16:27Z	Correct quota dataset reading	mechanical	dcfs-mechanical	haiku	low									
 aa36da7ee7dec764b	2026-10-18T21:20:12Z	Effort-decision data audit		Explore	sonnet										
 af0bdc86f54db0d31	2026-10-18T21:21:42Z	Clerk batch 23	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+aa17d9d354f546e43	2026-10-18T21:24:11Z	rules-index	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
+a5185f58c3796c3a5	2026-10-18T21:27:38Z	Upload ci dataset	mechanical	dcfs-mechanical	haiku	low									
+a3af6f71e6e68108b	2026-10-18T21:40:25Z	Upload sloc and ci datasets	mechanical	dcfs-mechanical	haiku	low									
+abea83bf2c986ea22	2026-10-18T22:00:00Z	17.2e	review	dcfs-reviewer	claude-opus-5-5	high									
+a2f125ed2382bd6b9	2026-10-18T22:00:00Z	17.2e	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
+acad7f2863d179f6a	2026-10-18T22:37:47Z	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high									
+a7b1c2c44cb93db42	2026-10-18T22:42:20Z	Rank mechanizable review findings		Explore	sonnet										
+a33a7764dc1c9fd20	2026-10-18T22:42:46Z	Upload quota and budget datasets	mechanical	dcfs-mechanical	haiku	low									
+a434a974f638733a1	2026-10-18T22:43:35Z	Upload ci dataset	mechanical	dcfs-mechanical	haiku	low									
+a1f165fb580a2475f	2026-10-18T22:49:37Z	Clerk batch 24	mechanical	dcfs-mechanical	claude-haiku-5-5	low									

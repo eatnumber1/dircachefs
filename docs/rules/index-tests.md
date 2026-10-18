@@ -39,6 +39,9 @@ the date where there is one and a link to the section that holds its reasoning.
   [style 2](/docs/style.md#rule-shard-count)
 - The kernel-facts pins test the kernel, not dcfs, so they run only weekly
   (russ, 2026-10-18). [style 2](/docs/style.md#rule-kernel-facts-weekly)
+- Every kernel invariant dcfs relies on is pinned by a native `kernel_facts_test`
+  case citing `path:line` (russ, 2026-10-18: "add a test").
+  [style 2](/docs/style.md#rule-kernel-invariants-pinned)
 - Test conventions: googletest fixtures, extend an existing test or write a new
   one by cost, matchers over booleans.
   [style 2](/docs/style.md#rule-googletest),

@@ -1750,12 +1750,13 @@ draft's step, numbered 25.41 (the draft's working number was 25.34b, and
    - *Hot-path cost:* Cache hits do zero backing syscalls (`SlopeTest`, [`dcfs/dir_cache_fs_test.cc:8460-8503`]). On cache misses and mutations, one indirect call (~1–2 ns) precedes a kernel transition and filesystem operation (~300–5,000+ ns) — <0.5% overhead, verified by [`//bench:dcfs_bench`].
    - *Nth-call faults:* A `CountdownFault` helper in `testonly/` decrements a counter on matching calls and returns `ErrnoToStatus(err, op)` when `++calls == fail_at` (for [`dcfs/dir_cache_fs_test.cc:288-306`], [`dcfs/dir_cache_fs_test.cc:486-495`]) or while `times-- > 0` (for [`dcfs/fsck_test.cc:52-67`]).
 2. **Template parameter (`template <typename Syscalls = RealSyscalls>`) on callers.**
-   - *Rejected:* Zero dispatch cost, but [`dcfs/backing.cc`] (2,555 lines), [`dcfs/dir_cache_fs.cc`] (4,072 lines), [`dcfs/file_handle.cc`], [`dcfs/device_id.cc`], and [`dcfs/fsck.cc`] would either move into headers or require explicit instantiations of production `.cc` files for every test fake, breaking `.o`-level symbol enforcement in [`tools/banned_symbols.txt:117`] and bloating compile times. And [`FaultSitesTest`] still needs runtime dispatch across hooks. (Compile-time selection *is* used in step 25.38 for the typed `ioctl<OP>`/`fcntl<OP>` member templates, which dispatch to protected pure virtual per-op methods on the interface.)
+   - *Rejected:* Zero dispatch cost, but [`dcfs/backing.cc`] (2,555 lines), [`dcfs/dir_cache_fs.cc`] (4,072 lines), [`dcfs/file_handle.cc`], [`dcfs/device_id.cc`], and [`dcfs/fsck.cc`] would either move into headers or require explicit instantiations of production `.cc` files for every test fake, breaking `.o`-level symbol enforcement in [`tools/banned_symbols.txt:117`] and bloating compile times. And [`FaultSitesTest`] still needs runtime dispatch across hooks. (Compile-time selection *is* used in step 25.38 for the typed `ioctl<OP>`/`fcntl<OP>` free function templates, which dispatch to per-op members of the interface.)
 3. **Per-thread or per-instance fault table inside `syscalls::`.**
    - *Rejected:* Violates [`docs/style.md:505-511`] (step 25.7: no test-only knobs in production code) and adds a TLS/table branch to every production syscall solely for tests.
 
 **Architecture of the seams.**
-- **Syscall interfaces:** [`Context`] carries `BackingSyscalls &backing_syscalls` and `LocalSyscalls &syscalls` (constructed in `main` at [`dcfs/main.cc:322-375`] and in test harnesses; no global `Default()` accessor). Low-level helpers in [`dcfs/backing.cc`], [`dcfs/file_handle.h:35-66`], and [`dcfs/device_id.h:33`] take `BackingSyscalls &` (or `Context &`). [`dcfs/fsck.h:37-49`] and [`dcfs/startup_channel.h:58`] take a small `FsckDeps` / `DaemonDeps` struct holding references to `BackingSyscalls`, `LocalSyscalls`, and `ProcessSyscalls`. [`FileDescriptor`] keeps calling [`syscalls::close`] directly (never wrapped; avoids doubling `sizeof(FileDescriptor)`). The template [`syscalls::ioctl`] becomes a typed front-end (anticipating 25.38): `ioctl<OP>` and `fcntl<OP>` are public non-virtual member templates on the interface, with the operation as a template parameter (`syscalls.ioctl<FS_IOC_GETFSUUID>(fd, ...)`, `syscalls.fcntl<F_GETFL>(fd)`). Each specialization dispatches to a protected pure virtual per-op method (`IoctlGetVersion`, `IoctlGetFsUuid`, `IoctlBtrfsFsInfo`, `IoctlBtrfsSubvolInfo`, `IoctlFlags`, `IoctlRaw`) that implementations and fakes override (the non-virtual-interface pattern). The injected interfaces keep syscall-looking names at call sites (`syscalls.read(...)`, `backing.openat(...)`, never `syscalls.Read(...)`); the naming rule is in [`docs/style.md`] section 1.2.
+- **Syscall interfaces:** [`Context`] carries `BackingSyscalls &backing_syscalls` and `LocalSyscalls &syscalls` (constructed in `main` at [`dcfs/main.cc:322-375`] and in test harnesses; no global `Default()` accessor). Low-level helpers in [`dcfs/backing.cc`], [`dcfs/file_handle.h:35-66`], and [`dcfs/device_id.h:33`] take `BackingSyscalls &` (or `Context &`). [`dcfs/fsck.h:37-49`] and [`dcfs/startup_channel.h:58`] take a small `FsckDeps` / `DaemonDeps` struct holding references to `BackingSyscalls`, `LocalSyscalls`, and `ProcessSyscalls`. [`FileDescriptor`] keeps calling [`syscalls::close`] directly (never wrapped; avoids doubling `sizeof(FileDescriptor)`). Call sites keep calling the `syscalls::` free functions. Russ, 2026-10-18: "for the change to use a dependency-injected syscalls wrapper, keep the global free functions (so call sites look like syscalls::write(...)), but pass in the Context or Syscalls object. Then the wrapper can call syscalls.Write(...) (and note I'm removing the function naming exception for the member methods of Syscalls, since those functions will now only ever be called by the free functions in syscalls::." Then, russ, 2026-10-18: "Actually, let's have the syscalls:: free functions take Context. It can pull Syscalls from inside it, and it provides a uniform surface for the API (syscalls functions look and feel mostly like libc, with an additional Context argument)." So every `syscalls::` free function takes the `Context` as its first argument (`syscalls::read(ctx, fd, buf, n)`, `syscalls::openat(ctx, dirfd, path, flags)`), pulls the right Syscalls interface out of it, and calls its CamelCase member (`Read`, `Openat`). The members are called only by the free functions, and nothing else calls them. How that is enforced is an open question for the 25.41 implementer: members private with the free functions as friends, or public with a `repo_shape` or clang-query rule refusing member calls outside `syscalls*.cc`. Naming rule: [`docs/style.md`] section 1.2, as amended by russ on 2026-10-18.
+- **Typed ioctl and fcntl:** the template [`syscalls::ioctl`] becomes a typed front-end (anticipating 25.38): `ioctl<OP>` and `fcntl<OP>` stay free function templates, with the operation as a template parameter (`syscalls::ioctl<FS_IOC_GETFSUUID>(ctx, fd, ...)`, `syscalls::fcntl<F_GETFL>(ctx, fd)`). Each specialization calls a per-op CamelCase member (`IoctlGetVersion`, `IoctlGetFsUuid`, `IoctlBtrfsFsInfo`, `IoctlBtrfsSubvolInfo`, `IoctlFlags`, `IoctlRaw`) that implementations and fakes override (the non-virtual-interface pattern).
 - **Libfuse seam:** Extract a `FuseLowlevelOps` interface on [`FuseSession`] / [`FuseRequest`] for `fuse_passthrough_open`, `fuse_passthrough_close` ([`dcfs/dir_cache_fs.cc:158-221`]), and `fuse_reply_none` ([`dcfs/fuse_request.cc:136`]), replacing those 3 wraps in [`dcfs/fuse_request_test.cc:159`] and [`dcfs/dir_cache_fs_test.cc:320-335`].
 - **Trace-validation & recovery fault tests:** The 6 negative tests in [`DIR_CACHE_FS_FAULTS`] (`skip_mark_unknown`, `syscall_before_phase1`, `phase3_before_syscall`, `snapshot_after_syncfs`, `create_syscall_before_phase1`, `swallow_syscall_error`) test [`//formal:trace_validate`], not `dcfs`, by corrupting `dcfs` at link time. Replace `syscall_before_phase1`, `snapshot_after_syncfs`, `create_syscall_before_phase1`, and `swallow_syscall_error` with injected `BackingSyscalls` fakes that emit/alter trace events or run the backing syscall inside the fake before phase 1 commits, and replace `skip_mark_unknown` and `phase3_before_syscall` by either a `sqlite3_authorizer` on the test's [`sqlite::Database`] (`SQLITE_IGNORE` on the `unknown` write) or direct negative trace tests on `trace_validate`. In [`dir_cache_fs_crash_during_recovery_test`], replace wrapping mangled `cache::RecoverDirty` and `backing::BackingNlink` ([`dcfs/testonly/recover_dirty_fails_once.cc:25`], [`dcfs/testonly/probe_fails_once.cc:26`]) by injecting a `BackingSyscalls` fake that fails `statx` / `open_by_handle_at` on the first recovery pass and on the root-nlink probe.
 - **`tools/waitexit.c`:** Split `waitexit_run(pid_t pid, const struct waitexit_sys *sys)` in [`tools/waitexit.c:18-62`] with function pointers `.pidfd_open` and `.poll` so [`test/qemu/waitexit_test.cc:56-96`] injects fakes without `-Wl,--wrap`. *Ruling (russ, 2026-10-18, who asked why it needs a seam at all):* first check whether `tools/waitexit.c` is still used once 25.34 ports the guest scripts to C++. If it is not used, delete it. If it stays, it moves to C++ on `LocalSyscalls` instead of getting a function-pointer struct of its own.
@@ -1768,7 +1769,7 @@ draft's step, numbered 25.41 (the draft's working number was 25.34b, and
 5. **Migrate [`//dcfs:fuse_request_test`] and libfuse passthrough in `dir_cache_fs`.** Inject `FuseLowlevelOps`; drop `--wrap=fuse_reply_none` and `--wrap=fuse_passthrough_{open,close}`. *Test:* `bazel test //dcfs:fuse_request_test //dcfs:dir_cache_fs_test`.
 6. **Migrate [`DIR_CACHE_FS_TEST_WRAPS`].** Move `NoTransactionAt`, `DCFS_INJECT`, `WrappedCalls`, `FakeInodeNumbers`, hooks, and `SetgroupsFault` ([`dcfs/dir_cache_fs_test.cc:134-516`]) into a `HarnessSyscalls` delegating wrapper on the test harness's `Context`; delete `DIR_CACHE_FS_TEST_WRAPS`. *Test:* `bazel test //dcfs:dir_cache_fs_test //dcfs:dir_cache_fs_poisoned_test //dcfs:dir_cache_fs_slope_test //dcfs:dir_cache_fs_fault_sites_test`.
 7. **Migrate [`DIR_CACHE_FS_FAULTS`] and [`dir_cache_fs_crash_during_recovery_test`].** Replace the 8 `dcfs/testonly/` `--wrap` libraries ([`dcfs/testonly/BUILD.bazel:184-237`], [`dcfs/testonly/BUILD.bazel:310-334`]) with injected fakes/authorizer. *Test:* `bazel test //dcfs:dir_cache_fs_fault_... //dcfs:dir_cache_fs_crash_during_recovery_test`.
-8. **Delete `--wrap` allow-lists, ban `-Wl,--wrap`, and update docs.** Delete free-function callers outside `Real*Syscalls`; remove `__wrap_`/`__real_` exceptions from [`.clang-tidy:35-37,68-70`] and [`tools/raw_syscalls_test.py:15-17,141`]; add a check in [`tools/style_checks_test.py`] banning `--wrap` in `BUILD.bazel`/`*.bzl`; update [`AGENTS.md:22-23`], [`docs/style.md:474-475,516,532,1491-1493,1559,1757-1758`], and [`docs/design.md:3292-3312`]. *Test:* `bazel test --config=presubmit //...`.
+8. **Delete `--wrap` allow-lists, ban `-Wl,--wrap`, and update docs.** Ban calls to the interface members outside `syscalls*.cc` (the `syscalls::` free functions, which take `Context`, are their only callers; the mechanism is the open question in the 25.41 design); remove `__wrap_`/`__real_` exceptions from [`.clang-tidy:35-37,68-70`] and [`tools/raw_syscalls_test.py:15-17,141`]; add a check in [`tools/style_checks_test.py`] banning `--wrap` in `BUILD.bazel`/`*.bzl`; update [`AGENTS.md:22-23`], [`docs/style.md:474-475,516,532,1491-1493,1559,1757-1758`], and [`docs/design.md:3292-3312`]. *Test:* `bazel test --config=presubmit //...`.
 9. **Migrate the `InChild` reap test (25.34 follow-ups).** The reap test,
    written with a `--wrap` fake before this step, takes `LocalSyscalls` here:
    `InChild` takes `LocalSyscalls` and the test injects a failing `read`;
@@ -1777,8 +1778,8 @@ draft's step, numbered 25.41 (the draft's working number was 25.34b, and
    //test/qemu:guest_test`.
 
 **Risks.**
-- *Bypassing the injected interface:* A caller invoking a free function in `syscalls::` would silently skip `NoTransactionAt` and `FaultSitesTest`. Mitigation: remove non-RAII free functions from `syscalls*.h` in sub-step 8 so only `Real*Syscalls` methods exist (`FileDescriptor::Close` is the sole documented exception).
-- *Variadic `openat`/`ioctl`/`fcntl`:* Virtual methods cannot be variadic or templates. Mitigation: split `openat(dirfd, path, flags)` and `openat(dirfd, path, flags, mode)` and use the `ioctl<OP>`/`fcntl<OP>` member templates over per-op virtuals, aligning directly with step 25.38 ([`docs/plan/phases/25-style-convergence.md:1405-1437`]).
+- *Bypassing the injected interface:* A caller invoking an interface member directly would silently skip `NoTransactionAt` and `FaultSitesTest`. Mitigation: the members are reachable only through the `syscalls::` free functions, enforced as the 25.41 design decides in sub-step 8 (`FileDescriptor::Close`, which calls `syscalls::close` without an interface argument, needs the same treatment; open question).
+- *Variadic `openat`/`ioctl`/`fcntl`:* Virtual methods cannot be variadic or templates. Mitigation: split `openat(dirfd, path, flags)` and `openat(dirfd, path, flags, mode)` and use the `ioctl<OP>`/`fcntl<OP>` free function templates over per-op virtuals, aligning directly with step 25.38 ([`docs/plan/phases/25-style-convergence.md:1405-1437`]).
 - *Coverage Baseline:* Every `Real*Syscalls` method and error branch must stay covered so total coverage never drops ([`AGENTS.md:24-29`]).
 
 **Orchestrator review notes (2026-10-18).**
@@ -1893,6 +1894,71 @@ failing first; the implementer names the commands when the step starts.
 Owner: not yet assigned (the orchestrator chooses). Dependencies: the
 rules-index branch merges first, because it restructures `docs/style.md` and
 `AGENTS.md`.
+
+Also folded in (the same fact-check's stale text outside `docs/testing.md`,
+2026-10-18; a small fix job, clerk batch 24): `.github/workflows/ci.yml:316`
+says "No threshold gate yet", but the coverage gate exists;
+`.github/ci/coverage.sh:9` says "not 0.1 or more above it", but the gate passes
+a rise; `tools/mutation/README.md:182` says "survivor ... 1 per push", but
+survivors are findings and only exit 2 fails; and `AGENTS.md` and `docs/rules`
+still mention `formal/findings/`, which was removed with 12.6b (5dcbdca). Each
+becomes true or is reworded as planned, as above.
+
+## 25.45 Mechanize what reviewers keep finding (russ, 2026-10-18; queued, not started; after the 2026-10-23 reset unless russ says otherwise)
+
+Russ, 2026-10-18: "are there things the reviewers are finding that we can
+automate mechanically?" The ledger analysis (311 review-findings rows, 106 of
+them marked "could" be mechanical) says yes. Build these in order, each a
+`tools/` check with its own failing-first test:
+
+1. Kernel-citation checker (about 34 findings, M). Every `path:line` citation of
+   the kernel carries "(Linux v7.3-rc7)" and exists at that tag
+   (`git -C ~/Sources/linux show`); the cited line is anchored to the named
+   symbol within +-N lines; a bare kernel function name next to a kernel path is
+   refused. This is 25.39 item 3, pulled forward.
+2. `repo_shape` 80-column rule for `*.md`, `*.py`, `*.sh` and `BUILD` files,
+   outside fences, tables and URLs, with a shrink-only allowlist; plus a rule
+   refusing a backtick span split across lines (about 18 findings, S).
+3. `.github/ci/commit_subjects.sh`: subject at most 72 columns; body lines at
+   most 72 columns outside quotes and URLs; `Co-Authored-By` present; "Failing
+   first" in the body of a test-first commit (about 11 findings, S).
+4. `repo_shape` comment rules: no step numbers in code comments; no comment
+   block longer than 10 lines above a declaration; no first person in
+   `docs/style.md` or the reference docs (about 8 findings, S).
+5. A clang-query matcher for const non-reference scalar locals (about 6, S-M).
+
+Then: pasted UAPI constants (M), and finishing 7.6b (shfmt, shellcheck and
+buildifier). Together these should cover about 20% of the should and nit
+findings (55-65 of 294). The rest are stale numbers and doc accuracy, which
+need judgement and stay with reviewers.
+
+Test: each check fails first on a fixture that carries the finding, and passes
+on the tree once the existing findings are fixed or allowlisted.
+
+Owner: not yet assigned (the orchestrator chooses). Dependencies: none for
+items 1 to 4; item 1 needs `~/Sources/linux` at the pinned tag.
+
+## 25.46 Audit the kernel invariants dcfs relies on, and pin each one (russ, 2026-10-18; queued, not started)
+
+Russ, 2026-10-18: "For this and everything else that we're relying on kernel
+invariants like this, add a test." A kernel invariant that lets dcfs skip work
+or decide a result needs a native `kernel_facts_test` case citing `path:line`
+(Linux v7.3-rc7) ([`docs/style.md`] section 2, `rule-kernel-invariants-pinned`).
+
+Steps:
+
+1. Find the reliances. Grep the citations of "Linux v7.3-rc7" in `dcfs/` and
+   list each one that lets dcfs skip work or decide a result.
+2. For each reliance with no `kernel_facts_test` case, add the case and cite
+   the kernel path and line in it. A reliance whose test cannot run natively is
+   listed with its reason in the step's "As built" notes.
+3. Check that the weekly noisy job runs every case (`kernel_facts_test` runs
+   only in the weekly workflow, `rule-kernel-facts-weekly`).
+
+Test: each new case fails first on a deliberately wrong expectation, then passes
+on the pinned kernel; the step names the commands when it starts.
+
+Owner: not yet assigned (the orchestrator chooses). Dependencies: none.
 
 ### 25.34 as built (dcfs-implementer, 2026-10-17)
 
