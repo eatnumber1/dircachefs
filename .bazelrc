@@ -63,6 +63,16 @@ build --dynamic_mode=off
 # excluded by default.
 test --test_output=errors
 
+# Quiet output for agents (lanes set `common --config=agent` in their
+# user.bazelrc): no progress lines, no info or debug events, no curses or
+# color, only warnings, errors and failing tests, and the exit status.
+common:agent --noshow_progress
+common:agent --ui_event_filters=-info,-debug,-progress
+common:agent --curses=no
+common:agent --color=no
+build:agent --show_result=0
+test:agent --test_summary=terse
+
 # Test tiers (phase 6.1): a test's Bazel `size` is its tier. Plain
 # `bazel test //...` runs every tier; these select the cheaper ones.
 test:fast --test_size_filters=small

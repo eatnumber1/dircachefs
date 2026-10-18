@@ -1739,6 +1739,8 @@ necessary, but if you think one is necessary, come to me."
   test results sound, locally and in CI (the restored disk cache lets
   unchanged tests count as passed, and there is no periodic forced rerun:
   flake hunting is a targeted `--runs_per_test` on the changed tests).
+  Lanes run Bazel with `--config=agent` from their user.bazelrc, so agents
+  see only warnings, errors and failing tests, plus the exit status.
   Shut down Bazel servers you started in temporary worktrees when you are
   done with them.
 - Targets are `snake_case` after the file stem (`metadata_cache`,
