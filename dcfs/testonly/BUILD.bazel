@@ -24,6 +24,14 @@ cc_library(
     ],
 )
 
+# A capability set less one capability, for capset in tests.
+cc_library(
+    name = "capabilities",
+    hdrs = ["capabilities.h"],
+    visibility = ["//dcfs:__pkg__"],
+    deps = ["//dcfs:capability_set"],
+)
+
 # A thread whose /proc shows no CAP_FSETID (step 17.2e).
 cc_library(
     name = "thread_without_cap_fsetid",

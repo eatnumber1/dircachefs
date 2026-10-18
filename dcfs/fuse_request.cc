@@ -219,7 +219,7 @@ namespace {
 absl::StatusOr<bool> CapFsetidShown(const ProcCredentials &proc,
                                     const fuse_ctx &ctx) {
   if (proc.fsuid != ctx.uid) return false;
-  if ((proc.cap_effective & (uint64_t{1} << CAP_FSETID)) == 0) return false;
+  if (!proc.cap_effective.Has(CAP_FSETID)) return false;
   return SharesMyUserNamespace(ctx.pid);
 }
 

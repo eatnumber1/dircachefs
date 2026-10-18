@@ -17,6 +17,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/strip.h"
+#include "dcfs/capability_set.h"
 #include "dcfs/proc_file.h"
 #include "dcfs/ret_check.h"
 #include "dcfs/syscalls.h"
@@ -64,7 +65,7 @@ absl::StatusOr<ProcCredentials> ParseProcStatus(std::string_view status) {
   return ProcCredentials{
       .fsuid = (*uids)[3],
       .groups = std::vector<gid_t>(groups->begin(), groups->end()),
-      .cap_effective = *cap_effective};
+      .cap_effective = CapabilitySet::FromKernel(*cap_effective)};
 }
 
 absl::StatusOr<ProcCredentials> ReadProcCredentials(pid_t tid) {

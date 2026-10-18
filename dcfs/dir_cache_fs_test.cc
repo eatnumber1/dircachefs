@@ -116,6 +116,7 @@
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
+#include "dcfs/testonly/capabilities.h"
 #include "dcfs/testonly/cost_counter.h"
 #include "dcfs/testonly/fake_bookkeeping.h"
 #include "dcfs/testonly/files.h"
@@ -7414,10 +7415,9 @@ TEST_F(DirCacheFSTest, ATruncateFailsWhereTheDaemonLacksCapFsetid) {
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   std::thread([&] {
-    constexpr uint64_t kFsetid = uint64_t{1} << CAP_FSETID;
     ASSERT_OK_AND_ASSIGN(syscalls::CapabilitySets sets, syscalls::capget());
-    sets.effective &= ~kFsetid;
-    sets.permitted &= ~kFsetid;
+    sets.effective = testonly::Without(sets.effective, CAP_FSETID);
+    sets.permitted = testonly::Without(sets.permitted, CAP_FSETID);
     ASSERT_THAT(syscalls::capset(sets), IsOk());
     struct fuse_setattr_in in = {};
     in.valid = FATTR_SIZE;

@@ -329,7 +329,7 @@ std::invoke_result_t<Op> AsCaller(const Credentials &caller, Op &&op) {
 // v7.3-rc7)), so nothing undoes this. EPERM if the daemon lacks it.
 absl::Status RaiseCapFsetid() {
   ASSIGN_OR_RETURN(syscalls::CapabilitySets sets, syscalls::capget());
-  sets.effective |= uint64_t{1} << CAP_FSETID;
+  sets.effective.Add(CAP_FSETID);
   return syscalls::capset(sets);
 }
 

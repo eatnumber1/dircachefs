@@ -42,6 +42,7 @@
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/syscalls_process.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
+#include "dcfs/testonly/capabilities.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -594,33 +595,32 @@ TEST(SyscallsCredentialsTest, TheQuerySentinelIsNotAnId) {
 }
 
 // A nonzero fsuid takes the filesystem capabilities, CAP_FSETID among them,
-// out of the effective set (cap_task_fix_setuid, security/commoncap.c:1179-1183
-// (Linux v7.3-rc7)); capset raises one from the permitted set again, and
-// fails with EPERM for one the thread no longer has. In a thread of its own,
-// which nothing uses after it drops one.
+// out of the effective set (cap_task_fix_setuid,
+// security/commoncap.c:1179-1183 (Linux v7.3-rc7)); capset raises one from
+// the permitted set again, and fails with EPERM for one the thread no longer
+// has. In a thread of its own, which nothing uses after it drops one.
 TEST(SyscallsCredentialsTest, CapsetRaisesOnlyAPermittedCapability) {
-  constexpr uint64_t kFsetid = uint64_t{1} << CAP_FSETID;
   std::thread([] {
     ASSERT_OK_AND_ASSIGN(syscalls::CapabilitySets root, syscalls::capget());
-    EXPECT_NE(root.effective & kFsetid, 0u);
+    EXPECT_TRUE(root.effective.Has(CAP_FSETID));
     // Root's capabilities above 31 (CAP_SYSLOG 34 to CAP_CHECKPOINT_RESTORE
     // 40) are in the second 32-bit word, which both calls carry.
-    EXPECT_NE(root.permitted >> 32, 0u);
+    EXPECT_TRUE(root.permitted.Has(CAP_CHECKPOINT_RESTORE));
     ASSERT_THAT(syscalls::setfsuid(1000), IsOk());
     ASSERT_OK_AND_ASSIGN(syscalls::CapabilitySets sets, syscalls::capget());
-    EXPECT_EQ(sets.effective & kFsetid, 0u);
-    EXPECT_EQ(sets.permitted, root.permitted);
-    EXPECT_EQ(sets.inheritable, root.inheritable);
-    sets.effective |= kFsetid;
+    EXPECT_FALSE(sets.effective.Has(CAP_FSETID));
+    EXPECT_EQ(sets.permitted.ToKernel(), root.permitted.ToKernel());
+    EXPECT_EQ(sets.inheritable.ToKernel(), root.inheritable.ToKernel());
+    sets.effective.Add(CAP_FSETID);
     ASSERT_THAT(syscalls::capset(sets), IsOk());
     ASSERT_OK_AND_ASSIGN(syscalls::CapabilitySets raised, syscalls::capget());
-    EXPECT_NE(raised.effective & kFsetid, 0u);
-    EXPECT_EQ(raised.permitted, root.permitted);
-    EXPECT_EQ(raised.inheritable, root.inheritable);
-    sets.effective &= ~kFsetid;
-    sets.permitted &= ~kFsetid;
+    EXPECT_TRUE(raised.effective.Has(CAP_FSETID));
+    EXPECT_EQ(raised.permitted.ToKernel(), root.permitted.ToKernel());
+    EXPECT_EQ(raised.inheritable.ToKernel(), root.inheritable.ToKernel());
+    sets.effective = testonly::Without(sets.effective, CAP_FSETID);
+    sets.permitted = testonly::Without(sets.permitted, CAP_FSETID);
     ASSERT_THAT(syscalls::capset(sets), IsOk());
-    sets.effective |= kFsetid;
+    sets.effective.Add(CAP_FSETID);
     EXPECT_EQ(StatusToErrno(syscalls::capset(sets)), EPERM);
   }).join();
 }

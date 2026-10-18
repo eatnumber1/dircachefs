@@ -4,11 +4,11 @@
 
 #include <sys/types.h>
 
-#include <cstdint>
 #include <string_view>
 #include <vector>
 
 #include "absl/status/statusor.h"
+#include "dcfs/capability_set.h"
 
 namespace dcfs {
 
@@ -21,8 +21,7 @@ namespace dcfs {
 struct ProcCredentials {
   uid_t fsuid = 0;
   std::vector<gid_t> groups;
-  // A bit per capability (1 << CAP_FSETID, ...).
-  uint64_t cap_effective = 0;
+  CapabilitySet cap_effective;
 };
 
 // The uid, groups and capabilities in `status`, the contents of a status

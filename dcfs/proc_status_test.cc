@@ -27,8 +27,6 @@ using ::testing::IsEmpty;
 using ::testing::Not;
 using ::testing::UnorderedElementsAreArray;
 
-constexpr uint64_t kFsetid = uint64_t{1} << CAP_FSETID;
-
 // The lines of a status file that matter, as the kernel prints them, among
 // lines that do not.
 constexpr char kStatus[] =
@@ -45,7 +43,7 @@ TEST(ProcStatusTest, ParsesTheFilesystemUidGroupsAndEffectiveCapabilities) {
   ASSERT_OK_AND_ASSIGN(ProcCredentials parsed, ParseProcStatus(kStatus));
   EXPECT_EQ(parsed.fsuid, 1003u);
   EXPECT_THAT(parsed.groups, ElementsAre(10u, 2000u));
-  EXPECT_EQ(parsed.cap_effective, kFsetid);
+  EXPECT_EQ(parsed.cap_effective.ToKernel(), uint64_t{1} << CAP_FSETID);
 }
 
 TEST(ProcStatusTest, AnEmptyGroupsLineIsNoGroups) {
@@ -53,7 +51,7 @@ TEST(ProcStatusTest, AnEmptyGroupsLineIsNoGroups) {
                        ParseProcStatus("Uid:\t0\t0\t0\t0\nGroups:\t\n"
                                        "CapEff:\t000001ffffffffff\n"));
   EXPECT_THAT(parsed.groups, IsEmpty());
-  EXPECT_EQ(parsed.cap_effective, uint64_t{0x000001ffffffffff});
+  EXPECT_EQ(parsed.cap_effective.ToKernel(), uint64_t{0x000001ffffffffff});
 }
 
 // Whatever the kernel would never write is refused, each line on its own.
@@ -84,19 +82,20 @@ TEST(ProcStatusTest, ReadsThisProcess) {
                        ReadProcCredentials(syscalls::getpid()));
   EXPECT_EQ(read.fsuid, 0u);
   EXPECT_THAT(read.groups, UnorderedElementsAreArray(groups));
-  EXPECT_NE(read.cap_effective & kFsetid, 0u);
+  EXPECT_TRUE(read.cap_effective.Has(CAP_FSETID));
   EXPECT_THAT(SharesMyUserNamespace(syscalls::getpid()), IsOkAndHolds(true));
   EXPECT_THAT(InInitUserNamespace(), IsOkAndHolds(true));
 }
 
 // A filesystem uid other than 0 drops the filesystem capabilities, CAP_FSETID
-// among them, from the effective set (cap_task_fix_setuid), and /proc shows
-// both, for another thread of this process.
+// among them, from the effective set (cap_task_fix_setuid,
+// security/commoncap.c:1179-1183 (Linux v7.3-rc7)), and /proc shows both,
+// for another thread of this process.
 TEST(ProcStatusTest, ReadsAThreadThatDroppedCapFsetid) {
   testonly::ThreadWithoutCapFsetid thread;
   ASSERT_OK_AND_ASSIGN(ProcCredentials read, ReadProcCredentials(thread.tid()));
   EXPECT_EQ(read.fsuid, 1000u);
-  EXPECT_EQ(read.cap_effective & kFsetid, 0u);
+  EXPECT_FALSE(read.cap_effective.Has(CAP_FSETID));
   EXPECT_THAT(SharesMyUserNamespace(thread.tid()), IsOkAndHolds(true));
 }
 

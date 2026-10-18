@@ -36,6 +36,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
+#include "dcfs/capability_set.h"
 #include "dcfs/escape.h"
 #include "dcfs/fd.h"
 #include "dcfs/ret_check.h"
@@ -125,7 +126,7 @@ absl::StatusOr<CapabilitySets> capget() {
     return ErrnoToStatus(errno, "capget");
   }
   auto join = [](uint32_t low, uint32_t high) {
-    return uint64_t{high} << 32 | low;
+    return CapabilitySet::FromKernel(uint64_t{high} << 32 | low);
   };
   return CapabilitySets{
       .effective = join(data[0].effective, data[1].effective),
@@ -137,10 +138,13 @@ absl::Status capset(const CapabilitySets &sets) {
   __user_cap_header_struct header = ThisThread();
   CapabilityData data{};
   for (size_t i = 0; i < data.size(); ++i) {
-    const size_t shift = 32 * i;
-    data[i] = {.effective = static_cast<uint32_t>(sets.effective >> shift),
-               .permitted = static_cast<uint32_t>(sets.permitted >> shift),
-               .inheritable = static_cast<uint32_t>(sets.inheritable >> shift)};
+    size_t shift = 32 * i;
+    auto word = [shift](CapabilitySet set) {
+      return static_cast<uint32_t>(set.ToKernel() >> shift);
+    };
+    data[i] = {.effective = word(sets.effective),
+               .permitted = word(sets.permitted),
+               .inheritable = word(sets.inheritable)};
   }
   if (::capset(&header, data.data()) == -1) {
     return ErrnoToStatus(errno, "capset");

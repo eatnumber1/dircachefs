@@ -280,6 +280,7 @@ cc_library(
       "fd.cc",
     ],
     deps = [
+      ":capability_set",
       ":escape",
       ":ret_check",
       ":status",
@@ -290,6 +291,13 @@ cc_library(
       "@absl//absl/strings",
         "@absl//absl/time",
     ],
+)
+
+# A set of capabilities (capability_set.h): what capget(2) and /proc report.
+cc_library(
+    name = "capability_set",
+    visibility = ["//dcfs/testonly:__pkg__"],
+    hdrs = ["capability_set.h"],
 )
 
 # Process-control wrappers (fork, execv, waitpid, dup2, _exit): the benchmark
@@ -400,6 +408,7 @@ qemu_cc_test(
       ":syscalls_backing",
       ":syscalls_process",
       "//dcfs/testonly:assert_ok_and_assign",
+      "//dcfs/testonly:capabilities",
       "@absl//absl/algorithm:container",
       "@absl//absl/container:fixed_array",
       "@absl//absl/log",
@@ -487,6 +496,7 @@ cc_library(
     hdrs = ["proc_status.h"],
     srcs = ["proc_status.cc"],
     deps = [
+      ":capability_set",
       ":proc_file",
       ":ret_check",
       ":syscalls",
@@ -1162,6 +1172,7 @@ DIR_CACHE_FS_TEST_DEPS = [
     ":syscalls",
     ":syscalls_backing",
     "//dcfs/testonly:assert_ok_and_assign",
+    "//dcfs/testonly:capabilities",
     "//dcfs/testonly:thread_without_cap_fsetid",
     "//dcfs/testonly:fake_bookkeeping",
     "//dcfs/testonly:files",

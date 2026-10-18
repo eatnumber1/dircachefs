@@ -20,6 +20,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
+#include "dcfs/capability_set.h"
 #include "dcfs/fd.h"
 
 namespace dcfs::syscalls {
@@ -60,12 +61,11 @@ absl::Status setgroups(std::span<const gid_t> groups);
 // the count.
 absl::StatusOr<int> getgroups(int size, gid_t *list);
 
-// A thread's capability sets, a bit per capability (uint64_t{1} <<
-// CAP_FSETID, ...).
+// A thread's capability sets.
 struct CapabilitySets {
-  uint64_t effective = 0;
-  uint64_t permitted = 0;
-  uint64_t inheritable = 0;
+  CapabilitySet effective;
+  CapabilitySet permitted;
+  CapabilitySet inheritable;
 };
 
 // capget(2) and capset(2) of the CALLING THREAD alone (pid 0, version 3).
