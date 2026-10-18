@@ -146,9 +146,17 @@ use it as design guidance rather than firm rules."
   in lower case (`syscalls::setxattr`); every other function is CamelCase
   (`SetXattr`). The two layers therefore never clash by construction. Call
   sites keep calling the free functions. Every `syscalls::` free function takes
-  the `Context` as its first argument (`syscalls::write(ctx, fd, buf, n)`),
-  pulls the right Syscalls interface out of it, and calls that interface's
-  CamelCase member (`Write`). The members of the injected syscall interfaces
+  the `Context` as its first argument. The typed signatures stay: a call looks
+  like `syscalls::write(ctx, fd, buf)` with `buf` a `std::span<const std::byte>`,
+  not `(fd, buf, n)`; names are `std::string_view`, not `char *`; errors come
+  back as `Status` or `StatusOr` ([`rule-status-only-error-channel`](#rule-status-only-error-channel)).
+  The Context argument changes none of these deviations from libc (the `char *`
+  rule in section 1.2, step 25.24; buffers as spans, step 25.37; typed
+  signatures, step 25.38) (russ, 2026-10-18: "Be sure not to let that
+  invalidate the other libc deviations we've already done (such as changing
+  pointer+len to std::span, or changing char* to string_view)."). Every
+  `syscalls::` free function pulls the right Syscalls interface out of the
+  Context, and calls that interface's CamelCase member (`Write`). The members of the injected syscall interfaces
   (`BackingSyscalls`, `LocalSyscalls`, `ProcessSyscalls`) follow the normal
   CamelCase rule and are called only by the `syscalls::` free functions
   (russ, 2026-10-18: "for the change to use a dependency-injected syscalls
