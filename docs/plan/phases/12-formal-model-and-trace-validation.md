@@ -778,9 +778,12 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
   so the property covers lookups too.
 - Xattr population stops prefetching: values are read on demand, and the
   name list is cached only on listxattr (russ, 2026-10-17).
-- Per-filesystem xattr limits: deferred by russ ("Let's circle back on
-  that"). The kernel's macros (linux/limits.h) stay the only source until
-  then.
+- Per-filesystem xattr limits (decided 2026-10-17 from the kernel source,
+  notes/contract-audit-2026-10-17.md "Xattr limits per filesystem"): names
+  need nothing; values pass through. Native differential test: a 64 KiB
+  setxattr through dcfs on xfs succeeds, and on ext4 (no ea_inode) fails
+  with the same ENOSPC as native; a test that dcfs's FUSE read buffer holds
+  a 64 KiB SETXATTR.
 - NAME_MAX (found 2026-10-17, missed by the audit): `LookupOrPopulate`
   (dcfs/backing.cc:1549-1564) rejects names over NAME_MAX, citing it as "the
   generic Linux VFS limit"; the kernel says otherwise (fs/readdir.c:146-148:

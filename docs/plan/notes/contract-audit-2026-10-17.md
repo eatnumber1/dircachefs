@@ -80,3 +80,41 @@ V19. formal/README.md:643-644 "an atomic replace or create by rename without fsy
 V20. file_handle.h:20-23 STATX_MNT_ID_UNIQUE "promises not to reuse the value": man 2 statx (STATX_MNT_ID_UNIQUE, "unique ... not reused").
 V21. docs/design.md:2288-2300 POSIX ACLs enforced by the kernel when FUSE_CAP_POSIX_ACL is set: libfuse/kernel capability; the kernel tree has fs/fuse/acl.c; not read in detail.
 V22. README.md:129 plain umount does not wait for the daemon: same as V3.
+
+## Xattr limits per filesystem (kernel v7.3-rc4, ~/Sources/linux)
+
+Names: the VFS copies every xattr name into a fixed XATTR_NAME_MAX+1
+buffer and returns ERANGE for 256+ bytes or empty, on set, get and
+remove, before any filesystem sees it (fs/xattr.c:615-624;
+fs/internal.h:276-278; callers fs/xattr.c:637, 862, 1085,
+io_uring/xattr.c:63). The 255 includes the namespace prefix. ext4
+(fs/ext4/xattr.c:2373), f2fs (fs/f2fs/xattr.c:653) and cifs
+(fs/smb/client/smb2ops.c:1225) have their own 255 checks that cannot
+fire. Exception: overlayfs's own trusted.overlay. and user.overlay.
+names are limited to 247 bytes, EOPNOTSUPP (fs/overlayfs/xattrs.c:156-158).
+
+Values: the VFS caps at XATTR_SIZE_MAX, E2BIG on set (fs/xattr.c:642-643),
+and turns a filesystem's ERANGE at a full 64 KiB get buffer into E2BIG
+(fs/xattr.c:798-815). Per filesystem:
+
+- ext4 without ea_inode: about one block, ENOSPC (fs/ext4/xattr.c:1696,
+  1710).
+- ext4 with ea_inode: 64 KiB.
+- xfs: 64 KiB (fs/xfs/libxfs/xfs_format.h:56).
+- btrfs: name plus value <= nodesize minus headers (about 16 KiB by
+  default), ENOSPC (fs/btrfs/xattr.c:82-83; fs/btrfs/ctree.h:499-502).
+- f2fs: about 4 KiB, E2BIG (fs/f2fs/xattr.c:732-733; fs/f2fs/xattr.h:74-84).
+- tmpfs: its inode-space budget, ENOSPC (mm/shmem.c:4276-4288).
+- cifs: CIFSMaxBufSize (16 KiB by default), EOPNOTSUPP; ENOSPC for total
+  EA space (fs/smb/client/xattr.c:127-130; fs/smb/client/smb2ops.c:
+  1275-1280).
+- nfs: session sxasize, ERANGE (fs/nfs/nfs42proc.c:1442-1443).
+- fuse: 64 KiB, E2BIG if the daemon's read buffer is too small
+  (fs/fuse/dev.c:1615-1620).
+
+Consequence for dcfs: names need nothing (dcfs never sees a name over
+255). Values need dcfs to impose no limit of its own and to pass the
+backing's errno through unchanged, since writes are write-through.
+
+Open risk: dcfs's FUSE read buffer must hold a 64 KiB SETXATTR plus its
+header, or dcfs refuses (E2BIG) what xfs accepts.
