@@ -1265,7 +1265,32 @@ AfterSyscallPcs == {"C_probe", "C_rec", "U3", "R3", "A3"}
 \* request goes on until its next interruption point. The environment's
 \* step, not the daemon's (no `running`). (A slot is in flight only while
 \* serving: a crash empties them, and the shutdown waits for them.)
-CanArrive(p) == Interrupts /\ ps[p].pc # "idle" /\ ~ps[p].intr
+CanArriveAnywhere(p) == Interrupts /\ ps[p].pc # "idle" /\ ~ps[p].intr
+CanArrive(p) == CanArriveAnywhere(p)
+
+\* The pcs whose step neither makes a backing syscall (Counted) nor is an
+\* interruption point: no step from them reads `intr`.
+QuietPcs ==
+    {"LK", "RN_commit", "RD", "RDP_fill", "GA_fill", "C_rec", "C_fill",
+     "C_fail", "U1", "U3", "U_fill", "U_fail", "R0", "R1", "R3", "R_fill",
+     "R_fail", "R_fail2", "A3", "A_fill", "S2", "W_reply", "FR_fill",
+     "FG_fill", "FG_rfill", "FS_end", "FS_fill", "FC_rec", "FC_mark",
+     "FC_fail", "FL_commit"}
+\* The safety configurations' arrival (MC_interrupt.cfg and the others:
+\* CanArrive <- CanArriveWhereItMatters; step 22.5): only where the
+\* request's next step reads `intr`, and only when it could take that step
+\* (Free(p) and the daemon up, which every request step needs). An arrival
+\* elsewhere changes nothing until the request reaches such a state, and
+\* commutes with every other slot's steps, so it is the same as arriving
+\* there: no state of the full arrival that an invariant reads is lost
+\* (InterruptBound reads `nsys`, which only a Counted step changes). Wrong
+\* by default in the safe direction: a pc left out of QuietPcs only adds
+\* states. Not for liveness, whose fairness can tell the two apart: the
+\* liveness configurations keep CanArrive.
+CanArriveWhereItMatters(p) ==
+    /\ CanArriveAnywhere(p) /\ Free(p) /\ mode = "up"
+    /\ ps[p].pc \notin QuietPcs
+                    \ (IF BugInterruptAfterSyscall THEN AfterSyscallPcs ELSE {})
 InterruptArrives(p) ==
     /\ CanArrive(p)
     /\ ps' = [ps EXCEPT ![p].intr = TRUE]

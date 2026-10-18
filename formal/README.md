@@ -721,13 +721,13 @@ populated. Every configuration but `MC_long_names.cfg` sets it to `{}`.
 | `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes; `ReplyObservable` | 10,239,570 | ~20 min unloaded (CI 634 s on 2026-10-08 before step 12.6b's daemon crash; 27 min alone at load 11 without `ReplyObservable`, 64 min with it at load 9-12, 2026-10-08) |
 | `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; the three effect-point properties (since step 12.12a) and `ReplyObservable` (lookups and listings overlap mutations here) | 8,224,822 | ~6 min unloaded (CI 506 s before step 12.6b's daemon crash, for 6.37M states; 19 min alone at load 11, 2026-10-08) |
 | `MC_nolock_small.cfg` | `nolock_small_test` (medium) | step 12.12a (the audit's G4): as nolock with no crash and only `NolockGuardRequests` (lookups, listings, creates, unlinks, renames), so that `Mutation::Owns`, the phase-1 verification and the fill guards meeting a mutation bite before the large tier (`known_bug_rename_stale_source_nolock_small_test` finds R4 in these bounds); all invariants and the four action properties | 343,294 | ~1.5 min (load 8-14, 2026-10-10); with every kind but readdirplus 1,990,812 (6 min), with sync points added 1,185,567 |
-| `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` and `InterruptBound` (step 22.5) | 1,134,929 (280,869 before step 22.5's arrival) | ~2.5 min at load 15 (8.4 min at load 30 beside another test, 2026-10-17) |
+| `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` and `InterruptBound` (step 22.5) | 677,637 (280,869 before step 22.5's arrival, 1,134,929 with arrival anywhere) | ~2 min at load 2 (2026-10-18); 8.4 min at load 30 with arrival anywhere |
 | `MC_long_names.cfg` | `long_names_test` (medium) | as small with `LongNames = {"b"}`, 1 mutation | 429,426 | ~1 min |
-| `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one); `ReplyObservable`, `InterruptBound` | 3,908,815 (892,708) | 26 min alone at load 30 |
-| `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable`, `InterruptBound` | 4,207,066 (1,036,982) | 26 min alone at load 30 |
+| `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one); `ReplyObservable`, `InterruptBound` | 2,252,176 (892,708; 3,908,815) | 5.3 min at load 2 |
+| `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable`, `InterruptBound` | 2,774,256 (1,036,982; 4,207,066) | 7 min at load 2 |
 | `MC_interrupt_liveness.cfg` | `interrupt_liveness_test` (medium) | step 22.5: `FairSpec`, no VIEW; 2 names, 1 slot, every kind, 1 mutation, 1 crash; `InterruptBound`, `InterruptedReplies`, `InterruptActedOn` (the reply ghost keeps only `EINTR`: `RecordReply <- RecordEintr`) | 64,111 | ~2-3 min at load 24-30 |
 | `MC_interrupt_liveness_slots.cfg` | `interrupt_liveness_slots_test` (large) | as `MC_interrupt_liveness.cfg` with 2 slots (another request can hold the thread), 1 name (so no rename), no crash | 126,731 | 4.5 min at load 20, 8 min at load 30 |
-| `MC_interrupt_files.cfg`, `MC_interrupt_borndirty.cfg` | `interrupt_files_test`, `interrupt_borndirty_test` (medium) | step 22.5: as `MC_atime.cfg` (with writes and FSYNCs) and `MC_borndirty.cfg` with `Interrupts`, 2 changes, no crash: F's interruption points (`FC_sys`, `FS_sys`) and a write's (`W_sys`), with `InterruptBound` and every invariant of the two | 13,642; 78,402 | 7 s; 10 s (load 1, 2026-10-18) |
+| `MC_interrupt_files.cfg`, `MC_interrupt_borndirty.cfg` | `interrupt_files_test`, `interrupt_borndirty_test` (medium) | step 22.5: as `MC_atime.cfg` (with writes and FSYNCs) and `MC_borndirty.cfg` with `Interrupts`, 2 changes, no crash: F's interruption points (`FC_sys`, `FS_sys`) and a write's (`W_sys`), with `InterruptBound` and every invariant of the two | 59,680; 10,266 (78,402 and 13,642 with arrival anywhere) | 14 s; 7 s (load 2, 2026-10-18) |
 | `MC_atime.cfg`, `MC_atime_concurrent.cfg`, `MC_atime_crash.cfg` | `atime_test`, `atime_concurrent_test`, `atime_crash_test` (medium) | the file F (step 23.8; [Access times of a file](#access-times-of-a-file-step-238)) | 334,826; 373,534; 29,322 (step 23.11: F's setattrs also move the ghost `fs`; 260,871, 292,824, 29,322 at step 23.8b's corrected `View`; before it 263,848, 297,308, 29,950, the first two depending on TLC's workers) | ~2.5 min; ~3.5 min; ~15 s (load 10-17, 2026-10-09) |
 | `MC_borndirty.cfg`, `_ext4`; `MC_borndirty_nolock.cfg`, `_nolock_ext4`; `MC_borndirty_recovery.cfg` | `borndirty_*_test` (medium) | step 23.11 ([Born-dirty create](#born-dirty-create-step-2311)) | 275,962; 382,710; 89,998; 108,724; 3,054 | 39 s; 2.2 min; 33 s; 46 s; 7 s (by hand, load 14, 2026-10-09) |
 | `MC_crash_ext4.cfg`, `MC_crash_metaprefix.cfg` | `crash_ext4_test`, `crash_metaprefix_test` (medium) | step 12.8: the two weaker backing regimes; 2 names, 1 slot, 3 mutations, 1 crash, lookups, getattrs, creates, unlinks, renames, attribute changes of D and syncs (the litmus configurations have the writes and FSYNCs); all invariants, `CrashRefines`, the effect-point properties and `ReplyObservable` | 356,954 (ext4), 292,044 (metaprefix) | ~3 min, ~1.5 min |
@@ -746,13 +746,23 @@ every configuration.
 grows to 2,154,085 states (6 min), so the interrupts have configurations
 of their own. All of them check `GuardsBalanced`. Step 22.5's arrival
 (`InterruptArrives`, at any step of a request in flight, with the `nsys`
-it counts) took each by about four; arrival only where it can matter next
-(at a checkpoint, or before a backing syscall) would merge behaviors that
-differ only in when an arrival nothing has read yet came, and took
-`MC_interrupt.cfg` to 677,637, but every new syscall step would then have
-to be added to that set, or the bound would not count it: not done. With
-`Interrupts` off, `intr` and `nsys` stay `FALSE` and 0, and the other
-configurations' state counts are unchanged.
+it counts) took each by about four. The safety configurations then take
+it only where it can matter (`CanArrive <- CanArriveWhereItMatters`): at
+a pc whose step reads `intr` (an interruption point, or a backing syscall
+step that `Counted` counts), with the slot free to step and the daemon
+up. An arrival anywhere else changes nothing until the request gets
+there and commutes with the other slots' steps, so the reduction merges
+only behaviors that differ in when an arrival nothing has read yet came:
+`MC_interrupt.cfg` 1,134,929 to 677,637, `_muts2` 3,908,815 to 2,252,176,
+`_nolock` 4,207,066 to 2,774,256, `_files` 78,402 to 59,680, `_borndirty`
+13,642 to 10,266; with it, every safety known bug of the interrupts still
+finds its counterexample (checked by hand, 2026-10-18). The set it
+excludes is `QuietPcs`, the pcs whose step neither syscalls nor checks, so
+a new step's pc left out of it only costs states; a new step wrongly put
+in would hide its arrivals. The liveness configurations keep arrival
+anywhere: fairness can tell the two apart. With `Interrupts` off, `intr`
+and `nsys` stay `FALSE` and 0, and the other configurations' state counts
+are unchanged.
 
 The `View` (in `MC.tla`) merges database states a crash may leave when
 recovery would make the same cache of them: a dirty state's rows are

@@ -75,10 +75,12 @@ tlc_test(
 )
 
 # FUSE_INTERRUPT (Phase 22): the Interrupt action, with the kernel's lock,
-# and with two mutations or without the lock. Since step 22.5's arrival
-# (InterruptArrives, at any step) interrupt_test has 1,134,929 distinct
-# states (280,869 before), 2.5 min alone at load 15, 8.4 min at load 30
-# beside another test (2026-10-17): past "moderate".
+# and with two mutations or without the lock. Step 22.5's arrival
+# (InterruptArrives, at any step) took interrupt_test from 280,869 distinct
+# states to 1,134,929 (2.5 min alone at load 15, 8.4 min at load 30 beside
+# another test, 2026-10-17); arrival only where it can matter
+# (CanArriveWhereItMatters) to 677,637 (2 min at load 2, 2026-10-18):
+# still past "moderate" at load 30.
 tlc_test(
     name = "interrupt_test",
     size = "medium",
@@ -110,9 +112,12 @@ tlc_test(
     srcs = ["dcfs.tla"],
 )
 
-# Since step 22.5: interrupt_muts2 3,908,815 distinct states (892,708
-# before), interrupt_nolock 4,207,066 (1,036,982), each 26 min alone at
-# load 30 (2026-10-17): past "long".
+# Since step 22.5: interrupt_muts2 2,252,176 distinct states (892,708
+# before the arrival; 3,908,815 with it anywhere), interrupt_nolock
+# 2,774,256 (1,036,982; 4,207,066); 5.3 and 7 min side by side at load 2
+# (2026-10-18), against 9.5 and 10 min with arrival anywhere, which took 26
+# min each alone at load 30 (2026-10-17): kept "eternal", since at that load
+# they would still be past "long".
 tlc_test(
     name = "interrupt_muts2_test",
     size = "large",
