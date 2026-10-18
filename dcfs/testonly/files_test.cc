@@ -12,7 +12,6 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/strip.h"
 #include "dcfs/syscalls.h"
-#include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -27,8 +26,8 @@ using ::testing::ElementsAre;
 
 // A directory of its own on the guest's disk (TEST_TMPDIR).
 std::string NewDirectory(std::string_view name) {
-  std::string dir = absl::StrCat(
-      absl::StripSuffix(::testing::TempDir(), "/"), "/", name);
+  std::string dir =
+      absl::StrCat(absl::StripSuffix(::testing::TempDir(), "/"), "/", name);
   EXPECT_THAT(syscalls::mkdir(dir, 0755), IsOk());
   return dir;
 }

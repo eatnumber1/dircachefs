@@ -4,10 +4,10 @@
 #include <fcntl.h>
 #include <linux/fs.h>
 #include <linux/stat.h>
-#include <poll.h>
 #include <sys/file.h>
 #include <sys/inotify.h>
 #include <sys/mman.h>
+#include <sys/poll.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>

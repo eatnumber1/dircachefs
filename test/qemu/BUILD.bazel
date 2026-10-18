@@ -2204,6 +2204,7 @@ qemu_cc_test(
         "//dcfs/testonly:assert_ok_and_assign",
         "//dcfs/testonly:files",
         "//dcfs/testonly:process",
+        "@absl//absl/base:log_severity",
         "@absl//absl/log:scoped_mock_log",
         "@absl//absl/status",
         "@absl//absl/status:status_matchers",

@@ -16,12 +16,12 @@ std::string SerializeStatus(const absl::Status &status) {
   StatusWire wire;
   wire.set_code(static_cast<int>(status.code()));
   wire.set_message(std::string(status.message()));
-  status.ForEachPayload([&wire](std::string_view type_url,
-                                const absl::Cord &value) {
-    StatusWire::Payload *payload = wire.add_payloads();
-    payload->set_type_url(std::string(type_url));
-    payload->set_value(std::string(value));
-  });
+  status.ForEachPayload(
+      [&wire](std::string_view type_url, const absl::Cord &value) {
+        StatusWire::Payload *payload = wire.add_payloads();
+        payload->set_type_url(std::string(type_url));
+        payload->set_value(std::string(value));
+      });
   return wire.SerializeAsString();
 }
 

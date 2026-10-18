@@ -28,7 +28,6 @@
 #include "absl/status/status_macros.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
@@ -73,8 +72,7 @@ std::string StepGetxattr(const absl::StatusOr<size_t> &n,
 
 // The attributes the mutate scenarios compare: what a local filesystem and
 // dcfs must agree on (no ctime: it is the moment of the change).
-std::string StatText(const absl::StatusOr<struct stat> &stat,
-                     bool with_times) {
+std::string StatText(const absl::StatusOr<struct stat> &stat, bool with_times) {
   if (!stat.ok()) return Step("stat", stat.status());
   std::string out = absl::StrFormat(
       " stat=size:%d,mode:%o,uid:%u,gid:%u,nlink:%u", stat->st_size,
@@ -140,8 +138,8 @@ absl::StatusOr<std::string> RemovedCwd(const std::string &dir) {
   }
   char buf[4096];
   absl::StatusOr<ssize_t> n = syscalls::getdents64(**fd, buf, sizeof(buf));
-  return absl::StrCat(out, " open=ok getdents=",
-                      n.ok() ? "ok" : ErrText(n.status()));
+  return absl::StrCat(
+      out, " open=ok getdents=", n.ok() ? "ok" : ErrText(n.status()));
 }
 
 // What listing a directory that was removed under the process answers.
@@ -237,9 +235,9 @@ absl::StatusOr<std::string> RemovedLink(const std::string &path) {
                    syscalls::open(path, O_PATH | O_NOFOLLOW));
   ASSIGN_OR_RETURN(struct stat st, syscalls::fstat(*fd));
   RETURN_IF_ERROR(S_ISDIR(st.st_mode) ? Rmdir(path) : syscalls::unlink(path));
-  absl::Status link = syscalls::linkat(AT_FDCWD, ProcFd(*fd), AT_FDCWD,
-                                       absl::StrCat(path, ".back"),
-                                       AT_SYMLINK_FOLLOW);
+  absl::Status link =
+      syscalls::linkat(AT_FDCWD, ProcFd(*fd), AT_FDCWD,
+                       absl::StrCat(path, ".back"), AT_SYMLINK_FOLLOW);
   return link.ok() ? "link=ok" : absl::StrCat("link=", ErrText(link));
 }
 
@@ -291,42 +289,41 @@ class RemovedTest : public ::testing::Test {
     ASSERT_OK_AND_ASSIGN(state_->ref.cwd,
                          InChild([] { return RemovedCwd(Src("ref_cwd")); }));
     Touch(Src("ref_file"), "data\n");
-    ASSERT_OK_AND_ASSIGN(
-        state_->ref.file,
-        InChild([] { return OpathUnlinkStat(Src("ref_file")); }));
+    ASSERT_OK_AND_ASSIGN(state_->ref.file, InChild([] {
+                           return OpathUnlinkStat(Src("ref_file"));
+                         }));
     Mkdir(Src("ref_ls"));
-    ASSERT_OK_AND_ASSIGN(
-        state_->ref.ls, InChild([] { return RemovedCwdListing(Src("ref_ls")); }));
-    ASSERT_OK_AND_ASSIGN(
-        state_->ref.umut,
-        InChild([] { return UnlinkedMutate(Src("ref_umut")); }));
-    ASSERT_OK_AND_ASSIGN(
-        state_->ref.omut,
-        InChild([] { return OpathUnlinkedMutate(Src("ref_omut")); }));
+    ASSERT_OK_AND_ASSIGN(state_->ref.ls, InChild([] {
+                           return RemovedCwdListing(Src("ref_ls"));
+                         }));
+    ASSERT_OK_AND_ASSIGN(state_->ref.umut, InChild([] {
+                           return UnlinkedMutate(Src("ref_umut"));
+                         }));
+    ASSERT_OK_AND_ASSIGN(state_->ref.omut, InChild([] {
+                           return OpathUnlinkedMutate(Src("ref_omut"));
+                         }));
     Mkdir(Src("ref_cmut"));
-    ASSERT_OK_AND_ASSIGN(
-        state_->ref.cmut,
-        InChild([] { return RemovedCwdMutate(Src("ref_cmut")); }));
+    ASSERT_OK_AND_ASSIGN(state_->ref.cmut, InChild([] {
+                           return RemovedCwdMutate(Src("ref_cmut"));
+                         }));
     // Linking a removed object back: ENOENT for a file, EPERM for a
     // directory (linkat(2): the object has no link count left to raise).
     Touch(Src("ref_lfile"), "data\n");
-    ASSERT_OK_AND_ASSIGN(
-        state_->ref.lfile,
-        InChild([] { return RemovedLink(Src("ref_lfile")); }));
+    ASSERT_OK_AND_ASSIGN(state_->ref.lfile,
+                         InChild([] { return RemovedLink(Src("ref_lfile")); }));
     Mkdir(Src("ref_ldir"));
-    ASSERT_OK_AND_ASSIGN(
-        state_->ref.ldir, InChild([] { return RemovedLink(Src("ref_ldir")); }));
+    ASSERT_OK_AND_ASSIGN(state_->ref.ldir,
+                         InChild([] { return RemovedLink(Src("ref_ldir")); }));
     Mkdir(Src("ref_tdir"));
-    ASSERT_OK_AND_ASSIGN(
-        state_->ref.tlink,
-        InChild([] { return TmpfileLink(Src("ref_tdir"), "t"); }));
+    ASSERT_OK_AND_ASSIGN(state_->ref.tlink, InChild([] {
+                           return TmpfileLink(Src("ref_tdir"), "t");
+                         }));
     syscalls::sync();
 
-    ASSERT_OK_AND_ASSIGN(
-        state_->mount,
-        DcfsMount::Start({.source = state_->src,
-                          .mountpoint = std::string(kMnt),
-                          .cache_db = "/cache/dcfs.db"}));
+    ASSERT_OK_AND_ASSIGN(state_->mount,
+                         DcfsMount::Start({.source = state_->src,
+                                           .mountpoint = std::string(kMnt),
+                                           .cache_db = "/cache/dcfs.db"}));
   }
 
   static void TearDownTestSuite() {
@@ -341,9 +338,11 @@ class RemovedTest : public ::testing::Test {
 
   // A name that is gone for good once the references are gone.
   static void ExpectGone(std::string_view name) {
-    EXPECT_THAT(syscalls::stat(Mnt(name)), StatusIs(absl::StatusCode::kNotFound))
+    EXPECT_THAT(syscalls::stat(Mnt(name)),
+                StatusIs(absl::StatusCode::kNotFound))
         << name << ": still exists through dcfs";
-    EXPECT_THAT(syscalls::stat(Src(name)), StatusIs(absl::StatusCode::kNotFound))
+    EXPECT_THAT(syscalls::stat(Src(name)),
+                StatusIs(absl::StatusCode::kNotFound))
         << name << ": still exists on the backing filesystem";
   }
 
@@ -450,9 +449,9 @@ TEST_F(RemovedTest, ChangingAnUnlinkedStattedFileAnswersAsTheBackingDoes) {
 
 // unlinked-opath-mutate
 TEST_F(RemovedTest, ChangingAnUnlinkedOpathFileAnswersAsTheBackingDoes) {
-  ASSERT_OK_AND_ASSIGN(
-      std::string served,
-      InChild([] { return OpathUnlinkedMutate(Mnt("omut")); }));
+  ASSERT_OK_AND_ASSIGN(std::string served, InChild([] {
+                         return OpathUnlinkedMutate(Mnt("omut"));
+                       }));
   ExpectSameAsBacking(state_->ref.omut, served);
   ExpectGone("omut");
 }

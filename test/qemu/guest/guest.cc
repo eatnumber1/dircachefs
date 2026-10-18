@@ -2,12 +2,13 @@
 #include "test/qemu/guest/guest.h"
 
 #include <fcntl.h>
-#include <poll.h>
-#include <signal.h>
+#include <signal.h>  // NOLINT(modernize-deprecated-headers): include-cleaner finds SIGKILL here
+#include <stdio.h>  // NOLINT(modernize-deprecated-headers): include-cleaner finds SEEK_SET here
+#include <stdlib.h>  // NOLINT(modernize-deprecated-headers): include-cleaner finds WIFEXITED here
+#include <sys/poll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 #include <cstddef>
@@ -185,7 +186,8 @@ DcfsMount::~DcfsMount() {
   if (pid_.has_value()) {
     status.Update(syscalls::kill(*pid_, SIGKILL));
     status.Update(Wait(*pid_).status());
-    status.Update(testonly::RunCommand({"/bin/umount", "-l", spec_.mountpoint}));
+    status.Update(
+        testonly::RunCommand({"/bin/umount", "-l", spec_.mountpoint}));
   }
   status.Update(syscalls::unlink(log_path_));
   if (!status.ok()) {
@@ -197,7 +199,8 @@ DcfsMount::~DcfsMount() {
 absl::StatusOr<std::unique_ptr<DcfsMount> absl_nonnull> DcfsMount::Spawn(
     MountSpec spec) {
   std::vector<std::string> argv = {
-      "mount.dcfs", "-o", absl::StrCat("dcfs.cache_db=", spec.cache_db, ",dcfs.foreground")};
+      "mount.dcfs", "-o",
+      absl::StrCat("dcfs.cache_db=", spec.cache_db, ",dcfs.foreground")};
   for (const std::string &flag : spec.flags) {
     absl::StrAppend(&argv[2], ",dcfs.", flag);
   }
@@ -229,19 +232,18 @@ absl::StatusOr<std::unique_ptr<DcfsMount> absl_nonnull> DcfsMount::Start(
   // the poll in WaitForMount, whatever the daemon does in between.
   ASSIGN_OR_RETURN(FileDescriptor mounts,
                    syscalls::open("/proc/self/mounts", O_RDONLY));
-  ASSIGN_OR_RETURN(std::unique_ptr<DcfsMount> daemon,
-                   Spawn(std::move(spec)));
-  ASSIGN_OR_RETURN(FileDescriptor pidfd, syscalls::pidfd_open(*daemon->pid_));
-  ASSIGN_OR_RETURN(
-      MountWait waited,
-      WaitForMount(*mounts, *pidfd, daemon->spec_.mountpoint));
+  ASSIGN_OR_RETURN(std::unique_ptr<DcfsMount> daemon, Spawn(std::move(spec)));
+  ASSIGN_OR_RETURN(pid_t pid, daemon->Running());
+  ASSIGN_OR_RETURN(FileDescriptor pidfd, syscalls::pidfd_open(pid));
+  ASSIGN_OR_RETURN(MountWait waited,
+                   WaitForMount(*mounts, *pidfd, daemon->spec_.mountpoint));
   if (waited == MountWait::kMounted) {
     // The mount is in the table before the daemon serves it; a stat is
     // answered once it does.
     RETURN_IF_ERROR(syscalls::stat(daemon->spec_.mountpoint).status());
     return daemon;
   }
-  ASSIGN_OR_RETURN(int wait_status, Wait(*daemon->pid_));
+  ASSIGN_OR_RETURN(int wait_status, Wait(pid));
   daemon->pid_.reset();
   return daemon->DaemonEnded(
       wait_status, absl::StrCat("without mounting ", daemon->spec_.mountpoint));
@@ -342,8 +344,8 @@ absl::Status CompareTrees(std::string_view a, std::string_view b) {
 }
 
 void ExpectSameAsBacking(std::string_view backing, std::string_view served) {
-  EXPECT_EQ(backing, served) << "backing filesystem: '" << backing
-                             << "'; dcfs: '" << served << "'";
+  EXPECT_EQ(backing, served)
+      << "backing filesystem: '" << backing << "'; dcfs: '" << served << "'";
 }
 
 }  // namespace dcfs

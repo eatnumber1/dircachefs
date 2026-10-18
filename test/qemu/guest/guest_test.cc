@@ -11,6 +11,7 @@
 #include <string_view>
 #include <vector>
 
+#include "absl/base/log_severity.h"
 #include "absl/log/scoped_mock_log.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
@@ -21,9 +22,9 @@
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/syscalls_process.h"
-#include "dcfs/testonly/process.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "dcfs/testonly/files.h"
+#include "dcfs/testonly/process.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest-spi.h"
 #include "gtest/gtest.h"
@@ -148,8 +149,8 @@ TEST(SnapshotTest, OneLinePerEntryWithTheContentsOfFiles) {
   Mkdir(dir);
   ASSERT_THAT(syscalls::mkdir(absl::StrCat(dir, "/d"), 0700), IsOk());
   ASSERT_THAT(WriteFile(absl::StrCat(dir, "/d/f"), "abc"), IsOk());
-  ASSERT_THAT(
-      syscalls::symlinkat("d/f", AT_FDCWD, absl::StrCat(dir, "/l")), IsOk());
+  ASSERT_THAT(syscalls::symlinkat("d/f", AT_FDCWD, absl::StrCat(dir, "/l")),
+              IsOk());
   EXPECT_THAT(Snapshot(dir),
               IsOkAndHolds(ElementsAre("./d d 4096 700 2",
                                        StartsWith("./d/f f 3 644 1 "),
@@ -192,9 +193,8 @@ TEST(ExpectSameAsBackingTest, EqualAnswersPass) {
 }
 
 TEST(ExpectSameAsBackingTest, DifferentAnswersFailAndShowBoth) {
-  EXPECT_NONFATAL_FAILURE(
-      ExpectSameAsBacking("nlink=0", "ESTALE"),
-      "backing filesystem: 'nlink=0'; dcfs: 'ESTALE'");
+  EXPECT_NONFATAL_FAILURE(ExpectSameAsBacking("nlink=0", "ESTALE"),
+                          "backing filesystem: 'nlink=0'; dcfs: 'ESTALE'");
 }
 
 TEST(DcfsMountTest, ServesTheBackingAndUnmountsCleanly) {
@@ -204,7 +204,8 @@ TEST(DcfsMountTest, ServesTheBackingAndUnmountsCleanly) {
   ASSERT_THAT(mount, IsOk());
   EXPECT_THAT(testonly::ListDirectory(spec.mountpoint),
               IsOkAndHolds(ElementsAre("f")));
-  ASSERT_THAT(WriteFile(absl::StrCat(spec.mountpoint, "/g"), "through"), IsOk());
+  ASSERT_THAT(WriteFile(absl::StrCat(spec.mountpoint, "/g"), "through"),
+              IsOk());
   EXPECT_THAT(CompareTrees(spec.mountpoint, spec.source), IsOk());
   EXPECT_THAT((*mount)->Unmount(), IsOk());
   EXPECT_THAT(testonly::ListDirectory(spec.mountpoint),

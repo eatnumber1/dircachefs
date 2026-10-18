@@ -183,8 +183,7 @@ absl::StatusOr<short> poll(int fd, short events, int timeout_ms) {
   return n == 0 ? static_cast<short>(0) : pfd.revents;
 }
 
-absl::StatusOr<int> poll(std::span<struct pollfd> fds,
-                         absl::Duration timeout) {
+absl::StatusOr<int> poll(std::span<struct pollfd> fds, absl::Duration timeout) {
   // poll(2) takes milliseconds in an int, and a negative one waits for ever.
   RET_CHECK_GE(timeout, absl::ZeroDuration());
   RET_CHECK(timeout == absl::InfiniteDuration() ||

@@ -22,6 +22,7 @@
   "bazel_dep": {
     "googletest": {"purl": "pkg:github/google/googletest", "kind": "code"},
     "google_benchmark": {"purl": "pkg:github/google/benchmark", "kind": "code"},
+    "protobuf": {"purl": "pkg:github/protocolbuffers/protobuf", "kind": "code"},
     "rules_cc": {"purl": "pkg:github/bazelbuild/rules_cc", "kind": "build-rules"},
     "rules_shell": {"purl": "pkg:github/bazelbuild/rules_shell", "kind": "build-rules"},
     "bazel_skylib": {"purl": "pkg:github/bazelbuild/bazel-skylib", "kind": "build-rules"},

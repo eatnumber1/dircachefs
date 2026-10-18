@@ -59,8 +59,8 @@ inline constexpr std::string_view kDcfsBinary = "/test/data/dcfs";
 class DcfsMount {
  public:
   // Starts mount.dcfs (kDcfsBinary) and returns once the mount is in the
-  // table and the daemon answers a stat of it. If the daemon exits first, the error carries its exit and its
-  // stderr.
+  // table and the daemon answers a stat of it. If the daemon exits first, the
+  // error carries its exit and its stderr.
   static absl::StatusOr<std::unique_ptr<DcfsMount> absl_nonnull> Start(
       MountSpec spec);
 

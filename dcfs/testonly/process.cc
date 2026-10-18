@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "dcfs/testonly/process.h"
 
+#include <stdlib.h>  // NOLINT(modernize-deprecated-headers): include-cleaner finds WIFEXITED here
 #include <sys/types.h>
-#include <sys/wait.h>
 
 #include <string>
 #include <vector>

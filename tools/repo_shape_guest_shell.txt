@@ -62,6 +62,7 @@ test/qemu/guest/pjdfstest_chown.sh
 test/qemu/guest/pjdfstest_lib.sh
 test/qemu/guest/pjdfstest_rename.sh
 test/qemu/guest/pjdfstest_rest.sh
+test/qemu/guest/pmu.sh
 test/qemu/guest/power.sh
 test/qemu/guest/quiet_kernel.sh
 test/qemu/guest/ram_disks.sh

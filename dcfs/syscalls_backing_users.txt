@@ -33,6 +33,7 @@
 //test/qemu:removed_test_lib
 
 # tests
+//dcfs/testonly:files_test_bin
 //dcfs/testonly:trace_recorder_test_bin
 //dcfs:backing_fault_test_bin
 //dcfs:backing_test_bin
