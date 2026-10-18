@@ -411,8 +411,9 @@ qemu_cc_test(
 )
 
 # Fault-injection test for the retry loops in backing.cc (xattr size races,
-# the symlink target cap; see backing_fault_test.cc): link-time --wrap fakes
-# for getxattr/listxattr/readlinkat, in a target of its own so the wrapping cannot affect any other test.
+# the symlink target cap; see backing_fault_test.cc) and a failing capget:
+# link-time --wrap fakes for getxattr/listxattr/readlinkat/capget, in a target
+# of its own so the wrapping cannot affect any other test.
 qemu_cc_test(
     name = "backing_fault_test",
     size = "small",
@@ -423,9 +424,11 @@ qemu_cc_test(
       "-Wl,--wrap=getxattr",
       "-Wl,--wrap=listxattr",
       "-Wl,--wrap=readlinkat",
+      "-Wl,--wrap=capget",
     ],
     deps = [
       ":backing",
+      ":credentials",
       ":status",
       ":syscalls",
       ":syscalls_backing",

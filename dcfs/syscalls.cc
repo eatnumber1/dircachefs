@@ -41,6 +41,12 @@
 #include "dcfs/ret_check.h"
 #include "dcfs/status.h"
 
+// glibc exports capget(2) and capset(2) but declares them in no header: the
+// manpage calls them through syscall(2), and libcap's <sys/capability.h>,
+// which declares them like this, is not in the sysroot.
+extern "C" int capget(cap_user_header_t header, cap_user_data_t data);
+extern "C" int capset(cap_user_header_t header, cap_user_data_t data);
+
 namespace dcfs::syscalls {
 
 absl::Status close(FileDescriptor fd) {
@@ -112,12 +118,12 @@ using CapabilityData =
 
 }  // namespace
 
-CapabilitySets capget() {
+absl::StatusOr<CapabilitySets> capget() {
   __user_cap_header_struct header = ThisThread();
   CapabilityData data{};
-  // Cannot fail (syscalls.h): the header and buffers are this function's
-  // and right, and pid 0 is the calling thread.
-  ::syscall(SYS_capget, &header, data.data());
+  if (::capget(&header, data.data()) == -1) {
+    return ErrnoToStatus(errno, "capget");
+  }
   auto join = [](uint32_t low, uint32_t high) {
     return uint64_t{high} << 32 | low;
   };
@@ -136,7 +142,7 @@ absl::Status capset(const CapabilitySets &sets) {
                .permitted = static_cast<uint32_t>(sets.permitted >> shift),
                .inheritable = static_cast<uint32_t>(sets.inheritable >> shift)};
   }
-  if (::syscall(SYS_capset, &header, data.data()) == -1) {
+  if (::capset(&header, data.data()) == -1) {
     return ErrnoToStatus(errno, "capset");
   }
   return absl::OkStatus();

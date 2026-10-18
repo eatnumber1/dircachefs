@@ -2,7 +2,8 @@
 // Fault-injection tests for the xattr retry loops in dcfs/backing.cc: the
 // value or the list of xattrs can grow between the size query and the read
 // that follows, and no real filesystem can be made to do that
-// deterministically. A separate binary (see BUILD.bazel) because its
+// deterministically; and for a capget(2) that fails, which only an LSM
+// policy makes it do. A separate binary (see BUILD.bazel) because its
 // link-time symbol wrapping (-Wl,--wrap=...) rewrites every reference to
 // the wrapped symbols in the whole binary it links into.
 //
@@ -12,6 +13,7 @@
 // it cares about. No production code is touched by any of this.
 
 #include <fcntl.h>
+#include <linux/capability.h>
 #include <sys/types.h>
 
 #include <cerrno>
@@ -25,6 +27,7 @@
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "dcfs/backing.h"
+#include "dcfs/credentials.h"
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls_backing.h"
@@ -65,6 +68,11 @@ struct FaultState {
   // symlink(2) time), so the doubling loop's PATH_MAX*4 cap is reached.
   int fake_readlinkat_dirfd = -1;
   std::string fake_readlinkat_path;
+
+  // capget: if nonzero, fails every call with this errno, as an LSM's
+  // security_capget can (kernel/capability.c:123 (Linux v7.3-rc7); SELinux's
+  // PROCESS__GETCAP check, security/selinux/hooks.c:2179).
+  int capget_errno = 0;
 };
 
 FaultState &GetFaultState() {
@@ -136,6 +144,16 @@ ssize_t __wrap_readlinkat(int dirfd, const char *pathname, char *buf,
     return static_cast<ssize_t>(bufsize);
   }
   return __real_readlinkat(dirfd, pathname, buf, bufsize);
+}
+
+int __real_capget(cap_user_header_t header, cap_user_data_t data);
+
+int __wrap_capget(cap_user_header_t header, cap_user_data_t data) {
+  if (int err = dcfs::GetFaultState().capget_errno; err != 0) {
+    errno = err;
+    return -1;
+  }
+  return __real_capget(header, data);
 }
 
 }  // extern "C"
@@ -228,6 +246,20 @@ TEST_F(BackingFaultTest, SymlinkTargetIsEnametoolongAtPathMaxTimesFourCap) {
   auto errno_val = GetErrnoFromStatus(target.status());
   ASSERT_THAT(errno_val, IsOk());
   EXPECT_EQ(*errno_val, ENAMETOOLONG);
+}
+
+// A backing call that keeps CAP_FSETID reads the thread's capabilities
+// first; where capget(2) fails, the call fails with its errno and makes no
+// backing syscall.
+TEST_F(BackingFaultTest, AFallocateFailsWhereCapgetFails) {
+  GetFaultState().capget_errno = EACCES;
+  absl::Status fallocated =
+      backing::FallocateFd(Credentials{.uid = 1000, .gid = 1000, .groups = {}},
+                           *file_fd_, 0, 0, 4096);
+  GetFaultState().capget_errno = 0;
+  EXPECT_EQ(StatusToErrno(fallocated), EACCES) << fallocated;
+  ASSERT_OK_AND_ASSIGN(struct stat st, syscalls::fstat(*file_fd_));
+  EXPECT_EQ(st.st_size, 0);
 }
 
 }  // namespace

@@ -328,7 +328,7 @@ std::invoke_result_t<Op> AsCaller(const Credentials &caller, Op &&op) {
 // again (cap_task_fix_setuid, security/commoncap.c:1178-1188 (Linux
 // v7.3-rc7)), so nothing undoes this. EPERM if the daemon lacks it.
 absl::Status RaiseCapFsetid() {
-  syscalls::CapabilitySets sets = syscalls::capget();
+  ASSIGN_OR_RETURN(syscalls::CapabilitySets sets, syscalls::capget());
   sets.effective |= uint64_t{1} << CAP_FSETID;
   return syscalls::capset(sets);
 }

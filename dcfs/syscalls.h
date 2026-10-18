@@ -69,12 +69,11 @@ struct CapabilitySets {
 };
 
 // capget(2) and capset(2) of the CALLING THREAD alone (pid 0, version 3).
-// capget cannot fail: its errors are a bad header or buffer (EFAULT,
-// EINVAL) or a pid that is not the caller's (ESRCH), and it passes its own
-// version 3 header, its own buffers and pid 0. capset fails with EPERM for
-// an effective capability outside the permitted set, or a permitted one
-// the thread does not have.
-CapabilitySets capget();
+// capget fails where an LSM refuses it (security_capget,
+// kernel/capability.c:123 (Linux v7.3-rc7); SELinux's PROCESS__GETCAP). capset
+// fails with EPERM for an effective capability outside the permitted set, or a
+// permitted one the thread does not have.
+absl::StatusOr<CapabilitySets> capget();
 absl::Status capset(const CapabilitySets &sets);
 
 // mkdtemp(3): creates the directory and returns its name; `pattern` ends in
