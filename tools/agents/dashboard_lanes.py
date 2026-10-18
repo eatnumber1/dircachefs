@@ -20,6 +20,7 @@ this directory for the hook configuration.
     dashboard_lanes.py lane-state ...  set or clear lane state override
     dashboard_lanes.py ledger add ...  append row for unhooked agent job
     dashboard_lanes.py ledger set ...  fill outcome fields at merge time
+    dashboard_lanes.py ledger backfill-tokens  fill empty tokens
     dashboard_lanes.py clerk-queue add TEXT...  queue a bookkeeping item
     dashboard_lanes.py clerk-queue drain        print the clerk brief, empty it
 
@@ -38,6 +39,7 @@ docs/plan/dispatch-ledger.tsv under the main repository checkout.
 import dataclasses
 import datetime
 import fcntl
+import glob
 import hashlib
 import json
 import os
@@ -72,6 +74,16 @@ LEDGER_COLUMNS = [
     "escapes",
     "verdict",
     "notes",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_creation_tokens",
+]
+USAGE_KEYS = [
+    ("input_tokens", "input_tokens"),
+    ("output_tokens", "output_tokens"),
+    ("cache_read_tokens", "cache_read_input_tokens"),
+    ("cache_creation_tokens", "cache_creation_input_tokens"),
 ]
 LEDGER_HEADER = "\t".join(LEDGER_COLUMNS) + "\n"
 
@@ -106,6 +118,7 @@ class Env:
     runner: object = None
     launcher: object = None
     environ: dict = dataclasses.field(default_factory=dict)
+    projects_dir: str = ""
 
     @classmethod
     def from_environ(cls, environ):
@@ -132,6 +145,7 @@ class Env:
             ).strftime("%Y-%m-%dT%H:%M:%SZ"),
             stderr=sys.stderr,
             environ=dict(environ),
+            projects_dir=os.path.join(home, ".claude", "projects"),
         )
 
     def path(self, name):
@@ -1094,26 +1108,124 @@ def record_ledger_dispatch(env, event):
     write_ledger(ledger_path, rows)
 
 
+def read_transcript_usage(path):
+    """Sums the usage blocks of a subagent transcript (JSONL).
+
+    Returns (usage, duration_s): usage maps each USAGE_KEYS ledger column to
+    its total, duration_s is last minus first timestamp, in seconds (a
+    string). Streaming writes one transcript line per content block of an
+    assistant message, each repeating the message's usage block, so a message
+    counts once, by its last usage block. Raises ValueError saying why when
+    the totals cannot be trusted: no file, a malformed line, no usage block.
+    """
+    try:
+        with open(os.path.expanduser(path), encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError as e:
+        raise ValueError("transcript %s unreadable: %s" % (path, e))
+    by_message = {}
+    stamps = []
+    for n, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            raise ValueError("transcript %s: line %d is not JSON" % (path, n))
+        if not isinstance(entry, dict):
+            raise ValueError("transcript %s: line %d is not an object"
+                             % (path, n))
+        if isinstance(entry.get("timestamp"), str):
+            stamps.append(entry["timestamp"])
+        message = entry.get("message")
+        if not isinstance(message, dict):
+            continue
+        usage = message.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        by_message[message.get("id") or "line%d" % n] = usage
+    if not by_message:
+        raise ValueError("transcript %s: no usage blocks" % path)
+    totals = {col: 0 for col, _ in USAGE_KEYS}
+    for usage in by_message.values():
+        for col, key in USAGE_KEYS:
+            value = usage.get(key, 0)
+            if isinstance(value, int):
+                totals[col] += value
+    duration = ""
+    if len(stamps) >= 2:
+        first, last = parse_iso_datetime(stamps[0]), parse_iso_datetime(
+            stamps[-1])
+        duration = str(round((last - first).total_seconds()))
+    return totals, duration
+
+
+def fill_from_transcript(row, path):
+    """Puts a transcript's token totals and duration into a ledger row."""
+    totals, duration = read_transcript_usage(path)
+    for col, value in totals.items():
+        row[col] = str(value)
+    row["tokens"] = str(sum(totals.values()))
+    if duration:
+        row["duration_s"] = duration
+
+
 def record_ledger_stop(env, event):
     agent_id = event.get("agent_id")
     if not agent_id:
         return
     tokens, duration = extract_tokens_and_duration(event)
-    if not tokens and not duration:
-        return
+    transcript = event.get("agent_transcript_path")
     ledger_path = env.ledger_path()
     rows = read_ledger(ledger_path)
-    updated = False
     for r in reversed(rows):
         if r.get("id") == agent_id:
-            if tokens:
-                r["tokens"] = tokens
-            if duration:
-                r["duration_s"] = duration
-            updated = True
             break
-    if updated:
-        write_ledger(ledger_path, rows)
+    else:
+        return
+    if transcript:
+        try:
+            fill_from_transcript(r, transcript)
+        except ValueError as e:
+            env.stderr.write("dashboard_lanes: ledger: %s\n" % e)
+    if tokens:
+        r["tokens"] = tokens
+    if duration:
+        r["duration_s"] = duration
+    write_ledger(ledger_path, rows)
+
+
+def find_transcript(env, agent_id):
+    """Finds agent_id's transcript under the projects directory, or None."""
+    pattern = os.path.join(env.projects_dir, "*", "*", "subagents",
+                           "agent-%s.jsonl" % glob.escape(agent_id))
+    found = sorted(glob.glob(pattern))
+    return found[-1] if found else None
+
+
+def ledger_backfill_tokens(env, args):
+    """Fills rows with empty tokens from their agents' transcripts."""
+    if args:
+        raise ValueError("usage: ledger backfill-tokens")
+    ledger_path = env.ledger_path()
+    rows = read_ledger(ledger_path)
+    filled = missing = failed = 0
+    for r in rows:
+        if r.get("tokens"):
+            continue
+        path = find_transcript(env, r.get("id", "")) if r.get("id") else None
+        if path is None:
+            missing += 1
+            continue
+        try:
+            fill_from_transcript(r, path)
+            filled += 1
+        except ValueError as e:
+            env.stderr.write("dashboard_lanes: ledger: %s\n" % e)
+            failed += 1
+    write_ledger(ledger_path, rows)
+    return "filled %d, no transcript %d, failed %d\n" % (
+        filled, missing, failed)
 
 
 def parse_key_value_args(args):
@@ -1212,12 +1324,15 @@ def ledger_set(env, args):
 
 def ledger(env, args):
     if not args:
-        raise ValueError("ledger requires a subcommand (add or set)")
+        raise ValueError(
+            "ledger requires a subcommand (add, set or backfill-tokens)")
     sub = args[0]
     if sub == "add":
         return ledger_add(env, args[1:])
     elif sub == "set":
         return ledger_set(env, args[1:])
+    elif sub == "backfill-tokens":
+        return ledger_backfill_tokens(env, args[1:])
     else:
         raise ValueError("unknown ledger subcommand: %r" % sub)
 

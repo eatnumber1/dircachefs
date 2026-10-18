@@ -194,7 +194,7 @@ empirically against its outcome, deciding which effort and model suits each
 task class. It is tab-separated with the header:
 
 ```text
-id	dispatched	step	task_class	agent	model	effort	tokens	duration_s	rounds	blockers	shoulds	nits	escapes	verdict	notes
+id	dispatched	step	task_class	agent	model	effort	tokens	duration_s	rounds	blockers	shoulds	nits	escapes	verdict	notes	input_tokens	output_tokens	cache_read_tokens	cache_creation_tokens
 ```
 
 - Fields recorded at dispatch:
@@ -208,11 +208,23 @@ id	dispatched	step	task_class	agent	model	effort	tokens	duration_s	rounds	blocke
   - `agent`: agent type name (or `agy` for orchestrator-added jobs).
   - `model`: resolved model name.
   - `effort`: resolved effort level.
-- Fields filled on completion:
-  - `tokens`: total tokens consumed (from SubagentStop or completion hook input
-    if provided; blank otherwise).
-  - `duration_s`: run duration in seconds (from completion hook input if
-    provided; blank otherwise).
+- Fields filled on completion (SubagentStop; the PostToolUse hook of a
+  background launch fires at dispatch, before the agent has spent anything):
+  - `input_tokens`, `output_tokens`, `cache_read_tokens`,
+    `cache_creation_tokens` (the last four columns): summed from the
+    `message.usage` blocks of the agent's own transcript, whose path the hook
+    input gives as `agent_transcript_path`. Streaming writes one transcript
+    line per content block with the message's usage repeated, so a message
+    counts once, by its last block.
+  - `tokens`: the total of those four; blank when the transcript is missing,
+    has a malformed line or has no usage block (the reason goes to stderr and
+    the hook still succeeds). A `tokens` or `total_tokens` in the hook input,
+    if one ever appears, wins.
+  - `duration_s`: the run duration, from `duration_s` in the hook input if
+    present, else the transcript's last minus first `timestamp`.
+  - `dashboard_lanes.py ledger backfill-tokens` fills the same fields for rows
+    whose `tokens` is empty, finding `agent-<id>.jsonl` under
+    `~/.claude/projects/*/*/subagents/`, and prints how many rows it filled.
 - Outcome fields filled at merge time:
   - `rounds`: number of review rounds or revisions.
   - `blockers`: count of blocking review issues.

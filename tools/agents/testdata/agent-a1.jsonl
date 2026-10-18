@@ -1,0 +1,5 @@
+{"type":"user","isSidechain":true,"agentId":"a1","message":{"role":"user","content":"do it"},"timestamp":"2026-10-18T10:00:00.000Z"}
+{"type":"assistant","agentId":"a1","message":{"model":"claude-sonnet-5-5","id":"msg_1","role":"assistant","content":[{"type":"thinking","thinking":""}],"usage":{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":0,"output_tokens":5}},"timestamp":"2026-10-18T10:00:05.000Z"}
+{"type":"assistant","agentId":"a1","message":{"model":"claude-sonnet-5-5","id":"msg_1","role":"assistant","content":[{"type":"tool_use","name":"Bash"}],"usage":{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":0,"output_tokens":17}},"timestamp":"2026-10-18T10:00:06.000Z"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result"}]},"timestamp":"2026-10-18T10:00:30.000Z"}
+{"type":"assistant","agentId":"a1","message":{"model":"claude-sonnet-5-5","id":"msg_2","role":"assistant","content":[{"type":"text","text":"Done."}],"usage":{"input_tokens":3,"cache_creation_input_tokens":200,"cache_read_input_tokens":1000,"output_tokens":40}},"timestamp":"2026-10-18T10:01:15.000Z"}

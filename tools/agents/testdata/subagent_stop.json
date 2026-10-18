@@ -1,0 +1,1 @@
+{"session_id": "sess1", "transcript_path": "/home/u/.claude/projects/p/sess1.jsonl", "cwd": "/home/u", "permission_mode": "default", "hook_event_name": "SubagentStop", "stop_hook_active": false, "agent_id": "a1", "agent_type": "dcfs-implementer", "agent_transcript_path": "TRANSCRIPT", "last_assistant_message": "Done."}

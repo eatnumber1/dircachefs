@@ -14,6 +14,7 @@ import unittest
 
 import dashboard_lanes
 
+TESTDATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata")
 AGENT_DEF = (
     "---\nname: dcfs-implementer\nmodel: sonnet\neffort: medium\n---\nbody\n"
 )
@@ -58,6 +59,7 @@ class Fixture(unittest.TestCase):
             proc_root=self.proc,
             main_repo=self.main_repo,
             launcher=lambda cmd, **kwargs: None,
+            projects_dir=os.path.join(root, "projects"),
         )
 
     def write(self, path, text):
@@ -916,6 +918,100 @@ class DispatchLedgerTest(Fixture):
             "tokens": 500,
         })
         self.assertEqual((out, err), ("", ""))
+
+    def stop_payload(self, transcript):
+        with open(os.path.join(TESTDATA, "subagent_stop.json"),
+                  encoding="utf-8") as f:
+            payload = json.load(f)
+        payload["agent_transcript_path"] = transcript
+        return payload
+
+    def test_subagent_stop_sums_transcript_usage(self):
+        self.launch(agent_id="a1")
+        out, err = self.run_hook("subagent-stop", self.stop_payload(
+            os.path.join(TESTDATA, "agent-a1.jsonl")))
+        self.assertEqual((out, err), ("", ""))
+        (r,) = self.ledger_rows()
+        # msg_1 is written twice and counts once, by its last usage block.
+        self.assertEqual(r["input_tokens"], "5")
+        self.assertEqual(r["output_tokens"], "57")
+        self.assertEqual(r["cache_read_tokens"], "1000")
+        self.assertEqual(r["cache_creation_tokens"], "1200")
+        self.assertEqual(r["tokens"], str(5 + 57 + 1000 + 1200))
+        self.assertEqual(r["duration_s"], "75")
+
+    def test_payload_metrics_win_over_transcript(self):
+        self.launch(agent_id="a1")
+        payload = self.stop_payload(os.path.join(TESTDATA, "agent-a1.jsonl"))
+        payload.update(tokens=7, duration_s=3)
+        self.run_hook("subagent-stop", payload)
+        (r,) = self.ledger_rows()
+        self.assertEqual((r["tokens"], r["duration_s"]), ("7", "3"))
+        self.assertEqual(r["output_tokens"], "57")
+
+    def assert_transcript_failure(self, transcript, reason):
+        self.launch(agent_id="a1")
+        out, err = self.run_hook("subagent-stop",
+                                 self.stop_payload(transcript))
+        self.assertEqual(out, "")
+        self.assertIn("ledger", err)
+        self.assertIn(reason, err)
+        (r,) = self.ledger_rows()
+        self.assertEqual((r["tokens"], r["duration_s"]), ("", ""))
+        self.assertEqual(r["output_tokens"], "")
+
+    def test_missing_transcript_is_reported(self):
+        self.assert_transcript_failure(
+            os.path.join(self.dash, "nope.jsonl"), "unreadable")
+
+    def test_malformed_transcript_line_is_reported(self):
+        path = os.path.join(self.dash, "bad.jsonl")
+        os.makedirs(self.dash)
+        self.write(path, '{"timestamp":"2026-10-18T10:00:00Z"}\n{oops\n')
+        self.assert_transcript_failure(path, "line 2 is not JSON")
+
+    def test_non_object_transcript_line_is_reported(self):
+        path = os.path.join(self.dash, "bad.jsonl")
+        os.makedirs(self.dash)
+        self.write(path, "[1]\n")
+        self.assert_transcript_failure(path, "line 1 is not an object")
+
+    def test_transcript_without_usage_is_reported(self):
+        path = os.path.join(self.dash, "empty.jsonl")
+        os.makedirs(self.dash)
+        self.write(path, '{"type":"user","message":{"content":"hi"}}\n\n'
+                         '{"message":{"usage":3}}\n')
+        self.assert_transcript_failure(path, "no usage blocks")
+
+    def add_transcript(self, agent_id, lines):
+        d = os.path.join(self.env.projects_dir, "proj", "sess", "subagents")
+        os.makedirs(d, exist_ok=True)
+        self.write(os.path.join(d, "agent-%s.jsonl" % agent_id), lines)
+
+    def test_backfill_tokens_fills_empty_rows_only(self):
+        self.launch(agent_id="a1")
+        self.launch(agent_id="gone")
+        self.launch(agent_id="bad")
+        self.launch(agent_id="done")
+        self.run_cmd(["ledger", "set", "done", "tokens=99"])
+        with open(os.path.join(TESTDATA, "agent-a1.jsonl"),
+                  encoding="utf-8") as f:
+            self.add_transcript("a1", f.read())
+        self.add_transcript("done", "ignored\n")
+        self.add_transcript("bad", "{oops\n")
+        out, err = self.run_cmd(["ledger", "backfill-tokens"])
+        self.assertEqual(out, "filled 1, no transcript 1, failed 1\n")
+        self.assertIn("line 1 is not JSON", err)
+        rows = {r["id"]: r for r in self.ledger_rows()}
+        self.assertEqual(rows["a1"]["tokens"], "2262")
+        self.assertEqual(rows["a1"]["duration_s"], "75")
+        self.assertEqual(rows["gone"]["tokens"], "")
+        self.assertEqual(rows["bad"]["tokens"], "")
+        self.assertEqual(rows["done"]["tokens"], "99")
+
+    def test_backfill_tokens_takes_no_arguments(self):
+        with self.assertRaises(ValueError):
+            dashboard_lanes.ledger(self.env, ["backfill-tokens", "x"])
 
     def test_foreground_completion_with_tokens_and_duration(self):
         self.run_hook("post-agent", {
