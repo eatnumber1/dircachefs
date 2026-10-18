@@ -43,6 +43,7 @@ cc_library(
         "@absl//absl/log:check",
         "@absl//absl/status",
         "@absl//absl/status:statusor",
+        "@absl//absl/strings",
         "@absl//absl/time",
     ],
 )

@@ -5547,7 +5547,8 @@ TEST_F(DirCacheFSTest, SyncPointKeepsTheDirtySetIfTheBackingWentReadOnly) {
   StatvfsReadOnly() = true;
   absl::Status synced = backing::SyncBacking(ctx_);
   EXPECT_THAT(GetErrnoFromStatus(synced), IsOkAndHolds(EROFS));
-  EXPECT_THAT(synced, StatusIs(::testing::_, HasSubstr("read-only")));
+  EXPECT_THAT(synced, StatusIs(absl::StatusCode::kPermissionDenied,
+                               HasSubstr("read-only")));
   EXPECT_THAT(Dirty(), Contains(kRootInode));
   EXPECT_THAT(backing::FinishRun(ctx_), Not(IsOk()));
   EXPECT_THAT(GetCleanShutdown(db_), IsOkAndHolds(false));

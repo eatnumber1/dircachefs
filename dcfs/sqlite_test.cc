@@ -107,9 +107,8 @@ TEST(ConnectionTest, FileBackedWithoutWalFailsToOpen) {
   absl::StatusOr<Connection> conn =
       ConnectionFactory{.path = path, .vfs_name = "unix-none"}.Open();
   ASSERT_FALSE(conn.ok()) << "opened in a journal mode other than WAL";
-  EXPECT_EQ(conn.status().code(), absl::StatusCode::kFailedPrecondition)
-      << conn.status();
-  EXPECT_THAT(conn, StatusIs(testing::_, testing::HasSubstr("journal_mode")));
+  EXPECT_THAT(conn, StatusIs(absl::StatusCode::kFailedPrecondition,
+                             testing::HasSubstr("journal_mode")));
 }
 
 // An in-memory database has no WAL ("memory") and still opens: the unit

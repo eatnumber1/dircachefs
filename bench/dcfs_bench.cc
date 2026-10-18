@@ -41,6 +41,7 @@
 #include <vector>
 
 #include "absl/status/status.h"
+#include "absl/status/status_builder.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
@@ -229,7 +230,8 @@ void Cycle(benchmark::State &state, const Target &t, Op op) {
   for (auto _ : state) {
     std::string path = t.root + "/" + EntryPath((i * stride) % n);
     if (absl::Status done = op(path); !done.ok()) {
-      state.SkipWithError(absl::StrCat("operation on ", path, ": ", done));
+      state.SkipWithError(
+          absl::StrCat("operation on ", path, ": ", done.ToString()));
       return;
     }
     ++i;
@@ -254,15 +256,15 @@ void BM_OpenClose(benchmark::State &state, const Target *t) {
 }
 
 void BM_SmallRead(benchmark::State &state, const Target *t) {
-  Cycle(state, *t, [](const std::string &p) {
+  Cycle(state, *t, [](const std::string &p) -> absl::Status {
     absl::StatusOr<FileDescriptor> fd = syscalls::openat(AT_FDCWD, p, O_RDONLY);
     if (!fd.ok()) return fd.status();
     char buf[4096];
     absl::StatusOr<size_t> r = syscalls::pread(**fd, buf, sizeof buf, 0);
     if (!r.ok()) return r.status();
     if (*r != kFileBytes) {
-      return absl::DataLossError(
-          absl::StrCat("read ", *r, " bytes, not ", kFileBytes));
+      return absl::StatusBuilder(absl::StatusCode::kDataLoss)
+             << "read " << *r << " bytes, not " << kFileBytes;
     }
     return absl::OkStatus();
   });
@@ -278,7 +280,8 @@ void BM_Lookup(benchmark::State &state, const Target *t) {
     state.ResumeTiming();
     if (absl::StatusOr<struct stat> st = syscalls::fstatat(AT_FDCWD, p);
         !st.ok()) {
-      state.SkipWithError(absl::StrCat("stat ", p, ": ", st.status()));
+      state.SkipWithError(
+          absl::StrCat("stat ", p, ": ", st.status().ToString()));
       return;
     }
   }
@@ -295,14 +298,15 @@ void BM_Readdir(benchmark::State &state, const Target *t) {
     absl::StatusOr<FileDescriptor> d =
         syscalls::openat(AT_FDCWD, p, O_RDONLY | O_DIRECTORY);
     if (!d.ok()) {
-      state.SkipWithError(absl::StrCat("open ", p, ": ", d.status()));
+      state.SkipWithError(
+          absl::StrCat("open ", p, ": ", d.status().ToString()));
       return;
     }
     seen = 2;  // "." and ".."
     if (absl::Status read =
             ForEachEntry(**d, [&](std::string_view) { ++seen; });
         !read.ok()) {
-      state.SkipWithError(absl::StrCat("read ", p, ": ", read));
+      state.SkipWithError(absl::StrCat("read ", p, ": ", read.ToString()));
       return;
     }
   }
@@ -321,7 +325,8 @@ void WriteMiB(benchmark::State &state, const Target &t, std::string_view name) {
   absl::StatusOr<FileDescriptor> fd =
       syscalls::openat(AT_FDCWD, path, O_WRONLY);
   if (!fd.ok()) {
-    state.SkipWithError(absl::StrCat("open ", path, ": ", fd.status()));
+    state.SkipWithError(
+        absl::StrCat("open ", path, ": ", fd.status().ToString()));
     return;
   }
   for (auto _ : state) {
@@ -329,7 +334,8 @@ void WriteMiB(benchmark::State &state, const Target &t, std::string_view name) {
       absl::StatusOr<size_t> n =
           syscalls::pwrite(**fd, chunk.data(), chunk.size(), off);
       if (!n.ok()) {
-        state.SkipWithError(absl::StrCat("write ", path, ": ", n.status()));
+        state.SkipWithError(
+            absl::StrCat("write ", path, ": ", n.status().ToString()));
         return;
       }
       if (*n != chunk.size()) {

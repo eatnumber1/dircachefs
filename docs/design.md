@@ -2928,10 +2928,10 @@ records present again), so the checks are the one-way rules above; and
 file). Trace validation (`formal/`) checks what the checker cannot see
 from one moment's state: the order of a mutation's phases.
 
-A violation aborts the daemon (`LOG(FATAL)`: "invariant violated: FAILED_PRECONDITION:
-<invariant>: <what> (in request <OPCODE> nodeid <n>)") after writing the
-same line, as `DCFS-INVARIANT-VIOLATION ...`, to the console, where
-`run-qemu.sh` fails the run on it. Every `small` and `medium` `qemu_test`
+A violation aborts the daemon (`LOG(FATAL)`: "invariant violated:
+FAILED_PRECONDITION: <invariant>: <what> (in request <OPCODE> nodeid <n>)")
+after writing the same line, as `DCFS-INVARIANT-VIOLATION ...`, to the console,
+where `run-qemu.sh` fails the run on it. Every `small` and `medium` `qemu_test`
 (the fast and presubmit tiers) boots the checking build, except
 `memory_test` and `readdir_boundary_test`, which measure what ships (its
 memory, a listing's time); `large` and `enormous` boot the plain one

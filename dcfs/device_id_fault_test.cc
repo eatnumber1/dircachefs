@@ -133,7 +133,8 @@ TEST_F(DeviceIdFaultTest, AnIoctlErrorOtherThanUnsupportedKeepsItsErrno) {
   absl::StatusOr<DeviceId> id = IdOf("/");
   ASSERT_FALSE(id.ok());
   EXPECT_EQ(StatusToErrno(id.status()), EIO);
-  EXPECT_THAT(id, StatusIs(::testing::_, HasSubstr("FS_IOC_GETFSUUID")));
+  EXPECT_THAT(
+      id, StatusIs(absl::StatusCode::kUnknown, HasSubstr("FS_IOC_GETFSUUID")));
 }
 
 TEST_F(DeviceIdFaultTest, EveryUnsupportedErrnoNamesTheFilesystem) {
@@ -186,7 +187,8 @@ TEST_F(DeviceIdFaultTest, BtrfsFsInfoFailureIsNamed) {
   absl::StatusOr<DeviceId> id = IdOf("/");
   ASSERT_FALSE(id.ok());
   EXPECT_EQ(StatusToErrno(id.status()), EPERM);
-  EXPECT_THAT(id, StatusIs(::testing::_, HasSubstr("BTRFS_IOC_FS_INFO")));
+  EXPECT_THAT(id, StatusIs(absl::StatusCode::kPermissionDenied,
+                           HasSubstr("BTRFS_IOC_FS_INFO")));
 }
 
 TEST_F(DeviceIdFaultTest, BtrfsSubvolumeInfoFailureIsNamed) {
@@ -196,8 +198,8 @@ TEST_F(DeviceIdFaultTest, BtrfsSubvolumeInfoFailureIsNamed) {
   absl::StatusOr<DeviceId> id = IdOf("/");
   ASSERT_FALSE(id.ok());
   EXPECT_EQ(StatusToErrno(id.status()), EACCES);
-  EXPECT_THAT(id,
-              StatusIs(::testing::_, HasSubstr("BTRFS_IOC_GET_SUBVOL_INFO")));
+  EXPECT_THAT(id, StatusIs(absl::StatusCode::kPermissionDenied,
+                           HasSubstr("BTRFS_IOC_GET_SUBVOL_INFO")));
 }
 
 // ioctl refuses an O_PATH descriptor (EBADF); GetDeviceId reopens it through

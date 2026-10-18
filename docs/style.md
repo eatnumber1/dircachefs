@@ -649,8 +649,10 @@ logging or returning it silently suppresses the root cause of errors! Also an
 aside: Status implements AbslStringify. So it should be `StrCat("open ",
 path, ": ", status)`."). A failed `Status` that is not returned is logged or
 put into the message that replaces it, whole: `absl::StrCat(what, ": ",
-status)` or `LOG(...) << status`, for a `StatusOr` its `.status()`. Never
-`status.message()`, which drops the code and the payloads (the errno), and
+status)` or `LOG(...) << status`, for a `StatusOr` its `.status()`. In one-line
+user-facing text (a report line, a benchmark row), `status.ToString()`: the code
+and payload without the source-location trace; logs print the whole status.
+Never `status.message()`, which drops the code and the payloads (the errno), and
 never a fixed text (`SkipWithError("open failed")`) where a status was in
 hand. This holds for bench diagnostics, fsck's findings, tests and tools as
 much as for the daemon. Tests assert on a status with `StatusIs(code,

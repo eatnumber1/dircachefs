@@ -44,8 +44,9 @@ FILE_SCOPE = "<file scope>"
 FUNCTION_RULE = "function"
 
 # Matcher rules that are reported and not enforced: a preference
-# (status_uninitialized, docs/style.md 1.6a) or waiting for a step
-# (pointer_without_nullability, 25.16).
+# (status_uninitialized, docs/style.md 1.6a), waiting for a step
+# (pointer_without_nullability, 25.16), or where false positives are
+# legitimate answers such as predicates (status_dropped, docs/style.md 1.6).
 REPORT_ONLY = frozenset({"status_uninitialized", "pointer_without_nullability",
                          "status_dropped"})
 

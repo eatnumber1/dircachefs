@@ -1,8 +1,8 @@
 # docs/style.md 1.6 and 1.7 (russ, 2026-10-17): a failed Status is returned,
 # logged or put whole into the message that replaces it; it is never dropped.
-# Reported: an `if (!s.ok())` over a Status or StatusOr variable whose
-# failure branch never mentions the variable, e.g. `if (!s.ok()) return
-# false;` or `SkipWithError("failed")`. REPORT ONLY (tools/style_checks.py REPORT_ONLY)
+# Reported: an `if (!s.ok())` over a Status or StatusOr variable whose failure
+# branch never mentions the variable, e.g. `if (!s.ok()) return false;` or
+# `SkipWithError("failed")`. REPORT ONLY (tools/style_checks.py REPORT_ONLY)
 # until its findings are fixed or the matcher is proved exact.
 let statusOk cxxMemberCallExpr(callee(cxxMethodDecl(hasName("ok"), ofClass(anyOf(hasName("::absl::Status"), hasName("::absl::StatusOr"))))), on(ignoringParenImpCasts(declRefExpr(to(varDecl().bind("dropped_var"))))))
 match ifStmt(hasCondition(ignoringParenImpCasts(unaryOperator(hasOperatorName("!"), hasUnaryOperand(ignoringParenImpCasts(statusOk))))), hasThen(unless(hasDescendant(declRefExpr(to(varDecl(equalsBoundNode("dropped_var"))))))), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("status_dropped")

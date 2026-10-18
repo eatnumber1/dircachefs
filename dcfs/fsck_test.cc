@@ -491,8 +491,7 @@ class StandInPrograms {
 };
 
 // The text of the ERROR lines logged while it lives.
-class ErrorLines : public absl::LogSink {
- public:
+struct ErrorLines : public absl::LogSink {
   ErrorLines() { absl::AddLogSink(this); }
   ~ErrorLines() override { absl::RemoveLogSink(this); }
   void Send(const absl::LogEntry &entry) override {
@@ -596,7 +595,7 @@ TEST_F(FsckFaultTest, ALockThatCannotBeTakenIsReported) {
   EXPECT_EQ(report.status, kFsckOperational);
   ASSERT_THAT(report.lines, SizeIs(1));
   EXPECT_THAT(report.lines[0], HasSubstr("cannot lock the cache database"));
-  // The whole status: the code and the errno payload, not only its message.
+  // The status code and the errno payload.
   EXPECT_THAT(report.lines[0], HasSubstr(": UNAVAILABLE: "));
   EXPECT_THAT(report.lines[0], HasSubstr(kErrnoTypeUrl));
   EXPECT_THAT(syscalls::fstatat(AT_FDCWD, path), absl_testing::IsOk())
