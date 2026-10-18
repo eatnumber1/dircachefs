@@ -43,3 +43,7 @@ agy-1017-25.34-review	2026-10-17	25.34		agy	gemini-4-argon	high								awaiting 
 0e543361	2026-10-17	25.34		agy	gemini-3.8-flash	medium									lane-7 25.34 fix round 2
 a9f01c8885415eb2d	2026-10-18T02:53:41Z	agents-foreman	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
 a3a78df4b9b858486	2026-10-18T02:59:11Z	agents-foreman	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+ae86d19e85bf27e58	2026-10-18T03:01:45Z	Show nested quotas on dashboard	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
+ab510690988d478b9	2026-10-18T03:05:57Z	dashboard-fixes	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+a03dfabbe6686518c	2026-10-18T03:30:10Z	Clerk: dashboard upload trial	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+ab0246cc1bca6a883	2026-10-18T03:31:08Z	dashboard-ci	mechanical	dcfs-mechanical	claude-haiku-5-5	low									

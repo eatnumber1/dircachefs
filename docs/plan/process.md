@@ -301,6 +301,14 @@ clerk (Haiku, effort low) in one batched dispatch with exact instructions
 note). A self-handoff note in `docs/plan/notes/` lets russ compress the
 orchestrator's context without losing the working state.
 
+## Timers (russ, 2026-10-17)
+
+Timers in the codebase stay banned (style 1.11; the dashboard tool's hourly
+meter reading is the one approved exception). Agents themselves may set
+timers: a self-scheduled wakeup at a quota reset or a check-back on a long
+job is fine (russ, 2026-10-17: "The timer ban only applies inside our
+codebase. Not to agents themselves.").
+
 ## Questions for russ, and rulings (russ, 2026-10-17)
 
 russ: "you can make rulings on cases that are very obvious, and also you
