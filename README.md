@@ -899,13 +899,13 @@ The report covers the small and medium tiers only (`--config=presubmit`):
 the large and enormous tests, and the trace-validation tests, are not in it.
 CI publishes it as the `coverage-lcov` artifact (dcfs, bench and tools only);
 the gate below runs only there. The baseline (small and medium tiers) is
-`dcfs/coverage_baseline.txt`: today 96.95% of the lines and 83.25% of the
+`dcfs/coverage_baseline.txt`: today 97.27% of the lines and 83.97% of the
 branches of `dcfs/*.cc`.
 
 The gate (step 8.1, `tools/coverage_gate.sh`, run by `.github/ci/coverage.sh`
 in the CI coverage job only, not in the local tiers): `dcfs/*.cc` line and
 branch coverage of the published report must not fall below the committed
-baseline `dcfs/coverage_baseline.txt` (`lines 96.95` and `branches 83.25` today,
+baseline `dcfs/coverage_baseline.txt` (`lines 97.27` and `branches 83.97` today,
 two decimals). Below it on either, the job fails with the numbers. Above it by 0.1
 or more on either, the job passes and prints (and adds to the job summary) a
 note, `raise dcfs/coverage_baseline.txt to X / Y`: the baseline only moves up,
@@ -929,7 +929,7 @@ the two sanitizer suites:
 | `presubmit` | `bazel test --config=presubmit //...` (small and medium) | `fast` |
 | `coverage` | `bazel coverage` of the small and medium tests, the lcov artifact and the coverage gate | `fast` |
 | `reproducible` | two builds of the shipped outputs in two output bases are byte-identical | `fast` |
-| `mutation-changed` | mutation testing of the protocol functions the push touched (at most 30 mutants); fails on a survivor | `fast` |
+| `mutation-changed` | mutation testing of the protocol functions the push touched (at most 30 mutants); survivors are reported as findings, and only a tooling error fails the job | `fast` |
 | `full` | the large and enormous tests (pjdfstest on all three filesystems), in 3 shards | `presubmit` |
 | `xfstests` | xfstests' generic tests against dcfs (`.github/ci/test.sh --tag=xfstests-<fstype>`), one runner per backing file system (3 runners); not in `full`, `asan` or `ubsan` | `presubmit` |
 | `asan` | `bazel test --config=asan` over every tier, in 3 shards | `presubmit` |

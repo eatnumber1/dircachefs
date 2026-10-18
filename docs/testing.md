@@ -105,7 +105,7 @@ sections after this table describe each regime, its bounds and its blind spots.
 | Dirty set, recovery | Model (`DurableSetSound`, `RecoveryIdempotent`, `RecoveryTerminates`, `ClearOnlyAfterSync`, `RecoveryForgetsDirty`); invariant checker (`dirty-set`, `open-file`, `writable-open`); `power_test`; `fault_ace_mixed_test`; crash-during-recovery trace test | `formal/MC_recovery.cfg`; `//dcfs:dir_cache_fs_crash_during_recovery_test` |
 | Sync points, fsync | Model (sync actions; `FsyncedCacheDurable`; the durability model); Ferrite litmus programs; `no_stronger` pinned non-guarantees; `fault_power_test` `lag`/`lagclean`; `fault_freeze_test` | `formal/MClitmus.tla`, `formal/durability.tla`, `formal/known_bugs/*fsync*` |
 | Crash consistency of the cache database | `sqlite_durability_test` (dm-log-writes replays, write subsets, torn writes, forged WALs) against the model's abstraction; `fault_cache_test` | `test/qemu/guest/sqlite_durability.sh`, `test/qemu/crash_states.c` |
-| Identity (nodeids, generations, handles) | `ident.tla` and its trace validator; `lifetime.tla` for nodeids and FORGET; `handles_test`; NFS test; the identity oracle in the mixed-fault sequences | `formal/ident.tla`, `formal/lifetime.tla`; `test/qemu/guest/{handles,nfs,fault_ace_mixed}.sh` |
+| Identity (nodeids, generations, handles) | `ident.tla` and its trace validator (forged-request harness traces only); `lifetime.tla` for nodeids and FORGET; `handles_test`; NFS test; the identity oracle in the mixed-fault sequences | `formal/ident.tla`, `formal/lifetime.tla`; `test/qemu/guest/{handles,nfs,fault_ace}.sh` (the mixed sequences are `fault_ace.sh` with `dcfs_ace_kinds=mixedfixtures,mixed`) |
 | Credentials, permissions | `credentials_test` (two unprivileged users against the backing); pjdfstest; `reval.tla` for the cached mode the kernel's `default_permissions` check reads; xfstests | `test/qemu/guest/credentials.sh`; `formal/reval.tla` |
 | Cancellation | Model (`InterruptBound`, `InterruptedReplies`, `InterruptActedOn`, `GuardsBalanced`, reachability of each interruption point); forged `FUSE_INTERRUPT` tests; interrupt sweep; `cancel_test` | `formal/MC_interrupt*.cfg`; `//dcfs:dir_cache_fs_interrupt_sweep_test`; `//test/qemu:cancel_test` |
 | Bounded memory | `memory_test` (bytes per inode, a second tree adds no more than half); `readdir_boundary_test` (time linear in directory size); `names_test` | `test/qemu/guest/{memory,readdir_boundary}.sh`. The slope-at-zero allocation test is planned (26.41) |
@@ -125,18 +125,19 @@ everything not tagged `manual`.
 
 | Tier | Targets | Examples |
 |---|---:|---|
-| small | 347 | unit tests; ext4 variant of each e2e test; most TLC configurations and all 61 hand-written trace logs |
+| small | 347 | unit tests; ext4 variant of most e2e tests; 102 TLC runs, all of them self-checks (premises, known bugs, limitations, interruption-point reachability, litmus programs) and none of the main protocol configurations; all 61 hand-written trace-log tests (50 logs) |
 | medium | 156 | xfs and btrfs variants; the forged-request trace harness; 80 TLC configurations |
 | large | 64 | `nfs_test`, systemd guest, 22 TLC configurations, the four guest trace tests, `cancel_test` |
 | enormous | 96 | pjdfstest (3 filesystems, shards), xfstests shards (see below) |
 
-By kind: 327 `sh_test` (the QEMU macros expand to these), 204 TLC runs
-(203 under `//formal`), 77 trace-validation tests (61 hand-written logs, 16
-guest or harness runs), 48 Python tests (the gates' self-checks and tools), 7
-flag/man tests. By location: 70 under `//dcfs`, 264 under `//test/qemu`, 264
-under `//formal`, 46 under `//tools`, 15 under `//third_party`, 4 under
-`//man`. Of the 663, 91 are tagged `manual` and run only when named (below).
-The `kvm` and `e2e` tags mark the 307 targets that boot a guest.
+By kind: 327 `sh_test` (the QEMU macros expand to these), 204 TLC runs (203
+under `//formal`), 77 trace-validation tests (61 log tests over 50 hand-written
+logs, 16 guest or harness runs), 48 Python tests (the gates' self-checks and
+tools), 7 warning-flag compile and link tests. By location: 70 under `//dcfs`,
+264 under `//test/qemu`, 264 under `//formal`, 46 under `//tools`, 15 under
+`//third_party`, 4 under `//man`. Of the 663, 91 are tagged `manual` and run
+only when named (below). The `kvm` and `e2e` tags mark the 307 targets that boot
+a guest.
 
 | Where | What runs | Source |
 |---|---|---|
@@ -155,18 +156,22 @@ The `kvm` and `e2e` tags mark the 307 targets that boot a guest.
 | Weekly mutation | about 340 C++ mutants over six shards and 90 TLA+ mutants over three | `.github/workflows/mutation.yml` |
 | By name only | the 91 `manual` targets: 24 slow xfstests shards, 18 native xfstests shards, 16 full SibylFS shards, 6 `xfstests_dev*`, `stress_random_test_<fs>`, the kernel-bug reproducers, `bench_write_test`, 14 TLC bisections of the state-merging `VIEW`, and the three weekly ones above (`kernel_facts`, `fault_ace_mixed_long`, `noisy_kernel_test`) | `bazel query 'attr(tags, manual, tests(//...))'` |
 
-Failing a tier does not stop a lane's work, but the process is: the
-orchestrator runs the tier russ expects for the step, CI must be green on a
-merged commit from phase 5 on, and a red push is fixed before further queued
-work (`docs/plan/process.md`, "Running tests" and the parallelism section).
-After launch a push point becomes a sync point at which the candidate commit
-gets CI's checks locally first; that is a stated plan, not a mechanism
-(`docs/plan/process.md`).
+CI runs only on pushes to main and on pull requests (`ci.yml:69-73`); steps
+merge locally first, after the orchestrator has run the tier russ expects for
+them. No CI job gates a merge until milestone M5 ("red CI then gates merges",
+`docs/plan/README.md`; `docs/plan/process.md`, "Running tests"). So in this
+document "gate" means "turns the CI run red", and a red run on a merged commit
+is fixed before further queued work. After launch a push point becomes a sync
+point at which the candidate commit gets CI's checks locally first; that is a
+stated plan, not a mechanism. `--config=fast` runs none of the main protocol
+configurations of the model: every one is medium or large.
 
 Tests that run in no push job: the 24 slow xfstests shards, the native-run
-xfstests shards, the full SibylFS run, `stress_random_test_*`, the kernel-bug
-reproducers and `bench_write_test`. They exist to be run by hand or to guide
-work (xfstests slow shards: `test/qemu/README.md`, "xfstests (Phase 17)").
+xfstests shards, the full SibylFS run, the six `xfstests_dev*` targets, the 14
+TLC bisections of the state-merging `VIEW`, `stress_random_test_*`, the
+kernel-bug reproducers and `bench_write_test`. They exist to be run by hand or
+to guide work (xfstests slow shards: `test/qemu/README.md`, "xfstests (Phase
+17)").
 
 ## QEMU guests
 
@@ -191,12 +196,13 @@ kernel's required options are checked against the package's config
 `third_party/linux/README.md` says what a second kernel (to test the minimum
 supported 6.9) would need; it does not exist yet.
 
-**Filesystems under test.** Disks are made by Alpine's `mke2fs`, `mkfs.xfs`
-and `mkfs.btrfs`, so every e2e test of the matrix macros runs on ext4, xfs and
-btrfs (the ext4 variant is `small`, the others `medium`). RAM disks (step
-26.17) let the budgeted tests avoid the host's disk. Tests that act on the
-disk below the filesystem use device-mapper targets in the guest
-(dm-flakey, dm-error, dm-delay, dm-log-writes).
+**Filesystems under test.** Disks are made by Alpine's `mke2fs`, `mkfs.xfs` and
+`mkfs.btrfs`, so every e2e test of the matrix macros runs on ext4, xfs and btrfs
+(for 21 of the matrices the ext4 variant is `small` and the others `medium`; the
+rest, among them pjdfstest and xfstests, are larger throughout). RAM disks (step
+26.17) let the budgeted tests avoid the host's disk. Tests that act on the disk
+below the filesystem use device-mapper targets in the guest (dm-flakey,
+dm-error, dm-delay, dm-log-writes).
 
 **Test shapes.** `qemu_cc_test` wraps a GoogleTest binary in a per-test
 initramfs (`test/qemu/qemu_cc_test.bzl`). `qemu_test` runs a guest shell
@@ -212,19 +218,21 @@ back whole), `Snapshot`, `CompareTrees` and `ExpectSameAsBacking`. A new
 today (`guest_test.cc`, `removed_test.cc`, `kernel_facts_test.cc`); the
 existing shell tests are being ported (plan M2).
 
-**Which dcfs a guest runs.** `small` and `medium` tests boot
+**Which dcfs a guest runs.** `small` and `medium` tests (and the large ACE
+tests, `test/qemu/README.md`) boot
 `//dcfs:main_static_checked`, the testonly build that installs the runtime
 invariant checker (below); `large` and `enormous` boot the plain build that
 ships. `memory_test` and `readdir_boundary_test` boot the plain build because
 they measure what ships (`test/qemu/README.md`, "Which dcfs a guest runs").
 
-**Verdicts are made of events, not time.** The project's rule (russ,
+**Verdicts should be made of events, not time.** The project's rule (russ,
 2026-10-17) is that a test's verdict counts events and never depends on host
-load; time appears only as a hang guard. Concretely:
+load; time appears only as a hang guard. The rule is not yet fully met; the
+exceptions are listed after the mechanisms. The mechanisms:
 
-- A guest is stopped after `TEST_TIMEOUT` less 60 s; that allowance is
-  the only timer in the harness besides xfstests' per-test limit
-  (`test/qemu/README.md`, "Guest timeout", "xfstests (Phase 17)").
+- A guest is stopped after `TEST_TIMEOUT` less 60 s, which is the hang guard
+  (`test/qemu/README.md`, "Guest timeout"); xfstests adds a per-test limit
+  ("xfstests (Phase 17)").
 - `run-qemu.sh` refuses to boot a guest whose allowance is below three times
   the work its budgets allow, so a hang guard cannot be shorter than the
   measured work (`cost_wall_allowance`, `guest/strace_lib.sh`).
@@ -241,13 +249,22 @@ load; time appears only as a hang guard. Concretely:
   shrinking list (`tools/repo_shape_sleeps.txt`); the project forbids timers
   and retry loops in production code (`docs/style.md` 1.11, 1.12).
 
-**Gates have self-checks.** Every gate (a test or check whose job is to
-reject something) ships a committed self-check that feeds it known-bad input
-and requires failure, because several gates once passed vacuously (pjdfstest
-ran while busybox's `tail -1` did not exist; an ASan benchmark passed while
-dcfs was OOM-killed). The table in `test/qemu/README.md`, "Gates and their
+Open exceptions, where a verdict still depends on time: `cancel_test`'s 2 s
+bound; `readdir_boundary_test`'s ratio of CPU ticks; the CPU budgets;
+`fault_freeze_test`'s probe wait (listed in `tools/repo_shape_sleeps.txt` as
+"a verdict on time"); about 26 guest scripts whose `sleep` stands in for an
+event; and the further verdicts on time the step 26.36 audit found outside
+that list (`docs/plan/phases/26-bumpers.md`, 26.36 A-H, and step 26.43,
+"Load-agnostic to zero", queued).
+
+**Gates have self-checks.** The rule is that every gate (a test or check whose
+job is to reject something) ships a committed self-check that feeds it known-bad
+input and requires failure, because several gates once passed vacuously
+(pjdfstest ran while busybox's `tail -1` did not exist; an ASan benchmark passed
+while dcfs was OOM-killed). The table in `test/qemu/README.md`, "Gates and their
 self-checks" has about 65 rows; a gate without one is a review finding
-(`docs/plan/process.md`, step 5).
+(`docs/plan/process.md`, step 5). The rule is enforced by review, not by a
+mechanical check.
 
 ## Unit tests, fakes and fault injection
 
@@ -255,7 +272,9 @@ self-checks" has about 65 rows; a gate without one is a review finding
 `dcfs/`, `test/`, `bench/` and `tools/`; 38 `dcfs/*_test.cc` files, with the
 large `dir_cache_fs_test.cc` split by `--gtest_filter` into the trace, fault
 sweep, interrupt sweep and slope targets (`dcfs/BUILD.bazel:1200-1331`). They
-run in guests as `qemu_cc_test` (44 targets in `dcfs/BUILD.bazel`).
+run in guests as `qemu_cc_test` (44 call sites in `dcfs/BUILD.bazel`, one a
+loop over eight fault builds: 51 targets). The same filters also split off
+`PoisonedBackingTest`.
 
 **Fakes, not mocks.** `AGENTS.md` bans mocks. Dependencies are injected and
 replaced by small fakes in `*_test.cc` or in `testonly/` directories whose
@@ -274,8 +293,12 @@ other test. Wrapped today: `fsync`, `getxattr`, `listxattr`, `readlinkat`,
 `fuse_reply_none`, `pidfd_open`, `poll`, and, for every `dir_cache_fs_*`
 target, `name_to_handle_at`, `open_by_handle_at`, `statx`, `syncfs`, the
 passthrough registration calls and a backstop over all 25 `*at`, xattr and
-data-mutation calls through which `backing.cc` reaches the backing (so a
-backing syscall added without its hook aborts the harness)
+data-mutation calls through which `backing.cc` reaches the backing. Each
+wrapped call aborts the harness if a transaction or statement cursor is open
+(`NoTransactionAt`, `dcfs/dir_cache_fs_test.cc`), so a wrapped backing call
+made inside a transaction fails there. The backstop does not detect a backing
+syscall added without its hook outside a transaction, and `open`, `pread`,
+`pwrite`, `ftruncate`, `ioctl` and `getdents64` are not wrapped at all
 (`dcfs/BUILD.bazel:1138`; `docs/design.md`, "Runtime invariant checks").
 This is a decision, not a gap: `docs/design.md` "Syscall fault injection stays
 link-time (russ, 2026-10-16)". Step **25.41** (drafted, awaiting russ's
@@ -320,8 +343,10 @@ excluded from sanitizer and coverage builds.
 | `formal/durability.tla` | A clock on the cache database's durability: how old a commit a power loss can take | 244 |
 | `formal/MClitmus.tla` | Ferrite-style litmus programs run through dcfs under three backing crash regimes (`seq`, `metaprefix`, `ext4`) | 111 |
 
-All five protocol-level models are small relative to the code: the model of the
-protocol is one directory, two names, a handful of requests.
+The five protocol-level models (`dcfs`, `reval`, `lifetime`, `ident`,
+`durability`; `MClitmus` is a litmus harness over `dcfs`) are small relative to
+the code: the model of the protocol is one directory, two names, a handful of
+requests.
 
 **Properties checked** (names are the TLA+ definitions in the `.cfg` files):
 
@@ -341,15 +366,16 @@ protocol is one directory, two names, a handful of requests.
 - `reval.tla`: an open succeeds exactly when the backing would allow it at
   that moment; nothing dcfs holds grants more than the backing would (an open
   descriptor keeps the rights it was granted, as in POSIX); every write has a
-  descriptor that can carry it (14 invariants, one temporal property
-  `CachedDecisionsConverge`).
+  descriptor that can carry it (13 invariants besides `TypeOK`, one temporal
+  property `CachedDecisionsConverge`).
 - `lifetime.tla`: a nodeid the kernel holds resolves to the object it was
   handed out for; a row or removed record goes only when nothing references it;
   dcfs's lookup count is the kernel's; after a crash the start sweeps every
-  unnamed row (12 invariants).
-- `ident.tla`: one `(nodeid, generation)` never stands for two objects; a
-  handle reaches its object or `ESTALE`, never another object and never `EIO`;
-  a row whose object is gone is caught at every entry point (7 invariants).
+  unnamed row (12 invariants besides `TypeOK`).
+- `ident.tla`: one `(nodeid, generation)` never stands for two objects; a handle
+  reaches its object or `ESTALE`, never another object and never `EIO`; a row
+  whose object is gone is caught at every entry point (7 invariants besides
+  `TypeOK`).
 - `durability.tla`: `BoundAtRequestEnd`, `LostOnlySinceSync`,
   `FsyncedDurable`.
 
@@ -364,10 +390,14 @@ configurations, 20 limitation configurations, and 204 TLC test targets (203
 under `//formal`): 102 small, 80 medium, 22 large tier. State counts are TLC's
 distinct states, as recorded in the README's tables from a full run of
 `bazel test //formal/...` on 2026-10-18 at load 19 ("all 250 tests passed",
-which includes the trace-log tests). These tables are hand-edited
-(step 12.27 item 9 plans to generate them), and the README itself notes that
-two of its tables disagree for the atime configurations, so treat them as
-approximate evidence of scale, not as a checked artifact.
+which includes the trace-log tests). Only the main table is from that run:
+the reval, lifetime and most identity counts are from the run of 2026-10-07
+(`formal/README.md` lines 2151, 2365, 2661). The tables are hand-edited (step
+12.27 item 9 plans to generate them) and they disagree with each other: the
+atime section gives 373,304 / 488,270 / 35,362 for `MC_atime`,
+`_concurrent` and `_crash` at step 25.28b where the main table gives 334,826 /
+373,534 / 29,322. Treat the counts as evidence of scale, not as a checked
+artifact.
 
 | Configuration | Bounds (README) | Distinct states | Tier |
 |---|---|---:|---|
@@ -380,21 +410,21 @@ approximate evidence of scale, not as a checked artifact.
 | `MC_interrupt` | `Interrupts`, 1 mutation | 757,278 | medium |
 | `MC_interrupt_muts2`, `_nolock` | interrupts with a later mutation; without the lock | 1,755,235; 2,622,519 | large |
 | `MC_interrupt_liveness`, `_slots` | `FairSpec`; 2 slots | 93,959; 196,629 | medium; large |
-| `MC_atime*`, `MC_borndirty*` | the file F; born-dirty create | 3,288 to 444,106 | medium |
+| `MC_atime*`, `MC_borndirty*` | the file F; born-dirty create | 3,288 to 488,270 (see above) | medium |
 | `MC_crash_ext4`, `MC_crash_metaprefix` | weaker backing crash regimes | 402,796; 335,050 | medium |
 | `MC_litmus_*` (7), `no_stronger/*` (3) | fixed fsync/replace/create programs | 761 to 1,874 | small |
-| `MC_reval`, `_oob`, `_liveness` | revalidation | 69,104; 442,736; 67,632 | small to medium |
-| `MC_lifetime*` (4) | nodeid lifetime | 23,082 to 317,992 | small to medium |
-| `MC_ident*` (9) | identity | 8,961 to 721,557 | small to medium |
+| `MC_reval`, `_oob`, `_liveness` | revalidation | 69,104; 442,736; 67,632 | medium |
+| `MC_lifetime*` (4) | nodeid lifetime | 23,082 to 317,992 | medium |
+| `MC_ident*` (9) | identity | 8,961 to 721,557 | medium |
 | `MC_durability` | durability clock | 764 | small |
 
-Search depth is not recorded anywhere I could find; only distinct states and
-elapsed time are. Bounds are small by necessity (every configuration is an
-exhaustive search of its bounded space): the guarantee is "no violation within
-these bounds", not for any number of names, mutations or crashes. The `View`
-in `MC.tla` merges database states a crash may leave when recovery would make
-the same cache of them; its soundness was itself checked (step 23.8b found it
-was not a congruence for the file extension, and `formal/view_bisect` plus
+Search depth is not recorded in the README or the build files; only distinct
+states and elapsed time are. Bounds are small by necessity (every configuration
+is an exhaustive search of its bounded space): the guarantee is "no violation
+within these bounds", not for any number of names, mutations or crashes. The
+`View` in `MC.tla` merges database states a crash may leave when recovery would
+make the same cache of them; its soundness was itself checked (step 23.8b found
+it was not a congruence for the file extension, and `formal/view_bisect` plus
 fourteen manual targets bisect it by comparing state counts at one and four
 workers). Liveness is checked without the `View`, because merging states can
 hide or invent cycles.
@@ -444,12 +474,14 @@ argued, not checked.
 Writing the model exposed three gaps that today's single thread and the
 kernel's per-directory lock kept unreachable, all fixed (plan step R4) and each
 now a known-bug variant: `sync_during_mutation`, `readdirplus_unlocked`,
-`rename_stale_source`. The lifetime model found three more, fixed in step 12.4b
-(a stub's nodeid handed out again; a removed object's row surviving a crash
-between an unlink's syscall and phase 3; a `DESTROY` with an unlinked file
-open for reading), and a fourth in 12.6b. `formal/findings/` is empty. This
-is evidence the model finds real bugs; it is also evidence of how few it has
-needed to: the gaps were ones the code could not yet reach.
+`rename_stale_source`. The lifetime model found four more, and these were
+reachable by today's single-threaded code: a stub's nodeid handed out again; a
+removed object's row surviving a crash between an unlink's syscall and phase
+3; a `DESTROY` with an unlinked file open for reading (all three fixed in step
+12.4b); and a crash during the start's probe (fixed in 12.6b). The directory
+`formal/findings/` no longer exists (removed with 12.6b; `AGENTS.md` still
+names it). The model found real bugs, in the code's behaviour under crashes as
+well as in its concurrency rules.
 
 ### Trace validation: does the code do what the model says?
 
@@ -466,13 +498,16 @@ model's state to match the recorded one; TLC must find a behaviour of the
 model that matches the whole trace. A step the model forbids fails the
 trace. Validators exist for the directory model (`Trace.tla`), `reval`,
 `lifetime` and `ident` (`RevalTrace.tla`, `LifetimeTrace.tla`,
-`IdentTrace.tla`).
+`IdentTrace.tla`). The `reval`, `lifetime` and `ident` validators run only on
+forged-request harness traces, never on guest traces; the file part of
+`dcfs.tla` (access times, step 23.8, and born-dirty file rows, step 23.11) has
+no trace validation (waiting on step 12.11b; `formal/README.md` 1605-1607).
 
-This is enforced, in 77 test targets (step 12.2 and its follow-ups,
-`formal/README.md`, "Trace validation"):
+Trace validation is enforced in CI, in 77 test targets (step 12.2 and its
+follow-ups, `formal/README.md`, "Trace validation"):
 
-- 61 hand-written trace logs (`formal/trace_tests/`, small tier, host
-  only), including deliberate violations that must be rejected.
+- 61 log tests over 50 hand-written trace logs (`formal/trace_tests/`, small
+  tier, host only), including deliberate violations that must be rejected.
 - 3 `dir_cache_fs_trace_{a,b,c}_test` (medium): the forged-request harness
   run through the recorder without the kernel lock, producing the
   interleavings coroutines will, validated against the model without the lock
@@ -489,9 +524,11 @@ This is enforced, in 77 test targets (step 12.2 and its follow-ups,
 
 Validation found places where the code is more conservative than the model
 (recovery forgot more than the model's), now reflected in the model.
-Limits (`formal/README.md` 1414-1463): cuts for syscall failures other than
-`EEXIST`/`ENOENT`, verification of other inodes, and a child row recorded while
-a mutation overlaps end a trace instead of being validated; three model
+Limits (`formal/README.md` 1197-1199, 1414-1463): a syscall failure other than
+`EEXIST`/`ENOENT` ends the trace (a declared cut). Verification of other
+inodes and a child row recorded while a mutation overlaps are steps the model
+forbids, so a trace that hit them would be rejected (a false alarm), not cut;
+no trace has. Three model
 actions are never taken by any trace (`UnlinkFailed`, `RenameFailed`,
 `RenameFailed2`); the guests' recorder does not write file traces for `reval`;
 `MClitmus` and `durability` have no trace validator. A step the model does not
@@ -593,22 +630,21 @@ guests per filesystem, in the `full` CI job; the xfs and btrfs runs are
 skipped on runners without KVM.
 
 **SibylFS** (step 12.18b, `docs/conformance.md`, "SibylFS, a second oracle").
-pjdfstest checks single calls; SibylFS, the 2015 executable POSIX
-specification, judges whole sequences of calls with several processes and
-users. dcfs runs it differentially: each script runs once in a directory of the
-dcfs mount and once on the backing filesystem, the checker judges both traces,
-and the test fails only for a script the model allows on the backing and
-rejects through dcfs. Measured on 2026-10-17: all 21,018 generated scripts on
-ext4 get the same verdict through dcfs as on the backing (17,178 allowed on
-both); the model itself rejects 18% on the backing (the 2015 model and
-today's kernel disagree), which is why only differences count. The 51
-hand-written scripts per filesystem are in CI tiers; a 1/40 sample runs
-(`sibylfs_sample_test`); the full run is 16 `manual` guests
-(`sibylfs_full_test`),
-not in CI. One divergence is listed (`sibylfs.ext4.expected_divergences`):
-`lseek(dirfd, 0, SEEK_END)` answers `EOVERFLOW` on ext4
-(`ext4_dir_llseek`) but the kernel's FUSE client answers a directory's
-`llseek` itself.
+pjdfstest checks single calls; SibylFS, the 2015 executable POSIX specification,
+judges whole sequences of calls with several processes and users. dcfs runs it
+differentially: each script runs once in a directory of the dcfs mount and once
+on the backing filesystem, the checker judges both traces, and the test fails
+only for a script the model allows on the backing and rejects through dcfs.
+Measured on 2026-10-17: all 21,018 generated scripts on ext4 get the same
+verdict through dcfs as on the backing (17,178 allowed on both); the model
+itself rejects 18% on the backing (the 2015 model and today's kernel disagree),
+which is why only differences count. The 51 hand-written scripts per filesystem
+are in CI tiers; a 1/40 sample runs (`sibylfs_sample_test`); the full run is 16
+`manual` guests (`sibylfs_full_test`), not in CI. One divergence is listed
+(`sibylfs.ext4.expected_divergences`): `lseek(dirfd, 0, SEEK_END)` answers
+`EOVERFLOW` on ext4 (`ext4_dir_llseek`, `fs/ext4/dir.c:413 (Linux v7.3-rc7)`)
+but the kernel's FUSE client (`generic_file_llseek`, `fs/fuse/dir.c:2439 (Linux
+v7.3-rc7)`) answers a directory's `llseek` itself.
 
 **xfstests** (step 17.1, `test/qemu/README.md`, "xfstests (Phase 17)"). The
 generic tests of group `auto` run through dcfs on ext4, xfs and btrfs (six
@@ -627,18 +663,23 @@ than an eighth of the tests ran. The slow shards (24, `manual`) and native
 sanitizers (shards are incompatible with them; a curated subset is step
 17.1c), and tests needing a raw block device.
 
-**Kernel facts** (`test/qemu/guest/kernel_facts_test.cc`, seven tests, ext4,
-xfs and btrfs, `manual`, run weekly by the `noisy` job). Each pins a fact about
-the kernel that dcfs relies on, with its citation in `path:line (Linux
-v7.3-rc7)` form, and fails when a kernel update changes it: an `O_DIRECT` open
-of a FUSE passthrough file is an `O_DIRECT` open of the backing file
-(`fs/fuse/passthrough.c:170`, `fs/backing-file.c:34-57`), `F_SETFL` clearing it
-leaves the backing file direct, and inotify sees changes made through the
-mount, a passthrough write raises `IN_MODIFY` on both, a backing change raises
-no event on the mount. Each runs the same steps natively and through dcfs and
-compares. `tools/kernel_bugs/` holds two standalone reproducers of Linux bugs
-the suite found (btrfs failed inode read, ext4 casefold tune), each with no
-dcfs in it.
+**Kernel facts** (`test/qemu/guest/kernel_facts_test.cc`, seven tests, ext4, xfs
+and btrfs, `manual`, run weekly by the `noisy` job). Each pins a fact about the
+kernel that dcfs relies on, with its citation in `path:line (Linux v7.3-rc7)`
+form, and fails when the kernel stops doing it. Today they pin only two areas,
+`O_DIRECT` through passthrough and inotify; nothing about handles, generations
+or `syncfs`. An `O_DIRECT` open of a FUSE passthrough file is an `O_DIRECT` open
+of the backing file (`fs/fuse/passthrough.c:170`, `fs/backing-file.c:34-57`),
+`F_SETFL` clearing it leaves the backing file direct, and inotify sees changes
+made through the mount, a passthrough write raises `IN_MODIFY` on both, a
+backing change raises no event on the mount. Each runs the same steps natively
+and through dcfs and compares. The tests are `manual` and run only in the weekly
+`noisy` job (`ci.yml:1281`, with `DCFS_NOISY=1`), where a test failure exits 0
+as a finding (`.github/ci/noisy.sh`). The Alpine kernel is fetched fresh on each
+run (`ci.yml` header), so a kernel change surfaces at best as a weekly report,
+not as a red push. `tools/kernel_bugs/` holds two standalone reproducers of
+Linux bugs the suite found (btrfs failed inode read, ext4 casefold tune), each
+with no dcfs in it.
 
 ## Crash and fault testing
 
@@ -666,17 +707,18 @@ must not have aborted.
 | `fsck.dcfs` | Cache database checks, tested through the unit harness (with `--wrap` fakes of `fork`, `flock` and others) and the guests | `//dcfs:fsck_test` |
 
 Honest bounds. A guest's page cache survives anything short of a reboot, so
-`power_test` constructs the aftermath of a power loss instead of causing
-one; the cuts that do cause one are dm-flakey drops (every cut is dm-flakey
-plus a remount, never device-level reordering) and the QEMU kill, which
-loses what the guest's block layer had not flushed. These cut points are
-placed deliberately, not found by search. The ACE sequences are bounded
-(length of two or three operations). Crash-consistency of the backing
-filesystem itself (ext4's behaviour on an fsync of a directory alone, found by
-11.2's ACE tests) is characterised, not assumed away
-(`docs/design.md`, "Assumptions"; the litmus tests). The weekly `noisy` job
-is the only place races between the daemon's threads and the kernel's
-writeback are sought, and, as its own comments say, it had not yet run when
+`power_test` constructs the aftermath of a power loss instead of causing one;
+the cuts that do cause one are dm-flakey drops (every cut of the backing's disk
+is dm-flakey plus a remount, never device-level reordering below the filesystem;
+the cache database's disk does get reordered write subsets and torn writes in
+`sqlite_durability_test`) and the QEMU kill, which loses what the guest's block
+layer had not flushed. These cut points are placed deliberately, not found by
+search. The ACE sequences are bounded (length of two or three operations).
+Crash-consistency of the backing filesystem itself (ext4's behaviour on an fsync
+of a directory alone, found by 11.2's ACE tests) is characterised, not assumed
+away (`docs/design.md`, "Assumptions"; the litmus tests). The weekly `noisy` job
+is the only place races between the daemon and the kernel's writeback, on a
+second vCPU, are sought, and, as its own comments say, it had not yet run when
 its time estimates were written.
 
 ## Cancellation and interruption
@@ -687,14 +729,13 @@ and never between a mutation's syscall and its phase 3, and to have a
 cancellation test. Built in Phase 22 (merged 2026-10-08; interruption points
 and the model's `InterruptBound`, step 22.5, 2026-10-18). Evidence:
 
-- **Unit harness** (`dcfs/dir_cache_fs_test.cc`, forged requests): 20
-  `Interrupt*` tests (an interrupted lookup replies `EINTR` without touching
-  the backing; an interrupted population records nothing; a mutation
-  interrupted before its syscall leaves its records unknown; one interrupted
-  after the syscall completes; a forged `FUSE_INTERRUPT` read by the real
-  `SessionLoop`), and `CheckpointTest.InterruptedAtItsFirstCheckpoint`,
-  parameterised over 12 request cases, each requiring `-EINTR` and exactly one
-  interruption-point hit.
+- **Unit harness** (`dcfs/dir_cache_fs_test.cc`, forged requests): 17 tests
+  named `*Interrupt*` (an interrupted lookup replies `EINTR` without touching
+  the backing; an interrupted population records nothing; a mutation interrupted
+  before its syscall leaves its records unknown; one interrupted after the
+  syscall completes; a forged `FUSE_INTERRUPT` read by the real `SessionLoop`),
+  and `CheckpointTest.InterruptedAtItsFirstCheckpoint`, parameterised over 12
+  request cases, each requiring `-EINTR` and exactly one interruption-point hit.
 - **Interrupt sweep** (`//dcfs:dir_cache_fs_interrupt_sweep_test`): each
   scenario is interrupted at every backing call, and the calls after the
   interrupt must stay within the request kind's run, mirroring the model's
@@ -723,19 +764,19 @@ lookup in a directory populates it.
 ## Sanitizers
 
 `--config=asan` (AddressSanitizer, `-O1`) and `--config=ubsan` (undefined
-behaviour with `-fsanitize=vptr` and `-fno-sanitize-recover=all`) are defined
-in `.bazelrc`, and each runs the whole suite, every tier, in three shards in
-its own CI job (`ci.yml:796`, `:895`); the weekly `noisy` job also runs three
-ASan shards. Both sanitizers have a self-check that the sanitized build
-reports and dies (`//dcfs:asan_runtime_test`, `//dcfs:ubsan_runtime_test`; the
-vptr check once failed to die until `-fsanitize=vptr` was named) and a check
-that the guest's command line says which sanitizer ran
-(`//dcfs:sanitizer_cmdline_test`), which leaves those runs out of the budgets.
-The xfstests shards are incompatible with both (the musl image cannot load
-the sanitizer runtime); a curated subset is step 17.1c, planned.
-ThreadSanitizer,
-MemorySanitizer and valgrind are not used. TSan would matter only once there
-are threads to race, which the single-threaded daemon does not have.
+behaviour with `-fsanitize=vptr` and `-fno-sanitize-recover=all`) are defined in
+`.bazelrc`, and each runs the whole suite, every tier, in three shards in its
+own CI job (`ci.yml:796`, `:895`); the weekly `noisy` job also runs three ASan
+shards, but only of the small and medium tiers (three runs each). Both
+sanitizers have a self-check that the sanitized build reports and dies
+(`//dcfs:asan_runtime_test`, `//dcfs:ubsan_runtime_test`; the vptr check once
+failed to die until `-fsanitize=vptr` was named) and a check that the guest's
+command line says which sanitizer ran (`//dcfs:sanitizer_cmdline_test`), which
+leaves those runs out of the budgets. The xfstests shards are incompatible with
+both (the musl image cannot load the sanitizer runtime); a curated subset is
+step 17.1c, planned. ThreadSanitizer, MemorySanitizer and valgrind are not used.
+TSan would matter only once there are threads to race, which the single-threaded
+daemon does not have.
 
 ## Coverage
 
@@ -755,14 +796,17 @@ coverage of `dcfs/*.cc` must not fall below the committed baseline
 | branches | 83.97% |
 
 The baseline can only rise (russ, 2026-10-11: "You must not lower the coverage
-baseline. That's why it exists. Only ever increase it."). A fall of 0.1 point
-or more fails the job; a rise of 0.1 or more passes with a note naming the new
-baseline. The gate is self-checked (`//tools:coverage_gate_self_check_test`) and
-fails on any branch count of 2^31 or more, which is a tooling artifact, not a
-count. The baseline began at 92.40% lines and 73.30% branches (step 7.2).
-`bazel coverage` reports are also compared across two runs of one commit to
-show the determinism the quiet kernel buys (`tools/coverage_diff.py`,
-`docs/plan/notes/coverage-determinism-2026-10-08.md`).
+baseline. That's why it exists. Only ever increase it."). Any fall below the
+baseline, at two decimals, fails the job (`tools/coverage_gate.sh:93`); the 0.1
+tolerance applies only to the note that a rise of 0.1 or more prints, naming the
+new baseline. The note does not fail the job. The gate is self-checked
+(`//tools:coverage_gate_self_check_test`) and fails on any branch count of 2^31
+or more, which is a tooling artifact, not a count. The baseline began at 92.40%
+lines and 73.30% branches (step 8.1). Once, by hand, two `bazel coverage` runs
+of one commit were compared to measure the determinism the quiet kernel buys
+(`tools/coverage_diff.py`,
+`docs/plan/notes/coverage-determinism-2026-10-08.md`); no CI job runs that
+comparison.
 
 **What the number covers.** The report is taken from the small and medium
 tiers only (`--config=presubmit`); the large and enormous tests and the
@@ -777,8 +821,9 @@ document that falls short of the rule that new code is fully covered
 `docs/coverage.md`: a `flock` interrupted by a signal while blocked (no event
 marks "blocked in it", and the project does not wait on timers), `flock` and
 `fstatat` failures of the umount helper that no `--wrap` fake covers, a
-`waitpid` failure other than `EINTR` that cannot happen, and a function that
-returns in two processes. The same file records the artifacts of the tooling
+`waitpid` failure other than `EINTR` that cannot happen, and a fork whose child
+never returns (the parent leg of `UmountAndWait` may read 0 although it ran).
+The same file records the artifacts of the tooling
 (branch counts of 2^32-1 from lost updates and from forks; both found by
 measurement, fixed, and guarded by `scripts/cov-lcov.sh`).
 
@@ -821,10 +866,10 @@ entry in `equivalent.txt` with a reason (11 entries today, all `End()` deletions
 on a path that returns at once after a refused interruption point, each with a
 reason that `mutate_test.py` enforces). A survivor does not fail CI: only a
 tooling error (exit 2) fails either job, as `ci.yml` (line 495) and
-`mutation.yml` say. (The repository `README.md` CI table, line 932, says the
-per-push job "fails on a survivor"; the workflow files say it does not, and I
-have followed them.) Making C++ survivors fail the per-push job is proposed
-(step 25.13) and not built, so a survivor blocks a merge only if a reviewer
+`mutation.yml` say.
+Making C++ survivors fail the per-push job was approved by russ on
+2026-10-10 (step 25.13, `docs/plan/phases/25-style-convergence.md:433`) and
+is queued, not built; until then a survivor blocks a merge only if a reviewer
 holds the step to it.
 
 **When it runs.** Per push (`mutation-changed`): the functions the push
@@ -834,12 +879,14 @@ over six shards, `--per-function 2`, and 90 TLA+ mutants over three. The weekly
 job publishes the `mutation-survivors` artifact and the badge in `README.md`
 (`killed K/TOTAL`, total counting suppressed and invalid mutants).
 
-**Recorded results** (all in `tools/mutation/README.md`; later weekly results
-are not recorded in the repository and I could not verify them):
+**Recorded results** (the C++ sample and the TLA+ run in
+`tools/mutation/README.md`, the 60-mutant sweep in
+`docs/plan/phases/08-coverage-to-100.md:102`; the repository records no later
+weekly result):
 
 | Run | Result |
 |---|---|
-| C++, step 8.2c | 60-mutant sweep: 51 killed, 7 survived, 2 invalid; survivors killed by new tests (8.2c, 8.2e, 8.2f: 11 of 12 survivors) |
+| C++, step 8.2b | 60-mutant sweep (it fed 8.2c): 51 killed, 7 survived, 2 invalid; survivors killed by new tests (8.2c, 8.2e, 8.2f: 11 of 12 survivors) |
 | C++, step 26.5d, 2026-10-08 | 354 mutants generated (343 to run, 11 suppressed); a sample of 30: 18 killed, 8 survived, 3 invalid, 1 flaky; survivors went to 8.2e |
 | TLA+, step 12.13, 2026-10-09 | 20 mutants, small tier only: 11 killed, 9 survived, 0 invalid. Survivors include a `TypeOK` junction swap (checked only by medium and large configurations), two dropped `Next` disjuncts (`UnlinkSyscall`, `AttrChangeSyscall`), a flipped `S2` durability argument, and a dropped conjunct of `FileExactStrict`; no resolution is recorded |
 
@@ -857,17 +904,17 @@ through `strace_budget_compare` (`guest/strace_lib.sh`), each with a self-check
 
 | Budget | File | Lines | What it holds | Tolerance |
 |---|---|---:|---|---|
-| Backing syscalls, procfd syscalls, syncs, SQL statements and transactions per operation | `syscall_budgets.txt`; `syscall_traces_test`, plus ordered goldens | 96 (non-comment) | counts from `strace` and the checking daemon's cost counter | none; below passes |
+| Backing syscalls, procfd syscalls, syncs, SQL statements and transactions per operation | `syscall_budgets.txt`; `syscall_traces_test`, plus ordered goldens | 80 budgets | counts from `strace` and the checking daemon's cost counter | none; below passes |
 | FUSE requests by opcode per user-level operation | `request_budgets.txt`; `request_counts_test` | 24 budgets | e.g. `ls -l` of 100 entries | none |
-| Disk I/O | `io_budgets.txt` | 89 budgets, 11 targets | reads, writes, sectors, flushes of the test's disks; the daemon's own I/O from the cgroup's `io.stat` | none; budget is the highest count seen plus the spread seen |
+| Disk I/O | `io_budgets.txt` | 89 budgets, 11 targets | reads, writes, sectors, flushes of the test's disks; the daemon's own I/O from the cgroup's `io.stat` | budget is the highest count seen plus the spread seen; since 26.17c the disk-request kinds may exceed it by 2% (at least 1), see below |
 | CPU time of dcfs | `cpu_budgets.txt` | 12 budgets | the cgroup's `usage_usec` of the processes running dcfs's code | 100% (`COST_CPU_TOLERANCE_PCT`) |
-| Slopes | `//dcfs:dir_cache_fs_slope_test` | 6 operation classes | statements, transactions, durable WAL fsyncs and backing syscalls at N = 100 and 1000 bounded by `a*N + b` (create: 79N+3 statements, 7N transactions) | the bound |
+| Slopes | `//dcfs:dir_cache_fs_slope_test` | 6 operation classes | SQLite statement steps, transactions, durable WAL fsyncs and backing syscalls at N = 100 and 1000 bounded by `a*N + b` (create: 79N+3 statement steps, 7N transactions) | the bound |
 
 Reading the table honestly:
 
-- Counts of syscalls, requests and statements are exact. The I/O budgets are
-  counts of requests, which vary with writeback timing on the write side (ext4
-  commits its journal by guest time) and were measured over 8 quiet and 7
+- Counts of syscalls, requests and statement steps are exact. The I/O budgets
+  are counts of requests, which vary with writeback timing on the write side
+  (ext4 commits its journal by guest time) and were measured over 8 quiet and 7
   loaded runs per target; reads are mostly exact. `write_test_ext4` wrote 329 to
   336 requests against a budget of 325 at host load about 50 (step 26.36
   follow-up I, not resolved); a target whose writes move with the host's speed
@@ -882,11 +929,20 @@ Reading the table honestly:
   small ones.
 - Budgets are pinned to the Alpine 6.18 kernel; only a kernel bump may
   re-baseline them.
+- Step 26.43 now owns `write_test_ext4`'s load-sensitive write count and the
+  26.36 follow-ups.
 
-I could not find the term "interim disk-read headroom" in the repository.
-What exists is the rule above: an I/O budget is the highest count observed plus
-the observed spread, so a read-side regression smaller than that spread is not
-caught.
+**Interim headroom (step 26.17c, russ, 2026-10-18).** The disk-request counts of
+`io_budgets.txt` (`reads`, `writes`, `sectors_read`, `sectors_written`,
+`dcfs_reads`, `dcfs_writes`) may exceed their budget by 2%, rounded up, and by
+at least 1 (`COST_DISK_COUNT_HEADROOM_PCT` and `_KINDS` in
+`test/qemu/guest/strace_lib.sh`; `test/qemu/README.md`, "I/O of the disks");
+`flushes`, the byte counts and every other count stay exact. The cause was CI
+run 39157612253, in which `fault_ace_mixed_test_ext4`'s `dcfs_reads` was 753
+against a budget of 752 under load (the full run on `9d6468d3` went red on it).
+It is a stopgap: steps 26.41 item 6 and 26.43 ("Load-agnostic to zero") remove
+it by counting something deterministic. Until then, a regression in those counts
+smaller than the budget's spread plus 2% is not caught.
 
 **Planned.** Step 26.41 (queued) makes the primary bumpers exact counts by
 backing-operation kind with zero tolerance, replaces the two-point slope check
@@ -955,21 +1011,25 @@ These are rules, enforced partly by tooling and partly by review, from
   (`docs/plan/process.md`, "A step, start to finish", step 5; the checklist
   includes test first, behave-like-the-backing, the invariants, coverage of new
   code, the TLA+ model updated for protocol changes, and a self-check for every
-  gate). Findings are appended to `docs/plan/review-findings.tsv`: 173 rows
-  from 2026-10-17 on, of which 9 blockers, 64 should-fix and 93 nits; 143 are
-  recorded `fixed/merged`, 17 `decided`, 8 open. The ledger records the
-  reviewers' own findings, including 12 test-gap and 14 test-shape findings, so
-  it also shows where tests were weak. It started on 2026-10-17; earlier
-  reviews are in `docs/plan/audits/` and `docs/plan/log.md`.
+  gate). Findings are appended to `docs/plan/review-findings.tsv`. The committed
+file has 183 rows (2026-10-17 and 2026-10-18): 9 blockers, 70 should-fix, 97
+nits and 7 clean reviews (severity "none"). Outcomes: 143 `fixed/merged`, 17
+`decided`, 18 open and 5 moved, listed elsewhere or not done. The counts are a
+lower bound, because rounds are missing: there are no round-1 rows for step
+22.5 (`docs/plan/log.md:4154`) and rounds 1 and 2 of step 17.2e were never
+appended (`log.md:4226`). The ledger records 13 test-gap and 14 test-shape
+findings, so it also shows where tests were weak. It starts on 2026-10-17;
+earlier reviews are in `docs/plan/audits/` and `docs/plan/log.md`.
 - **The model is kept in step with the code.** A protocol change updates the
-  TLA+ model in the same change, and trace validation fails if the code does
-  something the model does not allow (`AGENTS.md`).
-- **CI.** Red CI on a merged commit is fixed before further queued work (a
-  "red push" is dispatched first, `docs/plan/process.md`, "Parallelism and
-  budget"); large-tier failures are caught by CI rather than before merge
-  while development is fast, and the plan says push points become green-only
-  after launch (milestone M5: "red CI then gates merges"). Nothing here claims
-  CI is green now: I did not check.
+  TLA+ model in the same change (`AGENTS.md`). For the directory model,
+  trace validation fails if the code does, in a trace a test produces,
+  something the model does not allow; other models' validators run on
+  harness traces only (see the formal-model section).
+- **CI.** CI runs on pushes to main and on pull requests; it gates no merge
+  until milestone M5 ("red CI then gates merges"). A red run on a merged
+  commit is fixed before further queued work (`docs/plan/process.md`,
+  "Parallelism and budget"). The last recorded red result is the full run on
+  `9d6468d3`, red on an I/O budget (step 26.17c, above).
 
 ## Known gaps and open risks
 
@@ -987,8 +1047,9 @@ or unmodelled and the planned step that would address it, if there is one.
   map) would at least register what is abstracted.
 - There is no refinement proof against an ideal filesystem (12.16, planned).
 - The kernel's FUSE caching is not modelled (12.20, queued). The identity and
-  durability claims that depend on kernel behaviour rest on the
-  `kernel_facts` tests and the guests.
+  durability claims that depend on kernel behaviour rest on `handles_test`,
+  `nfs_test`, `sqlite_durability_test`, the power-cut tests and the guests;
+  `kernel_facts_test` pins only `O_DIRECT` through passthrough and inotify.
 - The backing filesystem's crash behaviour is one of three modelled regimes.
   Whether real ext4, xfs and btrfs stay inside them is tested by ACE sequences
   and litmus programs, not proved.
@@ -997,9 +1058,13 @@ or unmodelled and the planned step that would address it, if there is one.
   the argument for omitting `CacheDurable`) are not mechanically checked (12.27,
   queued). Known-bug variants and the TLA+ mutation tool partly stand in; the
   first TLA+ mutation run had nine survivors of twenty, unresolved in the
-  record.
+  record (that run was small tier only, by design, and the README expects the
+  medium tier to kill some, for example `Next`'s disjuncts, which `MC_small`
+  reaches).
 - Trace validation covers the traces the tests produce; whole classes of
-  step end a trace instead of being validated (listed above).
+  step end a trace instead of being validated (listed above). The file part
+  of `dcfs.tla` has none (12.11b); the `reval`, `lifetime` and `ident`
+  validators see harness traces only, never guest traces.
 - State counts in the README are hand-edited and in places inconsistent
   (12.27 item 9).
 
@@ -1027,7 +1092,7 @@ or unmodelled and the planned step that would address it, if there is one.
   names a coverage target.
 - Mutation testing is a sample, not a sweep: the recorded C++ sweeps ran 30
   and 60 mutants; there is no recorded current score or survivor baseline;
-  survivors do not fail CI (step 25.13 proposes that they do).
+  survivors do not fail CI (step 25.13, approved and queued, makes them).
 
 **Flaky and load-sensitive tests, as documented.**
 
@@ -1039,8 +1104,13 @@ or unmodelled and the planned step that would address it, if there is one.
   loaded host. Step 26.34 triaged the load-sensitive tests of 2026-10-17;
   follow-ups remain open in `docs/plan/phases/26-bumpers.md`.
 - The weekly `noisy` run is a search for races whose findings do not gate
-  anything, and its first run had not happened when its estimates were
-  written; I did not verify whether it has run since.
+  anything (`noisy.sh` exits 0 on test failures). Its time estimates were
+  written before its first run, and the repository records no result of it.
+- Tests whose verdicts still depend on time are listed under "Verdicts should
+  be made of events" above; step 26.43 ("Load-agnostic to zero", queued, M2)
+  owns the rest.
+- The disk-request budgets carry the interim 2% headroom described under
+  "Cost and I/O budgets" until step 26.41 item 6 removes it.
 - ASan and non-KVM runs differ from the default: some tests are
   incompatible with sanitizers, and without KVM the xfstests and the xfs and
   btrfs pjdfstest runs are skipped by CI.
@@ -1051,21 +1121,31 @@ or unmodelled and the planned step that would address it, if there is one.
   (no block device, no features FUSE has); the 40 slow tests and the native
   comparison are not run in CI; the shards do not run under sanitizers.
 - The full SibylFS run is manual.
+- Credentials: step 17.2d (supplementary groups read from `/proc/<pid>/status`
+  are wrong for credential-overriding callers such as `nfsd`, relevant to the
+  NFS-export target; uid 0 without `CAP_FSETID` keeps setgid); step 17.2f
+  (`credentials.sh` is a hand-picked set; completeness is not shown); step
+  17.2g (passthrough writes carry the daemon's `CAP_SYS_RESOURCE`, so ext4's
+  root-reserved blocks are open to every caller: `fs/fuse/backing.c:122`,
+  `fs/ext4/balloc.c:654-657` (Linux v7.3-rc7)). All three are queued.
 - Behaviour that differs from the backing today: a lookup populates its
   directory (decided against, step 22.7 queued); kernel-blocked syscalls are
   uninterruptible; remount `ro` is ignored and `dcfs.ro` must be used
   (`xfstests.ext4.expected_failures`, generic/294); atime of directories and
   symlinks is the cache's; mtime and ctime after a store through a shared
-  mapping following the last close are late (README "Limitations"). These are
-  documented and pinned by expected-failure lists or limitation
-  configurations, but they are departures from the stated specification.
+  mapping following the last close are late, and the kernel may serve the
+  previous ctime after `chattr` (generic/277); a frozen backing holds the whole
+  daemon, cached reads included; no submounts or btrfs subvolumes (boundary
+  stubs instead); the kernel's caches are not invalidated on out-of-band
+  changes; and the setuid/setgid gaps (README "Limitations"). These are
+  documented and pinned by expected-failure lists or limitation configurations,
+  but they are departures from the stated specification.
 
 **Process.**
 
 - Test-first, the review checklist and the rule that surviving mutants block
   a merge are enforced by people and agents, not tools. The review findings
-  ledger
-  begins 2026-10-17.
+  ledger begins 2026-10-17 and is incomplete (above).
 - Coverage of the planned dependency-injection step (25.41) and the shell-to-C++
   port of guest tests (plan M2) are open; until they land, many guest tests
   are shell scripts of the older style.
@@ -1136,3 +1216,4 @@ To check that a regime bites, break something and watch it fail: remove a
 `bazel test --config=fast //dcfs/...` (the mutation tool automates this); put
 `BugEffectBeforeSyscall`-style behaviour back by running a known-bug target and
 read its expected counterexample in `bazel-testlogs/formal/<test>/test.log`.
+
