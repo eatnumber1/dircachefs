@@ -304,11 +304,15 @@ answer; dcfs-protocol decides, with the model, and records the answers in
      transitions under concurrent mutation, before any code.
    - What a `listed` entry answers without a probe (russ, 2026-10-17):
      anything needing only existence, d_ino and d_type. Plain READDIR from a
-     complete listing (page 0 again included). Proposed option, not
-     committed: a partial listing serves its recorded prefix from the cache
+     complete listing (page 0 again included). Decided (russ,
+     2026-10-17: "It adheres to 'cache only what a client requested'"):
+     a partial listing serves its recorded prefix from the cache
      and resumes the stream on the backing from the last recorded d_off
-     (needs the backing's d_off per entry; POSIX permits entries changed
-     meanwhile to appear or not). Name-existence answers: EEXIST for
+     (the backing's d_off is stored per entry and used as the reply
+     cookie for cached entries too, so a handle's cookies are the backing's
+     throughout and seekdir/telldir work across the switch; if the backing
+     refuses a stored cookie, the stream restarts at 0, which POSIX allows,
+     as it lets entries changed meanwhile appear or not). Name-existence answers: EEXIST for
      mkdir/mknod/create/symlink/link onto a listed or present name,
      RENAME_NOREPLACE, and ENOENT for unlink/rmdir of a missing name in a
      complete listing; state whether these are answered from the cache or
