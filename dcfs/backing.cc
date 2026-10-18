@@ -609,8 +609,8 @@ absl::StatusOr<RootProbe> Probe(Context &ctx, int source_fd) {
   ASSIGN_OR_RETURN(probe.identity.device_id, GetDeviceId(source_fd));
   ASSIGN_OR_RETURN(struct statfs sfs, syscalls::fstatfs(source_fd));
   probe.identity.fstype = static_cast<int64_t>(sfs.f_type);
-  // ext4, xfs and btrfs report their exact byte limit (255; Linux v7.3-rc4
-  // fs/ext4/super.c:7011, fs/xfs/xfs_super.c:982, fs/btrfs/super.c:1815).
+  // ext4, xfs and btrfs report their exact byte limit (255; Linux v7.3-rc7
+  // fs/ext4/super.c:7021, fs/xfs/xfs_super.c:982, fs/btrfs/super.c:1815).
   probe.name_max = static_cast<size_t>(sfs.f_namelen);
   ASSIGN_OR_RETURN(probe.stx,
                    syscalls::statx(source_fd, "", AT_EMPTY_PATH, kAttrMask));
@@ -1554,9 +1554,9 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
                                                      std::string_view name) {
   // A name longer than the backing's limit skips the cache and is resolved
   // alone on the backing, which answers ENAMETOOLONG (ext4, xfs and btrfs
-  // check the length before any I/O: Linux v7.3-rc4 fs/ext4/namei.c:1768,
-  // fs/xfs/xfs_iops.c:323, fs/btrfs/inode.c:6095). A complete listing would
-  // answer ENOENT (pjdfstest chmod/02.t); the error is recorded nowhere
+  // check the length before any I/O: Linux v7.3-rc7 fs/ext4/namei.c:1768,
+  // fs/xfs/xfs_iops.c:322-323, fs/btrfs/inode.c:6094-6095). A complete listing
+  // would answer ENOENT (pjdfstest chmod/02.t); the error is recorded nowhere
   // (docs/design.md, "Name limits are the backing's").
   bool long_name = name.size() > ctx.name_max;
   events::Scope scope(*ctx.events, ctx, &ProtocolEvents::LookupBegin,

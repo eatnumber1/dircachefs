@@ -47,6 +47,8 @@ CONSTANTS
                     \* loss may leave of the writes since the last syncfs
     DirFsyncPersistsFiles,  \* an fsync of D also persists the data of the
                             \* files D names (FALSE: only D's own metadata)
+    LongNames,      \* the names longer than the backing's f_namelen
+                    \* (Context::name_max): never answered from the cache
     BugPhase1NotDurable,        \* crash F1
     BugCreateKeepsParentAttrs,  \* crash F3
     BugUnguardedFills,          \* tri-state F1
@@ -79,7 +81,8 @@ DataKinds == {"write", "fsync"}
 SyncKinds == {"sync", "fsync"}
 Regimes == {"seq", "metaprefix", "ext4"}
 
-ASSUME /\ Names # {} /\ IsFiniteSet(Names) /\ Names \cap {"F@D", "F#"} = {}
+ASSUME /\ LongNames \subseteq Names
+       /\ Names # {} /\ IsFiniteSet(Names) /\ Names \cap {"F@D", "F#"} = {}
        /\ Procs # {} /\ IsFiniteSet(Procs)
        /\ Requests \subseteq AllKinds \cup FileKinds \cup DataKinds
        /\ Reorder \in Regimes /\ DirFsyncPersistsFiles \in BOOLEAN
@@ -569,17 +572,23 @@ UnchangedGuards == UNCHANGED <<seq, inflight, durableD, fm>>
 \* The cache lookup. A known answer is served from the cache; an unknown
 \* name is resolved alone (backing::ResolveName) if the listing is
 \* complete, else the directory is listed (backing::PopulateDirectory).
+\* A name in LongNames (longer than the backing's f_namelen) is not looked
+\* up in the cache at all: it is resolved alone whatever the listing, and
+\* nothing is populated (the backing may answer ENAMETOOLONG, which records
+\* nothing; RNCommit's record of Absent is an ENOENT answer).
 \* Both begin with OpenNode(D), a syscall.
 LKFrom(p, r) ==
     /\ LET n == r.lk
            v == dbCur.dent[n]
            ans == FoundOrNeg(n, IF v \in Objs THEN v ELSE NoObj)
-       IN IF v \in Objs \/ v = Absent \/ (v = NoRow /\ dbCur.complete)
+       IN IF n \notin LongNames
+             /\ (v \in Objs \/ v = Absent \/ (v = NoRow /\ dbCur.complete))
           THEN /\ Serve(ans)
                /\ Then(p, [r EXCEPT !.pc = r.cont, !.res = ans,
                                     !.lk = None, !.cont = None])
           ELSE /\ NoServe
                /\ Syscall(p, [r EXCEPT !.pc = IF dbCur.complete
+                                                \/ n \in LongNames
                                                THEN "RN_probe"
                                                ELSE "PD_read"])
     /\ UnchangedBacking /\ UnchangedDB /\ UnchangedGuards

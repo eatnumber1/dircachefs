@@ -128,7 +128,7 @@ practice:
   completes only when a client reads its listing to the end (plan step
   22.7).
 - **Name limits are the backing's.** russ, 2026-10-17. NAME_MAX (255) is
-  not the kernel's limit on a path component (`fs/readdir.c:146-148`:
+  not the kernel's limit on a path component (`fs/readdir.c:151-153`:
   PATH_MAX is "the real kernel limit on a possible path component, not
   NAME_MAX"; FUSE allows `FUSE_NAME_MAX` = PATH_MAX - 1,
   `fs/fuse/fuse_i.h:45`), so dcfs imposes none of its own: it reads the
@@ -137,8 +137,8 @@ practice:
   even in an incomplete directory (nothing populates). A complete listing
   would answer ENOENT where the backing answers ENAMETOOLONG (pjdfstest
   `chmod/02.t`). On the supported backings `f_namelen` is the exact byte
-  limit and lookup checks it before any I/O (Linux v7.3-rc4: ext4
-  `fs/ext4/super.c:7011`, `fs/ext4/namei.c:1768-1769`; xfs
+  limit and lookup checks it before any I/O (Linux v7.3-rc7: ext4
+  `fs/ext4/super.c:7021`, `fs/ext4/namei.c:1768-1769`; xfs
   `fs/xfs/xfs_super.c:982`, `fs/xfs/xfs_iops.c:322-323`; btrfs
   `fs/btrfs/super.c:1815`, `fs/btrfs/inode.c:6094-6095`), so no over-long
   name is ever present in the cache, and the ENAMETOOLONG answer is

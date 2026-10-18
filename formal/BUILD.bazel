@@ -31,6 +31,18 @@ tlc_test(
     srcs = ["dcfs.tla"],
 )
 
+# Step 12.24: a name longer than the backing's f_namelen is never answered
+# from the cache (LongNames = {"b"}); resolved alone whatever the listing.
+# 429,426 distinct states (about 65 s).
+tlc_test(
+    name = "long_names_test",
+    size = "medium",
+    timeout = "moderate",
+    config = "MC_long_names.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
 # Step 12.12a (the audit's G4): without the kernel's lock, small enough for
 # the medium tier (no crash), so that Mutation::Owns, the phase-1
 # verification and the fill guards of lookups and listings meeting a
