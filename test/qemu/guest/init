@@ -8,9 +8,9 @@
 #   - Unit tests (test/qemu/qemu_cc_test.bzl): the initramfs has /test/run
 #     (the test binary), /test/args (its arguments, space-joined), an
 #     optional /test/data/ (TEST_SRCDIR) and an optional /test/disk0 (the
-#     device name of the first `disks=` entry, if any). Runs the test with
-#     TEST_TMPDIR on that disk if given, tmpfs otherwise, then prints
-#     DCFS-TEST-EXIT=<rc>.
+#     device and filesystem type of the first `disks=` entry, if any). Runs
+#     the test with TEST_TMPDIR on that disk if given, tmpfs otherwise,
+#     then prints DCFS-TEST-EXIT=<rc>.
 #
 #   - e2e tests (test/qemu/qemu_test.bzl): picks the guest/<name>.sh script
 #     to run from the dcfs_test= kernel command-line parameter, then prints
@@ -410,8 +410,9 @@ if [ -f /test/run ]; then
   mkdir -p /tmp/test_tmpdir
 
   if [ -s /test/disk0 ]; then
-    disk_dev="/dev/$(cat /test/disk0)"
-    if ! mount -t ext4 "$disk_dev" /tmp/test_tmpdir; then
+    disk_spec=$(cat /test/disk0)
+    disk_dev="/dev/${disk_spec%%:*}"
+    if ! mount -t "${disk_spec#*:}" "$disk_dev" /tmp/test_tmpdir; then
       echo "init: failed to mount $disk_dev on /tmp/test_tmpdir"
       echo "DCFS-TEST-EXIT=1"
       finish
