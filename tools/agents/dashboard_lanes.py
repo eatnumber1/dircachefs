@@ -16,16 +16,18 @@ this directory for the hook configuration.
     dashboard_lanes.py mark-uploaded   record the current file as uploaded
     dashboard_lanes.py show            print the lanes file
     dashboard_lanes.py quota           read usage meters and update quota/budget
+    dashboard_lanes.py lane-state ...  set or clear lane state override
     dashboard_lanes.py ledger add ...  append row for unhooked agent job
     dashboard_lanes.py ledger set ...  fill outcome fields at merge time
 
 State lives in $DCFS_DASHBOARD_DIR (default ~/.cache/dcfs-dashboard):
-running.json, finished.json, lanes.json, uploaded.sha256, sloc.json,
-sloc.head, sloc.uploaded.sha256, quota.json, quota.uploaded.sha256,
-quota.read_at, quota.log, budget.json, budget.uploaded.sha256, and an
-optional config.json with "model" and "effort" for the orchestrator row.
-Dispatch ledger is kept in docs/plan/dispatch-ledger.tsv under the main
-repository checkout.
+running.json, finished.json, lanes.json, uploaded.sha256,
+lanes.uploaded.json, lane_states.json, lane_states.uploaded.json,
+sloc.json, sloc.head, sloc.uploaded.sha256, quota.json,
+quota.uploaded.sha256, quota.read_at, quota.log, budget.json,
+budget.uploaded.sha256, and an optional config.json with "model" and
+"effort" for the orchestrator row. Dispatch ledger is kept in
+docs/plan/dispatch-ledger.tsv under the main repository checkout.
 """
 
 import dataclasses
@@ -619,7 +621,9 @@ DATASETS = ["lanes", "sloc", "quota", "budget"]
 
 def dataset_paths(env, name):
     json_path = env.path("%s.json" % name)
-    sha_file = "uploaded.sha256" if name == "lanes" else "%s.uploaded.sha256" % name
+    sha_file = (
+        "uploaded.sha256" if name == "lanes" else "%s.uploaded.sha256" % name
+    )
     return json_path, env.path(sha_file)
 
 
@@ -627,18 +631,79 @@ def file_digest(path):
     return hashlib.sha256(read_text(path).encode("utf-8")).hexdigest()
 
 
+def lanes_material_changed(env):
+    """Whether lanes has a material change vs the last uploaded table."""
+    lanes_path = env.path("lanes.json")
+    if not os.path.exists(lanes_path):
+        return False
+    sha_path = env.path("uploaded.sha256")
+    if not os.path.exists(sha_path):
+        return True
+    if file_digest(lanes_path) == read_text(sha_path).strip():
+        return False
+
+    up_path = env.path("lanes.uploaded.json")
+    if not os.path.exists(up_path):
+        return True
+    try:
+        up_rows = json.loads(read_text(up_path))
+    except (ValueError, json.JSONDecodeError):
+        return True
+
+    cur_states = load_json(env.path("lane_states.json"), {})
+    up_states = load_json(env.path("lane_states.uploaded.json"), {})
+    if cur_states != up_states:
+        return True
+
+    try:
+        cur_rows = json.loads(read_text(lanes_path))
+    except (ValueError, json.JSONDecodeError):
+        return True
+
+    cur_by_lane = {
+        r["lane"]: r for r in cur_rows if isinstance(r, dict) and "lane" in r
+    }
+    up_by_lane = {
+        r["lane"]: r for r in up_rows if isinstance(r, dict) and "lane" in r
+    }
+
+    for name, cur in cur_by_lane.items():
+        if name == "orchestrator":
+            continue
+        up = up_by_lane.get(name)
+        if not up:
+            return True
+        # Newly dispatched: went to running from idle or override
+        if cur.get("state") == "running" and up.get("state") != "running":
+            return True
+        # Step changed (excluding running -> idle transitions)
+        if cur.get("state") != "idle" and up.get("state") != "idle":
+            if cur.get("step") != up.get("step"):
+                return True
+
+    return False
+
+
 def dataset_changed(env, name):
+    if name == "lanes":
+        return lanes_material_changed(env)
     json_path, sha_path = dataset_paths(env, name)
     if not os.path.exists(json_path):
         return False
-    uploaded = read_text(sha_path).strip() if os.path.exists(sha_path) else None
+    uploaded = (
+        read_text(sha_path).strip() if os.path.exists(sha_path) else None
+    )
     return file_digest(json_path) != uploaded
 
 
 def file_changed(path, uploaded_path):
     if not os.path.exists(path):
         return False
-    uploaded = read_text(uploaded_path).strip() if os.path.exists(uploaded_path) else None
+    uploaded = (
+        read_text(uploaded_path).strip()
+        if os.path.exists(uploaded_path)
+        else None
+    )
     return file_digest(path) != uploaded
 
 
@@ -665,6 +730,14 @@ def frontmatter(env, subagent_type):
     return pairs
 
 
+def clear_lane_override(env, lane):
+    states_path = env.path("lane_states.json")
+    states = load_json(states_path, {})
+    if lane in states:
+        del states[lane]
+        write_atomic(states_path, json.dumps(states, indent=2) + "\n")
+
+
 def record_agent(env, event):
     tool_input = event["tool_input"]
     response = event["tool_response"]
@@ -672,11 +745,14 @@ def record_agent(env, event):
         return
     front = frontmatter(env, tool_input["subagent_type"])
     match = LANE_IN_PROMPT.search(tool_input["prompt"])
+    lane = "lane-" + match.group(1) if match else None
+    if lane:
+        clear_lane_override(env, lane)
     running = load_json(env.path("running.json"), {})
     running[response["agentId"]] = {
         "subagent_type": tool_input["subagent_type"],
         "description": tool_input["description"],
-        "lane": "lane-" + match.group(1) if match else None,
+        "lane": lane,
         "model": tool_input.get("model")
         or response.get("resolvedModel")
         or front.get("model", ""),
@@ -750,6 +826,7 @@ def build_rows(env):
         for name in os.listdir(env.lanes_root)
         if (m := LANE_DIR.match(name))
     )
+    overrides = load_json(env.path("lane_states.json"), {})
     for _, name in lanes:
         lane_dir = os.path.join(env.lanes_root, name)
         row = {"lane": name, "step": "", "agent": "", "model": "",
@@ -778,18 +855,26 @@ def build_rows(env):
                 effort=", ".join(s[2] for s in shown),
                 state="running",
             )
+        if name in overrides:
+            ov = overrides[name]
+            fallback = records[0]["description"] if records else ""
+            step = step_of(branch) if branch else fallback
+            row.update(
+                step=step,
+                agent=ov.get("note", ""),
+                model="",
+                effort="",
+                state=ov.get("state", ""),
+            )
         rows.append(row)
     return rows
 
 
 def regenerate(env):
-    """Writes lanes.json; returns whether it differs from the uploaded copy."""
+    """Writes lanes.json; returns whether it differs from uploaded copy."""
     text = json.dumps(build_rows(env), indent=2) + "\n"
     write_atomic(env.path("lanes.json"), text)
-    uploaded = None
-    if os.path.exists(env.path("uploaded.sha256")):
-        uploaded = read_text(env.path("uploaded.sha256")).strip()
-    return hashlib.sha256(text.encode()).hexdigest() != uploaded
+    return dataset_changed(env, "lanes")
 
 
 def upload_context(env):
@@ -1045,6 +1130,27 @@ def ledger(env, args):
         raise ValueError("unknown ledger subcommand: %r" % sub)
 
 
+def lane_state(env, args):
+    if len(args) < 2:
+        raise ValueError(
+            "usage: lane-state LANE STATE [NOTE] or lane-state LANE clear"
+        )
+    lane = args[0]
+    if not lane.startswith("lane-") and lane.isdigit():
+        lane = "lane-" + lane
+    states_path = env.path("lane_states.json")
+    states = load_json(states_path, {})
+    action = args[1]
+    if action == "clear":
+        states.pop(lane, None)
+    else:
+        note = " ".join(args[2:]) if len(args) > 2 else ""
+        states[lane] = {"state": action, "note": note}
+    write_atomic(states_path, json.dumps(states, indent=2) + "\n")
+    regenerate(env)
+    return ""
+
+
 def post_agent(env, event):
     # An agent_id means a subagent made this call: its launches are not
     # lanes of the orchestrator.
@@ -1068,7 +1174,11 @@ def post_message(env, event):
     if target not in finished:
         return ""
     running = load_json(env.path("running.json"), {})
-    running[target] = finished.pop(target)
+    record = finished.pop(target)
+    lane = record.get("lane")
+    if lane:
+        clear_lane_override(env, lane)
+    running[target] = record
     write_atomic(env.path("running.json"), json.dumps(running, indent=2))
     write_atomic(env.path("finished.json"), json.dumps(finished, indent=2))
     return upload_context(env)
@@ -1179,6 +1289,16 @@ def mark_uploaded(env):
             marked = True
     if not marked:
         raise FileNotFoundError("no dashboard files to mark uploaded")
+    if os.path.exists(env.path("lanes.json")):
+        write_atomic(
+            env.path("lanes.uploaded.json"),
+            read_text(env.path("lanes.json")),
+        )
+    states_path = env.path("lane_states.json")
+    write_atomic(
+        env.path("lane_states.uploaded.json"),
+        json.dumps(load_json(states_path, {}), indent=2) + "\n",
+    )
     return ""
 
 
@@ -1224,6 +1344,8 @@ def main(argv, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
         with lock(env):
             if argv[0] == "ledger":
                 stdout.write(ledger(env, argv[1:]))
+            elif argv[0] == "lane-state":
+                stdout.write(lane_state(env, argv[1:]))
             elif argv[0] in MANUAL:
                 stdout.write(MANUAL[argv[0]](env))
             else:

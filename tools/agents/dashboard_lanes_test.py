@@ -1273,6 +1273,141 @@ class QuotaStopAndUploadTest(Fixture):
         self.assertEqual(out2, "")
 
 
+class LaneStateOverrideTest(Fixture):
+
+    def run_cmd(self, argv):
+        out, err = io.StringIO(), io.StringIO()
+        code = dashboard_lanes.main(
+            argv, stdin=io.StringIO(""), stdout=out, stderr=err, env=self.env
+        )
+        self.assertEqual(code, 0)
+        return out.getvalue(), err.getvalue()
+
+    def test_override_set_and_clear(self):
+        # Set override with note
+        out, err = self.run_cmd(
+            ["lane-state", "lane-2", "paused", "quota"]
+        )
+        self.assertEqual((out, err), ("", ""))
+        row = self.rows()["lane-2"]
+        self.assertEqual(row["state"], "paused")
+        self.assertEqual(row["agent"], "quota")
+        self.assertEqual(row["step"], "main")
+
+        # stop() asks for upload because override was set
+        out, _ = self.run_hook("stop", {"stop_hook_active": False})
+        decision = json.loads(out)
+        self.assertEqual(decision["decision"], "block")
+        self.assertIn("lanes.json", decision["reason"])
+
+        self.run_hook("mark-uploaded", {})
+        self.assertEqual(
+            self.run_hook("stop", {"stop_hook_active": False})[0], ""
+        )
+
+        # Clear override
+        out, err = self.run_cmd(["lane-state", "lane-2", "clear"])
+        self.assertEqual((out, err), ("", ""))
+        row = self.rows()["lane-2"]
+        self.assertEqual(row["state"], "idle")
+        self.assertEqual(row["agent"], "")
+
+        # stop() asks for upload because override was cleared
+        out, _ = self.run_hook("stop", {"stop_hook_active": False})
+        decision = json.loads(out)
+        self.assertEqual(decision["decision"], "block")
+        self.assertIn("lanes.json", decision["reason"])
+
+    def test_override_auto_cleared_on_new_dispatch(self):
+        self.run_cmd(["lane-state", "lane-2", "waiting", "review Sunday"])
+        row = self.rows()["lane-2"]
+        self.assertEqual(row["state"], "waiting")
+        self.assertEqual(row["agent"], "review Sunday")
+        self.run_hook("mark-uploaded", {})
+
+        # New agent dispatch into lane-2 automatically clears override
+        self.launch(prompt="in ~/Sources/dircachefs-lanes/lane-2")
+        row = self.rows()["lane-2"]
+        self.assertEqual(row["state"], "running")
+        self.assertEqual(row["agent"], "dcfs-implementer")
+
+        states = dashboard_lanes.load_json(
+            self.env.path("lane_states.json"), {}
+        )
+        self.assertNotIn("lane-2", states)
+
+        # stop() asks for upload because lane went from override to running
+        out, _ = self.run_hook("stop", {"stop_hook_active": False})
+        decision = json.loads(out)
+        self.assertEqual(decision["decision"], "block")
+        self.assertIn("lanes.json", decision["reason"])
+
+
+class MaterialUploadRequestsTest(Fixture):
+
+    def test_flicker_subagent_stop_then_message_back_no_request(self):
+        # 1. Launch agent and mark uploaded: lane-2 running is uploaded.
+        self.launch()
+        self.run_hook("stop", {"stop_hook_active": False})
+        self.run_hook("mark-uploaded", {})
+
+        # 2. Agent pauses for background work: fires SubagentStop.
+        out, _ = self.run_hook("subagent-stop", {"agent_id": "a1"})
+        self.assertEqual(out, "")
+        self.assertEqual(self.rows()["lane-2"]["state"], "idle")
+
+        # SubagentStop alone going from running to idle triggers no request.
+        out, _ = self.run_hook("stop", {"stop_hook_active": False})
+        self.assertEqual(out, "")
+
+        # 3. Message resumes agent: no request.
+        out, _ = self.run_hook(
+            "post-message",
+            {
+                "tool_name": "SendMessage",
+                "tool_input": {"to": "a1", "message": "done"},
+            },
+        )
+        self.assertEqual(out, "")
+        self.assertEqual(self.rows()["lane-2"]["state"], "running")
+
+        # stop() also asks for no upload: matches last uploaded state.
+        out, _ = self.run_hook("stop", {"stop_hook_active": False})
+        self.assertEqual(out, "")
+
+    def test_new_dispatch_triggers_upload_request(self):
+        # Initial state: lane-2 idle is uploaded.
+        self.run_hook("stop", {"stop_hook_active": False})
+        self.run_hook("mark-uploaded", {})
+        self.assertEqual(self.rows()["lane-2"]["state"], "idle")
+
+        # New dispatch: lane-2 goes from idle to running.
+        self.launch(agent_id="a1")
+        out, _ = self.run_hook("stop", {"stop_hook_active": False})
+        decision = json.loads(out)
+        self.assertEqual(decision["decision"], "block")
+        self.assertIn("lanes.json", decision["reason"])
+
+    def test_step_change_triggers_upload_request(self):
+        # Launch agent on lane-1 (step-25.9b) and mark uploaded.
+        self.launch(
+            agent_id="a1", prompt="in ~/Sources/dircachefs-lanes/lane-1"
+        )
+        self.run_hook("stop", {"stop_hook_active": False})
+        self.run_hook("mark-uploaded", {})
+        self.assertEqual(self.rows()["lane-1"]["step"], "25.9b")
+
+        # Change branch on lane-1 to step-25.9c.
+        self.write(
+            os.path.join(self.lanes, "gitdir-1", "HEAD"),
+            "ref: refs/heads/step-25.9c\n",
+        )
+        out, _ = self.run_hook("stop", {"stop_hook_active": False})
+        decision = json.loads(out)
+        self.assertEqual(decision["decision"], "block")
+        self.assertIn("lanes.json", decision["reason"])
+
+
 if __name__ == "__main__":
     unittest.main()
 

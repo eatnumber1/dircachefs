@@ -100,15 +100,24 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
   regenerates, prints nothing.
 - `stop` (the main session's Stop): regenerates lanes and, when main's HEAD
   differs from the last recorded HEAD, regenerates `sloc.json`; launches the
-  detached `quota` reader at most once per hour; if any file changed since the
-  last upload it blocks with a reason naming the files, unless `stop_hook_active`
-  is true (no loops) or the caller is a subagent.
-- `mark-uploaded`: records the current files' sha256 checksums as uploaded
-  (`uploaded.sha256`, `sloc.uploaded.sha256`, `quota.uploaded.sha256`, and
-  `budget.uploaded.sha256`). The orchestrator runs it after uploading.
+  detached `quota` reader at most once per hour; asks for a lanes upload only
+  on material changes compared with the last uploaded table (a lane's step
+  changed, an agent was newly dispatched, or an override was set or cleared; a
+  lane going to idle by SubagentStop alone triggers no request) or when another
+  dataset changed, blocking with a reason naming the files, unless
+  `stop_hook_active` is true (no loops) or the caller is a subagent.
+- `mark-uploaded`: records the current files as uploaded (`uploaded.sha256`,
+  `lanes.uploaded.json`, `lane_states.uploaded.json`, `sloc.uploaded.sha256`,
+  `quota.uploaded.sha256`, and `budget.uploaded.sha256`). The orchestrator runs
+  it after uploading.
 - `show`: prints the table.
 - `quota`: runs the usage meters (claude_usage.py and agy /usage), writes
   `quota.json`, and appends Claude week to `budget.json`.
+- `lane-state LANE STATE [NOTE]` / `lane-state LANE clear`: sets or clears a
+  manual lane state override (e.g. `lane-state lane-2 paused "quota"` or
+  `lane-state lane-1 waiting "review Sunday"`), stored in `lane_states.json`.
+  The row shows the override state and note (in the agent column) instead of
+  idle or running, until cleared or a new agent is dispatched to that lane.
 - `ledger add [ID] field=value ...`: appends a row to the dispatch ledger
   for an unhooked job (an agy/Gemini job; model suffix sets effort, tokens
   blank, notes for quota delta).
@@ -124,7 +133,8 @@ values of every agent on the lane joined by `, ` in launch order (e.g.
 an agent stops, the row shows the rest. An `agy` process whose working
 directory is the lane adds `agy, sandboxed` to those lists, with its `--model`
 (a trailing `-low|-medium|-high` moved to the effort column). A lane with an
-`agy` process and no agent shows just that. Otherwise the lane is `idle`.
+`agy` process and no agent shows just that. An override (`lane-state`) displays
+its state and note instead of idle or running. Otherwise the lane is `idle`.
 
 The code size panel counts non-blank, non-comment lines over `git ls-files`
 of the main checkout (`$DCFS_MAIN_REPO` or `~/Sources/dircachefs`), outputting
@@ -202,10 +212,12 @@ of band, so the meters can only be known by reading them). If a meter fails or
 times out, previous rows are kept and the failure is reported to stderr.
 
 State is in `$DCFS_DASHBOARD_DIR` (default `~/.cache/dcfs-dashboard/`):
-`running.json`, `finished.json`, `lanes.json`, `uploaded.sha256`, `sloc.json`,
-`sloc.head`, `sloc.uploaded.sha256`, `quota.json`, `quota.uploaded.sha256`,
-`quota.read_at`, `quota.log`, `budget.json`, `budget.uploaded.sha256`, and an
-optional config.json (`{"model": ..., "effort": ...}`) for the orchestrator row.
+`running.json`, `finished.json`, `lanes.json`, `uploaded.sha256`,
+`lanes.uploaded.json`, `lane_states.json`, `lane_states.uploaded.json`,
+`sloc.json`, `sloc.head`, `sloc.uploaded.sha256`, `quota.json`,
+`quota.uploaded.sha256`, `quota.read_at`, `quota.log`, `budget.json`,
+`budget.uploaded.sha256`, and an optional config.json
+(`{"model": ..., "effort": ...}`) for the orchestrator row.
 A malformed input or an unreadable state file prints one line to stderr and
 exits 0, because a failing hook can wedge the session.
 
