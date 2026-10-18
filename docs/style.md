@@ -124,9 +124,9 @@ use it as design guidance rather than firm rules."
   matcher or a gate with a known-bad self-check can enforce is enforced that
   way, not by a style sentence and a reviewer, even at the cost of extra
   structure; structure that exists to make an invariant mechanical (a split
-  library, a golden list) is not merged away for simplicity. A rule proposed
-  here comes with its check, or with a type that makes the wrong code not
-  compile.
+  library, a golden list) is not merged away for simplicity. How to apply
+  (orchestrator's reading, not russ's words): a rule proposed here comes with
+  its check, or with a type that makes the wrong code not compile.
 
 ### 1.2 Narrowing Google's rules
 
@@ -1274,6 +1274,13 @@ the obvious what or how." Apply the core principles:
   that version once in its header (orchestrator ruling, 2026-10-18, from the
   17.6 style review).
 - `/* */` only for argument names (`/*is_dir=*/false`) and in `tools/*.c`.
+- <a id="rule-sync-point-terms"></a>**Sync-point terms** (russ, 2026-10-18,
+  "Sorry, what? fsync _is_ a sync point, just not a syncfs point."). `FSYNC`
+  and `FSYNCDIR` are sync points, "a file's sync point", and run no syncfs;
+  the timer-driven one is "the periodic sync point". An interruption point's
+  name says where it is, not which operation owns it (russ, 2026-10-18, "Huh?
+  Why not 'an fsync's interrupt point'?", then "Do it."): "a create's
+  syscall", "an fsync's syscall".
 
 ### 1.10 One abstraction over variants; branching is discouraged
 

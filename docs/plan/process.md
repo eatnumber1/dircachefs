@@ -50,7 +50,8 @@ process (its waves and file ownership table) is in `history.md`.
    files outside the step, to stop and report after two failed attempts at
    the same build or test error, and to leave the lane's Bazel server
    running (it is reused by the next step). After dispatching, refresh
-   the dashboard's lanes and steps (step 6 says how), and do the same
+   the dashboard's lanes and steps (step 6 says how; a Haiku subagent does
+   it), and do the same
    when a lane's agent finishes or is stopped, or a Gemini job ends.
 3. **Test first.** The agent writes the step's tests, runs them, and
    records them failing on the unchanged code (quoted output), then makes
@@ -121,8 +122,13 @@ process (its waves and file ownership table) is in `history.md`.
    `~/Sources/dircachefs`: `git fetch
    ~/Sources/dircachefs-lanes/lane-K step-N.M` and `git merge --ff-only
    FETCH_HEAD`. Update the status table and `log.md` and commit them.
-   Then refresh russ's private dashboard, "dcfs Mission Control"
-   (https://claude.ai/artifact/EVypNNcogbNcxzRjBYp8rK): rewrite its four
+   Then a Haiku subagent refreshes russ's private dashboard, "dcfs Mission
+   Control" (https://claude.ai/artifact/EVypNNcogbNcxzRjBYp8rK). The
+   uploads (asset publish, `ArtifactData` update with `if_version`, then
+   `mark-uploaded`) are the subagent's, not the orchestrator's (russ,
+   2026-10-18: "Use subagents!", sent while the orchestrator was
+   hand-uploading dashboard datasets; the update's `data` holds `source` and
+   `updated` at the top level). The refresh rewrites its four
    snapshot files (the steps in flight and queued, in the Queue's order;
    each lane's step, agent type, model and effort, which the
    `dashboard_lanes` hooks write to `~/.cache/dcfs-dashboard/lanes.json`
@@ -355,7 +361,7 @@ orchestrator's notes (2026-10-18) so that they are in the repository:
   2026-10-09: "In the future, can you use your edit tool rather than a
   python script to edit files? It's prettier and easier for me to review in
   the Claude webui."). Every file the orchestrator changes itself (plan
-  bookkeeping, the dashboard page, memory notes) is one Edit or Write call
+  bookkeeping, memory notes) is one Edit or Write call
   per file; Bash is for commands (git, gh, bazel, grep). This overrides any
   harness hint to prefer Bash for edits.
 - <a id="rule-red-ci-until-ship"></a>**Until we ship, a red CI is not a problem** (russ, 2026-10-17, declining
@@ -590,9 +596,10 @@ first.
   Antigravity: `agy -p "/usage"`. Read both before each dispatch; log a
   snapshot when a day starts. Read the pools live, never from the hourly
   dashboard reading alone (russ, 2026-10-18: "Why do we keep relying on
-  stale hourly readings?"): `python3 tools/agents/dashboard_lanes.py quota`
-  reads Claude and agy/Gemini at once and updates `quota.json` and
-  `budget.json` for the dashboard. A live read is event-driven, not a timer.
+  stale hourly readings?"): the two commands above are the live read; a
+  decision never rests on the hourly reading alone. `dashboard_lanes.py
+  quota` is only what the hourly hook records for the dashboard
+  (`quota.json`, `budget.json`). A live read is event-driven, not a timer.
 - <a id="rule-pace-claude-quota"></a>**The Claude plan is the scarce resource** (the orchestrator runs on it and
   every coding agent does). Pace it so the week ends near 95%, never empty
   before its reset. russ's own interactive use outside the project happens

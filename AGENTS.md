@@ -236,6 +236,10 @@ id="rule-NAME"></a>` on it, and add a line here.
 - **Return a failed Status or log, never both**; log levels (russ, 2026-10-08).
   [style 1.7](docs/style.md#rule-status-or-log),
   [style 1.7](docs/style.md#rule-logging-levels)
+- **Sync-point terms** (russ, 2026-10-18: "fsync _is_ a sync point, just not a
+  syncfs point."): a file's sync point runs no syncfs; "the periodic sync
+  point"; an interruption point is named by where it is ("an fsync's
+  syscall"). [style 1.9](docs/style.md#rule-sync-point-terms)
 - **Comments** are facts at the line that needs them:
   [style 1.9](docs/style.md#rule-comments-self-explanatory),
   [style 1.9](docs/style.md#rule-comments-invariants),
