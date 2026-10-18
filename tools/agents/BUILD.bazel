@@ -80,3 +80,29 @@ py_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
     deps = [":dashboard_lanes_lib"],
 )
+
+# Runs queued steps end to end on Gemini in a lane using stream-json mode.
+# See README.md in this directory.
+py_library(
+    name = "foreman_lib",
+    srcs = ["foreman.py"],
+    imports = ["."],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+py_binary(
+    name = "foreman",
+    srcs = ["foreman.py"],
+    main = "foreman.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":foreman_lib"],
+)
+
+py_test(
+    name = "foreman_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["foreman_test.py"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":foreman_lib"],
+)

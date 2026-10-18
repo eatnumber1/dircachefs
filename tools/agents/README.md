@@ -236,3 +236,62 @@ orchestrator):
 
 It runs directly with `python3 -I`, no Bazel needed; the tests are
 `//tools/agents:dashboard_lanes_test`.
+
+## foreman
+
+Drives a queued development step end to end on Gemini in a lane, running worker
+and review/fix rounds, and leaving a merge-ready branch plus `summary.md`.
+
+Usage:
+
+```bash
+python3 -I tools/agents/foreman.py STEP LANE BRANCH PROMPT_FILE [--model M] [--review-model M] [--out DIR]
+```
+
+Or via Bazel:
+
+```bash
+bazel run //tools/agents:foreman -- STEP LANE BRANCH PROMPT_FILE [--model M] [--review-model M] [--out DIR]
+```
+
+- `STEP` (required): name of the step (e.g. `25.33`).
+- `LANE` (required): lane repository directory.
+- `BRANCH` (required): branch name to check out from `FETCH_HEAD` of main.
+- `PROMPT_FILE` (required): path to the worker's initial prompt file.
+- `--model M`: model for worker and fix sessions (default:
+  `gemini-3.8-flash-medium`).
+- `--review-model M`: model for review sessions (default: same as `--model`).
+- `--out DIR`: output directory where `.jsonl`, `.out`, usage readings, and
+  `summary.md` are saved (default: scratchpad foreman directory or
+  `/tmp/foreman/<step>`).
+
+### Execution and protocol
+
+1. Checks out a fresh branch in `LANE` tracking `FETCH_HEAD` of the main
+   repository (`$DCFS_MAIN_REPO` or `~/Sources/dircachefs`), and records `base`.
+2. Measures quota before the run via `agy -p /usage` filtering for Gemini
+   models.
+3. Runs the worker session in `stream-json` mode:
+   - Starts `agy` with `--input-format stream-json --output-format stream-json`
+     and `-p=`.
+   - Sends the worker prompt with an instruction appended to print
+     `JOB-COMPLETE` when all work, including background commands, has finished
+     and reported.
+   - Keeps stdin open, reads stdout NDJSON events line by line, writes them to
+     `worker.jsonl`, and streams agent response text to `worker.out`.
+   - Closes stdin when an `agent_response` contains `JOB-COMPLETE`, then waits
+     for `agy` to emit the final `result` event and exit.
+   - If `agy` exits early (crash, quota, or an `ERROR` result), records the
+     failure in `summary.md` and terminates the job immediately.
+4. Up to two review/fix rounds:
+   - Read-only review: runs plain `agy -p ... --mode plan` inspecting
+     `git diff base HEAD` and uncommitted files against style and agent rules.
+     Outputs to `review<round>.out`.
+   - If review outputs `NONE`, the step is clean and the loop breaks.
+   - Otherwise, runs a fix round in `stream-json` mode with the review
+     findings, saving events to `fix<round>.jsonl` and text to `fix<round>.out`.
+5. Measures quota after the run, and writes `summary.md` reporting the branch,
+   base commit, commits made, uncommitted changes, last review, and quota
+   delta.
+
+The tests are `//tools/agents:foreman_test`.
