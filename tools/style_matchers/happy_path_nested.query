@@ -4,4 +4,4 @@
 # returns), holds the rest of the function: return the error first instead.
 # Heuristic: it also matches an `if (ok)` that is followed by more code
 # (clang-query has no "last statement" narrowing).
-match ifStmt(hasParent(compoundStmt(hasParent(functionDecl()))), hasCondition(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("ok"))))), hasThen(compoundStmt(unless(statementCountIs(0)), unless(statementCountIs(1)), unless(statementCountIs(2)))), anyOf(unless(hasElse(stmt())), hasElse(returnStmt())), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("happy_path_nested")
+match ifStmt(hasParent(compoundStmt(hasParent(functionDecl()))), hasCondition(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("ok"))))), hasThen(compoundStmt(unless(statementCountIs(0)), unless(statementCountIs(1)), unless(statementCountIs(2)))), anyOf(unless(hasElse(stmt())), hasElse(returnStmt())), isExpansionInFileMatching("(^|/)(dcfs|tools|bench|test/qemu/guest)/")).bind("happy_path_nested")

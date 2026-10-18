@@ -160,4 +160,9 @@ openlog
 syslog
 setsid
 getuid
+geteuid
+getgid
+getegid
+getcwd
 close_range
+system

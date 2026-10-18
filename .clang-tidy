@@ -74,7 +74,7 @@ Checks: >
   -modernize-use-std-format,
   -modernize-avoid-c-arrays
 WarningsAsErrors: '*'
-HeaderFilterRegex: '^(\./)?(dcfs|tools|bench)/'
+HeaderFilterRegex: '^(\./)?(dcfs|tools|bench|test/qemu/guest)/'
 CheckOptions:
   readability-function-cognitive-complexity.Threshold: 15
   # The complexity of what is written, not of what a macro expands to: an

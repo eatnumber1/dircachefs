@@ -73,6 +73,7 @@ def qemu_cc_test(
         mem = None,
         asan_mem = None,
         modules = [],
+        dcfs = False,
         **kwargs):
     """Declares a dcfs unit test that boots the QEMU guest to run it.
 
@@ -101,6 +102,10 @@ def qemu_cc_test(
         modules: kernel modules the test needs beyond the defaults (fuse,
             and virtio_blk plus the filesystem modules of `disks`); see
             qemu_test.bzl.
+        dcfs: put the dcfs binary in the guest at /test/data/dcfs (the
+            checking build for the small and medium tiers, the plain one
+            for the others, as qemu_test does), for a test that mounts it
+            (test/qemu/guest/guest.h).
         **kwargs: forwarded to the underlying cc_binary (e.g. extra
             copts).
     """
@@ -123,8 +128,13 @@ def qemu_cc_test(
         **kwargs
     )
 
-    disk0 = disks[0][0] if disks else "-"
+    # "<device>:<fstype>": guest/init mounts the first disk as that type.
+    disk0 = disks[0][0] + ":" + disks[0][1] if disks else "-"
     data_pairs = ["%s:$(location %s)" % (_relpath(d), d) for d in data]
+    dcfs_label = []
+    if dcfs:
+        dcfs_label = ["//dcfs:main_static_checked" if size in ("small", "medium") else "//dcfs:main_static"]
+        data_pairs.append("dcfs:$(location %s)" % dcfs_label[0])
 
     native.genrule(
         name = name + "_initramfs",
@@ -134,7 +144,7 @@ def qemu_cc_test(
             "//test/qemu:guest/init",
             "//test/qemu:guest/cost_lib.sh",
             ":" + bin_name,
-        ] + data,
+        ] + data + dcfs_label,
         outs = [initramfs_out],
         cmd = " ".join([
             GUEST_LIBS_ENV,
@@ -198,10 +208,10 @@ def qemu_cc_test(
         srcs = ["//test/qemu:scripts/run-qemu.sh"],
         data = kernel_data + qemu_data + BUDGET_DATA + [
             ":" + initramfs_out,
-        ] + coverage_data([":" + bin_name]),
+        ] + coverage_data([":" + bin_name] + dcfs_label),
         args = [
             "--unit",
-        ] + qemu_args + BUDGET_ARGS + coverage_args([":" + bin_name]) + mem_args_for(mem, asan_mem) + sanitizer_args() + kernel_args + [
+        ] + qemu_args + BUDGET_ARGS + coverage_args([":" + bin_name] + dcfs_label) + mem_args_for(mem, asan_mem) + sanitizer_args() + kernel_args + [
             "$(location :" + initramfs_out + ")",
         ] + disk_args,
         # run-qemu.sh --unit: -smp 1 and the allowance above.

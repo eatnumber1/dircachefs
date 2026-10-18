@@ -27,6 +27,11 @@
 //dcfs/testonly:trace_recorder
 //dcfs/testonly:trace_recorder_test_bin
 
+# the C++ guest tests (step 25.34): the helpers read and write files through the mount, and the ports do the removed-object syscalls
+//test/qemu:guest
+//test/qemu:guest_test_bin
+//test/qemu:removed_test_lib
+
 # tests
 //dcfs/testonly:trace_recorder_test_bin
 //dcfs:backing_fault_test_bin

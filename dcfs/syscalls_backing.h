@@ -118,6 +118,9 @@ absl::Status fchownat(int dirfd, std::string_view path, uid_t owner,
                       gid_t group, int flags);
 absl::Status futimens(int fd, const struct timespec times[2]);
 absl::Status ftruncate(int fd, off_t length);
+// truncate(2): by path, which follows symlinks (an O_PATH descriptor's
+// /proc/self/fd/<n> magic link included).
+absl::Status truncate(std::string_view path, off_t length);
 absl::Status fsync(int fd);
 absl::Status fdatasync(int fd);
 // syncfs(2): writes back and flushes the whole filesystem `fd` is on.

@@ -1647,6 +1647,24 @@ necessary, but if you think one is necessary, come to me."
 
 ## 4. Shell
 
+**No new shell for guest tests** (russ, 2026-10-17, step 25.34: "I suspect
+no, since we have very little tooling (e.g. no clang-tidy) and less
+developed style guides around it"; "we can do it in C++ with only a few
+helper functions just fine"). A new guest test is a `qemu_cc_test` in
+`test/qemu/guest/` that links the helpers of `guest.h` (mount and
+unmount dcfs, run a function as a user, crash the daemon, list and compare
+trees, the shared assertions); `dcfs = True` puts the dcfs binary in the
+guest. The helpers use the real system call where it is as easy as
+wrapping a command, and run a command (`umount`, `mount`) with `syscalls::system` where wrapping
+it would cost real code (an argv, no shell; the exit status is a Status that
+names the command). Shell under
+`test/qemu/` is thin glue only (the guest `init`, Bazel wrappers, a few
+lines that `exec` a binary). `tools/repo_shape.py` refuses a `*.sh` under
+`test/qemu/` that `tools/repo_shape_guest_shell.txt` does not list, and the
+list only shrinks: a script that is ported or deleted comes off it in the
+same change. Existing scripts are ported when a step would otherwise
+change them substantially (the plan's 25.34 follow-ups list them).
+
 **Minimize shell; new tools are C++** (russ, 2026-10-11: "We've got
 quite a few tools written in shell. I'd prefer they be in C++ since we
 don't have good style or tooling built around shell code. You don't have

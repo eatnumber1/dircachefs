@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <cstdlib>
 
+#include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
 #include "dcfs/fd.h"
@@ -20,6 +21,8 @@ namespace dcfs {
 namespace {
 
 using ::absl_testing::IsOk;
+using ::absl_testing::StatusIs;
+using ::testing::HasSubstr;
 
 TEST(SyscallsProcessTest, ForkWaitpidReportsTheChildsExitStatus) {
   absl::StatusOr<pid_t> pid = syscalls::fork();
@@ -72,6 +75,34 @@ TEST(SyscallsProcessTest, WaitpidOfNoChildIsEchild) {
   auto rc = syscalls::waitpid(-1, &status, WNOHANG);
   ASSERT_FALSE(rc.ok());
   EXPECT_EQ(StatusToErrno(rc.status()), ECHILD);
+}
+
+TEST(SyscallsProcessTest, SystemOfASucceedingCommandIsOk) {
+  EXPECT_THAT(syscalls::system({"/bin/true"}), IsOk());
+}
+
+TEST(SyscallsProcessTest, SystemNamesTheCommandAndItsExitStatus) {
+  EXPECT_THAT(syscalls::system({"/bin/sh", "-c", "exit 3"}),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("`/bin/sh -c exit 3` exited with status 3")));
+}
+
+TEST(SyscallsProcessTest, SystemNamesTheSignalThatEndedTheCommand) {
+  EXPECT_THAT(syscalls::system({"/bin/sh", "-c", "kill -9 $$"}),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("was killed by signal 9")));
+}
+
+TEST(SyscallsProcessTest, SystemOfAMissingProgramExitsWith127) {
+  EXPECT_THAT(syscalls::system({"/no/such/program"}),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("exited with status 127")));
+}
+
+TEST(SyscallsProcessTest, SystemOfNoCommandIsAnError) {
+  EXPECT_THAT(
+      syscalls::system({}),
+      StatusIs(absl::StatusCode::kInternal, HasSubstr("system of no command")));
 }
 
 }  // namespace

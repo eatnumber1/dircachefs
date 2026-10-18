@@ -22,6 +22,9 @@ Each function takes the root of a source tree and returns a list of problems
   `std::string s(n, '\0');`) in dcfs/*.h, dcfs/*.cc and tools/*.cc is an
   absl::FixedArray (docs/style.md, 1.2), except the known ones counted per
   file in tools/repo_shape_fixed_arrays.txt, a list that only shrinks;
+- no_new_guest_shell: every `*.sh` under test/qemu/ is listed in
+  tools/repo_shape_guest_shell.txt, a list that only shrinks (step 25.34:
+  guest tests are C++, test/qemu/guest/guest.h; shell is thin glue);
 - no_test_only_comments: no production source (dcfs/ and bench/, not
   *_test.cc and not testonly/) has a comment that gives tests as the reason
   for code, or a ForTest / _for_test name (docs/style.md, "No test-only
@@ -153,6 +156,41 @@ def guest_sleeps(root):
                 "tools/repo_shape_sleeps.txt lists %d sleep(s) for %s, which "
                 "has %d: lower it (the list only shrinks)" %
                 (count, path, actual.get(path, 0)))
+    return problems
+
+
+GUEST_SHELL_LIST = ("tools", "repo_shape_guest_shell.txt")
+
+
+def guest_shell_files(root):
+    """The *.sh files under test/qemu/, as paths relative to the root."""
+    found = []
+    base = os.path.join(root, "test", "qemu")
+    for directory, _, names in os.walk(base):
+        for name in names:
+            if name.endswith(".sh"):
+                found.append(
+                    os.path.relpath(os.path.join(directory, name), root))
+    return sorted(found)
+
+
+def no_new_guest_shell(root):
+    listed = set(
+        line.strip()
+        for line in read(root, *GUEST_SHELL_LIST).splitlines()
+        if line.strip() and not line.startswith("#"))
+    actual = set(guest_shell_files(root))
+    problems = []
+    for path in sorted(actual - listed):
+        problems.append(
+            "%s is new shell under test/qemu/: write the test in C++ with "
+            "the helpers of test/qemu/guest/guest.h (docs/style.md, "
+            "Shell); the list tools/repo_shape_guest_shell.txt does not "
+            "grow" % path)
+    for path in sorted(listed - actual):
+        problems.append(
+            "tools/repo_shape_guest_shell.txt lists %s, which is gone: take "
+            "it off (the list only shrinks)" % path)
     return problems
 
 
@@ -418,8 +456,8 @@ def absl_macro_sites(text):
 
 
 def absl_macro_files(root):
-    """Every .h and .cc under dcfs/, bench/ and tools/ (fixtures included)."""
-    for top in ("dcfs", "bench", "tools"):
+    """Every .h and .cc under dcfs/, bench/, tools/ and test/qemu/guest/ (fixtures included)."""
+    for top in ("dcfs", "bench", "tools", os.path.join("test", "qemu", "guest")):
         for dirpath, _, names in os.walk(os.path.join(root, top)):
             for name in sorted(names):
                 if name.endswith((".h", ".cc")):
@@ -565,7 +603,8 @@ def spdx_licenses(root, tracked=None):
 
 def all_problems(root):
     return (third_party_readmes(root) + guest_scripts_used(root) +
-            guest_sleeps(root) + disabled_checks_listed(root) +
+            guest_sleeps(root) + no_new_guest_shell(root) +
+            disabled_checks_listed(root) +
             no_test_only_comments(root) + no_testonly_friends(root) +
             fixed_arrays(root) + project_prefix(root) +
             absl_prefixed_status_macros(root) + nodiscard_on_status(root))

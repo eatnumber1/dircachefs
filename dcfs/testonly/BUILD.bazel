@@ -29,6 +29,7 @@ cc_library(
     visibility = [
         "//bench:__pkg__",
         "//dcfs:__pkg__",
+        "//test/qemu:__pkg__",
     ],
     deps = [
         "//dcfs:syscalls",

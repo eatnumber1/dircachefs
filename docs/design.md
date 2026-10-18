@@ -1355,7 +1355,7 @@ An unlinked file that dcfs itself still has open keeps its row until the
 last release (above); changing it goes the ordinary way, by handle:
 `open_by_handle_at` does reach an unlinked inode while something holds it
 (the backing filesystem finds it in its inode cache; checked on ext4, xfs
-and btrfs by `removed_test`'s `unlinked-open-mutate`).
+and btrfs by `removed_test`'s `UnlinkedOpenMutate`).
 
 ## Crashes, power loss and recovery
 

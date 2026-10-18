@@ -39,7 +39,7 @@ flags the build uses.
 import collections
 import re
 
-OURS = re.compile(r"^(dcfs|tools|bench)/")
+OURS = re.compile(r"^(dcfs|tools|bench|test/qemu/guest)/")
 FILE_SCOPE = "<file scope>"
 FUNCTION_RULE = "function"
 

@@ -1665,3 +1665,64 @@ Steps:
 Test: the two new tests, then `bazel test --config=fast //dcfs/...`.
 
 Owner: dcfs-implementer. Dependencies: none.
+
+### 25.34 as built (dcfs-implementer, 2026-10-17)
+
+- Helpers: `test/qemu/guest/guest.h` (`DcfsMount::{Start,Unmount,Crash,Log}`,
+  `InChild` with an optional `Identity`, `ListNames`, `Snapshot`,
+  `ExpectSameTree`, `ExpectSameAsBacking`); a command runs through the new
+  `syscalls::system` (argv, no shell, `dcfs/syscalls_process.h`). Tested by
+  `//test/qemu:guest_test`.
+- `qemu_cc_test` gained `dcfs = True` (the dcfs binary at `/test/data/dcfs`)
+  and a disk's filesystem type (`/test/disk0` is `vdb:xfs`; guest/init
+  mounts that type), so a port can run on ext4, xfs and btrfs.
+- First port: `guest/removed.sh` (197 lines) is
+  `//test/qemu:removed_test_{ext4,xfs,btrfs}` (`removed_test` aliases
+  ext4). The testutil subcommands only it used were deleted; `removed-link`
+  and `tmpfile-link` stay in testutil for `copy.sh` and are duplicated in the
+  C++ until `copy.sh` ports.
+- The rule: `docs/style.md` section 4, `AGENTS.md`, and
+  `tools/repo_shape.py` `no_new_guest_shell` with
+  `tools/repo_shape_guest_shell.txt` (shrinks only).
+- russ (2026-10-17): no separate directory; the sources are in
+  `test/qemu/guest/` beside the scripts and the targets in
+  `test/qemu/BUILD.bazel` (a BUILD file in `guest/` would move every `guest/`
+  label of that package, `guest/init`, the globs, into another package). The
+  raw-syscall scan and `style_checks.py` cover `test/qemu/guest/*.cc`; the
+  scenarios call the `syscalls::` wrappers, and `truncate`, `poll` of several
+  descriptors, `pidfd_open`, `setresuid` and `setresgid` were added.
+
+Follow-ups, in order of value (edits in git history, then size; every one
+needs only the helpers above plus what is named):
+
+1. 25.34a `lib.sh` (446, 32 edits): goes as the scripts leave it; its
+   `snapshot`, `list_names`, `start_daemon` are `guest.h` today.
+2. 25.34b `write.sh` (809), `rename.sh` (563), `lifecycle.sh` (481),
+   `create.sh` (460), `setattr.sh` (426): `DcfsMount`, `ExpectSameAsBacking`;
+   rename and lifecycle also `Crash`; setattr needs a `Stat`-comparing helper.
+3. 25.34c `nfs.sh` (735), `nfs_backing.sh` (376): a Debian chroot and an NFS
+   server; need a chroot (`syscalls::system`).
+4. 25.34d `mount_dcfs.sh` (905), `mount_dcfs_systemd.sh` (961),
+   `systemd_install.sh`/`systemd_run.sh`: the mount helper with options, a
+   systemd image; `syscalls::system` throughout.
+5. 25.34e `fault_power.sh` (708), `fault_ace.sh` (724), `fault_recover.sh`
+   (714), `fault_shutdown.sh` (675), `fault_freeze.sh` (462), `fault_lib.sh`
+   (257), `fault_dcfs_lib.sh` (220), `fault_backing.sh`, `fault_cache.sh`,
+   `fault_selftest.sh`, `crash.sh` (305), `power.sh` (256): `Crash`, a power
+   cut helper (the harness), dm-flakey/dm-log-writes, `Snapshot`/
+   `ExpectSameTree`; 26.36 is editing some of these.
+6. 25.34f `credentials.sh` (570, after 17.2e), `cache_permissions.sh` (473):
+   `InChild` with `Identity`.
+7. 25.34g `sqlite_durability.sh` (941) and its lib, `handles.sh` (446),
+   `release_leak.sh` (193), `destroy.sh` (165), `boot.sh` (212),
+   `readonly.sh` (315), `syscall_traces.sh` (407), `strace_lib.sh` (383),
+   `xfstests*.sh`/`pjdfstest*.sh`/`sibylfs*.sh` (suite runners: thin glue that
+   `exec`s the suite may stay shell), `stress*.sh`, `bench*.sh`, `idle*.sh`,
+   `memory.sh`, `atime.sh` (213), `copy.sh` (259), `passthrough.sh` (247),
+   `readdir_boundary.sh` (238), `boundary.sh` (268), `names*.sh`,
+   `enospc_*.sh`, `cancel*.sh`, `request_counts.sh`, `quiet_kernel.sh`,
+   `noisy_kernel.sh`, `help.sh`, `invariant_checks_on.sh`, `ram_disks*.sh`,
+   `kernel_bug_repro.sh`, `casefold_tune_oops.sh`.
+8. Host-side `test/qemu/*_test.sh` (run_qemu_verdict_test 599, run_qemu_cost_test
+   396, strace_lib_test 263, xfstests_gate_test 243, ...): Python or C++, not
+   part of this family.

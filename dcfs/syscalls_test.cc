@@ -7,6 +7,7 @@
 #include <sys/file.h>
 #include <sys/inotify.h>
 #include <sys/mman.h>
+#include <sys/poll.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -613,7 +614,11 @@ TEST(SyscallsWrapperTest, SendOnAClosedPeerIsAStatusNotASignal) {
 
 TEST(SyscallsWrapperTest, ChdirAndGetuid) {
   EXPECT_EQ(syscalls::getuid(), 0u);  // the guests run as root
+  EXPECT_EQ(syscalls::geteuid(), 0u);
+  EXPECT_EQ(syscalls::getgid(), 0u);
+  EXPECT_EQ(syscalls::getegid(), 0u);
   EXPECT_THAT(syscalls::chdir("/"), IsOk());
+  EXPECT_THAT(syscalls::getcwd(), IsOkAndHolds("/"));
   EXPECT_EQ(StatusToErrno(syscalls::chdir("/no/such/directory")), ENOENT);
 }
 
@@ -625,6 +630,62 @@ TEST(SyscallsWrapperTest, FailuresCarryTheErrno) {
             EAFNOSUPPORT);
   // No process has the largest pid, and signal 0 only asks.
   EXPECT_EQ(StatusToErrno(syscalls::kill(INT32_MAX, 0)), ESRCH);
+}
+
+TEST_F(SyscallsTest, TruncateByPathSetsTheSizeAndReportsAMissingPath) {
+  std::string path = "/proc/self/fd/" + std::to_string(file_fd_);
+  ASSERT_THAT(syscalls::truncate(path, 3), IsOk());
+  ASSERT_OK_AND_ASSIGN(struct stat st, syscalls::fstat(file_fd_));
+  EXPECT_EQ(st.st_size, 3);
+  EXPECT_EQ(StatusToErrno(syscalls::truncate("/no/such/file", 0)), ENOENT);
+}
+
+TEST(SyscallsWrapperTest, PollOfSeveralDescriptorsSaysWhichAreReady) {
+  ASSERT_OK_AND_ASSIGN(auto pair,
+                       syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  struct pollfd fds[2] = {{.fd = *pair.first, .events = POLLIN},
+                          {.fd = *pair.second, .events = POLLIN}};
+  EXPECT_THAT(syscalls::poll(fds, 0), IsOkAndHolds(0));
+  ASSERT_THAT(syscalls::send(*pair.first, "x", 1, 0), IsOk());
+  EXPECT_THAT(syscalls::poll(fds, 0), IsOkAndHolds(1));
+  EXPECT_EQ(fds[0].revents, 0);
+  EXPECT_EQ(fds[1].revents, POLLIN);
+}
+
+TEST(SyscallsWrapperTest, PollFailsWithEinvalForMoreDescriptorsThanTheLimit) {
+  ASSERT_OK_AND_ASSIGN(struct rlimit saved, syscalls::getrlimit(RLIMIT_NOFILE));
+  ASSERT_THAT(syscalls::setrlimit(RLIMIT_NOFILE,
+                                  {.rlim_cur = 1, .rlim_max = saved.rlim_max}),
+              IsOk());
+  struct pollfd fds[4] = {};
+  absl::StatusOr<int> result = syscalls::poll(fds, 0);
+  ASSERT_THAT(syscalls::setrlimit(RLIMIT_NOFILE, saved), IsOk());
+  EXPECT_EQ(StatusToErrno(result.status()), EINVAL);
+}
+
+TEST(SyscallsWrapperTest, PidfdOfAChildPollsReadableWhenItExits) {
+  ASSERT_OK_AND_ASSIGN(pid_t child, syscalls::fork());
+  if (child == 0) syscalls::_exit(0);
+  ASSERT_OK_AND_ASSIGN(FileDescriptor pidfd, syscalls::pidfd_open(child));
+  EXPECT_THAT(syscalls::poll(*pidfd, POLLIN, -1), IsOkAndHolds(POLLIN));
+  EXPECT_THAT(syscalls::waitpid(child, nullptr, 0), IsOkAndHolds(child));
+  EXPECT_EQ(StatusToErrno(syscalls::pidfd_open(-1).status()), EINVAL);
+}
+
+// In a child: the ids stay changed for the rest of the process's life.
+TEST(SyscallsCredentialsTest, SetresidsDropRootForGoodAndFailWithEperm) {
+  ASSERT_OK_AND_ASSIGN(pid_t child, syscalls::fork());
+  if (child == 0) {
+    bool ok = syscalls::setresgid(2000, 2000, 2000).ok() &&
+              syscalls::setresuid(1000, 1000, 1000).ok() &&
+              syscalls::getuid() == 1000;
+    ok = ok && StatusToErrno(syscalls::setresuid(0, 0, 0)) == EPERM &&
+         StatusToErrno(syscalls::setresgid(0, 0, 0)) == EPERM;
+    syscalls::_exit(ok ? 0 : 1);
+  }
+  int wait_status = -1;
+  ASSERT_THAT(syscalls::waitpid(child, &wait_status, 0), IsOkAndHolds(child));
+  EXPECT_EQ(wait_status, 0);
 }
 
 // The backing wrappers answer a failed syscall with its errno: a descriptor
@@ -721,6 +782,7 @@ std::vector<std::pair<std::string, absl::Status>> CallEveryBackingWrapper() {
       {"fchownat", syscalls::fchownat(-1, "x", 0, 0, 0)},
       {"futimens", syscalls::futimens(-1, times)},
       {"ftruncate", syscalls::ftruncate(-1, 0)},
+      {"truncate", syscalls::truncate(kNoPath, 0)},
       {"fsync", syscalls::fsync(-1)},
       {"fdatasync", syscalls::fdatasync(-1)},
       {"syncfs", syscalls::syncfs(-1)},

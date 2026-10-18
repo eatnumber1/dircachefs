@@ -7,6 +7,7 @@
 ban realpath | no paths after startup
 ban _ZN4dcfs8syscalls8realpath* | no paths after startup (the syscalls::realpath wrapper)
 ban getcwd | no paths after startup
+ban _ZN4dcfs8syscalls6getcwd* | no paths after startup (the syscalls::getcwd wrapper)
 ban get_current_dir_name | no paths after startup
 ban _ZNSt10filesystem* | no paths after startup (std::filesystem, libstdc++)
 ban _ZNSt3__110filesystem* | no paths after startup (std::filesystem, libc++)
@@ -112,9 +113,10 @@ ban _ZN4absl*log_internal27LogMessageQuietlyDebugFatal* | no intentional crashes
 
 # First party, startup only: "no paths after startup" permits these.
 allow dcfs/_objs/syscalls/* realpath | the syscalls::realpath wrapper itself; its callers are gated by the wrapper's own ban
+allow dcfs/_objs/syscalls/* getcwd | the syscalls::getcwd wrapper itself; its callers are gated by the wrapper's own ban
 allow dcfs/_objs/absolute_paths/* _ZN4dcfs8syscalls8realpath* | startup only: the wrapper makes SOURCE, MOUNTPOINT and the cache database absolute before it detaches (it has no working directory after)
 allow dcfs/_objs/remount/* _ZN4dcfs8syscalls8realpath* | startup only: the wrapper's remount canonicalizes MOUNTPOINT once before acting on it
-allow dcfs/_objs/syscalls_process/* execv | the umount.fuse.dcfs helper runs `umount -i` (step 15.6b) and fsck.dcfs runs the checkers (step 15.5): the callers are those helper entry points, never the daemon; nothing else execs
+allow dcfs/_objs/syscalls_process/* execv | the umount.fuse.dcfs helper runs `umount -i` (step 15.6b) and fsck.dcfs runs the checkers (step 15.5), and syscalls::system runs a command for the guest tests' helpers (step 25.34): the callers are those helper entry points and tests, never the daemon; nothing else execs
 allow dcfs/_objs/umount_helper/* _ZN4dcfs8syscalls8realpath* | startup only: the daemon canonicalizes MOUNTPOINT once, before the mount, to find its mountinfo line (CanonicalMountpoint); the umount.fuse helper resolves its target once, as the mountinfo line of a mount it was not given a canonical path for
 allow dcfs/_objs/mounts_below/* _ZN4dcfs8syscalls8realpath* | startup only: mounts_below.cc canonicalizes --source once, from main.cc (MountsBelow), before the mount
 
@@ -196,6 +198,7 @@ allow <runtime> _ZN4dcfs8syscalls13clock_gettimeEi | the wrapper is linked with 
 allow dcfs/_objs/syscalls/* clock_gettime | the syscalls::clock_gettime wrapper itself, for the tests
 allow <runtime> _ZN4dcfs8syscalls9nanosleepERK8timespec | the syscalls::nanosleep wrapper is linked with syscalls.o for the tests and the benchmarks; nothing in the daemon calls it (a caller is a violation)
 allow dcfs/_objs/syscalls/* nanosleep | the syscalls::nanosleep wrapper itself, for the tests and the benchmarks
+allow <runtime> _ZN4dcfs8syscalls6getcwd* | the wrapper is linked with syscalls.o for the tests; nothing in the daemon calls it (a caller is a violation)
 allow <runtime> _ZN4absl*WithDeadline* | Abseil's Mutex::AwaitWithDeadline and LockSlowWithDeadline, and the real Clock's AwaitWithDeadline, linked in with absl::Mutex and absl::Clock; dcfs calls none (a caller is a violation)
 allow <runtime> clock_nanosleep | glibc's own nanosleep, which the allowed users above reach
 allow <runtime> sqlite3_busy_timeout | defined by the SQLite amalgamation (PRAGMA busy_timeout is built on it); dcfs sets none, and a reference from our code is a violation

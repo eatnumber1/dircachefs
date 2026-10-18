@@ -212,31 +212,6 @@
  *       RLIMIT_NOFILE to fs.nr_open first), prints "READY <n>", and sleeps
  *       forever with them open, until killed: the kernel keeps every one of
  *       those dcfs inodes (no FORGET) across drop_caches (destroy.sh).
- *   testutil opath-unlink-stat <path>
- *       open(2)s <path> O_PATH|O_NOFOLLOW, unlink(2)s <path>, then
- *       fstat(2)s the descriptor and prints "nlink=<n> size=<bytes>": an
- *       object that is removed but still referenced, without any open
- *       file the filesystem would see (busybox cannot open O_PATH).
- *   testutil rmcwd <dir>
- *       chdir(2)s into <dir>, rmdir(2)s <dir>, then prints the outcome of
- *       stat(".") ("stat=nlink:<n>"), open(".") and one getdents64 on it,
- *       one field each, "ERR <errno-name>" for a failure: a process whose
- *       working directory was removed.
- *   testutil unlinked-mutate <path>
- *   testutil opath-unlinked-mutate <path>
- *   testutil rmcwd-mutate <dir>
- *       Changes an object that is removed but still referenced, and prints
- *       one line: each step as "<step>=ok" or "<step>=<errno-name>", then
- *       the object's attributes. unlinked-mutate creates <path> (writing
- *       "hello"), keeps it open O_RDWR and unlinks it, then works through
- *       the descriptor (ftruncate, fchmod, fchown, futimens, f*xattr,
- *       fsync) and reopens it through /proc/self/fd. opath-unlinked-mutate
- *       does the same through an O_PATH descriptor, whose
- *       /proc/self/fd/<n> magic link the path-based calls follow (truncate,
- *       chmod, chown, utimensat, *xattr, and an open that writes and reads
- *       back). rmcwd-mutate chdir(2)s into <dir>, rmdir(2)s it, and changes
- *       "." (chmod, chown, utimensat, *xattr). Step 23.2: the removed-
- *       object records answer the kernel's changes too.
  *   testutil copyrange <src> <dst>
  *       copy_file_range(2) of all of <src> to the start of <dst> (created
  *       or truncated, mode 0644), looping until EOF; prints "copied=<n>".
@@ -1177,195 +1152,6 @@ static int cmd_opath_hold_tree(const char *dir) {
   for (;;) pause();
 }
 
-static int cmd_opath_unlink_stat(const char *path) {
-  struct stat st;
-  int fd = open(path, O_PATH | O_NOFOLLOW);
-
-  if (fd == -1 || unlink(path) == -1 || fstat(fd, &st) == -1) {
-    print_err(errno);
-    return 1;
-  }
-  printf("nlink=%lu size=%lld\n", (unsigned long)st.st_nlink,
-         (long long)st.st_size);
-  close(fd);
-  return 0;
-}
-
-static int cmd_rmcwd(const char *dir) {
-  char buf[4096];
-  struct stat st;
-  const char *name;
-  int fd;
-
-  if (chdir(dir) == -1 || rmdir(dir) == -1) {
-    print_err(errno);
-    return 1;
-  }
-  if (stat(".", &st) == -1) {
-    name = strerrorname_np(errno);
-    printf("stat=ERR %s", name ? name : "UNKNOWN");
-  } else {
-    printf("stat=nlink:%lu", (unsigned long)st.st_nlink);
-  }
-  fd = open(".", O_RDONLY | O_DIRECTORY);
-  if (fd == -1) {
-    name = strerrorname_np(errno);
-    printf(" open=ERR %s getdents=-\n", name ? name : "UNKNOWN");
-    return 0;
-  }
-  if (syscall(SYS_getdents64, fd, buf, sizeof(buf)) == -1) {
-    name = strerrorname_np(errno);
-    printf(" open=ok getdents=ERR %s\n", name ? name : "UNKNOWN");
-  } else {
-    printf(" open=ok getdents=ok\n");
-  }
-  close(fd);
-  return 0;
-}
-
-/* Appends " <step>=ok" or " <step>=<errno-name>" for a call that returned
- * `ret` (-1 on failure, errno set) to the line being printed. */
-static void step(const char *name, int ret) {
-  const char *err;
-
-  if (ret != -1) {
-    printf(" %s=ok", name);
-    return;
-  }
-  err = strerrorname_np(errno);
-  printf(" %s=%s", name, err ? err : "UNKNOWN");
-}
-
-/* The attributes the mutate subcommands compare: what a local filesystem
- * and dcfs must agree on (no ctime: it is the moment of the change). */
-static void print_stat(int ret, const struct stat *st, int with_times) {
-  if (ret == -1) {
-    step("stat", ret);
-    return;
-  }
-  printf(" stat=size:%lld,mode:%o,uid:%u,gid:%u,nlink:%lu",
-         (long long)st->st_size, (unsigned)st->st_mode, (unsigned)st->st_uid,
-         (unsigned)st->st_gid, (unsigned long)st->st_nlink);
-  if (with_times)
-    printf(",atime:%lld.%09ld,mtime:%lld.%09ld", (long long)st->st_atim.tv_sec,
-           st->st_atim.tv_nsec, (long long)st->st_mtim.tv_sec,
-           st->st_mtim.tv_nsec);
-}
-
-/* The getxattr step: "getxattr=<value>" or the error. */
-static void step_getxattr(ssize_t n, const char *value) {
-  if (n < 0) {
-    step("getxattr", -1);
-    return;
-  }
-  printf(" getxattr=%.*s", (int)n, value);
-}
-
-static const struct timespec kMutateTimes[2] = {
-    {.tv_sec = 1000000000, .tv_nsec = 5},
-    {.tv_sec = 1000000000, .tv_nsec = 7},
-};
-
-static int cmd_unlinked_mutate(const char *path) {
-  char proc[64], buf[64];
-  struct stat st;
-  ssize_t n;
-  int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0644), fd2;
-
-  if (fd == -1 || write(fd, "hello", 5) != 5 || unlink(path) == -1) {
-    print_err(errno);
-    return 1;
-  }
-  printf("fd");
-  step("truncate", ftruncate(fd, 3));
-  step("chmod", fchmod(fd, 0600));
-  step("chown", fchown(fd, 1000, 1000));
-  step("utimens", futimens(fd, kMutateTimes));
-  step("setxattr", fsetxattr(fd, "user.dcfs", "v1", 2, 0));
-  n = fgetxattr(fd, "user.dcfs", buf, sizeof(buf));
-  step_getxattr(n, buf);
-  step("removexattr", fremovexattr(fd, "user.dcfs"));
-  n = fgetxattr(fd, "user.dcfs", buf, sizeof(buf));
-  step_getxattr(n, buf);
-  step("fsync", fsync(fd));
-  print_stat(fstat(fd, &st), &st, 1);
-  snprintf(proc, sizeof(proc), "/proc/self/fd/%d", fd);
-  fd2 = open(proc, O_RDONLY);
-  step("reopen", fd2);
-  if (fd2 != -1) {
-    n = pread(fd2, buf, sizeof(buf), 0);
-    printf(" read=%.*s", n < 0 ? 0 : (int)n, buf);
-    close(fd2);
-  }
-  printf("\n");
-  close(fd);
-  return 0;
-}
-
-static int cmd_opath_unlinked_mutate(const char *path) {
-  char proc[64], buf[64];
-  struct stat st;
-  ssize_t n;
-  int fd, fd2;
-
-  fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0644);
-  if (fd == -1 || write(fd, "hello", 5) != 5 || close(fd) == -1) {
-    print_err(errno);
-    return 1;
-  }
-  fd = open(path, O_PATH | O_NOFOLLOW);
-  if (fd == -1 || unlink(path) == -1) {
-    print_err(errno);
-    return 1;
-  }
-  snprintf(proc, sizeof(proc), "/proc/self/fd/%d", fd);
-  printf("opath");
-  step("truncate", truncate(proc, 4));
-  step("chmod", chmod(proc, 0640));
-  step("chown", chown(proc, 1000, 1000));
-  step("utimens", utimensat(AT_FDCWD, proc, kMutateTimes, 0));
-  step("setxattr", setxattr(proc, "user.dcfs", "v2", 2, 0));
-  n = getxattr(proc, "user.dcfs", buf, sizeof(buf));
-  step_getxattr(n, buf);
-  step("removexattr", removexattr(proc, "user.dcfs"));
-  fd2 = open(proc, O_RDWR);
-  step("reopen", fd2);
-  if (fd2 != -1) {
-    step("write", (int)pwrite(fd2, "J", 1, 0));
-    n = pread(fd2, buf, sizeof(buf), 0);
-    printf(" read=%.*s", n < 0 ? 0 : (int)n, buf);
-    step("fsync", fsync(fd2));
-    close(fd2);
-  }
-  /* The write after utimensat set mtime to now: no times. */
-  print_stat(fstat(fd, &st), &st, 0);
-  printf("\n");
-  close(fd);
-  return 0;
-}
-
-static int cmd_rmcwd_mutate(const char *dir) {
-  char buf[64];
-  struct stat st;
-  ssize_t n;
-
-  if (chdir(dir) == -1 || rmdir(dir) == -1) {
-    print_err(errno);
-    return 1;
-  }
-  printf("cwd");
-  step("chmod", chmod(".", 0700));
-  step("chown", chown(".", 1000, 1000));
-  step("utimens", utimensat(AT_FDCWD, ".", kMutateTimes, 0));
-  step("setxattr", setxattr(".", "user.dcfs", "v3", 2, 0));
-  n = getxattr(".", "user.dcfs", buf, sizeof(buf));
-  step_getxattr(n, buf);
-  step("removexattr", removexattr(".", "user.dcfs"));
-  print_stat(stat(".", &st), &st, 1);
-  printf("\n");
-  return 0;
-}
-
 static int cmd_copyrange(const char *src, const char *dst) {
   int in = open(src, O_RDONLY), out;
   long long total = 0;
@@ -1530,6 +1316,19 @@ static int cmd_fsuuid(const char *path) {
   for (unsigned i = 0; i < u.len; i++) printf("%02x", u.uuid[i]);
   printf("\n");
   return 0;
+}
+
+/* Appends " <step>=ok" or " <step>=<errno-name>" for a call that returned
+ * `ret` (-1 on failure, errno set) to the line being printed. */
+static void step(const char *name, int ret) {
+  const char *err;
+
+  if (ret != -1) {
+    printf(" %s=ok", name);
+    return;
+  }
+  err = strerrorname_np(errno);
+  printf(" %s=%s", name, err ? err : "UNKNOWN");
 }
 
 static int cmd_ioctl_unknown(const char *path) {
@@ -3013,9 +2812,6 @@ int main(int argc, char *argv[]) {
     return cmd_opath_hold(argv[2]);
   if (argc == 3 && strcmp(argv[1], "opath-hold-tree") == 0)
     return cmd_opath_hold_tree(argv[2]);
-  if (argc == 3 && strcmp(argv[1], "opath-unlink-stat") == 0)
-    return cmd_opath_unlink_stat(argv[2]);
-  if (argc == 3 && strcmp(argv[1], "rmcwd") == 0) return cmd_rmcwd(argv[2]);
   if (argc == 4 && strcmp(argv[1], "copyrange") == 0)
     return cmd_copyrange(argv[2], argv[3]);
   if (argc == 4 && strcmp(argv[1], "copyrange-into") == 0)
@@ -3036,12 +2832,6 @@ int main(int argc, char *argv[]) {
     return cmd_ioctl_unknown(argv[2]);
   if (argc == 5 && strcmp(argv[1], "tmpfile") == 0)
     return cmd_tmpfile(argv[2], argv[3], argv[4]);
-  if (argc == 3 && strcmp(argv[1], "unlinked-mutate") == 0)
-    return cmd_unlinked_mutate(argv[2]);
-  if (argc == 3 && strcmp(argv[1], "opath-unlinked-mutate") == 0)
-    return cmd_opath_unlinked_mutate(argv[2]);
-  if (argc == 3 && strcmp(argv[1], "rmcwd-mutate") == 0)
-    return cmd_rmcwd_mutate(argv[2]);
   if (argc == 3 && strcmp(argv[1], "ext4-tune-casefold") == 0)
     return cmd_ext4_tune_casefold(argv[2]);
   if (argc == 3 && strcmp(argv[1], "readdir-ino") == 0)
@@ -3108,8 +2898,6 @@ int main(int argc, char *argv[]) {
       "       testutil sql <db-path> <query>\n"
       "       testutil sqlite-lock <db-path> <hold-seconds>\n"
       "       testutil runas <uid> <gid> <gid,...|-> -- <cmd> [args...]\n"
-      "       testutil opath-unlink-stat <path>\n"
-      "       testutil rmcwd <dir>\n"
       "       testutil readdir-ino <dir> [small-first]\n"
       "       testutil mkfiles <dir> <prefix> <suffix> <count>\n"
       "       testutil btrfs-subvol-create <path>\n"

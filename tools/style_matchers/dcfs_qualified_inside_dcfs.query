@@ -6,4 +6,4 @@
 # stood in for it (tools/repo_shape.py, step 25.14) had to guess: the
 # enclosing namespace, and that `dcfs::` is a qualifier and not text in a
 # string or comment. A qualifier with no leading `::` inside namespace dcfs.
-match nestedNameSpecifierLoc(loc(specifiesNamespace(hasName("::dcfs"))), unless(hasPrefix(nestedNameSpecifierLoc())), hasAncestor(namespaceDecl(hasName("::dcfs"))), hasAncestor(decl(isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")))).bind("dcfs_qualified_inside_dcfs")
+match nestedNameSpecifierLoc(loc(specifiesNamespace(hasName("::dcfs"))), unless(hasPrefix(nestedNameSpecifierLoc())), hasAncestor(namespaceDecl(hasName("::dcfs"))), hasAncestor(decl(isExpansionInFileMatching("(^|/)(dcfs|tools|bench|test/qemu/guest)/")))).bind("dcfs_qualified_inside_dcfs")

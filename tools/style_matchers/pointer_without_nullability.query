@@ -8,6 +8,6 @@
 # specialization itself. A pointer hidden behind a typedef is not seen.
 let unannotatedLoc typeLoc(anyOf(pointerTypeLoc(), qualifiedTypeLoc(hasUnqualifiedLoc(pointerTypeLoc())), templateSpecializationTypeLoc()))
 let smartPointer namedDecl(hasAnyName("::std::unique_ptr", "::std::shared_ptr"))
-match parmVarDecl(anyOf(hasType(pointerType()), hasType(hasDeclaration(smartPointer))), hasTypeLoc(unannotatedLoc), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("pointer_without_nullability")
-match fieldDecl(anyOf(hasType(pointerType()), hasType(hasDeclaration(smartPointer))), hasTypeLoc(unannotatedLoc), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("pointer_without_nullability")
-match functionDecl(anyOf(returns(pointerType()), returns(hasDeclaration(smartPointer))), hasReturnTypeLoc(unannotatedLoc), unless(isImplicit()), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("pointer_without_nullability")
+match parmVarDecl(anyOf(hasType(pointerType()), hasType(hasDeclaration(smartPointer))), hasTypeLoc(unannotatedLoc), isExpansionInFileMatching("(^|/)(dcfs|tools|bench|test/qemu/guest)/")).bind("pointer_without_nullability")
+match fieldDecl(anyOf(hasType(pointerType()), hasType(hasDeclaration(smartPointer))), hasTypeLoc(unannotatedLoc), isExpansionInFileMatching("(^|/)(dcfs|tools|bench|test/qemu/guest)/")).bind("pointer_without_nullability")
+match functionDecl(anyOf(returns(pointerType()), returns(hasDeclaration(smartPointer))), hasReturnTypeLoc(unannotatedLoc), unless(isImplicit()), isExpansionInFileMatching("(^|/)(dcfs|tools|bench|test/qemu/guest)/")).bind("pointer_without_nullability")

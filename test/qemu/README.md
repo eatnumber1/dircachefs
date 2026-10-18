@@ -1648,6 +1648,21 @@ filesystem semantics (xattrs, `FS_IOC_GETVERSION`, `FS_IOC_GETFSUUID`,
 `name_to_handle_at` export support -- tmpfs has none of these) needs no
 changes at all to run under `qemu_cc_test`.
 
+### A guest test of dcfs itself, in C++ (step 25.34)
+
+A test that mounts dcfs, runs as a user, crashes the daemon or compares
+trees is a `qemu_cc_test` in `test/qemu/guest/` with `dcfs = True` (the
+dcfs binary, the checking build for the small and medium tiers, lands at
+`/test/data/dcfs`) and a `disks` entry for the backing filesystem. It links
+`//test/qemu:guest`, whose `guest.h` has the helpers: `DcfsMount`
+(`Start`, `Unmount`, `Crash`, `Log`), `InChild` (a function as a uid, gid and
+groups, in a forked child), `ListNames`, `Snapshot`,
+`ExpectSameTree`, `ExpectSameAsBacking`. `removed_test` is the first port
+(from `guest/removed.sh`); `guest_test` tests the helpers. There is no new
+guest shell: `tools/repo_shape.py` refuses it (`docs/style.md`, section 4).
+One backing filesystem per target: a test that ran on ext4, xfs and btrfs is a
+list comprehension over the three (see `removed_test_<fstype>`).
+
 ### Giving a test a real disk
 
 A test that needs `TEST_TMPDIR` to be a real filesystem (most of the ones
@@ -1663,8 +1678,9 @@ qemu_cc_test(
 )
 ```
 
-`guest/init` mounts the first entry at `/tmp/test_tmpdir` before running
-the test. Currently used by `backing_test`, `syscalls_test`,
+`guest/init` mounts the first entry, as its filesystem type (any of
+`ext4`, `xfs`, `btrfs`), at `/tmp/test_tmpdir` before running the test.
+Currently used by `backing_test`, `syscalls_test`,
 `file_handle_test`, and `device_id_test` (see the comment next to each in
 `dcfs/BUILD.bazel` for what specifically needs it).
 

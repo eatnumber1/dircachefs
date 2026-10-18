@@ -346,6 +346,16 @@ absl::Status ftruncate(int fd, off_t length) {
   return absl::OkStatus();
 }
 
+absl::Status truncate(std::string_view path, off_t length) {
+  RETURN_IF_ERROR(BackingDoor());
+  std::string path_str(path);
+  if (::truncate(path_str.c_str(), length) == -1) {
+    return ErrnoToStatus(errno,
+                         absl::StrFormat("truncate(%s)", EscapeBytes(path)));
+  }
+  return absl::OkStatus();
+}
+
 absl::Status fsync(int fd) {
   RETURN_IF_ERROR(BackingDoor());
   if (::fsync(fd) == -1) {

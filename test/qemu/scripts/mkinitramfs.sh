@@ -25,10 +25,10 @@
 #       /sibylfs/test-suite.tar.gz.
 #
 #   mkinitramfs.sh --unit <out.cpio.gz> <busybox> <init> <cost-lib> \
-#       <test-binary> <disk0-device-or-'-'> <args> [name:path...]
+#       <test-binary> <disk0-device:fstype-or-'-'> <args> [name:path...]
 #       Per-test initramfs for qemu_cc_test: busybox, guest/init, guest/
 #       cost_lib.sh (at /tests/, where init sources it), the test
-#       binary at /test/run, /test/disk0 (the device name, e.g. "vdb", iff
+#       binary at /test/run, /test/disk0 ("<device>:<fstype>", e.g. "vdb:ext4", iff
 #       a disks= entry was given), /test/args (<args> verbatim, guest/init
 #       word-splits it), and each `name:path` data file copied to
 #       /test/data/<name>.
@@ -185,6 +185,10 @@ if [ "$MODE" = "unit" ]; then
 		dest="$ROOT/test/data/$name"
 		mkdir -p "$(dirname "$dest")"
 		cp "$src" "$dest"
+		# A data file that is a program (the dcfs of qemu_cc_test's dcfs=)
+		# runs here: its libraries come with it.
+		copy_deps "$dest"
+		chmod +x "$dest"
 	done
 
 	chmod +x "$ROOT/init" "$ROOT/bin/"*

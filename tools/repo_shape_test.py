@@ -26,6 +26,9 @@ class RepoShapeTest(unittest.TestCase):
     def test_no_guest_script_waits_on_a_timer(self):
         self.assertEqual([], repo_shape.guest_sleeps(ROOT["root"]))
 
+    def test_no_new_guest_shell(self):
+        self.assertEqual([], repo_shape.no_new_guest_shell(ROOT["root"]))
+
     def test_local_buffers_sized_once_are_fixed_arrays(self):
         self.assertEqual([], repo_shape.fixed_arrays(ROOT["root"]))
 

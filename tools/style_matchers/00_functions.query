@@ -5,4 +5,4 @@
 # clang-query session, in file name order: this file sets the output.
 set output diag
 set bind-root false
-match functionDecl(isDefinition(), unless(cxxMethodDecl(ofClass(isLambda()))), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("function")
+match functionDecl(isDefinition(), unless(cxxMethodDecl(ofClass(isLambda()))), isExpansionInFileMatching("(^|/)(dcfs|tools|bench|test/qemu/guest)/")).bind("function")

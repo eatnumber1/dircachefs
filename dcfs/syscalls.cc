@@ -180,7 +180,42 @@ absl::StatusOr<short> poll(int fd, short events, int timeout_ms) {
   return n == 0 ? static_cast<short>(0) : pfd.revents;
 }
 
+absl::StatusOr<int> poll(std::span<struct pollfd> fds, int timeout_ms) {
+  int n = ::poll(fds.data(), fds.size(), timeout_ms);
+  if (n == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("poll of ", fds.size(), " fds"));
+  }
+  return n;
+}
+
+absl::StatusOr<FileDescriptor> pidfd_open(pid_t pid) {
+  int fd = static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
+  if (fd == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("pidfd_open(", pid, ")"));
+  }
+  return FileDescriptor(fd);
+}
+
+absl::Status setresuid(uid_t real, uid_t effective, uid_t saved) {
+  if (::setresuid(real, effective, saved) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("setresuid(", real, ", ",
+                                             effective, ", ", saved, ")"));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status setresgid(gid_t real, gid_t effective, gid_t saved) {
+  if (::setresgid(real, effective, saved) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("setresgid(", real, ", ",
+                                             effective, ", ", saved, ")"));
+  }
+  return absl::OkStatus();
+}
+
 uid_t getuid() { return ::getuid(); }
+uid_t geteuid() { return ::geteuid(); }
+gid_t getgid() { return ::getgid(); }
+gid_t getegid() { return ::getegid(); }
 
 absl::StatusOr<pid_t> setsid() {
   const pid_t group = ::setsid();
@@ -194,6 +229,14 @@ absl::Status chdir(std::string_view path) {
     return ErrnoToStatus(errno, absl::StrCat("chdir(", EscapeBytes(path), ")"));
   }
   return absl::OkStatus();
+}
+
+absl::StatusOr<std::string> getcwd() {
+  char *cwd = ::getcwd(nullptr, 0);
+  if (cwd == nullptr) return ErrnoToStatus(errno, "getcwd");
+  std::string result(cwd);
+  ::free(cwd);
+  return result;
 }
 
 absl::StatusOr<std::pair<FileDescriptor, FileDescriptor>> socketpair(

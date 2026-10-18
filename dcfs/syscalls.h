@@ -2,6 +2,7 @@
 #ifndef DCFS_SYSCALLS_H_
 #define DCFS_SYSCALLS_H_
 
+#include <poll.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -89,12 +90,31 @@ absl::Status flock(int fd, int operation);
 // poll(2) of one descriptor: its revents (0 if `timeout_ms` passed).
 absl::StatusOr<short> poll(int fd, short events, int timeout_ms);
 
+// poll(2) of several descriptors: how many have events; each `fds[i].revents`
+// says which (0 for all of them if `timeout_ms` passed).
+absl::StatusOr<int> poll(std::span<struct pollfd> fds, int timeout_ms);
+
+// pidfd_open(2) of `pid` (no flags): a descriptor that polls readable once the
+// process has exited, the event to wait on for a child (or a daemon) instead
+// of a timer.
+absl::StatusOr<FileDescriptor> pidfd_open(pid_t pid);
+
+// setresuid(2)/setresgid(2) for the whole process, as glibc does. A process
+// that has given up root cannot take it back (EPERM).
+absl::Status setresuid(uid_t real, uid_t effective, uid_t saved);
+absl::Status setresgid(gid_t real, gid_t effective, gid_t saved);
+
 // --- The mount.dcfs wrapper (phase 15): process, mount and socket calls ----
 
-// getuid(2) (never fails), setsid(2) and chdir(2).
+// getuid(2), geteuid(2), getgid(2), getegid(2) (never fail), setsid(2),
+// chdir(2) and getcwd(3).
 uid_t getuid();
+uid_t geteuid();
+gid_t getgid();
+gid_t getegid();
 absl::StatusOr<pid_t> setsid();
 absl::Status chdir(std::string_view path);
+absl::StatusOr<std::string> getcwd();
 
 // socketpair(2) with SOCK_CLOEXEC added to `type`.
 absl::StatusOr<std::pair<FileDescriptor, FileDescriptor>> socketpair(

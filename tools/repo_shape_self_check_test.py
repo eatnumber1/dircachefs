@@ -40,6 +40,11 @@ def good_tree(root):
           "void f(int n) {\n  std::vector<int> v(n);\n}\n")
     write(root, "tools/repo_shape_absl_macros.txt", "# known\n")
     write(root, "test/qemu/guest/init")
+    write(root, "tools/repo_shape_guest_shell.txt",
+          "# known\ntest/qemu/guest/lib.sh\ntest/qemu/guest/legacy.sh\n"
+          "test/qemu/guest/a.sh\ntest/qemu/guest/helper.sh\n"
+          "test/qemu/guest/shard_one.sh\ntest/qemu/wrapper_test.sh\n")
+    write(root, "test/qemu/wrapper_test.sh", "exec true\n")
     write(root, "test/qemu/guest/a.sh",
           '. "$(dirname "$0")/helper.sh"\ndisabled kernel-bug "why" check\n')
     write(root, "test/qemu/guest/helper.sh")
@@ -66,6 +71,22 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
 
     def test_good_tree_has_no_problems(self):
         self.assertEqual([], repo_shape.all_problems(self.root))
+
+    def test_new_guest_shell_is_reported(self):
+        write(self.root, "test/qemu/guest/new.sh", "echo hi\n")
+        problems = repo_shape.no_new_guest_shell(self.root)
+        self.assertEqual(1, len(problems))
+        self.assertIn("test/qemu/guest/new.sh is new shell", problems[0])
+
+    def test_new_shell_beside_the_guests_is_reported(self):
+        write(self.root, "test/qemu/scripts/new.sh", "echo hi\n")
+        self.assertEqual(1, len(repo_shape.no_new_guest_shell(self.root)))
+
+    def test_a_listed_script_that_is_gone_is_reported(self):
+        os.remove(os.path.join(self.root, "test/qemu/wrapper_test.sh"))
+        problems = repo_shape.no_new_guest_shell(self.root)
+        self.assertEqual(1, len(problems))
+        self.assertIn("wrapper_test.sh, which is gone", problems[0])
 
     def test_missing_readme_is_reported(self):
         os.remove(os.path.join(self.root, "third_party/pin/README.md"))
