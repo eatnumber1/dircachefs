@@ -1031,7 +1031,59 @@ modes with them. Cancellation: the flush is a backing-free step but sits
 at a request boundary; keep it off the request path (the sync point's own
 place) so no user request waits on it.
 
+**As built (step-25.28b, 2026-10-18, before its merge).** Two of russ's
+rulings changed the step as written above.
 
+- **The durable point is a WAL fsync, not "fsync, then a PASSIVE
+  checkpoint"** (russ, 2026-10-17, on FSYNC's cost: "2 fsyncs at most").
+  `sqlite3::Connection::MakeDurable` fsyncs the WAL through SQLite's
+  `SQLITE_FCNTL_JOURNAL_POINTER` and the file's `xSync`, only when
+  `CommittedSinceDurable()` (SQLite's data version) says something
+  committed since the last one. A checkpoint would add a database fsync
+  and a WAL-restart header fsync. SQLite's 1000-page autocheckpoint is the
+  only routine checkpoint; a clean shutdown truncates. `Connection::
+  Checkpoint` is the shutdown's TRUNCATE alone (the passive mode, the
+  SQLITE_BUSY swallow, the closed-connection return and the out-parameters
+  are gone).
+- **FSYNC and FSYNCDIR are no longer sync points** (russ, 2026-10-17, Q1:
+  "A client asking for FSYNC doesn't expect a syncfs"). They pass the
+  backing fsync through and make the cache's durable point before the
+  reply: no syncfs, no ClearDirty, and the interval's clock is not reset.
+  The litmus outcomes the backing allows after an fsync are pinned as
+  non-guarantees (`formal/no_stronger/*.cfg`).
+- **The periodic sync point** runs at the first request at least one
+  interval after the last, dirty or not: its backing half (syncfs, then
+  ClearDirty) only if the dirty set may be non-empty, then the durable
+  point after the request's reply and before the next request
+  (`DirCacheFS::FinishSyncPoint`; FORGET and BATCH_FORGET finish it too).
+  25.28's `MaybeCheckpointWal`, `last_wal_checkpoint_` and its trigger are
+  gone. With no timer the bound holds at requests only
+  (`limitations/durability_idle.cfg`); 25.28c adds the timer.
+- **The model**: `formal/durability.tla` (the clock; `BoundAtRequestEnd`,
+  `LostOnlySinceSync`, `FsyncedDurable`; limitations for a failed durable
+  point and for idle; known bugs for the code before 25.28, 25.28's, and
+  an FSYNC that skips the durable point), and `dcfs.tla`'s `CacheDurable`
+  and `FsyncDurable` with the action property `FsyncedCacheDurable` (the
+  `fsync_skips_durable_point` known bug). Guest tests: `fault_power`'s
+  `lag` and `lagclean` scenarios, `sqlite_durability` around an FSYNC's
+  and a periodic sync point's durable points.
+- **A failed durable point** (the Opus review's S1/S2): logged at
+  WARNING at a sync point, `EIO` to an FSYNC or FSYNCDIR, and not repaired
+  by a later one, since Linux reports a writeback error once
+  (`Documentation/filesystems/vfs.rst:711`, Linux v7.3-rc7) and SQLite's
+  recovery stops at the gap. The docs say a power loss can then take
+  every later commit, dirty marks included, until a restart;
+  `durability.tla`'s `failed` stays set until `PowerLossAndRestart`.
+  25.28d's poison replaces this.
+- `dcfs.sync_interval_sec` must be positive and finite as a duration:
+  the converted `absl::Duration` is checked, so 1e300 (infinite) and
+  1e-300 (zero) are refused as 0, negatives, NaN and inf are.
+
+Decisions with an alternative: the durable point after the reply rather
+than before it (the request whose sync point it is does not wait; one
+that arrives meanwhile does), and a failed FSYNC's durable point modelled
+as setting the same sticky `failed` as a sync point's (`FsyncFails`),
+rather than only replying `EIO`.
 
 Note from 25.28b's re-review (clerk batch 12, 2026-10-18): the branch was
 rebased onto 0068a1ba (not current main) and kept the citation
