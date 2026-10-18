@@ -4055,3 +4055,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   leftovers (FakeInterrupts::checkpoints, CheckpointTest, the cancel.sh
   check name, a VLOG prefix) are left for a follow-up. Phase 27: the
   kernel-cache answer goes into the code (russ).
+- 2026-10-17, 26.41 1b merged (bcdcb17): the query-plan check, the foreman
+  spike's first step (Gemini Flash worker + Flash review, no fix round
+  needed). Every SQL statement moved to dcfs/sql_statements.h so the test
+  can enumerate them; the orchestrator verified the 93 statements are
+  textually identical before and after. About 25 statements scan today,
+  each allowlisted with a reason (dcfs/query_plan_allowlist.txt), worth a
+  look in 26.41. Cost: 8% of the Gemini week (52% -> 44% left). The
+  second foreman step (quota panel) stalled on claude_usage.py and was
+  stopped; its partial work is stashed in lane-8.
