@@ -1370,3 +1370,84 @@ Every `syscalls::` wrapper taking a pointer and a length (`write`,
 convention is `std::span` (102 uses, no `absl::Span`), and
 `docs/style.md` already writes it. `docs/abseil-utilities.md`'s swaps
 table says the same for `(const T *p, size_t n)`, with that reason.
+
+## 25.38 `syscalls::` closer to libc, but typed (russ, 2026-10-17; queued, M2)
+
+Dependencies: after 25.37 and the dependency-injection step, to be written.
+
+Russ's decisions:
+
+1. Flag bitmasks are typed: `OpenFlags`, `AtFlags`, `RenameFlags` and
+   `Mode`, so swapped flags, or a mode passed where flags belong, do not
+   compile.
+2. `DirFd` is distinct from `FileDescriptor` for the `*at` calls.
+   `AT_FDCWD` is unrepresentable as a `DirFd`.
+3. `PathComponent` is a strong string of bytes: non-empty, no `/`, not `.`
+   or `..` unless the call asks for them, escaped when printed. The name
+   comes from POSIX's "pathname component". Russ is on the fence; the
+   orchestrator chose it.
+4. Data buffers are `std::span<std::byte>`. Names and link targets stay
+   byte strings.
+5. `WriteAll` and `PreadFull`-style helpers for short transfers are not in
+   `syscalls.h`, which mirrors libc calls only. They go in a separate file,
+   e.g. `dcfs/file_io.h`.
+6. Times are `absl::Time` and `absl::Duration`, provisional on a precision
+   check first. Verify that `statx_timestamp` and `timespec` (int64 seconds
+   plus nanoseconds, `UTIME_NOW` and `UTIME_OMIT`) round-trip through
+   `absl::Time` and `absl::Duration` without loss across the full range,
+   testing the extremes. Only then does the codebase convert, not urgently
+   (russ clarified). A converted time or duration becomes `absl::Time` or
+   `absl::Duration` as early as possible after it enters the program: where
+   it is pulled out of an incoming struct.
+7. Calls that return a new descriptor return the owning `FileDescriptor`.
+8. Nullability on every remaining pointer, enforced by a clang-tidy check.
+
+Compile time first (russ): fcntl's operation becomes a template argument,
+with a runtime overload only where the value must come from a variable.
+Likewise the other operation-selector arguments (ioctl request codes, prctl
+options).
+
+Every rule in this step gets a mechanical check: a clang-tidy or
+clang-query matcher, or a type that makes the wrong code not compile.
+
+## 25.39 Mechanize every style rule (russ, 2026-10-17; queued, M2)
+
+Dependencies: after 25.38.
+
+Russ: "remember to add mechanical enforcement for all the style rules we
+can!"
+
+Steps:
+
+1. Inventory every rule in `docs/style.md` into a table with the columns
+   rule, mechanism today, and why not mechanical. The mechanism is one of:
+   clang-tidy, a clang-query matcher in `tools/style_matchers`,
+   `banned_symbols`, a type that makes the wrong code not compile, or
+   review only.
+2. Add a check for each rule that can have one, with good and bad examples
+   like the existing matchers. Each new check fails first on a bad example.
+3. First candidates:
+   - Time values. Ban raw time types (`time_t`, `struct timespec`,
+     `struct timeval`, `struct statx_timestamp`) and integer variables or
+     fields named `*time`, `*_sec`, `*_ns`, `*_ms` or `*_us`, outside the
+     `syscalls::` boundary and the conversion helpers. Code must write
+     `absl::Time t = FromStatx(st.stx_mtime)` or similar.
+   - Nullability on raw pointers (clang-tidy).
+   - No in-band sentinels where detectable: comparisons of IDs, pids or
+     fds against 0 or -1 outside the boundary.
+   - `std::optional<std::string_view>`, or an optional of a type with an
+     empty state: the absence-versus-emptiness rule.
+   - Immediately invoked capturing lambdas returning `Status` (1.6a).
+   - TLA+ comment length (1.9 applied to `formal/`).
+   - Kernel citations naming a version and no host paths: grep for
+     `~/Sources` in code comments.
+4. Items for this step, not done by the clerk:
+   - `tools/agents/foreman.py`'s review prompt (`run_review`) takes the
+     findings block format from the reviewer agents
+     (`.claude/agents/dcfs-reviewer.md`, `dcfs-style-reviewer.md`, the
+     "End every report with a findings block" section). That is a code
+     change: it lands here, not as a clerk edit.
+   - `tools/agents/review_findings.py` and
+     `docs/plan/review-findings.tsv` do not exist yet. The orchestrator
+     appends findings through `review_findings.py`; the script is a step
+     item here.

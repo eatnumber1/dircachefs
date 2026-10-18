@@ -72,7 +72,7 @@ final hardware check (Phase 21.2).
 | | Milestone | Steps | Done when |
 |---|---|---|---|
 | M1 | A trustworthy core | 25.28b, 22.5, 17.2e, 25.10, 22.7 (placement provisional), 25.28c, 12.20, 26.40, 12.19, 26.39, 12.24 | every user-visible promise in the README has a test and, where it is the protocol, a model property |
-| M2 | CI you can trust | 26.41, 26.36's follow-ups, 7.6b, 25.33b, the shell ports (boot.sh first), 25.27, 17.5, 23.13 (stubs for submounts and btrfs subvolumes present at start: required for M3, russ 2026-10-17), 25.35, 25.36, 25.37 (after the dependency-injection step, to be written; strong types, scrub, spans) | main stays green through a week of normal merges with no budget re-measure |
+| M2 | CI you can trust | 26.41, 26.36's follow-ups, 7.6b, 25.33b, the shell ports (boot.sh first), 25.27, 17.5, 23.13 (stubs for submounts and btrfs subvolumes present at start: required for M3, russ 2026-10-17), 25.35, 25.36, 25.37 (after the dependency-injection step, to be written; strong types, scrub, spans), 25.38 (typed `syscalls::`, after 25.37), 25.39 (mechanize every style rule, after 25.38) | main stays green through a week of normal merges with no budget re-measure |
 | M2.5 | In-memory cache (the database on tmpfs) | 27.1, 27.2 | the guest suites pass with the cache on tmpfs, restart and reboot behave as documented, and the kernel-cache interplay is measured and decided |
 | M3 | Daily driver on russ's file server | 15.12, 14.10b, 26.38, 23.13 (from M2), a runbook | two weeks serving the media pool unattended, with the disks' sleep time shown; record spin-ups and backing lookups per workload (per-name lookups, 22.7) |
 | M4 | Release candidate | 16, 18, the xfstests target, the coverage target, man page and README, packaging | a fresh machine installs, mounts and survives the README's documented failures from the docs alone |
@@ -219,3 +219,19 @@ push; the queue above starts in earnest after the reset.
   which kernel-blocked calls stay uninterruptible, with a test for each
   that does become cancellable (russ, 2026-10-17: "Make sure it's
   written down to work on later").
+- **Queued follow-up: FUSE INTERRUPT cancels in-flight backing syscalls**
+  (russ, 2026-10-17; queued, after the io_uring phase). The io_uring phase
+  is unnumbered, so this follow-up has no step number yet. On
+  FUSE_INTERRUPT, cancel the request's in-flight io_uring operation
+  (`IORING_OP_ASYNC_CANCEL`), closing the kernel-blocked cancellation gap
+  recorded in commit 2dba04c. Notes for the step: a cancel races
+  completion, so a cancelled read-only operation replies EINTR (or its
+  result, if it completed). A cancelled mutation's backing outcome is
+  recorded unknown and left unknown, with no probe (russ, 2026-10-17:
+  "Don't cache what the user didn't ask for. Leave it as unknown until the
+  user asks again."); the next request that needs it resolves it then. The
+  tri-state rule already covers it. The model gains in-flight cancellation
+  (an interrupt arriving during a backing syscall), and the timely-interrupt
+  bound tightens accordingly. Cite `io_uring_enter(2)` and
+  `io_uring_prep_cancel(3)` for the cancel semantics when the step is
+  written.

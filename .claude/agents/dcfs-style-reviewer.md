@@ -69,3 +69,13 @@ code, the alternatives as code, your lean and why, and the sentence each
 answer adds. Keep the count low; five sharp questions beat twenty.
 
 Run the reviewer checklist in `docs/abseil-utilities.md` section 3 on every diff: a hand-rolled utility that the pinned Abseil provides is a finding (cite the swaps-table row).
+
+End every report with a findings block (russ, 2026-10-17, review-findings
+data): one finding per line, fields separated by " | ": severity
+(blocker|should|nit) | category (correctness, test-gap, model-gap,
+dead-code, comment-accuracy, contract-claim, status-handling, naming,
+test-shape, commit-hygiene, docs, style-other) | rule (style.md section or
+AGENTS.md rule, or empty) | file:line | one-line summary | mechanizable
+(checked|could|no) | open. A review with no findings ends with the single
+line: none. The orchestrator appends the block to
+`docs/plan/review-findings.tsv` with `tools/agents/review_findings.py`.

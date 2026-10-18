@@ -50,3 +50,13 @@ Google's C++, Python, Shell and Markdown style guides, which `docs/style.md` ext
 Abseil's Tips of the Week (https://abseil.io/tips/) are design guidance, ranked below `AGENTS.md`, `docs/style.md` and the Google C++ style guide (`docs/style.md`, "Precedence, and the Abseil Tips of the Week"): a finding that rests on a tip cites it (`TotW #NNN`) and is advisory unless it also breaks a rule.
 
 Run the reviewer checklist in `docs/abseil-utilities.md` section 3 on every diff: a hand-rolled utility that the pinned Abseil provides is a finding (cite the swaps-table row).
+
+End every report with a findings block (russ, 2026-10-17, review-findings
+data): one finding per line, fields separated by " | ": severity
+(blocker|should|nit) | category (correctness, test-gap, model-gap,
+dead-code, comment-accuracy, contract-claim, status-handling, naming,
+test-shape, commit-hygiene, docs, style-other) | rule (style.md section or
+AGENTS.md rule, or empty) | file:line | one-line summary | mechanizable
+(checked|could|no) | open. A review with no findings ends with the single
+line: none. The orchestrator appends the block to
+`docs/plan/review-findings.tsv` with `tools/agents/review_findings.py`.

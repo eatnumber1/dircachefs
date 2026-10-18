@@ -103,6 +103,10 @@ use it as design guidance rather than firm rules."
   today (`.bazelrc`); from phase 7 `-Weverything -Werror` with every
   disabled warning listed in `.bazelrc` with a reason. A suppression
   carries a comment saying why.
+- **Move logic to compile time where you can** (russ, 2026-10-17): the
+  type system, `constexpr`, `consteval`. An operation selector known at the
+  call site (fcntl's `cmd`, an ioctl request) is a template argument; a
+  runtime overload exists only where the value must come from a variable.
 
 ### 1.2 Narrowing Google's rules
 
@@ -228,6 +232,10 @@ use it as design guidance rather than firm rules."
   `tools/style_matchers/banned_std.query` (25.21) reports every use of the
   three names in `dcfs/`, `bench/` and `tools/`; the sites that existed are
   in the shrinking `tools/style_checks_allow.txt`.
+- **Times are `absl::Time` and durations `absl::Duration` throughout** (russ,
+  2026-10-17). A time arriving in a C struct (`statx`, `timespec`) is
+  converted where it is pulled out of the struct. Provisional until 25.38
+  confirms the conversion is lossless.
 - **Reach for Abseil before writing a helper**: `docs/abseil-utilities.md`
   (25.19) catalogues the pinned Abseil (20260817.0) with a swaps table
   (hand-written pattern → utility, each marked with the rule that demands
