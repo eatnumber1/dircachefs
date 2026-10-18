@@ -57,6 +57,15 @@ def good_tree(root):
     write(root, "dcfs/testonly/b.h", "// test-only helper.\n")
     write(root, "README.md",
           "# x\n\n## Limitations\n\n- the `kernel-bug` check.\n\n## More\n")
+    write(root, "docs/style.md",
+          '# Style\n\n<a id="rule-no-timers"></a>\n### 1.11 No timers\n\n'
+          '- <a id="rule-test-first"></a>**Test first.**\n')
+    write(root, "docs/design.md", "# Design\n")
+    write(root, "docs/plan/process.md", "# Process\n")
+    write(root, "CLAUDE.md", "# Claude\n")
+    write(root, "AGENTS.md",
+          "# Rules\n\n- No timers. [style](docs/style.md#rule-no-timers)\n"
+          "- Test first. [style](docs/style.md#rule-test-first)\n")
 
 
 class RepoShapeSelfCheckTest(unittest.TestCase):
@@ -71,6 +80,36 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
 
     def test_good_tree_has_no_problems(self):
         self.assertEqual([], repo_shape.all_problems(self.root))
+
+    def test_a_rule_with_no_agents_entry_is_reported(self):
+        write(self.root, "docs/design.md",
+              '# Design\n\n<a id="rule-bounded-memory"></a>\n'
+              '### Bounded memory\n')
+        problems = repo_shape.rule_index(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("docs/design.md marks rule bounded-memory", problems[0])
+        self.assertIn("AGENTS.md has no entry linking to it", problems[0])
+
+    def test_an_entry_for_a_rule_that_is_gone_is_reported(self):
+        write(self.root, "AGENTS.md",
+              "- No timers. [style](docs/style.md#rule-no-timers)\n"
+              "- Test first. [style](docs/style.md#rule-test-first)\n"
+              "- Gone. [process](docs/plan/process.md#rule-gone)\n")
+        problems = repo_shape.rule_index(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("AGENTS.md links to docs/plan/process.md#rule-gone",
+                      problems[0])
+
+    def test_a_marker_used_twice_in_a_file_is_reported(self):
+        write(self.root, "CLAUDE.md",
+              '- <a id="rule-x"></a>One.\n- <a id="rule-x"></a>Two.\n')
+        write(self.root, "AGENTS.md",
+              "- No timers. [style](docs/style.md#rule-no-timers)\n"
+              "- Test first. [style](docs/style.md#rule-test-first)\n"
+              "- X. [claude](CLAUDE.md#rule-x)\n")
+        problems = repo_shape.rule_index(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("CLAUDE.md marks rule x twice", problems[0])
 
     def test_new_guest_shell_is_reported(self):
         write(self.root, "test/qemu/guest/new.sh", "echo hi\n")

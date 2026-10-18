@@ -28,7 +28,12 @@ Each function takes the root of a source tree and returns a list of problems
 - no_test_only_comments: no production source (dcfs/ and bench/, not
   *_test.cc and not testonly/) has a comment that gives tests as the reason
   for code, or a ForTest / _for_test name (docs/style.md, "No test-only
-  things in production code", step 25.7).
+  things in production code", step 25.7);
+- rule_index: every ratified rule is indexed in AGENTS.md. A rule in
+  docs/style.md, docs/design.md, docs/plan/process.md or CLAUDE.md is marked
+  by an anchor `<a id="rule-NAME"></a>`; AGENTS.md has an entry that links to
+  `<file>#rule-NAME` for every marker, and every such link in AGENTS.md has
+  its marker (russ, 2026-10-18: AGENTS.md is the complete index).
 
 (The fourth rule, commit subjects, needs git: .github/ci/commit_subjects.sh.)
 """
@@ -603,10 +608,43 @@ def spdx_licenses(root, tracked=None):
     return problems
 
 
+RULE_FILES = ("docs/style.md", "docs/design.md", "docs/plan/process.md",
+              "CLAUDE.md")
+RULE_MARKER = re.compile(r'<a id="rule-([a-z0-9-]+)"></a>')
+RULE_LINK = re.compile(r"\]\(([^)#\s]+)#rule-([a-z0-9-]+)\)")
+
+
+def rule_index(root):
+    marked = {}
+    problems = []
+    for path in RULE_FILES:
+        for number, line in enumerate(read(root, path).splitlines(), 1):
+            for name in RULE_MARKER.findall(line):
+                if (path, name) in marked:
+                    problems.append(
+                        "%s marks rule %s twice (lines %d and %d): a rule's "
+                        "marker is unique in its file" %
+                        (path, name, marked[(path, name)], number))
+                marked[(path, name)] = number
+    linked = set(RULE_LINK.findall(read(root, "AGENTS.md")))
+    for (path, name), number in sorted(marked.items()):
+        if (path, name) not in linked:
+            problems.append(
+                "%s marks rule %s (line %d) but AGENTS.md has no entry "
+                "linking to it: add a line to AGENTS.md" %
+                (path, name, number))
+    for path, name in sorted(linked - set(marked)):
+        problems.append(
+            "AGENTS.md links to %s#rule-%s, which no file marks: fix or "
+            "remove the entry" % (path, name))
+    return problems
+
+
 def all_problems(root):
     return (third_party_readmes(root) + guest_scripts_used(root) +
             guest_sleeps(root) + no_new_guest_shell(root) +
             disabled_checks_listed(root) +
             no_test_only_comments(root) + no_testonly_friends(root) +
             fixed_arrays(root) + project_prefix(root) +
-            absl_prefixed_status_macros(root) + nodiscard_on_status(root))
+            absl_prefixed_status_macros(root) + nodiscard_on_status(root) +
+            rule_index(root))
