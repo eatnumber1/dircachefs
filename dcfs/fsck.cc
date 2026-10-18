@@ -151,7 +151,7 @@ Finding Corrupt(std::string detail) {
 
 // Where a lower layer's Status is itself the domain answer (fsck's findings),
 // its message is the text of the finding.
-std::string_view FindingText(const absl::Status &status) {
+std::string_view StatusToString(const absl::Status &status) {
   return status.message();
 }
 
@@ -164,12 +164,12 @@ Finding Inspect(const std::string &path) {
           .Open();
   if (!opened.ok()) {
     if (absl::IsUnavailable(opened.status())) {
-      return Finding{
-          .kind = Finding::Kind::kBusy,
-          .detail = absl::StrCat("is locked: ", FindingText(opened.status()))};
+      return Finding{.kind = Finding::Kind::kBusy,
+                     .detail = absl::StrCat("is locked: ",
+                                            StatusToString(opened.status()))};
     }
     return Corrupt(
-        absl::StrCat("cannot be opened: ", FindingText(opened.status())));
+        absl::StrCat("cannot be opened: ", StatusToString(opened.status())));
   }
   sqlite3::Connection &db = *opened;
 
@@ -177,7 +177,7 @@ Finding Inspect(const std::string &path) {
       FirstRows(db, "PRAGMA integrity_check", 3);
   if (!integrity.ok()) {
     return Corrupt(absl::StrCat("integrity_check failed: ",
-                                FindingText(integrity.status())));
+                                StatusToString(integrity.status())));
   }
   if (integrity->size() != 1 || integrity->front() != "ok") {
     return Corrupt(absl::StrCat("integrity_check found: ",
@@ -187,7 +187,7 @@ Finding Inspect(const std::string &path) {
   absl::StatusOr<int> version = GetSchemaVersion(db);
   if (!version.ok()) {
     return Corrupt(absl::StrCat("has no readable schema version: ",
-                                FindingText(version.status())));
+                                StatusToString(version.status())));
   }
   Finding found;
   if (*version > kSchemaVersion) {
@@ -221,7 +221,8 @@ Finding Inspect(const std::string &path) {
     });
   }();
   if (!read.ok()) {
-    return Corrupt(absl::StrCat("dirty set unreadable: ", FindingText(read)));
+    return Corrupt(
+        absl::StrCat("dirty set unreadable: ", StatusToString(read)));
   }
   if (!missing.empty()) {
     return Corrupt(
@@ -231,7 +232,7 @@ Finding Inspect(const std::string &path) {
   absl::StatusOr<bool> clean = GetCleanShutdown(db);
   if (!clean.ok()) {
     return Corrupt(absl::StrCat("the clean-shutdown flag is unreadable: ",
-                                FindingText(clean.status())));
+                                StatusToString(clean.status())));
   }
   if (*clean && dirty != 0) {
     return Corrupt(absl::StrCat(

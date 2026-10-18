@@ -3,7 +3,7 @@
 # absl::StrCat(what, ": ", status) or LOG(...) << status. Status::message()
 # drops the code and the payload (the errno), so a call of it on an
 # absl::Status (a StatusOr's status() included) is refused in dcfs/, tools/
-# and bench/, tests included; exempted only in FindingText(const absl::Status&),
+# and bench/, tests included; exempted only in StatusToString(const absl::Status&),
 # where a lower layer's Status is itself the domain answer.
-let inFindingText hasAncestor(functionDecl(hasName("FindingText")))
-match cxxMemberCallExpr(callee(cxxMethodDecl(hasName("message"), ofClass(hasName("::absl::Status")))), unless(inFindingText), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("status_message")
+let inStatusToString hasAncestor(functionDecl(hasName("StatusToString")))
+match cxxMemberCallExpr(callee(cxxMethodDecl(hasName("message"), ofClass(hasName("::absl::Status")))), unless(inStatusToString), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("status_message")

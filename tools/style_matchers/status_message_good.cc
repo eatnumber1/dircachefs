@@ -1,7 +1,8 @@
 // Known-good input of status_message.query: a Status is put into a message
 // whole (it implements AbslStringify), and absl::string_view::size and other
-// classes' message() are not the Status's; and FindingText(const absl::Status&)
-// is the one exempt helper for domain answers.
+// classes' message() are not the Status's; and
+// StatusToString(const absl::Status&) is the one exempt helper for domain
+// answers.
 #include <string>
 #include <string_view>
 
@@ -16,7 +17,7 @@ struct Greeting {
   std::string message() const { return "hello"; }
 };
 
-std::string_view FindingText(const absl::Status &status) {
+std::string_view StatusToString(const absl::Status &status) {
   return status.message();
 }
 

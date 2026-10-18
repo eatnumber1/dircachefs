@@ -709,7 +709,7 @@ is warranted at all)"):
    skips). These stop carrying a Status where practical: fsck findings become
    plain results (the `CacheReport`'s words), and benchmark skips say what could
    not be measured. Where a lower layer's `Status` is itself the domain answer,
-   convert it through one helper, `FindingText(const absl::Status&)` returning
+   convert it through one helper, `StatusToString(const absl::Status&)` returning
    its `.message()`, which the `status_message` matcher exempts; nothing else
    calls `.message()`.
 3. **Infrastructure failures**: The infrastructure underneath me failed. A
@@ -726,8 +726,13 @@ status was an infrastructure failure in hand. Tests assert on a status with
 `StatusIs(code, message_matcher)`, not on `.message()`. Mechanical: the
 `status_message` matcher (`tools/style_matchers/status_message.query`) refuses
 every call of `absl::Status::message()` in `dcfs/`, `tools/` and `bench/`, with
-no allowlist except `FindingText(const absl::Status&)` and `EncodeChildResult`
-(`test/qemu/guest/guest.cc`, per the 2026-10-18 ruling); `status_dropped` reports
+no allowlist except `StatusToString(const absl::Status&)` and `SerializeStatus`
+(`dcfs/testonly/status_wire`). Serializing a Status is an allowed use, but a
+Status carries payloads that must survive, so there is ONE place that serializes
+a Status: `SerializeStatus`/`ParseStatus` over a testonly protobuf message (code,
+message bytes, payloads), used everywhere a Status crosses a process boundary.
+Never rebuild a Status from its parts (`ErrnoToStatus` over a carried message
+doubles the strerror suffix). `status_dropped` reports
 a failure branch (`if (!s.ok()) return false;`) that never mentions the status
 (report only: some are legitimate domain answers, such as a predicate that is
 false when the probe failed).
