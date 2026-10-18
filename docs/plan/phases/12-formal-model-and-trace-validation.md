@@ -995,5 +995,18 @@ a check for speed.
 5. **Later: split `dcfs.tla`.** Split it so each config depends only on the
    modules it uses, so Bazel's cache skips configs a change does not affect.
    Not started; after items 1 to 4.
+6. **Mechanize the soundness of config shortcuts** (russ, 2026-10-18: "This
+   puts more burden on reviewers. Is there a way we can mechanize this
+   check?"). The argument for omitting `CacheDurable` in `MC.tla` (used by
+   `MC_large`, `MC_nolock`, `MC_interrupt_nolock`, `MC_interrupt_muts2`) is
+   checked by a Bazel test that parses `dcfs.tla` with SANY (`tla2tools.jar`)
+   and fails with the offending line when either part does not hold: (a)
+   `CacheDurable`'s `UNCHANGED` covers every variable except `dbOpts`; (b)
+   every occurrence of `dbOpts`, following operator definitions, sits in a
+   positive position under `\A x \in dbOpts` (no `\E`, no negation, no
+   equality or cardinality). A CI backstop runs one medium config with and
+   without `CacheDurable` and requires identical property verdicts. The same
+   pattern covers any config shortcut that omits a step on a soundness
+   argument. Independent of items 1 to 5. Owner: dcfs-protocol.
 
 Russ's question is answered by items 1 to 4; item 5 waits for them.
