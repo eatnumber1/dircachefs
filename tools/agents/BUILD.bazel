@@ -106,3 +106,30 @@ py_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
     deps = [":foreman_lib"],
 )
+
+# Review findings ledger and summary tool.
+# See README.md in this directory.
+py_library(
+    name = "review_findings_lib",
+    srcs = ["review_findings.py"],
+    imports = ["."],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+py_binary(
+    name = "review_findings",
+    srcs = ["review_findings.py"],
+    main = "review_findings.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":review_findings_lib"],
+)
+
+py_test(
+    name = "review_findings_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["review_findings_test.py"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":review_findings_lib"],
+)
+

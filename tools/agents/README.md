@@ -331,3 +331,44 @@ bazel run //tools/agents:foreman -- STEP LANE BRANCH PROMPT_FILE [--model M] [--
    delta.
 
 The tests are `//tools/agents:foreman_test`.
+
+## review_findings
+
+Maintains the review findings ledger (`docs/plan/review-findings.tsv`) in the
+main repository checkout and provides summary counts across review sessions.
+
+Usage:
+
+```bash
+# Add a findings block from stdin
+python3 -I tools/agents/review_findings.py add --step S --round R --reviewer X --date D < block
+
+# Print summary counts by category, rule, severity, and mechanizable
+python3 -I tools/agents/review_findings.py summary
+```
+
+Or via Bazel:
+
+```bash
+bazel run //tools/agents:review_findings -- add --step S --round R --reviewer X --date D < block
+bazel run //tools/agents:review_findings -- summary
+```
+
+The findings block format has one finding per line, separated by ` | `:
+```
+severity | category | rule | file | summary | mechanizable | outcome
+```
+
+- `severity`: `blocker`, `should`, `nit`, `none` ('none' records a review
+  that found nothing).
+- `category`: `correctness`, `test-gap`, `model-gap`, `dead-code`,
+  `comment-accuracy`, `contract-claim`, `status-handling`, `naming`,
+  `test-shape`, `commit-hygiene`, `docs`, `style-other`.
+- `rule`: `docs/style.md` section or `AGENTS.md` rule cited, or empty.
+- `file`: `path:line` or empty.
+- `summary`: one line, no tabs.
+- `mechanizable`: `checked`, `could`, `no`.
+- `outcome`: `fixed <commit>`, `declined`, `question`, `open`.
+
+The tests are `//tools/agents:review_findings_test`.
+
