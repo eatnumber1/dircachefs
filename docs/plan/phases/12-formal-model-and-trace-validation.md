@@ -762,7 +762,12 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
   hits): already decided, coroutines + io_uring (required, no fallback;
   docs/plan/README.md future work, the io_uring phase).
 - B6 (FUSE_CAP_ATOMIC_O_TRUNC off, so open(O_TRUNC) takes two backing
-  steps where the backing takes one): question for russ.
+  steps where the backing takes one): decided, turn it on (russ,
+  2026-10-17: "Yeah!"; follows from behaving like the backing). Open()
+  then carries the truncate as one backing open(O_TRUNC): it becomes a
+  mutation (tri-state phases for the size, killpriv as for a truncate),
+  the model covers it, and the comment at dcfs/dir_cache_fs.cc:251-262
+  goes. Agent: dcfs-protocol.
 - B8 (unreachable same-inode rename branch): remove it or make it a
   RET_CHECK that names the invariant (style 1.10a).
 - Unbounded working memory M1-M12: 22.7 covers ReadDirNames and
