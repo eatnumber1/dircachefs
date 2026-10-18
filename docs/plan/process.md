@@ -220,8 +220,8 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   here the count of concurrently running Sonnet or Opus agents is the thing
   the orchestrator limits, not the lane count, and an interactive session
   with russ (a trial, a review conversation) counts as one. Each lane's `user.bazelrc` caps its tests (since 2026-10-10:
-  `--jobs=4`, `--local_test_jobs=4`, 20 GB; the machine has 8 cores and
-  62 GB). Every lane's `user.bazelrc` also carries `--local_resources=cpu=4`
+  `--jobs=4`, `--local_test_jobs=2` (since 2026-10-17; it was 4), 20 GB; the machine has 8 cores and
+  62 GB). Every lane's `user.bazelrc` now also has `build --local_resources=cpu=4` (orchestrator, 2026-10-18)
   (time analysis 2026-10-18: lane 8 had no `user.bazelrc` and ran uncapped;
   with the cap a lane cannot start more than one 4-worker TLC beside a guest;
   agents spent 40 % of their active hours in Bazel on the oversubscribed host,

@@ -179,7 +179,19 @@ Owner: dcfs-protocol. Docs: `formal/README.md` (actions and properties
 tables), `docs/design.md` "Cancellation", README's EINTR paragraph if
 the guarantee is user-visible.
 
-### As built (step-22.5; rounds 1-3, 2026-10-17/18, pending review)
+### As built (step-22.5; rounds 1-3, 2026-10-17/18; merged 2026-10-18, fef4eb77)
+
+Merge record (clerk batch 12, 2026-10-18): merged by the orchestrator as 19
+commits ending fef4eb77, rebased onto main by a Sonnet agent. Conflicts were
+in formal/README.md's configuration table, three MC_interrupt*.cfg files, and
+dcfs/backing.cc, where 22.5's interruption point stays inside the
+resolve-alone branch that covers 12.24's long names; `LongNames = {}` was
+added to the 13 configs 22.5 created. Evidence: fast suite 245 pass; the
+interrupt, _liveness, _files, _borndirty, long_names and small TLC configs
+pass with state counts unchanged (547,645 / 65,261 / 55,625 / 9,678 /
+429,426 / 1,479,307); the interrupt sweep (plain and ASan) and cancel_test
+pass. Not rerun after the rebase: the large configs (_muts2, _nolock, large).
+Review rows for rounds 1-3 are fixed or merged, except the Q rows (decided).
 
 Round 1 (the names below follow 22.6 and round 2):
 

@@ -306,6 +306,16 @@ Then, medium:
 
 ## 17.6 Tests that pin what the kernel and dcfs do for O_DIRECT and inotify (russ, 2026-10-18: "add tests demonstrating that fact. That way we notice if it ever changes"; dispatched 2026-10-18, lane 4)
 
+Merge record (clerk batch 12, 2026-10-18): merged as db922fd8 after one
+style-review fix round (all 16 findings addressed; Q1-Q3 decided by the
+orchestrator; ChangeTree returns a Status instead of ASSERT_NO_FATAL_FAILURE,
+accepted). Evidence: kernel_facts_test_{ext4,xfs,btrfs} pass (8.5 / 11.1 /
+14.5 s); syscalls_test passes with the nine new wrappers (mmap, munmap,
+mincore, statfs, inotify_init1, inotify_add_watch, chmod, rename, rmdir);
+//tools/... 50/50; four mutations rechecked to fail. Finding: btrfs falls
+back to buffered I/O for misaligned O_DIRECT (fs/btrfs/direct-io.c:940-943,
+v7.3-rc7) where ext4 and xfs return EINVAL; dcfs matches each.
+
 Explore research, 2026-10-18, under "behave like the backing": these are
 facts today, and the tests pin them so a change shows up.
 

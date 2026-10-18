@@ -1078,6 +1078,25 @@ never weaken a test (AGENTS.md).
   decides), then re-measure with the other lines of `xfstests_1_test_ext4` and
   the ACE tests under russ's rule: lines together, one run count.
 
+### Follow-ups from the 25.34 fix round (clerk batch 12, 2026-10-18)
+
+- **`write_test_ext4`'s I/O budget is load-sensitive.** At host load ~50 it
+  counted 335 writes against a budget of 325 and failed ("load-starved");
+  alone it passes (24.8 s on main). It also failed in 17.6's first presubmit
+  run. A verdict that varies with load breaks the load-agnostic rule
+  (AGENTS.md, Tests): find what makes the count depend on timing (writeback,
+  journal commits) and make the budget count only what dcfs causes; test
+  first. Owner: dcfs-investigator.
+- **Suspected cause: the wall-clock sync interval.** The 25.28b fix round saw
+  it again (writes 325 to 328 against 325). The suspicion: at high load the
+  number of sync points during the test (each a syncfs and a WAL fsync)
+  varies, so the writes vary. If so, the budget must not count sync-point
+  writes by time; this connects to 25.28c (interval on CLOCK_MONOTONIC, a
+  timerfd). Not measured yet.
+- **`pmu.sh` in the shell list.** `test/qemu/guest/pmu.sh` (from 26.36) was
+  added to `tools/repo_shape_guest_shell.txt`, a list that should only
+  shrink: port it to C++. Owner: dcfs-implementer, after 25.34 merges.
+
 ## 26.38 The cache database's permissions are the administrator's (russ, 2026-10-17; queued)
 
 russ, on the Gemini finding that dcfs "tightens" a stricter 0400 database

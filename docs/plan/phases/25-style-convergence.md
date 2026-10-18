@@ -1033,6 +1033,11 @@ place) so no user request waits on it.
 
 
 
+Note from 25.28b's re-review (clerk batch 12, 2026-10-18): the branch was
+rebased onto 0068a1ba (not current main) and kept the citation
+`fs/fs-writeback.c:64 (Linux v7.3-rc4)`. It must be re-verified at v7.3-rc7
+when it is rebased again.
+
 ## 25.28d A failed cache fsync poisons the cache (russ, 2026-10-17; after 25.28b)
 
 Linux can drop pages a failed fsync could not write and report success to
@@ -1120,6 +1125,11 @@ definitely needs to get added to the formal model too", and confirmed:
   2026-10-18; the orchestrator ruled it under "behave like the backing".
 
 Owner: dcfs-protocol, then an Opus review.
+Related (clerk batch 12, 2026-10-18): 26.36's follow-ups suspect that
+`write_test_ext4`'s I/O budget varies with the wall-clock sync interval,
+because sync-point writes are counted by time. When this step lands, that
+budget must be measured against the timer, not against the wall clock.
+
 ## 25.29 A pinned local copy of Google's style guides for reviewers (russ, 2026-10-17)
 
 `docs/style.md` extends Google's C++, Python, Shell and Markdown guides but
@@ -1359,6 +1369,19 @@ is the single exempt helper in `tools/style_matchers/status_message.query`; doma
 stop carrying Status where practical (benchmark skips say what could not be measured);
 Kind 3 infrastructure failures retain the whole status; `waitexit` unit test
 (`//test/qemu:waitexit_test`) with link-time `--wrap` fakes of `pidfd_open` and `poll`.
+
+### Follow-ups from the 25.34 fix round and 17.6 (clerk batch 12, 2026-10-18)
+
+- **A mount start races an immediate unmount.** `DcfsMount::Start` returned
+  as soon as the mount was visible; an unmount straight after it made the
+  daemon die with "The FUSE mount of /mnt/twice is not in
+  /proc/self/mountinfo" (exit 32), because the mount is visible before the
+  daemon's own mountinfo check runs. Decide whether dcfs tolerates an
+  unmount that races its start (behave like the backing: a native mount can
+  be unmounted at once). 25.34 works around it by statting the mountpoint in
+  `Start`. Owner: dcfs-protocol (mount namespaces). Open for russ's decision.
+- **Note from 17.6:** `test/qemu/guest/kernel_facts.sh` becomes a
+  `qemu_cc_test` once these helpers land.
 
 ## 25.35 Strong types for IDs and sentinels (russ, 2026-10-17; queued, M2)
 
