@@ -30,6 +30,7 @@ MAIN_DEPS = [
     ":mount_dcfs",
     ":mount_options",
     ":mounts_below",
+    ":proc_file",
     ":remount",
     ":sqlite",
     ":startup_channel",
@@ -455,23 +456,36 @@ cc_library(
       "@absl//absl/log",
       "@absl//absl/log:check",
       "@absl//absl/status",
+      "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
       "@absl//absl/time",
       "@libfuse//:libfuse",
     ],
 )
 
-# Step 17.2e: a FUSE caller's ids, groups, capabilities and user namespace
-# from /proc (FuseRequest::Caller).
+# A procfs file's whole text (mountinfo, a task's status).
+cc_library(
+    name = "proc_file",
+    hdrs = ["proc_file.h"],
+    srcs = ["proc_file.cc"],
+    deps = [
+      ":syscalls",
+      ":syscalls_backing",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/status:statusor",
+    ],
+)
+
+# Step 17.2e: a FUSE caller's ids, groups and capabilities, and its user
+# namespace, from /proc (FuseRequest::Caller, CallerHasCapFsetid).
 cc_library(
     name = "proc_status",
     hdrs = ["proc_status.h"],
     srcs = ["proc_status.cc"],
     deps = [
+      ":proc_file",
       ":ret_check",
-      ":status",
       ":syscalls",
-      ":syscalls_backing",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
@@ -501,7 +515,10 @@ qemu_cc_test(
     size = "small",
     timeout = "short",
     srcs = ["fuse_request_test.cc"],
-    linkopts = ["-Wl,--wrap=fuse_reply_none"],
+    linkopts = [
+      "-Wl,--wrap=fuse_reply_none",
+      "-Wl,--wrap=fuse_reply_err",
+    ],
     deps = [
       ":fuse_request",
       ":status",
@@ -756,6 +773,7 @@ cc_library(
     deps = [
       ":escape",
       ":mount_dcfs",
+      ":proc_file",
       ":status",
       ":syscalls",
       ":syscalls_backing",
@@ -773,7 +791,7 @@ cc_library(
     deps = [
       ":escape",
       ":mount_dcfs",
-      ":remount",
+      ":proc_file",
       ":status",
       ":syscalls",
       ":syscalls_process",
@@ -1589,6 +1607,7 @@ cc_library(
     hdrs = ["mounts_below.h"],
     deps = [
       ":escape",
+      ":proc_file",
       ":status",
       ":syscalls",
       ":syscalls_backing",

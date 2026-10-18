@@ -97,7 +97,6 @@ dcfs/dir_cache_fs.cc|DirCacheFS::Releasedir|readability-convert-member-functions
 dcfs/dir_cache_fs.cc|DirCacheFS::RemoveChild|readability-function-cognitive-complexity|1
 dcfs/dir_cache_fs.cc|DirCacheFS::Rename|readability-function-cognitive-complexity|1
 dcfs/dir_cache_fs.cc|DirCacheFS::RequireAttr|misc-include-cleaner|1
-dcfs/dir_cache_fs.cc|DirCacheFS::Setattr|misc-unused-parameters|1
 dcfs/dir_cache_fs.cc|DirCacheFS::Setattr|readability-implicit-bool-conversion|1
 dcfs/dir_cache_fs.cc|DirCacheFS::SharedFdOf|readability-avoid-nested-conditional-operator|1
 dcfs/dir_cache_fs.cc|DirCacheFS::Write|misc-unused-parameters|1

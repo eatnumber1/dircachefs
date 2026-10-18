@@ -21,6 +21,7 @@ namespace dcfs {
 namespace {
 
 using ::absl_testing::IsOk;
+using ::absl_testing::IsOkAndHolds;
 using ::testing::ElementsAre;
 using ::testing::IsEmpty;
 using ::testing::Not;
@@ -45,7 +46,6 @@ TEST(ProcStatusTest, ParsesTheFilesystemUidGroupsAndEffectiveCapabilities) {
   EXPECT_EQ(parsed.fsuid, 1003u);
   EXPECT_THAT(parsed.groups, ElementsAre(10u, 2000u));
   EXPECT_EQ(parsed.cap_effective, kFsetid);
-  EXPECT_FALSE(parsed.same_user_namespace);
 }
 
 TEST(ProcStatusTest, AnEmptyGroupsLineIsNoGroups) {
@@ -85,7 +85,7 @@ TEST(ProcStatusTest, ReadsThisProcess) {
   EXPECT_EQ(read.fsuid, 0u);
   EXPECT_THAT(read.groups, UnorderedElementsAreArray(groups));
   EXPECT_NE(read.cap_effective & kFsetid, 0u);
-  EXPECT_TRUE(read.same_user_namespace);
+  EXPECT_THAT(SharesMyUserNamespace(syscalls::getpid()), IsOkAndHolds(true));
 }
 
 // A filesystem uid other than 0 drops the filesystem capabilities, CAP_FSETID
@@ -96,13 +96,14 @@ TEST(ProcStatusTest, ReadsAThreadThatDroppedCapFsetid) {
   ASSERT_OK_AND_ASSIGN(ProcCredentials read, ReadProcCredentials(thread.tid()));
   EXPECT_EQ(read.fsuid, 1000u);
   EXPECT_EQ(read.cap_effective & kFsetid, 0u);
-  EXPECT_TRUE(read.same_user_namespace);
+  EXPECT_THAT(SharesMyUserNamespace(thread.tid()), IsOkAndHolds(true));
 }
 
 // pid 0, what the kernel sends for a caller outside the reader's pid
 // namespace, has no /proc entry.
 TEST(ProcStatusTest, PidZeroIsUnreadable) {
   EXPECT_THAT(ReadProcCredentials(0), Not(IsOk()));
+  EXPECT_THAT(SharesMyUserNamespace(0), Not(IsOk()));
 }
 
 }  // namespace

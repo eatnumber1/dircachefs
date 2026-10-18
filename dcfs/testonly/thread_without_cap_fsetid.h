@@ -4,13 +4,9 @@
 
 #include <sys/types.h>
 
-#include <string>
-#include <string_view>
 #include <thread>
 
 #include "absl/log/check.h"
-#include "absl/status/statusor.h"
-#include "absl/strings/numbers.h"
 #include "absl/synchronization/notification.h"
 #include "dcfs/syscalls.h"
 
@@ -25,13 +21,7 @@ class ThreadWithoutCapFsetid {
  public:
   ThreadWithoutCapFsetid()
       : thread_([this] {
-          // /proc/thread-self resolves to /proc/<pid>/task/<tid>.
-          absl::StatusOr<std::string> self =
-              syscalls::realpath("/proc/thread-self");
-          CHECK_OK(self.status());
-          const std::string_view tid =
-              std::string_view(*self).substr(self->rfind('/') + 1);
-          CHECK(absl::SimpleAtoi(tid, &tid_)) << *self;
+          tid_ = syscalls::gettid();
           CHECK_OK(syscalls::setfsuid(1000));
           ready_.Notify();
           done_.WaitForNotification();

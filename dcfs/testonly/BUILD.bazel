@@ -32,8 +32,6 @@ cc_library(
     deps = [
         "//dcfs:syscalls",
         "@absl//absl/log:check",
-        "@absl//absl/status:statusor",
-        "@absl//absl/strings",
         "@absl//absl/synchronization",
     ],
 )

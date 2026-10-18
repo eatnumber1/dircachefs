@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include "dcfs/proc_status.h"
 
-#include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
-#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -18,10 +17,9 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/strip.h"
-#include "dcfs/fd.h"
+#include "dcfs/proc_file.h"
 #include "dcfs/ret_check.h"
 #include "dcfs/syscalls.h"
-#include "dcfs/syscalls_backing.h"
 
 namespace dcfs {
 namespace {
@@ -69,28 +67,21 @@ absl::StatusOr<ProcCredentials> ParseProcStatus(std::string_view status) {
 }
 
 absl::StatusOr<ProcCredentials> ReadProcCredentials(pid_t tid) {
-  const std::string dir = absl::StrCat("/proc/", tid, "/task/", tid);
-  // procfs, off the backing filesystem: opened and stat'ed by path
-  // (syscalls.h), and read with syscalls_backing.h's read, the read wrapper
-  // there is (as mounts_below reads /proc/self/mountinfo).
-  ASSIGN_OR_RETURN(FileDescriptor fd,
-                   syscalls::open(absl::StrCat(dir, "/status"), O_RDONLY));
-  std::string status;
-  char buf[4096];
-  while (true) {
-    ASSIGN_OR_RETURN(size_t n, syscalls::read(*fd, buf, sizeof(buf)));
-    if (n == 0) break;
-    status.append(buf, n);
-  }
-  ASSIGN_OR_RETURN(ProcCredentials credentials, ParseProcStatus(status));
-  // A user namespace is its nsfs inode, which stat(2) of the magic link
+  ASSIGN_OR_RETURN(
+      std::string status,
+      ReadProcFile(absl::StrCat("/proc/", tid, "/task/", tid, "/status")));
+  return ParseProcStatus(status);
+}
+
+absl::StatusOr<bool> SharesMyUserNamespace(pid_t tid) {
+  // procfs, off the backing filesystem: stat'ed by path (syscalls.h). A
+  // user namespace is its nsfs inode, which stat(2) of the magic link
   // reaches.
-  ASSIGN_OR_RETURN(struct stat theirs,
-                   syscalls::stat(absl::StrCat(dir, "/ns/user")));
+  ASSIGN_OR_RETURN(
+      struct stat theirs,
+      syscalls::stat(absl::StrCat("/proc/", tid, "/task/", tid, "/ns/user")));
   ASSIGN_OR_RETURN(struct stat mine, syscalls::stat("/proc/self/ns/user"));
-  credentials.same_user_namespace =
-      theirs.st_dev == mine.st_dev && theirs.st_ino == mine.st_ino;
-  return credentials;
+  return theirs.st_dev == mine.st_dev && theirs.st_ino == mine.st_ino;
 }
 
 }  // namespace dcfs

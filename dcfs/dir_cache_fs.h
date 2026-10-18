@@ -526,6 +526,11 @@ class DirCacheFS : private events::Bookkeeping {
   // before its reply.
   absl::Status MakeCacheDurable();
 
+  // A REMOVEXATTR of `name` from `id` succeeded: if it was
+  // security.capability and `id` is open for writing, sets its
+  // BackingFile's capability_removed.
+  void NoteXattrRemoved(InodeId id, std::string_view name);
+
   // Shared phase-1/2/3 wiring for Create/Mkdir/Mknod/Symlink (see
   // dir_cache_fs.cc's "write-through op" rule for what those phases are):
   // checks the parent row exists (NotFound -> ESTALE, the same pattern
@@ -650,11 +655,26 @@ class DirCacheFS : private events::Bookkeeping {
     // not (review L-a); dropped when writable_refs reaches 0.
     std::optional<FileDescriptor> write_fd;
     bool write_fd_appends = false;
+    // Whether the last REMOVEXATTR of this inode while writable_refs > 0
+    // took security.capability away, and no SETATTR has come since
+    // (Removexattr sets it, Setattr consumes it; step 17.2e). A write by
+    // anyone of a file with security.capability makes the kernel remove it
+    // and then send the SETATTR that sets nothing (fs/inode.c,
+    // file_remove_privs, __remove_privs; fs/attr.c, setattr_prepare's
+    // security_inode_killpriv, the REMOVEXATTR, before fuse_do_setattr
+    // sends the SETATTR), with the inode locked from the one to the other,
+    // so no other SETATTR or REMOVEXATTR of it comes in between. That
+    // SETATTR is the only one a writer with CAP_FSETID sends. A
+    // removexattr(2) of the capability itself sets it too, for the next
+    // SETATTR, whichever that is.
+    bool capability_removed = false;
     // The descriptor fallback writes, fallocate and copy_file_range use.
     int WriteFd() const { return write_fd.has_value() ? **write_fd : *fd; }
-    void DropWriteFd() {
+    // writable_refs reached 0: what only writers use goes.
+    void DropWriterState() {
       write_fd.reset();
       write_fd_appends = false;
+      capability_removed = false;
     }
   };
 

@@ -58,6 +58,7 @@
 #include "dcfs/mount_fds.h"
 #include "dcfs/mount_options.h"
 #include "dcfs/mounts_below.h"
+#include "dcfs/proc_file.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/remount.h"
 #include "dcfs/session_loop.h"

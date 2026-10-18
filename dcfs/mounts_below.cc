@@ -28,7 +28,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
-#include "dcfs/fd.h"
+#include "dcfs/proc_file.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
@@ -42,17 +42,6 @@ namespace {
 // the already-canonical paths /proc/self/mountinfo reports.
 absl::StatusOr<std::string> Canonicalize(std::string_view path) {
   return syscalls::realpath(path);
-}
-
-// The whole contents of `fd`, read from its current offset to EOF.
-absl::StatusOr<std::string> ReadAll(int fd) {
-  std::string contents;
-  char buf[65536];
-  while (true) {
-    ASSIGN_OR_RETURN(size_t n, syscalls::read(fd, buf, sizeof(buf)));
-    if (n == 0) return contents;
-    contents.append(buf, n);
-  }
 }
 
 }  // namespace
@@ -111,10 +100,7 @@ std::vector<std::string> MountPointsBelow(std::string_view mountinfo,
 absl::StatusOr<std::vector<std::string>> MountsBelow(
     std::string_view source_path) {
   ASSIGN_OR_RETURN(std::string source, Canonicalize(source_path));
-  ASSIGN_OR_RETURN(
-      FileDescriptor mountinfo,
-      syscalls::openat(AT_FDCWD, "/proc/self/mountinfo", O_RDONLY));
-  ASSIGN_OR_RETURN(std::string contents, ReadAll(*mountinfo));
+  ASSIGN_OR_RETURN(std::string contents, ReadMountinfo());
   return MountPointsBelow(contents, source);
 }
 
@@ -155,10 +141,7 @@ absl::StatusOr<bool> ForcedReadOnly(int fd) {
   ASSIGN_OR_RETURN(struct statx stx,
                    syscalls::statx(fd, "", AT_EMPTY_PATH, STATX_MNT_ID));
   if ((stx.stx_mask & STATX_MNT_ID) == 0) return false;
-  ASSIGN_OR_RETURN(
-      FileDescriptor mountinfo,
-      syscalls::openat(AT_FDCWD, "/proc/self/mountinfo", O_RDONLY));
-  ASSIGN_OR_RETURN(std::string contents, ReadAll(*mountinfo));
+  ASSIGN_OR_RETURN(std::string contents, ReadMountinfo());
   return ForcedReadOnlyIn(contents, stx.stx_mnt_id);
 }
 

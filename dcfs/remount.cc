@@ -1,38 +1,20 @@
 // SPDX-License-Identifier: MIT
 #include "dcfs/remount.h"
 
-#include <fcntl.h>
-
-#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
 
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
-#include "absl/status/statusor.h"
 #include "dcfs/escape.h"
-#include "dcfs/fd.h"
 #include "dcfs/mount_dcfs.h"
+#include "dcfs/proc_file.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 
 namespace dcfs {
-
-absl::StatusOr<std::string> ReadMountinfo() {
-  ASSIGN_OR_RETURN(
-      FileDescriptor mountinfo,
-      syscalls::openat(AT_FDCWD, "/proc/self/mountinfo", O_RDONLY));
-  std::string contents;
-  char buf[65536];
-  while (true) {
-    ASSIGN_OR_RETURN(size_t n, syscalls::read(*mountinfo, buf, sizeof(buf)));
-    if (n == 0) break;
-    contents.append(buf, n);
-  }
-  return contents;
-}
 
 absl::Status RemountDcfs(std::string_view mountpoint, bool read_only) {
   ASSIGN_OR_RETURN(std::string canonical, syscalls::realpath(mountpoint));

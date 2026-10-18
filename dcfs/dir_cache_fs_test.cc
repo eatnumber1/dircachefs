@@ -1245,6 +1245,14 @@ class DirCacheFSTest : public ::testing::Test {
     return Send(FUSE_SETATTR, static_cast<uint64_t>(id), body, uid, gid);
   }
 
+  // A REMOVEXATTR of `name`, from `uid`:`gid`.
+  Reply Removexattr(InodeId id, std::string_view name, uid_t uid = 0,
+                    gid_t gid = 0) {
+    std::string body(name);
+    body.push_back('\0');
+    return Send(FUSE_REMOVEXATTR, static_cast<uint64_t>(id), body, uid, gid);
+  }
+
   // Mounts a tmpfs on `rel` (a directory of the source): a filesystem
   // boundary below the source. Unmounted at TearDown.
   void MountBelow(std::string_view rel) {
@@ -6975,21 +6983,29 @@ TEST_F(DirCacheFSTest, CopyFileRangeByCallerOutsideGroupClearsSetgid) {
   EXPECT_EQ(Release(src, in_fh).error, 0);
 }
 
+// A version 2 file capability (struct vfs_cap_data, little-endian:
+// VFS_CAP_REVISION_2, then CAP_NET_RAW permitted), as setcap writes it.
+constexpr uint8_t kFileCapability[] = {0, 0, 0, 2, 0, 0x20, 0, 0, 0, 0,
+                                       0, 0, 0, 0, 0, 0,    0, 0, 0, 0};
+
 // Steps 17.2b and 17.2e: before a write by a caller without CAP_FSETID of a
 // setuid or setgid file, the kernel asks to remove privileges with a SETATTR
 // that sets nothing (under FUSE_CAP_HANDLE_KILLPRIV_V2 it drops the
 // ATTR_KILL_* bits and sends no mode), the request a chown(path, -1, -1)
 // makes. While the file is open for writing it is the write's: setuid and
-// setgid go as the backing filesystem's own write would take them
-// (setattr_should_drop_suidgid), from a non-owner too, whose chown would be
-// refused: setuid from a caller without CAP_FSETID, setgid with group
-// execute from one without it and without group execute from one outside
-// the group too. Root (with CAP_FSETID) and group members (by their group
-// or a supplementary one) keep setgid without group execute. Root's write
-// sends the same SETATTR for a file carrying security.capability (the
-// kernel removes that first), group-executable or not, and keeps both bits.
-// Root without CAP_FSETID (a pid whose /proc shows none) loses them as
-// anyone else does.
+// setgid go as the backing filesystem's own write by a caller without
+// CAP_FSETID would take them (setattr_should_drop_suidgid), from a non-owner
+// too, whose chown would be refused: setuid, and setgid with group execute
+// or from a caller outside the group. Group members (by their group or a
+// supplementary one) keep setgid without group execute; uid 0 is no
+// exception, whatever /proc shows (the kernel sends this SETATTR to a writer
+// with CAP_FSETID only for a file carrying security.capability).
+//
+// A writer with CAP_FSETID sends it for a file carrying security.capability,
+// right after the REMOVEXATTR that takes the capability away ("capability"
+// cases). Then the bits stay where /proc shows CAP_FSETID for the request's
+// uid: for this process as uid 0, not as uid 1000 (a kernel caller with
+// overridden credentials shows its own fsuid) nor for a thread without it.
 TEST_F(DirCacheFSTest,
        EmptySetattrOfAFileOpenForWritingDropsSetuidAndSetgidAsAWrite) {
   struct Case {
@@ -6999,7 +7015,11 @@ TEST_F(DirCacheFSTest,
     gid_t gid;
     std::vector<gid_t> groups;
     mode_t want;
+    // The request comes from a thread without CAP_FSETID, fsuid 1000.
     bool without_cap_fsetid = false;
+    // The file carries security.capability, which a REMOVEXATTR from the
+    // same caller takes away first.
+    bool capability = false;
   };
   Case cases[] = {
       {.name = "outside",
@@ -7025,13 +7045,13 @@ TEST_F(DirCacheFSTest,
        .uid = 0,
        .gid = 1000,
        .groups = {1000},
-       .want = 02666},
+       .want = 0666},
       {.name = "root_gx",
        .mode = 02676,
        .uid = 0,
        .gid = 1000,
        .groups = {1000},
-       .want = 02676},
+       .want = 0676},
       {.name = "member_gx",
        .mode = 02676,
        .uid = 1000,
@@ -7055,7 +7075,7 @@ TEST_F(DirCacheFSTest,
        .uid = 0,
        .gid = 1000,
        .groups = {1000},
-       .want = 04666},
+       .want = 0666},
       {.name = "outside_suid_sgid",
        .mode = 06666,
        .uid = 1000,
@@ -7079,7 +7099,7 @@ TEST_F(DirCacheFSTest,
        .uid = 0,
        .gid = 1000,
        .groups = {1000},
-       .want = 06676},
+       .want = 0676},
       {.name = "root_without_cap_fsetid",
        .mode = 06666,
        .uid = 0,
@@ -7087,10 +7107,50 @@ TEST_F(DirCacheFSTest,
        .groups = {1000},
        .want = 0666,
        .without_cap_fsetid = true},
+      {.name = "root_capability",
+       .mode = 02666,
+       .uid = 0,
+       .gid = 1000,
+       .groups = {1000},
+       .want = 02666,
+       .capability = true},
+      {.name = "root_suid_capability",
+       .mode = 04666,
+       .uid = 0,
+       .gid = 1000,
+       .groups = {1000},
+       .want = 04666,
+       .capability = true},
+      {.name = "root_suid_sgid_gx_capability",
+       .mode = 06676,
+       .uid = 0,
+       .gid = 1000,
+       .groups = {1000},
+       .want = 06676,
+       .capability = true},
+      {.name = "outside_suid_capability",
+       .mode = 04666,
+       .uid = 1000,
+       .gid = 1000,
+       .groups = {1000},
+       .want = 0666,
+       .capability = true},
+      {.name = "without_cap_fsetid_capability",
+       .mode = 04666,
+       .uid = 1000,
+       .gid = 1000,
+       .groups = {1000},
+       .want = 0666,
+       .without_cap_fsetid = true,
+       .capability = true},
   };
   for (const Case &c : cases) {
     WriteFile(Path(c.name), "data");
     CHECK_OK(syscalls::fchmodat(AT_FDCWD, Path(c.name), c.mode, 0));
+    if (c.capability) {
+      CHECK_OK(syscalls::setxattr(Path(c.name), "security.capability",
+                                  kFileCapability, 0));
+    }
   }
   Start();
   for (const Case &c : cases) {
@@ -7103,6 +7163,9 @@ TEST_F(DirCacheFSTest,
       // Started here, the thread has this thread's groups.
       std::optional<testonly::ThreadWithoutCapFsetid> thread;
       if (c.without_cap_fsetid) request_pid_ = thread.emplace().tid();
+      if (c.capability) {
+        EXPECT_EQ(Removexattr(f, "security.capability", c.uid, c.gid).error, 0);
+      }
       EXPECT_EQ(SetNothing(f, c.uid, c.gid).error, 0);
       request_pid_.reset();
     }
@@ -7146,6 +7209,136 @@ TEST_F(DirCacheFSTest, EmptySetattrOfAFileNotOpenForWritingIsTheCallersChown) {
   EXPECT_EQ(SetNothing(own, 1000, 1000).error, 0);
   ASSERT_OK_AND_ASSIGN(st, syscalls::fstatat(AT_FDCWD, Path("own")));
   EXPECT_EQ(st.st_mode & 07777, 0666u);
+}
+
+// Step 17.2e: only a REMOVEXATTR of security.capability right before it,
+// while the file is open for writing, makes a SETATTR that sets nothing the
+// write's removal of a writer that may hold CAP_FSETID. After a REMOVEXATTR
+// of another name, or one that failed, or one made before the file was
+// open for writing (with no open, or a read-only one), or one another
+// SETATTR came after, or one made by an earlier writable open, root's
+// SETATTR clears setuid as any writer's without CAP_FSETID does.
+TEST_F(DirCacheFSTest, OnlyTheCapabilityRemovalRightBeforeTheSetattrCounts) {
+  const std::string_view names[] = {"another_name", "failed",
+                                    "before_open",  "read_only_open",
+                                    "consumed",     "earlier_open"};
+  for (std::string_view name : names) {
+    WriteFile(Path(name), "data");
+    CHECK_OK(syscalls::fchmodat(AT_FDCWD, Path(name), 04666, 0));
+    if (name == "failed") continue;
+    CHECK_OK(syscalls::setxattr(Path(name), "security.capability",
+                                kFileCapability, 0));
+  }
+  const uint8_t v[] = {'v'};
+  CHECK_OK(syscalls::setxattr(Path("another_name"), "user.x", v, 0));
+  Start();
+  auto id_of = [&](std::string_view name) {
+    absl::StatusOr<InodeId> id = Id(name);
+    CHECK_OK(id.status());
+    return *id;
+  };
+  // Root's SETATTR that sets nothing on `name`, open for writing: setuid
+  // goes.
+  auto expect_cleared = [&](std::string_view name) {
+    SCOPED_TRACE(name);
+    EXPECT_EQ(SetNothing(id_of(name), 0, 0).error, 0);
+    ASSERT_OK_AND_ASSIGN(struct stat st,
+                         syscalls::fstatat(AT_FDCWD, Path(name)));
+    EXPECT_EQ(st.st_mode & 07777, 0666u);
+  };
+
+  const InodeId another_name = id_of("another_name");
+  auto [another_open, another_fh] = Open(another_name, O_WRONLY);
+  ASSERT_EQ(another_open.error, 0);
+  EXPECT_EQ(Removexattr(another_name, "user.x").error, 0);
+  expect_cleared("another_name");
+
+  const InodeId failed = id_of("failed");
+  auto [failed_open, failed_fh] = Open(failed, O_WRONLY);
+  ASSERT_EQ(failed_open.error, 0);
+  EXPECT_EQ(Removexattr(failed, "security.capability").error, -ENODATA);
+  expect_cleared("failed");
+
+  const InodeId before_open = id_of("before_open");
+  EXPECT_EQ(Removexattr(before_open, "security.capability").error, 0);
+  auto [before_open_open, before_open_fh] = Open(before_open, O_WRONLY);
+  ASSERT_EQ(before_open_open.error, 0);
+  expect_cleared("before_open");
+
+  const InodeId read_only = id_of("read_only_open");
+  auto [read_only_open, read_only_fh] = Open(read_only, O_RDONLY);
+  ASSERT_EQ(read_only_open.error, 0);
+  EXPECT_EQ(Removexattr(read_only, "security.capability").error, 0);
+  auto [read_only_w, read_only_w_fh] = Open(read_only, O_WRONLY);
+  ASSERT_EQ(read_only_w.error, 0);
+  expect_cleared("read_only_open");
+
+  const InodeId consumed = id_of("consumed");
+  auto [consumed_open, consumed_fh] = Open(consumed, O_WRONLY);
+  ASSERT_EQ(consumed_open.error, 0);
+  EXPECT_EQ(Removexattr(consumed, "security.capability").error, 0);
+  struct fuse_setattr_in truncate = {};
+  truncate.valid = FATTR_SIZE;
+  truncate.size = 2;
+  std::string body;
+  AppendBytes(body, truncate);
+  EXPECT_EQ(Send(FUSE_SETATTR, static_cast<uint64_t>(consumed), body).error, 0);
+  ASSERT_OK_AND_ASSIGN(struct stat truncated,
+                       syscalls::fstatat(AT_FDCWD, Path("consumed")));
+  EXPECT_EQ(truncated.st_size, 2);
+  EXPECT_EQ(truncated.st_mode & 07777, 04666u);
+  expect_cleared("consumed");
+
+  // A read-only open keeps the inode's shared descriptor (and its
+  // BackingFile) from the first writable open to the second.
+  const InodeId earlier = id_of("earlier_open");
+  auto [earlier_ro, earlier_ro_fh] = Open(earlier, O_RDONLY);
+  ASSERT_EQ(earlier_ro.error, 0);
+  auto [earlier_w, earlier_w_fh] = Open(earlier, O_WRONLY);
+  ASSERT_EQ(earlier_w.error, 0);
+  EXPECT_EQ(Removexattr(earlier, "security.capability").error, 0);
+  EXPECT_EQ(Release(earlier, earlier_w_fh).error, 0);
+  auto [earlier_w2, earlier_w2_fh] = Open(earlier, O_WRONLY);
+  ASSERT_EQ(earlier_w2.error, 0);
+  expect_cleared("earlier_open");
+
+  for (auto [id, fh] :
+       {std::pair{another_name, another_fh}, std::pair{failed, failed_fh},
+        std::pair{before_open, before_open_fh},
+        std::pair{read_only, read_only_fh},
+        std::pair{read_only, read_only_w_fh}, std::pair{consumed, consumed_fh},
+        std::pair{earlier, earlier_ro_fh}, std::pair{earlier, earlier_w2_fh}}) {
+    EXPECT_EQ(Release(id, fh).error, 0);
+  }
+}
+
+// Step 17.2e: the same for a file unlinked while open for writing, which
+// dcfs serves through the descriptor its record holds: root's write of it,
+// carrying security.capability, keeps setuid; root's next SETATTR that
+// sets nothing, with no removal right before it, clears setuid.
+TEST_F(DirCacheFSTest,
+       AnUnlinkedFileKeepsTheBitsOnlyAfterTheCapabilityRemoval) {
+  WriteFile(Path("f"), "data");
+  CHECK_OK(syscalls::fchmodat(AT_FDCWD, Path("f"), 04666, 0));
+  CHECK_OK(
+      syscalls::setxattr(Path("f"), "security.capability", kFileCapability, 0));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_WRONLY);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Unlink(kRootInode, "f").error, 0);
+
+  EXPECT_EQ(Removexattr(f, "security.capability").error, 0);
+  EXPECT_EQ(SetNothing(f, 0, 0).error, 0);
+  auto [kept, kept_attr] = Getattr(f);
+  ASSERT_EQ(kept.error, 0);
+  EXPECT_EQ(kept_attr.mode & 07777, 04666u);
+
+  EXPECT_EQ(SetNothing(f, 0, 0).error, 0);
+  auto [cleared, cleared_attr] = Getattr(f);
+  ASSERT_EQ(cleared.error, 0);
+  EXPECT_EQ(cleared_attr.mode & 07777, 0666u);
+  EXPECT_EQ(Release(f, fh).error, 0);
 }
 
 // Step 17.2e: a truncate arrives as a SETATTR of the size, with
@@ -7216,13 +7409,52 @@ TEST_F(DirCacheFSTest, TruncateRemovesPrivilegesAsTheCaller) {
   EXPECT_EQ(st.st_mode & 07777, 02666u);
 }
 
+// Step 17.2e: the clear after a truncate with FATTR_KILL_SUIDGID is uid 0's
+// alone. Any other caller's truncate, run as that caller, has cleared what
+// its write would already, so the flag costs it nothing over the same
+// truncate without it: no reopen and fchmod, and no access ACL to read back
+// (XattrsChangedBySetattr).
+TEST_F(DirCacheFSTest, TruncateKillCostsANonRootCallerNothingMore) {
+  for (std::string_view name : {"kill", "plain"}) {
+    WriteFile(Path(name), "data");
+    CHECK_OK(syscalls::fchmodat(AT_FDCWD, Path(name), 06666, 0));
+  }
+  auto restore_groups = WithThreadGroups({1000});
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId flagged, Id("kill"));
+  ASSERT_OK_AND_ASSIGN(InodeId plain, Id("plain"));
+  // The costs of a truncate of `f` from 1000:1000 whose valid has `flags`.
+  auto costs_of_truncate = [&](InodeId f, uint32_t flags) {
+    struct fuse_setattr_in in = {};
+    in.valid = FATTR_SIZE | flags;
+    in.size = 2;
+    std::string body;
+    AppendBytes(body, in);
+    counter_.Reset();
+    EXPECT_EQ(
+        Send(FUSE_SETATTR, static_cast<uint64_t>(f), body, 1000, 1000).error,
+        0);
+    return counter_.counts();
+  };
+  const testonly::CostCounter::Counts with =
+      costs_of_truncate(flagged, FATTR_KILL_SUIDGID);
+  const testonly::CostCounter::Counts without = costs_of_truncate(plain, 0);
+  EXPECT_EQ(with.backing_calls, without.backing_calls);
+  EXPECT_EQ(with.steps, without.steps);
+  for (std::string_view name : {"kill", "plain"}) {
+    ASSERT_OK_AND_ASSIGN(struct stat st,
+                         syscalls::fstatat(AT_FDCWD, Path(name)));
+    EXPECT_EQ(st.st_mode & 07777, 0666u) << name;
+  }
+}
+
 // Step 17.2e: a write that does not go through passthrough carries
-// FUSE_WRITE_KILL_SUIDGID from a caller without CAP_FSETID (the pinned
-// libfuse 3.18.2 does not hand it over). The write, as the caller, removes
-// privileges by the current rule, as the flag asks: a caller outside the
-// group loses both bits, a group member setuid alone, root (whose write
-// carries no flag) neither.
-TEST_F(DirCacheFSTest, WriteKillSuidgidIsTheCallersWrite) {
+// FUSE_WRITE_KILL_SUIDGID from a caller without CAP_FSETID, but the pinned
+// libfuse 3.18.2 does not hand the flag over (3.18.3 does), so this pins
+// what dcfs does without it: the write, as the caller, removes privileges
+// by the current rule: a caller outside the group loses both bits, a group
+// member setuid alone, root neither.
+TEST_F(DirCacheFSTest, FallbackWriteRemovesPrivilegesAsTheCaller) {
   struct Case {
     std::string name;
     uid_t uid;

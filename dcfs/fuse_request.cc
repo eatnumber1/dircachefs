@@ -18,6 +18,8 @@
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
+#include "absl/status/statusor.h"
 #include "absl/time/time.h"
 #include "dcfs/credentials.h"
 #include "dcfs/proc_status.h"
@@ -187,21 +189,46 @@ absl::StatusOr<Credentials> FuseRequest::Caller() const {
   if (!proc.ok()) {
     // Rate limited: one per request while it lasts.
     LOG_EVERY_N_SEC(WARNING, 60)
-        << "pid " << ctx->pid << ": credentials unreadable (" << proc.status()
-        << "); using no supplementary groups and no CAP_FSETID";
+        << "pid " << ctx->pid << ": supplementary groups unreadable ("
+        << proc.status() << "); using none";
     return caller;
   }
   caller.groups = std::move(proc->groups);
-  // /proc shows the task's objective credentials, and its capabilities in
-  // its own user namespace. They are the caller's only where they are the
-  // ones the request came with (a kernel caller acting with overridden
-  // credentials, nfsd for a client, shows its own fsuid there, not the
-  // request's) and count only in dcfs's user namespace, whose capabilities
-  // cover every inode (a namespaced root's CAP_FSETID covers only inodes
-  // whose owner and group its namespace maps: capable_wrt_inode_uidgid).
-  caller.cap_fsetid = proc->same_user_namespace && proc->fsuid == ctx->uid &&
-                      (proc->cap_effective & (uint64_t{1} << CAP_FSETID)) != 0;
   return caller;
+}
+
+namespace {
+
+// Whether /proc shows CAP_FSETID for the thread that sent the request
+// `ctx` describes, as that request's uid. /proc shows the task's objective
+// credentials, and its capabilities in its own user namespace. They are
+// the caller's only where they are the ones the request came with (a
+// kernel caller acting with overridden credentials, nfsd for a client,
+// shows its own fsuid there, not the request's), and count only in dcfs's
+// user namespace, the init user namespace as dcfs runs (as the host's
+// root), where setattr_should_drop_suidgid's capable(CAP_FSETID) asks for
+// them.
+absl::StatusOr<bool> CapFsetidShown(const fuse_ctx &ctx) {
+  ASSIGN_OR_RETURN(ProcCredentials proc, ReadProcCredentials(ctx.pid));
+  if (proc.fsuid != ctx.uid) return false;
+  if ((proc.cap_effective & (uint64_t{1} << CAP_FSETID)) == 0) return false;
+  return SharesMyUserNamespace(ctx.pid);
+}
+
+}  // namespace
+
+absl::StatusOr<bool> FuseRequest::CallerHasCapFsetid() const {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  // An answer of the kernel's own (fuse_ctx has no capabilities) is what
+  // docs/plan/notes/kernel-patches.md row 4 asks for.
+  const fuse_ctx *ctx = fuse_req_ctx(*req_);
+  absl::StatusOr<bool> shown = CapFsetidShown(*ctx);
+  if (shown.ok()) return *shown;
+  // Rate limited: one per request while it lasts.
+  LOG_EVERY_N_SEC(WARNING, 60)
+      << "pid " << ctx->pid << ": CAP_FSETID unverifiable (" << shown.status()
+      << "); taken as absent";
+  return false;
 }
 
 absl::Status FuseRequest::ReplyErrno(int errnum) {

@@ -542,6 +542,8 @@ TEST_F(SyscallsTest, RlimitFlockClockSleepAndPid) {
   const struct timespec not_a_time = {.tv_sec = 0, .tv_nsec = 2'000'000'000};
   EXPECT_EQ(StatusToErrno(syscalls::nanosleep(not_a_time)), EINVAL);
   EXPECT_GT(syscalls::getpid(), 0);
+  // The test's main thread is its thread group's leader.
+  EXPECT_EQ(syscalls::gettid(), syscalls::getpid());
 }
 
 TEST_F(SyscallsTest, MountAndUmountReportTheirErrors) {

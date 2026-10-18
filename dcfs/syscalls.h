@@ -70,9 +70,10 @@ absl::StatusOr<FileDescriptor> mkstemp(std::string &pattern);
 void sync();
 
 // nanosleep(2): sleeps for `duration` (EINTR is an error status, as for the
-// others), and getpid(2) (never fails).
+// others), and getpid(2) and gettid(2) (never fail).
 absl::Status nanosleep(const struct timespec &duration);
 pid_t getpid();
+pid_t gettid();
 
 // fcntl(2) with an integer argument (or none). Commands that return a new
 // descriptor (F_DUPFD) are for `dup` below, not this.

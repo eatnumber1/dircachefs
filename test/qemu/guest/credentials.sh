@@ -435,12 +435,22 @@ expect_stat sgid-group-member-keeps '%a' pub/sgid_ops/f_grp 2666
 #   passthrough choice of its first open, and setgid on bob's write).
 # - A truncate, or an O_TRUNC open ("otrunc"): a SETATTR of the size, with
 #   FATTR_KILL_SUIDGID from a caller without CAP_FSETID.
-# - Root (CAP_FSETID) clears nothing; "capwrite" sets security.capability
-#   first, so the kernel removes it and sends a SETATTR that sets nothing.
-# - Root without CAP_FSETID ("nofsetid"), and the root of a user namespace
-#   that maps neither the file's group nor its CAP_FSETID over it
-#   ("userns"), clear what bob would: dcfs trusts CAP_FSETID only where
-#   /proc shows it in its own user namespace (step 17.2e).
+# - Root (CAP_FSETID) clears nothing. Root without CAP_FSETID ("nofsetid"),
+#   and the root of a user namespace mapping only uid and gid 0 ("userns",
+#   without CAP_FSETID in the init user namespace, which
+#   setattr_should_drop_suidgid's capable() asks for), clear what bob
+#   would: the kernel sends the SETATTR for a write only for a writer
+#   without CAP_FSETID, or for a file with security.capability.
+# - "capwrite" sets security.capability first, so the kernel removes it
+#   (a REMOVEXATTR) and sends that SETATTR for any writer: then dcfs asks
+#   /proc whether the writer holds CAP_FSETID, in dcfs's user namespace and
+#   for the request's uid (step 17.2e).
+# - "chown" is chown(path, -1, -1); "chownheld" the same while root holds
+#   the file open for writing, when it reaches dcfs as the SETATTR before a
+#   write does.
+# - WANT "NATIVE|MOUNT" pins a known divergence: the native filesystem must
+#   answer NATIVE and the mount and the backing file MOUNT
+#   (docs/design.md, "Caller credentials", says why each exists).
 #
 # Each case runs twice: on files made warm, and on files made at the same
 # time whose operation runs after the caches are dropped.
@@ -456,8 +466,8 @@ chmod 0666 "$NAT2/src" "$MNT/$P2/src"
 CAPHEX=0000000200200000000000000000000000000000
 
 root() { "$@"; }
-# Root without CAP_FSETID (outside group 2000): clears what bob would.
-nofsetid() { "$TESTUTIL" nofsetid -- "$@"; }
+# Root without CAP_FSETID (4; outside group 2000): clears what bob would.
+nofsetid() { "$TESTUTIL" dropcap 4 -- "$@"; }
 # Root of a user namespace mapping only uid and gid 0: its CAP_FSETID does
 # not cover a file of group 2000, so it clears what bob would.
 userns() { "$TESTUTIL" userns -- "$@"; }
@@ -485,6 +495,7 @@ sgid_op() {
       3>>"$dir/$file"
     ;;
   chown) $who "$TESTUTIL" lchown "$dir/$file" -1 -1 ;;
+  chownheld) { $who "$TESTUTIL" lchown "$dir/$file" -1 -1; } 3>>"$dir/$file" ;;
   esac </dev/null >/dev/null 2>&1
   if [ $? -eq 0 ]; then echo 0; else echo 1; fi
 }
@@ -499,12 +510,14 @@ sgid_make() {
 }
 
 # sgid_check TEST FILE USER OP WANT: OP on FILE as USER, natively and through
-# the mount; both, and the backing file, must end as WANT.
+# the mount; both, and the backing file, must end as WANT (or as its NATIVE
+# and MOUNT halves).
 sgid_check() {
   nat="$(sgid_op "$3" "$4" "$NAT2" "$2"):$(stat -c '%a' "$NAT2/$2")"
   mnt="$(sgid_op "$3" "$4" "$MNT/$P2" "$2"):$(stat -c '%a' "$MNT/$P2/$2")"
   src="${mnt%%:*}:$(stat -c '%a' "$SRC/$P2/$2")"
-  if [ "$nat" = "$5" ] && [ "$mnt" = "$5" ] && [ "$src" = "$5" ]; then
+  if [ "$nat" = "${5%%|*}" ] && [ "$mnt" = "${5##*|}" ] &&
+    [ "$src" = "${5##*|}" ]; then
     pass "$1"
   else
     fail "$1" "want $5, native $nat, mount $mnt, src $src"
@@ -556,6 +569,18 @@ sgid-nofsetid-write 0:2000 2666 nofsetid write 0:666
 sgid-nofsetid-otrunc 0:2000 2666 nofsetid otrunc 0:666
 setuid-userns-write 0:2000 4666 userns write 0:666
 suid-userns-write 0:2000 6666 userns write 0:666
+setuid-root-capwrite 0:2000 4666 root capwrite 0:4666
+setuid-other-capwrite 0:2000 4666 bob capwrite 0:666
+setuid-nofsetid-capwrite 0:2000 4666 nofsetid capwrite 0:666
+setuid-userns-capwrite 0:2000 4666 userns capwrite 0:666
+setuid-root-chownheld 0:2000 4666 root chownheld 0:666
+sgid-gx-root-chownheld 0:2000 2776 root chownheld 0:776
+sgid-root-chownheld 0:2000 2666 root chownheld 0:2666|0:666
+sgid-other-chownheld 0:2000 2666 bob chownheld 1:2666|0:666
+setuid-nofsetid-chown 0:2000 4666 nofsetid chown 0:666
+sgid-root-chown 0:2000 2666 root chown 0:2666
+sgid-gx-nofsetid-chown 0:2000 2776 nofsetid chown 0:776
+sgid-nofsetid-chown 0:2000 2666 nofsetid chown 0:666|0:2666
 "
 
 while read -r name owner mode who op want; do
@@ -577,12 +602,13 @@ drop_caches_quiesced
 while read -r name owner mode who op want; do
   [ -n "$name" ] || continue
   sgid_check "sgid2b-$name-cold-cache" "$name.cold" "$who" "$op" "$want"
-  nat=$(stat -c '%a' "$NAT2/$name")
+  # The warm case's file, its cache dropped: its mode as checked above.
+  want_mnt=${want##*|}
   mnt=$(stat -c '%a' "$MNT/$P2/$name")
-  if [ "$mnt" = "$nat" ]; then
+  if [ "$mnt" = "${want_mnt#*:}" ]; then
     pass "sgid2b-$name-restat"
   else
-    fail "sgid2b-$name-restat" "native $nat, mount $mnt"
+    fail "sgid2b-$name-restat" "want ${want_mnt#*:}, mount $mnt"
   fi
 done <<EOF
 $SGID2B_CASES
@@ -655,5 +681,24 @@ if [ "$status_after" = "$status_before" ]; then
 else
   fail daemon-credentials-restored "before: $status_before; after: $status_after"
 fi
+
+# --- without CAP_SYS_PTRACE (step 17.2e) ----------------------------------
+#
+# The daemon again, without CAP_SYS_PTRACE (19), as in Docker's default
+# capability set. A caller's groups come from its /proc status file, which
+# anyone may read, so alice still reaches grp through group 2000. Its
+# /proc/<pid>/ns links need ptrace access (proc_ns_get_link), which a
+# reader without CAP_SYS_PTRACE lacks for a process holding a capability
+# the reader does not (cap_ptrace_access_check): root's write of a setuid
+# file with security.capability then clears setuid where the native
+# filesystem keeps it, the safe side.
+
+COST_EXEC="${COST_EXEC:-} $TESTUTIL dropcap 19 --"
+restart_daemon noptrace "$LOG"
+expect_ok noptrace-group-write-as-alice alice mkdir "$MNT/grp/noptrace"
+expect_stat noptrace-group-write-owner '%u:%g' grp/noptrace 1000:1000
+sgid_make noptrace-capwrite 0:2000 4666
+sgid_check sgid2b-setuid-root-capwrite-noptrace noptrace-capwrite root \
+  capwrite "0:4666|0:666"
 
 exit "$FAILED"

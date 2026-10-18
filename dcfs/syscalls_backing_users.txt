@@ -6,16 +6,16 @@
 //dcfs:device_id
 //dcfs:file_handle
 
-# startup: main opens --source and the cache database (openat, fstat, fstatat, mkdirat, fchmod); mounts_below reads /proc/self/mountinfo (openat, read: procfs, no backing disk)
+# startup: main opens --source and the cache database (openat, fstat, fstatat, mkdirat, fchmod); mounts_below statx's the source for its mount id
 //dcfs:main
 //dcfs:main_static
 //dcfs:main_static_traced
 //dcfs:mounts_below
 
-# a FUSE caller's credentials (step 17.2e): proc_status reads /proc/<pid>/task/<tid>/status (read: procfs, no backing disk; opened by path through syscalls.h)
-//dcfs:proc_status
+# procfs files read whole (read: procfs, no backing disk; opened by path through syscalls.h): /proc/self/mountinfo (mounts_below, remount, umount_helper, main), a FUSE caller's /proc/<pid>/task/<tid>/status (proc_status, step 17.2e)
+//dcfs:proc_file
 
-# the mount.dcfs wrapper (step 15.2): remount reads mountinfo, the startup channel reads the daemon's report, fsck (step 15.5) opens the cache database to lock and delete it (umount_helper's lock file in /run/dcfs and fusectl directory use syscalls.h's by-path calls, which no backing door guards: 25.9b)
+# the mount.dcfs wrapper (step 15.2): remount mounts, the startup channel reads the daemon's report, fsck (step 15.5) opens the cache database to lock and delete it (umount_helper's lock file in /run/dcfs and fusectl directory use syscalls.h's by-path calls, which no backing door guards: 25.9b)
 //dcfs:remount
 //dcfs:startup_channel
 //dcfs:fsck

@@ -143,6 +143,7 @@ sleep
 nftw
 mkdtemp
 getpid
+gettid
 fopen
 freopen
 pause

@@ -2392,14 +2392,13 @@ absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
   return FchmodOPath(opath_fd, mode);
 }
 
-// The setuid and setgid bits that a write by `caller` clears from a regular
-// file of mode `mode` whose group is `gid` (setattr_should_drop_suidgid,
-// which decides by capability, never by uid): none for a caller with
-// CAP_FSETID; for anyone else setuid, and setgid if the file is
+// The setuid and setgid bits that a write by `caller`, who lacks
+// CAP_FSETID, clears from a regular file of mode `mode` whose group is
+// `gid` (fs/attr.c, setattr_should_drop_suidgid, which decides by
+// capability, never by uid): setuid, and setgid if the file is
 // group-executable or the caller is outside its group.
 mode_t SuidgidClearedByWrite(const Credentials &caller, mode_t mode,
                              gid_t gid) {
-  if (caller.cap_fsetid) return 0;
   const bool in_group =
       caller.gid == gid || absl::c_linear_search(caller.groups, gid);
   const bool clears_setgid = (mode & S_IXGRP) != 0 || !in_group;
@@ -2474,9 +2473,9 @@ absl::Status SetAttrFd(const Credentials &caller, int fd,
   if (to_set & FUSE_SET_ATTR_MODE) {
     RETURN_IF_ERROR(ApplyMode(fd, type, attr.st_mode));
   } else if ((to_set & FUSE_SET_ATTR_KILL_PRIV) != 0) {
-    // Setuid and setgid cleared where a write by the caller clears them,
-    // from the mode read above: a truncate before this, as the caller,
-    // clears no more than that.
+    // Setuid and setgid cleared where a write by the caller, without
+    // CAP_FSETID, clears them, from the mode read above: a truncate before
+    // this, as the caller, clears no more than that.
     const mode_t mode = stx.stx_mode & 07777;
     RETURN_IF_ERROR(ApplyMode(
         fd, type, mode & ~SuidgidClearedByWrite(caller, mode, stx.stx_gid)));

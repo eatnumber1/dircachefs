@@ -22,7 +22,7 @@
 #include "dcfs/escape.h"
 #include "dcfs/fd.h"
 #include "dcfs/mount_dcfs.h"
-#include "dcfs/remount.h"
+#include "dcfs/proc_file.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_process.h"

@@ -617,6 +617,15 @@ void DirCacheFS::EndWriting(InodeId id) {
   open_for_write_.erase(id);
 }
 
+void DirCacheFS::NoteXattrRemoved(InodeId id, std::string_view name) {
+  auto it = backing_files_.find(id);
+  if (name != kCapabilityXattr || it == backing_files_.end() ||
+      it->second.writable_refs == 0) {
+    return;
+  }
+  it->second.capability_removed = true;
+}
+
 void DirCacheFS::ResolveSideEffectXattrs(
     InodeId id, std::span<const std::string_view> names, std::optional<int> fd,
     std::string_view op) {
@@ -797,23 +806,44 @@ absl::Status DirCacheFS::Setattr(FuseRequest &req, fuse_ino_t ino,
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "setattr");
   ASSIGN_OR_RETURN(Credentials caller, req.Caller());
+  // Whether the REMOVEXATTR of security.capability came right before this
+  // SETATTR (BackingFile::capability_removed): consumed by this SETATTR,
+  // whatever it sets.
+  auto backing_it = backing_files_.find(id);
+  const bool capability_removed =
+      backing_it != backing_files_.end() &&
+      std::exchange(backing_it->second.capability_removed, false);
   // A SETATTR that sets nothing is a chown(path, -1, -1) or the kernel's
   // privilege removal before a write (fuse_setattr sends no mode under
   // FUSE_CAP_HANDLE_KILLPRIV_V2), which always comes while the file is
-  // open for writing; then it is taken for the second, whose setuid and
-  // setgid go as a write by the caller would take them, not by a chown,
-  // which a non-owner may not make (docs/design.md, "Caller credentials").
-  if (backing::SetsNothing(to_set) && open_for_write_.contains(id)) {
-    to_set |= FUSE_SET_ATTR_KILL_PRIV;
-  }
+  // open for writing; then it is taken for the second (docs/design.md,
+  // "Caller credentials").
+  const bool write_removal =
+      backing::SetsNothing(to_set) && open_for_write_.contains(id);
+  // The kernel sends a write's removal (fs/inode.c,
+  // dentry_needs_remove_privs) for a writer without CAP_FSETID in the init
+  // user namespace, of a setuid or setgid file (setattr_should_drop_suidgid),
+  // or for anyone's write of a file with security.capability, right after
+  // taking that away. Only then may the writer hold CAP_FSETID, and keep
+  // both bits: nothing is left to change, and the SETATTR is answered as a
+  // GETATTR.
+  const bool writer_may_keep_bits = write_removal && capability_removed;
+  ASSIGN_OR_RETURN(const bool writer_keeps_bits,
+                   writer_may_keep_bits ? req.CallerHasCapFsetid()
+                                        : absl::StatusOr<bool>(false));
+  if (writer_keeps_bits) return Getattr(req, ino, fi);
+  // Any other write's removal is a writer's without CAP_FSETID: setuid and
+  // setgid go as its write would take them, not by a chown, which a
+  // non-owner may not make.
+  if (write_removal) to_set |= FUSE_SET_ATTR_KILL_PRIV;
   // A truncate with FATTR_KILL_SUIDGID (libfuse's FUSE_SET_ATTR_KILL_SUID):
-  // the kernel found the caller without CAP_FSETID, whatever /proc says.
-  // As uid 0 the truncate, run as the caller, keeps the bits all the same
-  // (AsCaller keeps CAP_FSETID for fsuid 0), so they go as for that
-  // caller's write; any other uid's truncate clears them itself.
+  // the kernel found the caller without CAP_FSETID. As uid 0 the truncate,
+  // run as the caller, keeps the bits all the same (AsCaller keeps
+  // CAP_FSETID for fsuid 0), so they go as for that caller's write; any
+  // other uid's truncate clears them itself, and the check of the uid
+  // spares it the clear's reopen and fchmod.
   constexpr int kTruncateKill = FUSE_SET_ATTR_SIZE | FUSE_SET_ATTR_KILL_SUID;
   if ((to_set & kTruncateKill) == kTruncateKill && caller.uid == 0) {
-    caller.cap_fsetid = false;
     to_set |= FUSE_SET_ATTR_KILL_PRIV;
   }
   if (auto it = removed_.find(id); it != removed_.end()) {
@@ -1872,7 +1902,7 @@ absl::Status DirCacheFS::OpenInode(FuseRequest &req, InodeId id,
       // will ever come for it).
       if (--backing_it->second.writable_refs == 0) {
         EndWriting(id);
-        backing_it->second.DropWriteFd();
+        backing_it->second.DropWriterState();
       }
       if (--backing_it->second.refs == 0) {
         if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
@@ -2098,7 +2128,7 @@ absl::Status DirCacheFS::Release(FuseRequest &req, fuse_ino_t ino,
     }
     // No writer is left to write through it (review L-a); a readers'
     // shared fd stays.
-    backing_file.DropWriteFd();
+    backing_file.DropWriterState();
   }
   // Step 23.8: a read-only open's reads went through passthrough; read back
   // the access time they gave (a held fill), whether other opens remain or
@@ -2722,6 +2752,7 @@ absl::Status DirCacheFS::Removexattr(FuseRequest &req, fuse_ino_t ino,
     ASSIGN_OR_RETURN(Credentials caller, req.Caller());
     BackingCall("RemoveXattrFd");
     RETURN_IF_ERROR(backing::RemoveXattrFd(caller, *it->second.fd, name));
+    NoteXattrRemoved(id, name);
     return req.ReplyErrno(0);
   }
   // Missing row -> ESTALE; see RequireAttr().
@@ -2754,6 +2785,7 @@ absl::Status DirCacheFS::Removexattr(FuseRequest &req, fuse_ino_t ino,
     NoteBestEffort("refresh after a failed removexattr", RefreshAttrsOf(id));
     return remove_status;
   }
+  NoteXattrRemoved(id, name);
 
   // Phase 3 (unless another mutation of `id` overlapped this one: then
   // `name` stays unknown). Failures are logged, never replied

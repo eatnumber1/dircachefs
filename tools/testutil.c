@@ -164,13 +164,14 @@
  *       this needs none, and sets the exact group list a test wants. Used
  *       by credentials.sh to act on the dcfs mount as an unprivileged user.
  *       On failure prints "ERR <errno-name>" and exits 127 (execvp) or 1.
- *   testutil nofsetid -- <cmd> [args...]
- *       Drops CAP_FSETID from the capability bounding set
- *       (prctl(PR_CAPBSET_DROP)) and execvp(3)s <cmd>, which, run as root,
- *       then has every capability but CAP_FSETID: a uid 0 caller without
- *       it, whose writes and truncates clear setuid and setgid. Used by
- *       credentials.sh (step 17.2e). On failure prints "ERR <errno-name>"
- *       and exits 127 (execvp) or 1.
+ *   testutil dropcap <capability number> -- <cmd> [args...]
+ *       Drops the capability from the bounding set (prctl(PR_CAPBSET_DROP))
+ *       and execvp(3)s <cmd>, which, run as root, then has every capability
+ *       but that one. Used by credentials.sh (step 17.2e): CAP_FSETID (4)
+ *       makes a uid 0 caller whose writes and truncates clear setuid and
+ *       setgid; CAP_SYS_PTRACE (19) a daemon that cannot follow another
+ *       user's /proc/<pid>/ns links (Docker's default set has none). On
+ *       failure prints "ERR <errno-name>" and exits 127 (execvp) or 1.
  *   testutil userns -- <cmd> [args...]
  *       Moves into a new user namespace (unshare(CLONE_NEWUSER)) that maps
  *       uid 0 and gid 0 to themselves and nothing else, and execvp(3)s
@@ -321,7 +322,6 @@
 #include <ftw.h>
 #include <grp.h>
 #include <libgen.h>
-#include <linux/capability.h>
 #include <linux/fiemap.h>
 #include <linux/fs.h>
 #include <linux/perf_event.h>
@@ -1119,16 +1119,16 @@ static int cmd_runas(char *argv[]) {
   return 127;
 }
 
-static int cmd_nofsetid(char *argv[]) {
-  if (strcmp(argv[2], "--") != 0) {
-    fprintf(stderr, "testutil nofsetid: expected -- before the command\n");
+static int cmd_dropcap(char *argv[]) {
+  if (strcmp(argv[3], "--") != 0) {
+    fprintf(stderr, "testutil dropcap: expected -- before the command\n");
     return 1;
   }
-  if (prctl(PR_CAPBSET_DROP, CAP_FSETID, 0, 0, 0) == -1) {
+  if (prctl(PR_CAPBSET_DROP, strtoul(argv[2], NULL, 10), 0, 0, 0) == -1) {
     print_err(errno);
     return 1;
   }
-  execvp(argv[3], &argv[3]);
+  execvp(argv[4], &argv[4]);
   print_err(errno);
   return 127;
 }
@@ -2868,7 +2868,7 @@ int main(int argc, char *argv[]) {
   if (argc == 4 && strcmp(argv[1], "sqlite-lock") == 0)
     return cmd_sqlite_lock(argv[2], argv[3]);
   if (argc >= 7 && strcmp(argv[1], "runas") == 0) return cmd_runas(argv);
-  if (argc >= 4 && strcmp(argv[1], "nofsetid") == 0) return cmd_nofsetid(argv);
+  if (argc >= 5 && strcmp(argv[1], "dropcap") == 0) return cmd_dropcap(argv);
   if (argc >= 4 && strcmp(argv[1], "userns") == 0) return cmd_userns(argv);
   if (argc == 3 && strcmp(argv[1], "opath-hold") == 0)
     return cmd_opath_hold(argv[2]);
@@ -2960,7 +2960,7 @@ int main(int argc, char *argv[]) {
       "       testutil sql <db-path> <query>\n"
       "       testutil sqlite-lock <db-path> <hold-seconds>\n"
       "       testutil runas <uid> <gid> <gid,...|-> -- <cmd> [args...]\n"
-      "       testutil nofsetid -- <cmd> [args...]\n"
+      "       testutil dropcap <capability number> -- <cmd> [args...]\n"
       "       testutil userns -- <cmd> [args...]\n"
       "       testutil readdir-ino <dir> [small-first]\n"
       "       testutil mkfiles <dir> <prefix> <suffix> <count>\n"

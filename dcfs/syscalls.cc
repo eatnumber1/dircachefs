@@ -128,6 +128,8 @@ absl::Status nanosleep(const struct timespec &duration) {
 
 pid_t getpid() { return ::getpid(); }
 
+pid_t gettid() { return ::gettid(); }
+
 absl::StatusOr<int> fcntl(int fd, int cmd, int arg) {
   int rc = ::fcntl(fd, cmd, arg);
   if (rc == -1) return ErrnoToStatus(errno, absl::StrCat("fcntl(", fd, ")"));

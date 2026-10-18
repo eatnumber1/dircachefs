@@ -88,6 +88,10 @@ struct FakeChannel {
   // If set, FakeGetattr stores FuseRequest::Caller()'s result in `caller`.
   bool read_caller = false;
   std::optional<absl::StatusOr<Credentials>> caller;
+  // If set, FakeGetattr stores FuseRequest::CallerHasCapFsetid()'s result
+  // in `cap_fsetid`.
+  bool read_cap_fsetid = false;
+  std::optional<absl::StatusOr<bool>> cap_fsetid;
 };
 
 // Never actually called: this test drives the session entirely via
@@ -121,6 +125,7 @@ void FakeGetattr(fuse_req_t req, fuse_ino_t, struct fuse_file_info *) {
   auto *channel = static_cast<FakeChannel *>(fuse_req_userdata(req));
   FuseRequest fr(req);
   if (channel->read_caller) channel->caller = fr.Caller();
+  if (channel->read_cap_fsetid) channel->cap_fsetid = fr.CallerHasCapFsetid();
   if (channel->reply_attr_then_fail) {
     struct stat st = {};
     absl::Status sent = fr.ReplyAttr(st, absl::Seconds(1));
@@ -261,13 +266,6 @@ class WarningCapture : public absl::LogSink {
   std::vector<std::string> lines;
 };
 
-// Matches a FakeChannel::caller that read Credentials whose cap_fsetid is
-// `want`.
-auto HasCapFsetid(bool want) {
-  return testing::Optional(absl_testing::IsOkAndHolds(
-      testing::Field(&Credentials::cap_fsetid, want)));
-}
-
 // Step 26.14d: Caller() reads the supplementary groups of the request's pid
 // (libfuse's fuse_req_getgroups: /proc/<pid>/task/<pid>/status), takes the
 // ids from the header, and logs nothing when it can read them.
@@ -317,9 +315,8 @@ TEST(FuseRequestChannelTest, CallerOfPidZeroHasNoGroupsAndIsWarnedAbout) {
   EXPECT_EQ((*channel.caller)->uid, 1000u);
   EXPECT_EQ((*channel.caller)->gid, 2000u);
   EXPECT_THAT((*channel.caller)->groups, testing::IsEmpty());
-  EXPECT_THAT(channel.caller, HasCapFsetid(false));
   EXPECT_THAT(capture.lines, testing::ElementsAre(testing::HasSubstr(
-                                 "pid 0: credentials unreadable (NOT_FOUND")))
+                                 "pid 0: supplementary groups unreadable")))
       << absl::StrJoin(capture.lines, "\n");
 }
 
@@ -330,12 +327,14 @@ TEST(FuseRequestChannelTest, CallerOfPidZeroHasNoGroupsAndIsWarnedAbout) {
 TEST(FuseRequestChannelTest, CallerHasCapFsetidWhereProcShowsItForItsUid) {
   for (uid_t uid : {0u, 1000u}) {
     FakeChannel channel;
-    channel.read_caller = true;
+    channel.read_cap_fsetid = true;
     channel.request_pid = static_cast<uint32_t>(syscalls::getpid());
     channel.request_uid = uid;
     channel.request_gid = 0;
     RunGetattr(channel);
-    EXPECT_THAT(channel.caller, HasCapFsetid(uid == 0)) << uid;
+    EXPECT_THAT(channel.cap_fsetid,
+                testing::Optional(absl_testing::IsOkAndHolds(uid == 0)))
+        << uid;
   }
 }
 
@@ -343,12 +342,31 @@ TEST(FuseRequestChannelTest, CallerHasCapFsetidWhereProcShowsItForItsUid) {
 TEST(FuseRequestChannelTest, CallerWithoutCapFsetidInProcHasNone) {
   testonly::ThreadWithoutCapFsetid thread;
   FakeChannel channel;
-  channel.read_caller = true;
+  channel.read_cap_fsetid = true;
   channel.request_pid = static_cast<uint32_t>(thread.tid());
   channel.request_uid = 1000;
   channel.request_gid = 0;
   RunGetattr(channel);
-  EXPECT_THAT(channel.caller, HasCapFsetid(false));
+  EXPECT_THAT(channel.cap_fsetid,
+              testing::Optional(absl_testing::IsOkAndHolds(false)));
+}
+
+// pid 0 has no /proc entry to vouch for CAP_FSETID: none, and the
+// administrator is told (once per 60 s for the process, so no other test in
+// this binary may ask it of a pid-0 request).
+TEST(FuseRequestChannelTest, CapFsetidOfPidZeroIsNoneAndIsWarnedAbout) {
+  FakeChannel channel;
+  channel.read_cap_fsetid = true;
+  channel.request_pid = 0;
+  channel.request_uid = 0;
+  channel.request_gid = 0;
+  WarningCapture capture;
+  RunGetattr(channel);
+  EXPECT_THAT(channel.cap_fsetid,
+              testing::Optional(absl_testing::IsOkAndHolds(false)));
+  EXPECT_THAT(capture.lines, testing::ElementsAre(testing::HasSubstr(
+                                 "pid 0: CAP_FSETID unverifiable (NOT_FOUND")))
+      << absl::StrJoin(capture.lines, "\n");
 }
 
 // docs/style.md 1.7: the handler that replies is the one place that logs a

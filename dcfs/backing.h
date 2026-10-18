@@ -634,10 +634,11 @@ absl::Status FinishRun(Context &ctx);
 // mode cannot be changed at all on Linux (there is no lchmod) and this
 // fails with EOPNOTSUPP. FUSE_SET_ATTR_KILL_PRIV without FUSE_SET_ATTR_MODE
 // sets the mode the node had when SetAttr began less the setuid and setgid
-// bits that a write by `caller` clears (setattr_should_drop_suidgid): for a
-// caller without `cap_fsetid`, S_ISUID, and S_ISGID if the node is
-// group-executable or `caller` is outside its group; nothing is cleared
-// for one with it. FUSE_SET_ATTR_KILL_SUID (the kernel's
+// bits that a write by `caller`, taken to lack CAP_FSETID, clears
+// (setattr_should_drop_suidgid): S_ISUID, and S_ISGID if the node is
+// group-executable or `caller` is outside its group (whether the writer
+// holds CAP_FSETID, and the bits stay, is DirCacheFS::Setattr's to decide
+// before asking for this). FUSE_SET_ATTR_KILL_SUID (the kernel's
 // FATTR_KILL_SUIDGID) is not acted on: the chown and the ftruncate run as
 // `caller`.
 // Owner and times use the same regular/dir-vs-other-types split as mode,

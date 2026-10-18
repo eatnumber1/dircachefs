@@ -125,6 +125,12 @@ int &RepliesNone() {
   return replies;
 }
 
+// The errno of every fuse_reply_err call (the --wrap fake below).
+std::vector<int> &ErrnoReplies() {
+  static std::vector<int> replies;
+  return replies;
+}
+
 // The text of every ERROR logged while it lives.
 class ErrorCapture : public absl::LogSink {
  public:
@@ -153,7 +159,35 @@ TEST(FuseRequestTest, ReplyNoneTwiceRepliesOnceAndLogsOnce) {
               ::testing::ElementsAre(::testing::HasSubstr("already replied")));
 }
 
+// The request's credentials go with it: asked after the reply (a bug), the
+// question is refused rather than reaching libfuse with the request it
+// freed.
+TEST(FuseRequestTest, CapFsetidAfterTheReplyIsRefused) {
+  FuseRequest req(reinterpret_cast<fuse_req_t>(0x1));
+  req.ReplyNone();
+  EXPECT_FALSE(req.CallerHasCapFsetid().ok());
+}
+
+// A request its op did not reply to (a bug) is answered with ECOMM when it
+// goes, so that the kernel does not wait for it forever, and logged.
+TEST(FuseRequestTest, AnUnrepliedRequestIsAnsweredWithEcommAndLogged) {
+  ErrorCapture errors;
+  ErrnoReplies().clear();
+  {
+    FuseRequest req(reinterpret_cast<fuse_req_t>(0x1));
+  }
+  ASSERT_EQ(ErrnoReplies().size(), 1u);
+  EXPECT_EQ(ErrnoToErrorName(ErrnoReplies()[0]), "ECOMM");
+  EXPECT_THAT(errors.lines, ::testing::ElementsAre(::testing::HasSubstr(
+                                "Replying to FuseRequest in destructor")));
+}
+
 }  // namespace
 }  // namespace dcfs
 
 extern "C" void __wrap_fuse_reply_none(fuse_req_t) { ++dcfs::RepliesNone(); }
+
+extern "C" int __wrap_fuse_reply_err(fuse_req_t, int err) {
+  dcfs::ErrnoReplies().push_back(err);
+  return 0;
+}

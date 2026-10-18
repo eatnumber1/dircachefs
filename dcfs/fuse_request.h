@@ -77,17 +77,23 @@ class FuseRequest {
 
   // The caller's filesystem identity: the uid/gid the kernel sent with the
   // request (fuse_req_ctx), and the calling thread's supplementary groups
-  // and whether it holds CAP_FSETID (ReadProcCredentials, from
-  // /proc/<tid>/task/<tid>/status -- the kernel sends neither). CAP_FSETID
-  // counts only where /proc shows the request's uid and dcfs's own user
-  // namespace. If /proc cannot be read (the caller already exited, or
-  // lives in a pid namespace the daemon cannot see, where the kernel sends
-  // pid 0), the result has NO supplementary groups and no CAP_FSETID: never
-  // more than the caller has, at worst a spurious EACCES for access granted
-  // only through a group, or setuid and setgid cleared by a write that
-  // would keep them. Does not consume the request; must be called before a
-  // Reply*.
+  // (ReadProcCredentials, from /proc/<tid>/task/<tid>/status -- the kernel
+  // does not send them). If they cannot be read (the caller already exited,
+  // or lives in a pid namespace the daemon cannot see, where the kernel
+  // sends pid 0), the result has NO supplementary groups: never more than
+  // the caller has, at worst a spurious EACCES for access granted only
+  // through one of them. Does not consume the request; must be called
+  // before a Reply*.
   absl::StatusOr<Credentials> Caller() const;
+
+  // Whether the caller holds CAP_FSETID, as far as /proc can vouch for it:
+  // its status file shows the capability for the request's uid, and its
+  // user namespace is dcfs's (SharesMyUserNamespace, which needs ptrace
+  // access to the caller). Anything else, unreadable included (logged), is
+  // false: the safe side for what it decides, a write's removal of setuid
+  // and setgid (DirCacheFS::Setattr). Does not consume the request; must be
+  // called before a Reply*.
+  absl::StatusOr<bool> CallerHasCapFsetid() const;
 
   // Fills in a fuse_entry_param from `attr` and replies with it.
   absl::Status ReplyEntry(fuse_ino_t nodeid, uint64_t generation,
