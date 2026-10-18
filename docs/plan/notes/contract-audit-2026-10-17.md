@@ -118,3 +118,30 @@ backing's errno through unchanged, since writes are write-through.
 
 Open risk: dcfs's FUSE read buffer must hold a 64 KiB SETXATTR plus its
 header, or dcfs refuses (E2BIG) what xfs accepts.
+
+## ZFS xattrs (OpenZFS zfs-2.4.99-1319-g7c3d85aaf, ~/Sources/zfs)
+
+Names: no ZFS limit beyond the VFS's 255 (module/os/linux/zfs/zpl_xattr.c:
+702-717).
+
+Values: xattr=sa stores at most 32 KiB each (DXATTR_MAX_ENTRY_SIZE,
+include/sys/zfs_sa.h:125-126) and about 64 KiB in total, returning EFBIG
+(zpl_xattr.c:562-572). On Linux, zpl_xattr_set falls back to directory
+storage on that failure (zpl_xattr.c:640-660), so callers never see it.
+xattr=dir (the Linux default, zpl_xattr.c:58-61) has no limit beyond the
+file size (zpl_xattr.c:508-512).
+
+Values over 64 KiB can exist: FreeBSD writes them (module/os/freebsd/zfs/
+zfs_vnops_os.c:6230-6262). Linux's get handler returns the real size to a
+size-0 query (zpl_xattr.c:289-298) and ERANGE to a smaller buffer
+(347-351); the VFS turns that into E2BIG. This confirms 12.24's
+population-failure finding.
+
+Surprises for a layer on top, all passed through unchanged by on-demand
+xattrs:
+- A listed user.X may be stored as user.X or as bare X (zfs_xattr_compat;
+  zpl_xattr.c:738-753, 780-815).
+- Names like user.user.x are refused with EINVAL (zpl_xattr.c:731-736).
+- freebsd:* names are hidden (zpl_xattr.c:836-876).
+- Dir-stored names may match case-insensitively on casesensitivity=
+  insensitive datasets (inferred, untested: zfs_dir.c:182-194).

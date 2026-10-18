@@ -252,11 +252,11 @@ answer; dcfs-protocol decides, with the model, and records the answers in
    (the nodeid is the backing inode number, phase 14, so `d_ino` is what
    every other reply would show). `.` and `..` keep the backing's
    cookies and use `d_ino` (the mount's root is its own parent, as
-   `ParentOf` has it). Open: a mount point's `d_ino` is the covered
-   directory's, not the stub's, so a plain page may show a boundary entry's
-   `d_ino` differently from its later `stat`; the proposal accepts that (a
-   cosmetic difference, in `README.md`'s limitations) because the entry
-   itself, its name and type, is the backing's.
+   `ParentOf` has it). A mount point's `d_ino` is the covered directory's,
+   not the stub's, so a plain page shows a boundary entry's `d_ino` that its
+   later `stat` does not: this is native behaviour (readdir reports the
+   covered directory's inode, stat the mounted root's), not a dcfs
+   limitation (Q-2026-10-17-23).
 3. *What does a READDIRPLUS page cost?* Proposed: it probes the entries
    that go in the reply (`ProbeChild`, as today), replies, and records
    them (`RecordChild`, one transaction per page). A request replies at
@@ -267,24 +267,43 @@ answer; dcfs-protocol decides, with the model, and records the answers in
    `lseek` back to the N-th entry's `d_off`, or a buffer held in the
    handle) is measured against the syscall budgets.
 4. *When is the listing recorded, and when is it complete?* Proposed:
-   page by page, as each page's children are probed (so only probed pages
-   are recorded: a plain page records nothing, because a child's row needs
-   its file handle and a boundary needs its `statx`), under one
-   fill snapshot and epoch taken when the stream starts (`BeginFill`,
-   `DirEpoch`, as `PopulateStarted` takes them). The listing stays
-   incomplete (tri-state) during the stream. At EOF the stream marks it
-   complete and prunes the names it did not see only if every page since
-   offset 0 was probed and recorded in order (the handle tracks "this
-   request started where the last reply ended"), and `CanFill` still holds
-   for the directory and the epoch has not moved: no mutation of the
-   directory began, ended or ran since the snapshot. Otherwise the
-   listing stays incomplete and is never wrong. The names seen are held in
-   the handle for the prune, as today's population holds them (a name
-   stamp on the dentries is the alternative if memory budgets object).
-   Consequence to state: a stream of plain pages alone completes nothing, so
-   a repeated plain `ls` re-reads the backing directory until a READDIRPLUS
-   page completes it (a lookup no longer does: item 8); measure the effect on spin-ups (26.x) and
-   decide if plain pages should also probe after replying.
+   page by page, under one fill snapshot and epoch taken when the stream
+   starts (`BeginFill`, `DirEpoch`, as `PopulateStarted` takes them). A
+   READDIRPLUS page records its children (`RecordChild`) as it probes
+   them. A plain page records its names as `listed` (item 4a), with no
+   per-child syscall. The listing stays incomplete (tri-state) during the
+   stream. At EOF the stream marks it complete and prunes the names it did
+   not see only if every page since offset 0 was read and recorded in
+   order (the handle tracks "this request started where the last reply
+   ended"), and `CanFill` still holds for the directory and the epoch has
+   not moved: no mutation of the directory began, ended or ran since the
+   snapshot. Otherwise the listing stays incomplete and is never wrong. The
+   names seen are held in the handle for the prune, as today's population
+   holds them (a name stamp on the dentries is the alternative if memory
+   budgets object). Consequence: a plain `ls` to EOF completes the listing
+   too, so negative lookups in it are answered from the cache (item 4a).
+4a. *A `listed` dentry state* (orchestrator, 2026-10-17, from russ's "only
+   cache data that the client asked for"). Today `dentries.state` is
+   present, absent, unknown or refused, and `CHECK ((state = 'present') =
+   (inode IS NOT NULL))` (dcfs/migrate.cc:148-156) welds "the name exists"
+   to "its inode is fully identified" ((device_id, backing_ino,
+   backing_gen) NOT NULL in dcfs/schema.sql:77-106), so recording a plain
+   readdir page forces a per-child probe. Add state `listed`: the name
+   exists, identity unknown. Its `getdents64` `d_ino` and `d_type` are kept
+   as hints (nullable columns, set only for `listed`). Rules:
+   - A plain READDIR records its pages as `listed`, with no per-child
+     syscalls.
+   - A lookup of a `listed` name probes that one child (identity,
+     generation, mount boundary) and turns it into present (or refused).
+   - READDIRPLUS probes the page's entries as it replies (item 4).
+   - Serving a plain listing from the cache reports the hint `d_ino`, which
+     for a mount point is native behaviour (item 2, Q-2026-10-17-23).
+   - A mutation sets a `listed` name unknown before its syscall and present
+     or absent after, as for a present name (the tri-state rule).
+   - Model first: `listed` is a dentry state in `formal/dcfs.tla`, with its
+     transitions under concurrent mutation, before any code.
+   This supersedes Q-2026-10-17-22 (plain pages record nothing); a plain
+   page is no longer a non-recording page.
 5. *An abandoned or interrupted stream?* Proposed: the pages recorded stay
    (they are fills like any lookup's); the listing stays incomplete;
    nothing is undone. A handle released (or a request interrupted: it
@@ -397,6 +416,7 @@ end of the stream instead of at the end of one read).
 Docs: `docs/design.md` "Population policy" and "Cancellation",
 `formal/README.md` (actions and properties tables, the trace-validation
 notes), `docs/style.md` 1.12 (the readdir sentence), README's limitations
-(boundary `d_ino`, repeated plain `ls`). One way to do each thing: the
+(boundary `d_ino` is native behaviour, Q-2026-10-17-23; a plain `ls`
+completes the listing, item 4a). One way to do each thing: the
 whole-directory read for a readdir, `ListCached`'s retry loop, and
 `kProbesPerCheckpoint` all go; report any that stays and why.
