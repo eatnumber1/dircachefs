@@ -1278,6 +1278,14 @@ jobs:
           ./.github/ci/noisy.sh plain-mixed-${{ matrix.shard }}
           --targets=//test/qemu:fault_ace_mixed_long_test_${{ matrix.fs }}
           --test_env=DCFS_SEED=${{ github.run_number }}
+      - name: Kernel facts on ${{ matrix.fs }}
+        # These pin what the kernel does (test/qemu/guest/kernel_facts_test.cc)
+        # and change only when the guest kernel does, so they run weekly, not
+        # per push (tagged manual).
+        if: ${{ matrix.suite == 'plain' }}
+        run: >-
+          ./.github/ci/noisy.sh plain-kernel-facts-${{ matrix.shard }}
+          --targets=//test/qemu:kernel_facts_test_${{ matrix.fs }}
       - name: Report the accelerator
         if: ${{ !cancelled() }}
         run: ./.github/ci/accelerator.sh

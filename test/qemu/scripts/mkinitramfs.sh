@@ -306,10 +306,9 @@ else
       cp "$f" "$dest"
       ;;
     */pjdfstest) cp "$f" "$ROOT/pjdfstest/pjdfstest" ;;
-    *xfstests*/fsstress | *xfstests*/fsx | *xfstests*/replay-log | */test/qemu/crash_states | */test/qemu/kernel_facts)
+    *xfstests*/fsstress | *xfstests*/fsx | *xfstests*/replay-log | */test/qemu/crash_states)
       # step 11.2b: xfstests' fsstress and fsx (//third_party/xfstests);
-      # step 12.14: its replay-log and our crash_states;
-      # our kernel_facts (test/qemu/kernel_facts.cc).
+      # step 12.14: its replay-log and our crash_states.
       cp "$f" "$ROOT/bin/$(basename "$f")"
       copy_deps "$ROOT/bin/$(basename "$f")"
       ;;

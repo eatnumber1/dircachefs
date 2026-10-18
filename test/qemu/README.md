@@ -1893,8 +1893,8 @@ ext4, xfs and btrfs.
   backing filesystem (step 4.4; `write_test` has the full write-through
   test), 200 open/release cycles leak no fds, and all of this still works
   after killing and restarting the daemon against the same cache database.
-- `kernel_facts_test` (`kernel_facts.cc`, run by `guest/kernel_facts.sh`, which
-  only mounts dcfs): pins of what the kernel and dcfs do for
+- `kernel_facts_test` (`guest/kernel_facts_test.cc`, a `qemu_cc_test` that
+  mounts dcfs itself): pins of what the kernel and dcfs do for
   O_DIRECT and inotify, each a kernel behaviour dcfs relies on or its users
   meet, cited to the kernel source in the test's comments, so that a kernel
   update that changes one fails here. O_DIRECT on a passthrough open behaves

@@ -30,6 +30,7 @@
 # the C++ guest tests (step 25.34): the helpers read and write files through the mount, and the ports do the removed-object syscalls
 //test/qemu:guest
 //test/qemu:guest_test_bin
+//test/qemu:kernel_facts_lib
 //test/qemu:removed_test_lib
 
 # tests

@@ -2052,7 +2052,7 @@ test_suite(name = "every_test")
 
 genquery(
     name = "syscalls_backing_users",
-    expression = "rdeps(set(//dcfs:every_test //dcfs/testonly:every_test //dcfs:main //dcfs:main_static //dcfs:main_static_traced //bench:bench_lib //test/qemu:guest //test/qemu:guest_test_bin //test/qemu:removed_test_lib), //dcfs:syscalls_backing, 1) - //dcfs:syscalls_backing",
+    expression = "rdeps(set(//dcfs:every_test //dcfs/testonly:every_test //dcfs:main //dcfs:main_static //dcfs:main_static_traced //bench:bench_lib //test/qemu:guest //test/qemu:guest_test_bin //test/qemu:kernel_facts_lib //test/qemu:removed_test_lib), //dcfs:syscalls_backing, 1) - //dcfs:syscalls_backing",
     opts = [
         "--output=label",
         "--noimplicit_deps",
@@ -2066,6 +2066,7 @@ genquery(
         "//dcfs/testonly:every_test",
         "//test/qemu:guest",
         "//test/qemu:guest_test_bin",
+        "//test/qemu:kernel_facts_lib",
         "//test/qemu:removed_test_lib",
     ],
     visibility = ["//tools:__pkg__"],

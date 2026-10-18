@@ -7,11 +7,12 @@
 // citations are file:line in Linux v7.3-rc7 (the guest runs Alpine's 6.18;
 // the tests are the check that it agrees).
 //
-// Run in the guest by guest/kernel_facts.sh, which mounts dcfs on /mnt over
-// the backing file system at /src (ext4, xfs and btrfs: test/qemu/BUILD.bazel
-// "kernel_facts_test"). /src/native is a directory dcfs never touches: the
-// "native" half of a differential test runs the same operations there, with
-// dcfs out of the loop (docs/design.md, "Behave like the backing").
+// Run in the guest as a qemu_cc_test (ext4, xfs and btrfs:
+// test/qemu/BUILD.bazel "kernel_facts_test"). The environment below mounts dcfs
+// on /mnt over a directory of the test's disk. Native() is a directory dcfs
+// never touches: the "native" half of a differential test runs the same
+// operations there, with dcfs out of the loop (docs/design.md, "Behave like the
+// backing").
 //
 // Nothing here depends on timing. inotify queues an event in the syscall that
 // causes it (fs/notify/inotify/inotify_fsnotify.c:126 fsnotify_add_event,
@@ -24,8 +25,8 @@
 #include <linux/magic.h>
 #include <sys/inotify.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
 #include <sys/statfs.h>
+#include <sys/types.h>
 
 #include <cerrno>
 #include <cstdint>
@@ -40,17 +41,22 @@
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/fixed_array.h"
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/str_split.h"
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
+#include "dcfs/testonly/files.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "test/qemu/guest/guest.h"
 
 namespace {
 
@@ -62,8 +68,19 @@ using ::testing::Contains;
 using ::testing::ElementsAre;
 
 constexpr std::string_view kMnt = "/mnt";
-constexpr std::string_view kSrc = "/src";
-constexpr std::string_view kNative = "/src/native";
+
+// The backing directory (on the test's disk, so on the file system under test)
+// and, inside it, the directory dcfs never touches.
+const std::string &Src() {
+  static const std::string *const src =
+      new std::string(absl::StrCat(dcfs::TestTmp(), "/src"));
+  return *src;
+}
+const std::string &Native() {
+  static const std::string *const native =
+      new std::string(absl::StrCat(Src(), "/native"));
+  return *native;
+}
 constexpr size_t kPage = 4096;
 
 std::string Path(std::string_view dir, std::string_view name) {
@@ -85,7 +102,7 @@ using AlignedBuffer = std::unique_ptr<char[], decltype(&std::free)>;
 AlignedBuffer MakeAlignedBuffer(size_t size) {
   AlignedBuffer buf(static_cast<char *>(std::aligned_alloc(kPage, size)),
                     &std::free);
-  for (size_t i = 0; i < size; ++i) buf[i] = static_cast<char>('a' + i % 26);
+  for (size_t i = 0; i < size; ++i) buf[i] = static_cast<char>('a' + (i % 26));
   return buf;
 }
 
@@ -175,10 +192,10 @@ absl::StatusOr<std::vector<std::string>> DirectIoSession(
 
 TEST(ODirectPassthroughTest, BehavesLikeTheBacking) {
   ASSERT_OK_AND_ASSIGN(std::vector<std::string> native,
-                       DirectIoSession(kNative, "dio_match"));
+                       DirectIoSession(Native(), "dio_match"));
   ASSERT_OK_AND_ASSIGN(std::vector<std::string> mounted,
                        DirectIoSession(kMnt, "dio_match"));
-  ASSERT_OK_AND_ASSIGN(struct statfs fs, syscalls::statfs(kSrc));
+  ASSERT_OK_AND_ASSIGN(struct statfs fs, syscalls::statfs(Src()));
   // The backing's own answers, so that agreement between the two cannot be
   // two failures alike. Aligned I/O works on all three file systems. An
   // offset, a length or a buffer that is not aligned is EINVAL on ext4 and
@@ -218,9 +235,11 @@ TEST(ODirectPassthroughTest, WritesAndReadsBypassTheBackingPageCache) {
                        CreateSparse(Path(kMnt, "dio_bypass"), O_DIRECT, kSize));
   AlignedBuffer buf = MakeAlignedBuffer(kSize);
   EXPECT_THAT(syscalls::pwrite(*fd, buf.get(), kSize, 0), IsOkAndHolds(kSize));
-  EXPECT_THAT(ResidentPages(Path(kSrc, "dio_bypass"), kSize), IsOkAndHolds(0u));
+  EXPECT_THAT(ResidentPages(Path(Src(), "dio_bypass"), kSize),
+              IsOkAndHolds(0u));
   EXPECT_THAT(syscalls::pread(*fd, buf.get(), kSize, 0), IsOkAndHolds(kSize));
-  EXPECT_THAT(ResidentPages(Path(kSrc, "dio_bypass"), kSize), IsOkAndHolds(0u));
+  EXPECT_THAT(ResidentPages(Path(Src(), "dio_bypass"), kSize),
+              IsOkAndHolds(0u));
 }
 
 TEST(ODirectPassthroughTest, TheProbeSeesABufferedWrite) {
@@ -235,7 +254,7 @@ TEST(ODirectPassthroughTest, TheProbeSeesABufferedWrite) {
   absl::FixedArray<char> data(kSize, 'x');
   EXPECT_THAT(syscalls::pwrite(*fd, data.data(), kSize, 0),
               IsOkAndHolds(kSize));
-  EXPECT_THAT(ResidentPages(Path(kSrc, "dio_control"), kSize),
+  EXPECT_THAT(ResidentPages(Path(Src(), "dio_control"), kSize),
               IsOkAndHolds(kSize / kPage));
 }
 
@@ -269,14 +288,14 @@ absl::StatusOr<std::vector<std::string>> ClearODirect(
                    CreateSparse(Path(dir, name), O_DIRECT, kSize));
   std::vector<std::string> steps;
   ASSIGN_OR_RETURN(int flags, syscalls::fcntl(*fd, F_GETFL));
-  steps.push_back(
-      absl::StrCat("opened with O_DIRECT: ", flags & O_DIRECT ? "yes" : "no"));
+  steps.push_back(absl::StrCat("opened with O_DIRECT: ",
+                               (flags & O_DIRECT) != 0 ? "yes" : "no"));
   steps.push_back(
       absl::StrCat("F_SETFL without O_DIRECT: ",
                    Outcome(syscalls::fcntl(*fd, F_SETFL, flags & ~O_DIRECT))));
   ASSIGN_OR_RETURN(int after, syscalls::fcntl(*fd, F_GETFL));
-  steps.push_back(
-      absl::StrCat("F_GETFL has O_DIRECT: ", after & O_DIRECT ? "yes" : "no"));
+  steps.push_back(absl::StrCat("F_GETFL has O_DIRECT: ",
+                               (after & O_DIRECT) != 0 ? "yes" : "no"));
   AlignedBuffer buf = MakeAlignedBuffer(kSize);
   steps.push_back(
       absl::StrCat("pwrite 16 pages: ",
@@ -293,9 +312,9 @@ TEST(ODirectSetflTest, ClearingItLeavesTheBackingFileDirect) {
   // are in the cache. Through the mount the FUSE file says it is buffered and
   // the backing file is still direct: none are.
   ASSERT_OK_AND_ASSIGN(std::vector<std::string> native,
-                       ClearODirect(kNative, kNative, "setfl_clear"));
+                       ClearODirect(Native(), Native(), "setfl_clear"));
   ASSERT_OK_AND_ASSIGN(std::vector<std::string> mounted,
-                       ClearODirect(kMnt, kSrc, "setfl_clear"));
+                       ClearODirect(kMnt, Src(), "setfl_clear"));
   EXPECT_THAT(
       native,
       ElementsAre("opened with O_DIRECT: yes", "F_SETFL without O_DIRECT: 0",
@@ -346,7 +365,9 @@ class Notifier {
       }
       for (size_t at = 0; at < *n;) {
         const auto *e = reinterpret_cast<const inotify_event *>(buf + at);
-        events.push_back({e->mask, e->cookie, e->len ? e->name : ""});
+        events.push_back({.mask = e->mask,
+                          .cookie = e->cookie,
+                          .name = e->len != 0 ? e->name : ""});
         at += sizeof(inotify_event) + e->len;
       }
     }
@@ -360,6 +381,7 @@ class Notifier {
 
   static std::vector<std::string> Text(const std::vector<Event> &events) {
     std::vector<std::string> text;
+    text.reserve(events.size());
     for (const Event &e : events) text.push_back(Describe(e));
     return text;
   }
@@ -373,18 +395,21 @@ class Notifier {
       const char *text;
     };
     static constexpr Kind kKinds[] = {
-        {IN_CREATE, "create"},         {IN_DELETE, "delete"},
-        {IN_MODIFY, "modify"},         {IN_ATTRIB, "attrib"},
-        {IN_MOVED_FROM, "moved_from"}, {IN_MOVED_TO, "moved_to"},
+        {.bit = IN_CREATE, .text = "create"},
+        {.bit = IN_DELETE, .text = "delete"},
+        {.bit = IN_MODIFY, .text = "modify"},
+        {.bit = IN_ATTRIB, .text = "attrib"},
+        {.bit = IN_MOVED_FROM, .text = "moved_from"},
+        {.bit = IN_MOVED_TO, .text = "moved_to"},
     };
     std::string what = absl::StrFormat("event 0x%x", e.mask);
     for (const Kind &kind : kKinds) {
-      if (e.mask & kind.bit) {
+      if ((e.mask & kind.bit) != 0) {
         what = kind.text;
         break;
       }
     }
-    if (e.mask & IN_ISDIR) what += " dir";
+    if ((e.mask & IN_ISDIR) != 0) what += " dir";
     return e.name.empty() ? what : absl::StrCat(what, " ", e.name);
   }
 
@@ -420,10 +445,10 @@ TEST(InotifyTest, SeesChangesMadeThroughTheMount) {
   // in /src/native, with dcfs out of the loop, give the events a user of the
   // backing gets, and the mount gives the same ones.
   ASSERT_OK_AND_ASSIGN(Notifier native, Notifier::Create());
-  ASSERT_THAT(native.Watch(kNative, kDirEvents), IsOk());
+  ASSERT_THAT(native.Watch(Native(), kDirEvents), IsOk());
   ASSERT_OK_AND_ASSIGN(Notifier mounted, Notifier::Create());
   ASSERT_THAT(mounted.Watch(kMnt, kDirEvents), IsOk());
-  ASSERT_THAT(ChangeTree(kNative), IsOk());
+  ASSERT_THAT(ChangeTree(Native()), IsOk());
   ASSERT_THAT(ChangeTree(kMnt), IsOk());
 
   ASSERT_OK_AND_ASSIGN(std::vector<Notifier::Event> native_events,
@@ -457,7 +482,7 @@ TEST(InotifyTest, APassthroughWriteRaisesModifyOnTheMountAndOnTheBacking) {
   ASSERT_OK_AND_ASSIGN(Notifier mount_watch, Notifier::Create());
   ASSERT_THAT(mount_watch.Watch(Path(kMnt, "watched"), IN_MODIFY), IsOk());
   ASSERT_OK_AND_ASSIGN(Notifier backing_watch, Notifier::Create());
-  ASSERT_THAT(backing_watch.Watch(Path(kSrc, "watched"), IN_MODIFY), IsOk());
+  ASSERT_THAT(backing_watch.Watch(Path(Src(), "watched"), IN_MODIFY), IsOk());
 
   ASSERT_OK_AND_ASSIGN(FileDescriptor fd,
                        syscalls::open(Path(kMnt, "watched"), O_WRONLY));
@@ -476,7 +501,7 @@ TEST(InotifyTest, APassthroughWriteRaisesModifyOnTheMountAndOnTheBacking) {
 absl::Status ListDirectory(std::string_view path) {
   ASSIGN_OR_RETURN(FileDescriptor fd,
                    syscalls::open(path, O_RDONLY | O_DIRECTORY));
-  absl::FixedArray<char> entries(32 * 1024);
+  absl::FixedArray<char> entries(size_t{32} * 1024);
   for (;;) {
     ASSIGN_OR_RETURN(ssize_t n,
                      syscalls::getdents64(*fd, entries.data(), entries.size()));
@@ -509,11 +534,11 @@ TEST(InotifyTest, ABackingChangeRaisesNoEventOnTheMount) {
   ASSERT_THAT(mount_watch.Watch(kMnt, kDirEvents), IsOk());
   ASSERT_THAT(mount_watch.Watch(Path(kMnt, "oob"), kDirEvents), IsOk());
   ASSERT_OK_AND_ASSIGN(Notifier backing_watch, Notifier::Create());
-  ASSERT_THAT(backing_watch.Watch(kSrc, kDirEvents), IsOk());
-  ASSERT_THAT(backing_watch.Watch(Path(kSrc, "oob"), kDirEvents), IsOk());
+  ASSERT_THAT(backing_watch.Watch(Src(), kDirEvents), IsOk());
+  ASSERT_THAT(backing_watch.Watch(Path(Src(), "oob"), kDirEvents), IsOk());
 
-  const std::string oob = Path(kSrc, "oob");
-  const std::string created = Path(kSrc, "oob_created");
+  const std::string oob = Path(Src(), "oob");
+  const std::string created = Path(Src(), "oob_created");
   {
     ASSERT_OK_AND_ASSIGN(FileDescriptor fd, syscalls::open(oob, O_WRONLY));
     ASSERT_THAT(syscalls::write(*fd, "x", 1), IsOkAndHolds(1u));
@@ -546,5 +571,53 @@ TEST(InotifyTest, ABackingChangeRaisesNoEventOnTheMount) {
   EXPECT_THAT(backing, Contains("delete oob_created"));
   EXPECT_THAT(backing, Contains("create oob_marker"));
 }
+
+// The mount, and the check that the guest never ran short of memory: the
+// residency checks read the backing's page cache, which reclaim would empty
+// (the cc-test form of lib.sh's require_no_reclaim; /proc/vmstat counts pages
+// scanned by kswapd and by direct reclaim).
+class FactsEnvironment : public ::testing::Environment {
+ public:
+  void SetUp() override {
+    ASSERT_OK_AND_ASSIGN(reclaim_before_, PagesScanned());
+    dcfs::Mkdir(Src());
+    dcfs::Mkdir(Native());
+    ASSERT_OK_AND_ASSIGN(
+        mount_, dcfs::DcfsMount::Start({.source = Src(),
+                                        .mountpoint = std::string(kMnt),
+                                        .cache_db = "/cache/dcfs.db"}));
+  }
+
+  void TearDown() override {
+    EXPECT_THAT(mount_->Unmount(), IsOk());
+    ASSERT_OK_AND_ASSIGN(uint64_t reclaim_after, PagesScanned());
+    EXPECT_EQ(reclaim_after, reclaim_before_)
+        << "the kernel reclaimed memory during the run: cached pages were "
+           "evicted; raise this test's mem=";
+  }
+
+ private:
+  static absl::StatusOr<uint64_t> PagesScanned() {
+    ASSIGN_OR_RETURN(std::string vmstat,
+                     dcfs::testonly::ReadFileToString("/proc/vmstat"));
+    uint64_t scanned = 0;
+    for (std::string_view line : absl::StrSplit(vmstat, '\n')) {
+      std::vector<std::string_view> kv = absl::StrSplit(line, ' ');
+      uint64_t n;
+      if (kv.size() == 2 &&
+          (kv[0] == "pgscan_kswapd" || kv[0] == "pgscan_direct") &&
+          absl::SimpleAtoi(kv[1], &n)) {
+        scanned += n;
+      }
+    }
+    return scanned;
+  }
+
+  std::unique_ptr<dcfs::DcfsMount> mount_;
+  uint64_t reclaim_before_ = 0;
+};
+
+::testing::Environment *const kEnvironment =
+    ::testing::AddGlobalTestEnvironment(new FactsEnvironment);
 
 }  // namespace
