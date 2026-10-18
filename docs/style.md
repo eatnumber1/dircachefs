@@ -374,9 +374,10 @@ converted in step 25.1. A scoped enum has no `operator<<`, so
 `RET_CHECK_EQ/NE` print its underlying value (`RetCheckStreamable`).
 
 Express invariants in the type system, not in comments. A field meaningful
-only for some kinds or states is modelled with types (a `std::variant` of
-per-kind structs, a distinct kind, a strong type), so the compiler stops a
-read where it means nothing; a comment like "For kX: ..." is not enough.
+only for some kinds or states is modelled with types (a distinct kind, or
+a separate type per state that carries only its own fields, such as a
+result type returned only on that path), so the compiler stops a read
+where it means nothing; a comment like "For kX: ..." is not enough.
 russ, 2026-10-17: "It's easy to ignore a comment. The compiler enforces
 types. Express it in the type system."
 
