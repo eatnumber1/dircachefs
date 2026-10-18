@@ -4,6 +4,7 @@
 #include <linux/capability.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <sys/types.h>
 
 #include <cerrno>
 #include <cstdint>
@@ -178,10 +179,9 @@ absl::Status FuseRequest::PassthroughClose(int backing_id) {
   return absl::OkStatus();
 }
 
-const absl::StatusOr<ProcCredentials> &FuseRequest::CallerStatus() const {
-  if (!caller_status_.has_value()) {
-    caller_status_ = ReadProcCredentials(fuse_req_ctx(*req_)->pid);
-  }
+const absl::StatusOr<ProcCredentials> &FuseRequest::CallerStatus(
+    pid_t pid) const {
+  if (!caller_status_.has_value()) caller_status_ = ReadProcCredentials(pid);
   return *caller_status_;
 }
 
@@ -192,7 +192,7 @@ absl::StatusOr<Credentials> FuseRequest::Caller() const {
       .uid = ctx->uid, .gid = ctx->gid, .groups = {}, .umask = ctx->umask};
   // pid 0 (a caller outside dcfs's pid namespace) has no /proc entry, and
   // a caller that already exited has none any more.
-  const absl::StatusOr<ProcCredentials> &proc = CallerStatus();
+  const absl::StatusOr<ProcCredentials> &proc = CallerStatus(ctx->pid);
   if (!proc.ok()) {
     // Rate limited: one per request while it lasts.
     LOG_EVERY_N_SEC(WARNING, 60)
@@ -230,7 +230,7 @@ absl::StatusOr<bool> FuseRequest::CallerHasCapFsetid() const {
   // An answer of the kernel's own (fuse_ctx has no capabilities) is what
   // docs/plan/notes/kernel-patches.md row 4 asks for.
   const fuse_ctx *ctx = fuse_req_ctx(*req_);
-  const absl::StatusOr<ProcCredentials> &proc = CallerStatus();
+  const absl::StatusOr<ProcCredentials> &proc = CallerStatus(ctx->pid);
   absl::StatusOr<bool> shown = proc.ok() ? CapFsetidShown(*proc, *ctx)
                                          : absl::StatusOr<bool>(proc.status());
   if (shown.ok()) return *shown;

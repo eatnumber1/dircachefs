@@ -6,6 +6,7 @@
 
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <sys/types.h>
 
 #include <cstdint>
 #include <optional>
@@ -175,11 +176,11 @@ class FuseRequest {
   // ReplyNegativeEntry.
   absl::Status ReplyEntryParam(const fuse_entry_param &param);
 
-  // The status file of the thread that sent the request
+  // The status file of `pid`, the thread that sent the request
   // (ReadProcCredentials), read at the first call and kept: Caller and
   // CallerHasCapFsetid answer from one read of one task, with no window
   // between two reads in which its tid could name another.
-  const absl::StatusOr<ProcCredentials> &CallerStatus() const;
+  const absl::StatusOr<ProcCredentials> &CallerStatus(pid_t pid) const;
 
   std::optional<fuse_req_t> req_;
   int errno_sent_ = 0;

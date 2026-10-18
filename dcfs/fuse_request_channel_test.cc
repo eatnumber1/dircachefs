@@ -38,6 +38,7 @@
 
 #include <cerrno>
 #include <cstring>
+#include <future>
 #include <optional>
 #include <string>
 #include <thread>
@@ -362,24 +363,21 @@ TEST(FuseRequestChannelTest, CallerWithoutCapFsetidInProcHasNone) {
 // a thread that drops CAP_FSETID (a nonzero fsuid) after Caller() read it
 // is still the thread Caller() saw.
 TEST(FuseRequestChannelTest, CallerAndCapFsetidShareOneReadOfTheStatus) {
-  absl::Notification started;
+  std::promise<pid_t> tid;
   absl::Notification drop;
   absl::Notification dropped;
   absl::Notification done;
-  pid_t tid = 0;
   std::thread thread([&] {
-    tid = syscalls::gettid();
-    started.Notify();
+    tid.set_value(syscalls::gettid());
     drop.WaitForNotification();
     EXPECT_THAT(syscalls::setfsuid(1000), IsOk());
     dropped.Notify();
     done.WaitForNotification();
   });
-  started.WaitForNotification();
   FakeChannel channel;
   channel.read_caller = true;
   channel.read_cap_fsetid = true;
-  channel.request_pid = static_cast<uint32_t>(tid);
+  channel.request_pid = static_cast<uint32_t>(tid.get_future().get());
   channel.between_reads = [&] {
     drop.Notify();
     dropped.WaitForNotification();
