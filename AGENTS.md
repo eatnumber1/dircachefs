@@ -20,7 +20,7 @@ Rules marked "(from phase N)" take effect when that plan phase lands.
   dcfs, crashes it or compares trees is a `qemu_cc_test` in
   `test/qemu/guest/` using the helpers of `guest.h`; shell under
   `test/qemu/` is thin glue only, and `tools/repo_shape.py` refuses a new
-  `*.sh` there (`docs/style.md` section 4).
+  `*.sh` there that `tools/repo_shape_guest_shell.txt` does not list.
 - **Fakes, not mocks.** Inject dependencies and use small fake
   implementations. Test-only code never lives in production files: it
   goes in `*_test.cc`, or in a `testonly/` directory whose BUILD targets
