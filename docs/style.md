@@ -373,6 +373,13 @@ converted when touched. The four nested unscoped `enum Kind`s were
 converted in step 25.1. A scoped enum has no `operator<<`, so
 `RET_CHECK_EQ/NE` print its underlying value (`RetCheckStreamable`).
 
+Express invariants in the type system, not in comments. A field meaningful
+only for some kinds or states is modelled with types (a `std::variant` of
+per-kind structs, a distinct kind, a strong type), so the compiler stops a
+read where it means nothing; a comment like "For kX: ..." is not enough.
+russ, 2026-10-17: "It's easy to ignore a comment. The compiler enforces
+types. Express it in the type system."
+
 ### 1.5 `syscalls.h`
 
 One thin wrapper per documented Linux syscall or libc call, named for its
@@ -1128,6 +1135,10 @@ the obvious what or how." Apply the core principles:
   `backing.cc:1185`), the model step (`// Model: UnlinkPhase1's ENOENT
   branch`, `dir_cache_fs.cc:836`) or the commit (`fuse_request_channel_
   test.cc:1`: "Regression test for 0795d12").
+- **A kernel citation gives the path in the kernel tree, the line, and the
+  kernel version it was read at (once per comment), e.g.
+  `fs/ext4/namei.c:1768` (Linux v7.3-rc4); never a path on a developer's
+  machine.** russ, 2026-10-17: "Yes."
 - **Length**: one to three lines for a block, up to about ten for a non-local
   invariant; longer reasoning goes in `docs/design.md` and the comment points
   to it. No restating the code, no changelog ("fixed in step N" is the

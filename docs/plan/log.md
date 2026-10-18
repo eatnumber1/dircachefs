@@ -4106,3 +4106,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   UNSOURCED, eight behaviour flags. Queued as 12.24 (M1), with the
   follow-ups and questions for russ (B5, B6).
 - 2026-10-17, OpenZFS test suite survey (notes/zfs-test-suite-survey-2026-10-17.md): nothing adopted as a suite; eight ideas queued as 17.5 (M2), reimplemented as C++ guest tests.
+- 2026-10-17, style rulings (docs/style.md 1.4, 1.9): kernel citations name the path, line and kernel version; invariants live in the type system, not comments (russ).
