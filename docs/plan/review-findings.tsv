@@ -130,3 +130,33 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-18	17.6	1	dcfs-style-reviewer/sonnet/high	nit	style-other	1.2 / 1.9	test/qemu/kernel_facts.cc:58-71	Fd duplicates dcfs::FileDescriptor and its comment restates the type; AlignedBuffer holds a bare char*	no	fixed/merged
 2026-10-18	17.6	1	dcfs-style-reviewer/sonnet/high	nit	style-other	1.10 table over if-chain; 1.2 string types	test/qemu/kernel_facts.cc:98-103,374-387,45-47	one-case switch in Outcome, if-chain in Describe, constexpr char[] instead of string_view	no	fixed/merged
 2026-10-18	17.6	1	dcfs-style-reviewer/sonnet/high	nit	docs	2. tests (step number); 2. tiers	test/qemu/guest/kernel_facts.sh:3; test/qemu/BUILD.bazel:763	comments open with "Step 17.6:"; no measured duration for the tier choice	no	fixed/merged
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	should	style-other	1.6a ruling 4	test/qemu/guest/guest.cc:184	~DcfsMount joins statuses with Status::Update; log each failed step where found	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	should	test-shape	1.6 StatusIs not .message(); 2 matchers	test/qemu/guest/guest_test.cc:105	.message() and ASSERT_FALSE(ok()) in a guest test; use StatusIs	checked	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	should	style-other	1.6 status_message matcher scope	tools/style_matchers/status_message.query:11	matcher not extended to test/qemu/guest, unlike the other eleven	checked	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	should	comment-accuracy	AGENTS.md cite kernel sources; 1.9	test/qemu/guest/guest.cc:94	mounts poll compares with the event at open or last report (fs/proc_namespace.c:32,272 v7.3-rc7), not "table as last read"; Start says read, it is opened; no citation	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	should	contract-claim	docs	docs/design.md:1358	cites removed_test's UnlinkedOpenMutate, which does not exist	could	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	should	commit-hygiene	7 commit trailer and body	aed1cd2e	5 of 8 commits lack Co-Authored-By; aed1cd2e has no body and a process-narrating subject; 9df84d9b subject 77 cols	could	yes
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	1.1 direct deps	dcfs/testonly/BUILD.bazel:status_wire	cord.h included but absl/strings:cord not a dep	could	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	1.1 NOLINT form; Google 80 columns	test/qemu/guest/guest.cc:5	NOLINT trailing comments make 96-98 column lines	could	yes
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	abseil-utilities 3 q4	test/qemu/guest/guest_test.cc:79	hand-rolled comma join	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	abseil-utilities 3 q1	dcfs/testonly/files_test.cc:41	string built with +	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	comment-accuracy	1.9	test/qemu/guest/removed_test.cc:117	doc comments narrate the body	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	status-handling	1.6 message rule 4	test/qemu/guest/guest.cc:123	added-context capitalisation; RET_CHECK message case	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	1.6a	test/qemu/guest/guest.cc:169	RETURN_IF_ERROR(got.status()) instead of ASSIGN_OR_RETURN; child not reaped on early returns; Close() RET_CHECK_OK	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	status-handling	1.6a ruling 4	test/qemu/guest/guest.cc:263	DaemonEnded returns the log-read failure instead of the daemon's exit	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	1.2 locals non-const	dcfs/syscalls.cc:192	const locals added	could	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	naming	1.3	test/qemu/guest/kernel_facts_test.cc:68	global anonymous namespace, dcfs:: qualified throughout	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	test-shape	2	test/qemu/guest/guest_test.cc:257	name promises the log, asserts only the signal	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	test-shape	2 matchers over booleans	dcfs/testonly/status_wire_test.cc:26	EXPECT_TRUE(ok())	could	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	docs	7	test/qemu/README.md:1896	kernel_facts_test bullet does not say manual and weekly	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	docs	7	docs/plan/phases/25-style-convergence.md:1642	As built still says syscalls::system and ExpectSameTree; raw_syscalls_test docstring stale	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	naming	silent	test/qemu/guest/removed_test.cc:274	cryptic field names	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	contract-claim	AGENTS.md cite kernel sources	test/qemu/guest/removed_test.cc:485	forget ordering claim uncited (fs/fuse/dev.c:1598-1603)	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	test-shape	1.6b ASSERT in void helper	test/qemu/guest/guest.cc:297	fatal ASSERT in void helper	could	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	correctness	1.10a	test/qemu/guest/kernel_facts_test.cc:586	TearDown dereferences mount_ after failed SetUp; leaked new std::string statics	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	3	dcfs/BUILD.bazel:1957	visibility reflow; 6-space items	could	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	test-gap	AGENTS.md coverage	test/qemu/guest/guest.cc:151	_exit(112) branch and RET_CHECK_EQ untested	no	no
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	1.2 suite state; nullability	test/qemu/guest/removed_test.cc:349	State *absl_nullable dereferenced unchecked, raw new/delete	no	yes
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	style-other	1.1 include-cleaner vs modernize-deprecated-headers	test/qemu/guest/guest.cc:5	NOLINT of C headers for POSIX macros	no	yes
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	naming	silent	test/qemu/guest/guest.h:29	Identity duplicates dcfs::Credentials minus umask	no	yes
+2026-10-18	25.34	2	dcfs-style-reviewer/sonnet/high	nit	commit-hygiene	1.1 .git-blame-ignore-revs; 7 subject	a4da076b	shfmt reformat commits not in .git-blame-ignore-revs	no	yes
