@@ -759,7 +759,8 @@ The first pass is `notes/contract-audit-2026-10-17.md` (about 45 of about
 - B3, B4 (first stat pays for the whole directory; "all I/O, then one
   transaction"): 22.7.
 - B5 (one thread serves one request, so a stalled backing blocks cache
-  hits): question for russ.
+  hits): already decided, coroutines + io_uring (required, no fallback;
+  docs/plan/README.md future work, the io_uring phase).
 - B6 (FUSE_CAP_ATOMIC_O_TRUNC off, so open(O_TRUNC) takes two backing
   steps where the backing takes one): question for russ.
 - B8 (unreachable same-inode rename branch): remove it or make it a
