@@ -14,12 +14,14 @@ no polling. See README.md in this directory for the hook configuration.
     dashboard_lanes.py stop            the main session's Stop hook
     dashboard_lanes.py mark-uploaded   record the current file as uploaded
     dashboard_lanes.py show            print the lanes file
+    dashboard_lanes.py quota           read usage meters and update quota/budget
     dashboard_lanes.py ledger add ...  append row for unhooked agent job
     dashboard_lanes.py ledger set ...  fill outcome fields at merge time
 
 State lives in $DCFS_DASHBOARD_DIR (default ~/.cache/dcfs-dashboard):
 running.json, finished.json, lanes.json, uploaded.sha256, sloc.json,
-sloc.head, sloc.uploaded.sha256, and an optional config.json with "model"
+sloc.head, sloc.uploaded.sha256, quota.json, quota.uploaded.sha256,
+budget.json, budget.uploaded.sha256, and an optional config.json with "model"
 and "effort" for the orchestrator row. Dispatch ledger is kept in
 docs/plan/dispatch-ledger.tsv under the main repository checkout.
 """
@@ -35,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+import zoneinfo
 
 LANE_IN_PROMPT = re.compile(r"dircachefs-lanes/lane-(\d+)")
 LANE_DIR = re.compile(r"lane-(\d+)$")
@@ -82,6 +85,8 @@ class Env:
     main_repo: str = ""
     now: object = None
     stderr: object = sys.stderr
+    runner: object = None
+    environ: dict = dataclasses.field(default_factory=dict)
 
     @classmethod
     def from_environ(cls, environ):
@@ -107,6 +112,7 @@ class Env:
                 datetime.timezone.utc
             ).strftime("%Y-%m-%dT%H:%M:%SZ"),
             stderr=sys.stderr,
+            environ=dict(environ),
         )
 
     def path(self, name):
@@ -295,6 +301,283 @@ def regenerate_sloc(env):
     uploaded = None
     if os.path.exists(env.path("sloc.uploaded.sha256")):
         uploaded = read_text(env.path("sloc.uploaded.sha256")).strip()
+    return current_digest != uploaded
+
+
+MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+RESET_TIME_RE = re.compile(
+    r"^(?:(?P<month>[A-Za-z]{3})\s*(?P<day>\d{1,2})\s*,?\s*)?"
+    r"(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)$",
+    re.IGNORECASE,
+)
+POOL_ORDER = [
+    "Claude session",
+    "Claude week",
+    "Gemini week",
+    "Gemini five-hour",
+    "agy Claude/GPT week",
+    "agy Claude/GPT five-hour",
+    "Gemini 4 Argon week",
+]
+
+
+def get_current_datetime(env):
+    if env is not None:
+        t = env.current_time()
+        if isinstance(t, str):
+            if t.endswith("Z"):
+                t = t[:-1] + "+00:00"
+            return datetime.datetime.fromisoformat(t)
+        elif isinstance(t, datetime.datetime):
+            if t.tzinfo is None:
+                return t.replace(tzinfo=datetime.timezone.utc)
+            return t
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def get_now_timestamp(env):
+    return get_current_datetime(env).timestamp()
+
+
+def local_timezone(env):
+    tz_name = None
+    if env and getattr(env, "environ", None):
+        tz_name = env.environ.get("TZ")
+    if not tz_name:
+        tz_name = os.environ.get("TZ")
+    if tz_name:
+        try:
+            return zoneinfo.ZoneInfo(tz_name)
+        except Exception:
+            pass
+    try:
+        return zoneinfo.ZoneInfo("America/Los_Angeles")
+    except Exception:
+        return datetime.datetime.now().astimezone().tzinfo
+
+
+def resolve_claude_reset(raw_time, tz_str, env):
+    now_dt = get_current_datetime(env)
+    try:
+        tz = zoneinfo.ZoneInfo(
+            tz_str.strip() if tz_str else "America/Los_Angeles"
+        )
+    except Exception:
+        tz = zoneinfo.ZoneInfo("America/Los_Angeles")
+    now_local = now_dt.astimezone(tz)
+
+    m = RESET_TIME_RE.match(raw_time.strip())
+    if not m:
+        return now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    hour = int(m.group("hour"))
+    minute = int(m.group("minute") or 0)
+    ampm = m.group("ampm").lower()
+    if ampm == "pm" and hour < 12:
+        hour += 12
+    elif ampm == "am" and hour == 12:
+        hour = 0
+
+    if m.group("month"):
+        month = MONTHS.get(m.group("month").lower()[:3], now_local.month)
+        day = int(m.group("day"))
+        candidate = datetime.datetime(
+            now_local.year, month, day, hour, minute, tzinfo=tz
+        )
+        if candidate < now_local:
+            candidate = datetime.datetime(
+                now_local.year + 1, month, day, hour, minute, tzinfo=tz
+            )
+    else:
+        candidate = datetime.datetime(
+            now_local.year, now_local.month, now_local.day, hour, minute,
+            tzinfo=tz
+        )
+        if candidate < now_local:
+            candidate += datetime.timedelta(days=1)
+
+    return candidate.astimezone(datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+
+def parse_claude_usage(text, env=None):
+    rows = []
+    current_pool = None
+    used_pct = None
+    for line in text.splitlines():
+        line_clean = line.strip()
+        lower = line_clean.lower()
+        if "current" in lower and "session" in lower:
+            current_pool = "Claude session"
+            used_pct = None
+        elif "current" in lower and "week" in lower:
+            current_pool = "Claude week"
+            used_pct = None
+        pct_match = re.search(r"(\d+)%\s*used", line_clean)
+        if pct_match and current_pool:
+            used_pct = int(pct_match.group(1))
+        reset_match = re.search(
+            r"Resets\s*([A-Za-z0-9,:\s]+?)(?:\s*\(([^)]+)\))?$", line_clean
+        )
+        if reset_match and current_pool and used_pct is not None:
+            raw_time = reset_match.group(1).strip()
+            tz_str = reset_match.group(2) or "America/Los_Angeles"
+            resets = resolve_claude_reset(raw_time, tz_str, env)
+            rows.append({
+                "pool": current_pool,
+                "used_pct": used_pct,
+                "resets": resets,
+            })
+            current_pool = None
+            used_pct = None
+    return rows
+
+
+def parse_agy_usage(text):
+    rows = []
+    for line in text.splitlines():
+        if not line.strip() or "disabled" in line.lower():
+            continue
+        parts = [p.strip() for p in line.split("\t")]
+        if len(parts) < 4:
+            continue
+        model_group, limit_name, pct_str, resets = parts[:4]
+        m = re.search(r"(\d+)%", pct_str)
+        if not m:
+            continue
+        remaining = int(m.group(1))
+        used_pct = 100 - remaining
+
+        pool = None
+        if "Gemini Models" in model_group:
+            if "Weekly" in limit_name:
+                pool = "Gemini week"
+            elif "Five Hour" in limit_name:
+                pool = "Gemini five-hour"
+        elif "Claude and GPT" in model_group:
+            if "Weekly" in limit_name:
+                pool = "agy Claude/GPT week"
+            elif "Five Hour" in limit_name:
+                pool = "agy Claude/GPT five-hour"
+        elif "Gemini 4 Argon" in model_group:
+            if "Weekly" in limit_name:
+                pool = "Gemini 4 Argon week"
+
+        if pool:
+            rows.append({
+                "pool": pool,
+                "used_pct": used_pct,
+                "resets": resets,
+            })
+    return rows
+
+
+def run_meter(cmd, runner, **kwargs):
+    try:
+        res = runner(cmd, **kwargs)
+        if isinstance(res, subprocess.CompletedProcess):
+            if res.returncode == 0:
+                return res.stdout
+            return None
+        return res
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
+def quota(env):
+    runner = getattr(env, "runner", None) or subprocess.run
+    claude_out = run_meter(
+        ["python3", "-I", "tools/agents/claude_usage.py"],
+        runner,
+        cwd=env.main_repo,
+        timeout=90,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    agy_out = run_meter(
+        ["agy", "-p", "/usage"],
+        runner,
+        timeout=120,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    existing = load_json(env.path("quota.json"), [])
+    by_pool = {
+        r["pool"]: r
+        for r in existing
+        if isinstance(r, dict) and "pool" in r
+    }
+
+    if claude_out is not None:
+        try:
+            for r in parse_claude_usage(claude_out, env):
+                by_pool[r["pool"]] = r
+        except Exception as e:
+            env.stderr.write("dashboard_lanes: parse claude: %r\n" % e)
+
+    if agy_out is not None:
+        try:
+            for r in parse_agy_usage(agy_out):
+                by_pool[r["pool"]] = r
+        except Exception as e:
+            env.stderr.write("dashboard_lanes: parse agy: %r\n" % e)
+
+    ordered_rows = []
+    for p in POOL_ORDER:
+        if p in by_pool:
+            ordered_rows.append(by_pool[p])
+    for p, r in by_pool.items():
+        if p not in POOL_ORDER:
+            ordered_rows.append(r)
+
+    quota_text = json.dumps(ordered_rows, indent=2) + "\n"
+    write_atomic(env.path("quota.json"), quota_text)
+    now_ts = get_now_timestamp(env)
+    try:
+        os.utime(env.path("quota.json"), (now_ts, now_ts))
+    except OSError:
+        pass
+
+    claude_week = by_pool.get("Claude week")
+    if claude_week is not None:
+        actual = claude_week.get("used_pct")
+        when = env.current_time()
+        now_dt = get_current_datetime(env)
+        local_tz = local_timezone(env)
+        local_dt = now_dt.astimezone(local_tz)
+        label = local_dt.strftime("%a %H:%M")
+        budget = load_json(env.path("budget.json"), [])
+        budget.append({
+            "when": when,
+            "label": label,
+            "target": None,
+            "actual": actual,
+        })
+        write_atomic(
+            env.path("budget.json"), json.dumps(budget, indent=2) + "\n"
+        )
+        try:
+            os.utime(env.path("budget.json"), (now_ts, now_ts))
+        except OSError:
+            pass
+
+    return ""
+
+
+def file_changed(path, uploaded_path):
+    if not os.path.exists(path):
+        return False
+    current_digest = hashlib.sha256(read_text(path).encode()).hexdigest()
+    uploaded = None
+    if os.path.exists(uploaded_path):
+        uploaded = read_text(uploaded_path).strip()
     return current_digest != uploaded
 
 
@@ -757,28 +1040,48 @@ def stop(env, event):
     # loop.
     if "agent_id" in event or event.get("stop_hook_active"):
         return ""
-    lanes_changed = regenerate(env)
-    sloc_changed = regenerate_sloc(env)
-    if not lanes_changed and not sloc_changed:
+
+    # Timer exception approved by russ, 2026-10-17: credits are spent out of
+    # band, so the meters can only be known by reading them.
+    quota_path = env.path("quota.json")
+    if os.path.exists(quota_path):
+        now_ts = get_now_timestamp(env)
+        if now_ts - os.path.getmtime(quota_path) >= 3600:
+            try:
+                quota(env)
+            except Exception as e:
+                env.stderr.write("dashboard_lanes: quota: %r\n" % e)
+
+    changed = []
+    if regenerate(env):
+        changed.append(("lanes", env.path("lanes.json")))
+    if regenerate_sloc(env):
+        changed.append(("sloc", env.path("sloc.json")))
+    if file_changed(env.path("quota.json"), env.path("quota.uploaded.sha256")):
+        changed.append(("quota", env.path("quota.json")))
+    if file_changed(env.path("budget.json"),
+                    env.path("budget.uploaded.sha256")):
+        changed.append(("budget", env.path("budget.json")))
+
+    if not changed:
         return ""
 
-    if lanes_changed and sloc_changed:
+    if len(changed) == 1:
+        name, path = changed[0]
         reason = (
-            "Dashboard lanes and sloc changed: upload %s and %s and run "
-            "dashboard_lanes.py mark-uploaded."
-            % (env.path("lanes.json"), env.path("sloc.json"))
-        )
-    elif lanes_changed:
-        reason = (
-            "Dashboard lanes changed: upload %s to the dashboard's lanes "
-            "dataset and run dashboard_lanes.py mark-uploaded."
-            % env.path("lanes.json")
+            "Dashboard %s changed: upload %s to the dashboard's %s dataset "
+            "and run dashboard_lanes.py mark-uploaded."
+            % (name, path, name)
         )
     else:
+        names = [c[0] for c in changed]
+        paths = [c[1] for c in changed]
+        names_str = ", ".join(names[:-1]) + " and " + names[-1]
+        paths_str = ", ".join(paths[:-1]) + " and " + paths[-1]
         reason = (
-            "Dashboard sloc changed: upload %s to the dashboard's sloc "
-            "dataset and run dashboard_lanes.py mark-uploaded."
-            % env.path("sloc.json")
+            "Dashboard %s changed: upload %s and run dashboard_lanes.py "
+            "mark-uploaded."
+            % (names_str, paths_str)
         )
     return json.dumps({"decision": "block", "reason": reason})
 
@@ -786,7 +1089,11 @@ def stop(env, event):
 def mark_uploaded(env):
     lanes_path = env.path("lanes.json")
     sloc_path = env.path("sloc.json")
-    if not os.path.exists(lanes_path) and not os.path.exists(sloc_path):
+    quota_path = env.path("quota.json")
+    budget_path = env.path("budget.json")
+    if (not os.path.exists(lanes_path) and not os.path.exists(sloc_path)
+            and not os.path.exists(quota_path)
+            and not os.path.exists(budget_path)):
         raise FileNotFoundError("no dashboard files to mark uploaded")
     if os.path.exists(lanes_path):
         digest = hashlib.sha256(read_text(lanes_path).encode())
@@ -795,6 +1102,16 @@ def mark_uploaded(env):
         digest = hashlib.sha256(read_text(sloc_path).encode())
         write_atomic(
             env.path("sloc.uploaded.sha256"), digest.hexdigest() + "\n"
+        )
+    if os.path.exists(quota_path):
+        digest = hashlib.sha256(read_text(quota_path).encode())
+        write_atomic(
+            env.path("quota.uploaded.sha256"), digest.hexdigest() + "\n"
+        )
+    if os.path.exists(budget_path):
+        digest = hashlib.sha256(read_text(budget_path).encode())
+        write_atomic(
+            env.path("budget.uploaded.sha256"), digest.hexdigest() + "\n"
         )
     return ""
 
@@ -820,7 +1137,7 @@ def lock(env):
 HOOKS = {"post-agent": post_agent, "post-message": post_message,
          "subagent-stop": subagent_stop, "stop": stop}
 # The others are run by hand and read no stdin.
-MANUAL = {"mark-uploaded": mark_uploaded, "show": show}
+MANUAL = {"mark-uploaded": mark_uploaded, "show": show, "quota": quota}
 
 
 # A table dispatch, not argparse: a hook must exit 0 with one line on

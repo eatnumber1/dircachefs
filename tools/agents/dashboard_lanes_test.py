@@ -1012,5 +1012,229 @@ class DispatchLedgerTest(Fixture):
         self.assertEqual(len(err.splitlines()), 1)
 
 
+CLAUDE_USAGE_FIXTURE = (
+    "Currentsession\n"
+    "▌ 1%used\n"
+    "Resets10:40pm(America/Los_Angeles)\n"
+    "Currentweek(allmodels)\n"
+    "████████████████████████████▍ 57%used\n"
+    "ResetsOct23,1am(America/Los_Angeles)\n"
+)
+
+AGY_USAGE_FIXTURE = (
+    "Gemini Models\tWeekly Limit Remaining\t42%\t2026-10-24T03:07:32Z\n"
+    "Gemini Models\tFive Hour Limit Remaining\t56%\t2026-10-18T03:38:16Z\n"
+    "Claude and GPT models\tWeekly Limit Remaining\t44%\t"
+    "2026-10-24T19:55:29Z\n"
+    "Claude and GPT models\tFive Hour Limit Remaining\t0%\t"
+    "2026-10-18T02:20:58Z\n"
+    "Gemini 4 Argon\tGemini 4 Argon Weekly Limit\t28%\t2026-10-24T03:46:13Z\n"
+)
+
+
+class UsageParsersTest(unittest.TestCase):
+
+    def test_parse_claude_usage(self):
+        env = dashboard_lanes.Env.from_environ({"HOME": "/tmp"})
+        env.now = lambda: "2026-10-17T15:00:00Z"
+        rows = dashboard_lanes.parse_claude_usage(CLAUDE_USAGE_FIXTURE, env)
+        expected = [
+            {
+                "pool": "Claude session",
+                "used_pct": 1,
+                "resets": "2026-10-18T05:40:00Z",
+            },
+            {
+                "pool": "Claude week",
+                "used_pct": 57,
+                "resets": "2026-10-23T08:00:00Z",
+            },
+        ]
+        self.assertEqual(rows, expected)
+
+    def test_parse_agy_usage(self):
+        rows = dashboard_lanes.parse_agy_usage(AGY_USAGE_FIXTURE)
+        expected = [
+            {
+                "pool": "Gemini week",
+                "used_pct": 58,
+                "resets": "2026-10-24T03:07:32Z",
+            },
+            {
+                "pool": "Gemini five-hour",
+                "used_pct": 44,
+                "resets": "2026-10-18T03:38:16Z",
+            },
+            {
+                "pool": "agy Claude/GPT week",
+                "used_pct": 56,
+                "resets": "2026-10-24T19:55:29Z",
+            },
+            {
+                "pool": "agy Claude/GPT five-hour",
+                "used_pct": 100,
+                "resets": "2026-10-18T02:20:58Z",
+            },
+            {
+                "pool": "Gemini 4 Argon week",
+                "used_pct": 72,
+                "resets": "2026-10-24T03:46:13Z",
+            },
+        ]
+        self.assertEqual(rows, expected)
+
+    def test_parse_agy_usage_skips_disabled(self):
+        text = AGY_USAGE_FIXTURE + (
+            "Other\tLimit\tdisabled\t2026-10-24T03:07:32Z\n"
+        )
+        rows = dashboard_lanes.parse_agy_usage(text)
+        self.assertEqual(len(rows), 5)
+
+
+class QuotaCommandTest(Fixture):
+
+    def setUp(self):
+        super().setUp()
+        self.env.now = lambda: "2026-10-17T15:00:00Z"
+        self.env.environ = {"TZ": "America/Los_Angeles"}
+        self.claude_output = CLAUDE_USAGE_FIXTURE
+        self.agy_output = AGY_USAGE_FIXTURE
+        self.claude_fail = False
+        self.agy_fail = False
+        self.run_calls = []
+
+        def fake_runner(cmd, **kwargs):
+            self.run_calls.append((cmd, kwargs))
+            if cmd == ["python3", "-I", "tools/agents/claude_usage.py"]:
+                self.assertEqual(kwargs.get("cwd"), self.main_repo)
+                self.assertEqual(kwargs.get("timeout"), 90)
+                if self.claude_fail:
+                    raise subprocess.TimeoutExpired(cmd, 90)
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout=self.claude_output, stderr=""
+                )
+            elif cmd == ["agy", "-p", "/usage"]:
+                self.assertEqual(kwargs.get("timeout"), 120)
+                if self.agy_fail:
+                    raise subprocess.CalledProcessError(1, cmd)
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout=self.agy_output, stderr=""
+                )
+            raise AssertionError("unexpected command: %r" % cmd)
+
+        self.env.runner = fake_runner
+
+    def test_quota_success_writes_quota_and_budget(self):
+        out, err = io.StringIO(), io.StringIO()
+        code = dashboard_lanes.main(
+            ["quota"], stdin=io.StringIO(""), stdout=out, stderr=err,
+            env=self.env
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(out.getvalue(), "")
+        self.assertEqual(err.getvalue(), "")
+
+        with open(self.env.path("quota.json"), encoding="utf-8") as f:
+            quota_data = json.load(f)
+        self.assertEqual(len(quota_data), 7)
+        self.assertEqual(quota_data[0]["pool"], "Claude session")
+        self.assertEqual(quota_data[1]["pool"], "Claude week")
+        self.assertEqual(quota_data[1]["used_pct"], 57)
+        self.assertEqual(quota_data[2]["pool"], "Gemini week")
+
+        with open(self.env.path("budget.json"), encoding="utf-8") as f:
+            budget_data = json.load(f)
+        self.assertEqual(len(budget_data), 1)
+        self.assertEqual(budget_data[0], {
+            "when": "2026-10-17T15:00:00Z",
+            "label": "Sat 08:00",
+            "target": None,
+            "actual": 57,
+        })
+
+    def test_quota_retains_previous_rows_on_meter_failure(self):
+        # First run succeeds.
+        dashboard_lanes.main(
+            ["quota"], stdin=io.StringIO(""), stdout=io.StringIO(),
+            stderr=io.StringIO(), env=self.env
+        )
+        # Claude meter now fails, agy succeeds with updated remaining.
+        self.claude_fail = True
+        self.agy_output = (
+            "Gemini Models\tWeekly Limit Remaining\t50%\t2026-10-24T03:07:32Z\n"
+        )
+        dashboard_lanes.main(
+            ["quota"], stdin=io.StringIO(""), stdout=io.StringIO(),
+            stderr=io.StringIO(), env=self.env
+        )
+        with open(self.env.path("quota.json"), encoding="utf-8") as f:
+            quota_data = {r["pool"]: r for r in json.load(f)}
+        # Claude retained old rows.
+        self.assertEqual(quota_data["Claude session"]["used_pct"], 1)
+        self.assertEqual(quota_data["Claude week"]["used_pct"], 57)
+        # agy updated.
+        self.assertEqual(quota_data["Gemini week"]["used_pct"], 50)
+
+
+class QuotaStopAndUploadTest(Fixture):
+
+    def setUp(self):
+        super().setUp()
+        self.current_time_str = "2026-10-17T15:00:00Z"
+        self.env.now = lambda: self.current_time_str
+        self.env.environ = {"TZ": "America/Los_Angeles"}
+        self.quota_calls = 0
+
+        def fake_runner(cmd, **kwargs):
+            if cmd == ["python3", "-I", "tools/agents/claude_usage.py"]:
+                self.quota_calls += 1
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout=CLAUDE_USAGE_FIXTURE, stderr=""
+                )
+            elif cmd == ["agy", "-p", "/usage"]:
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout=AGY_USAGE_FIXTURE, stderr=""
+                )
+            raise AssertionError("unexpected command: %r" % cmd)
+
+        self.env.runner = fake_runner
+
+    def test_stop_runs_quota_hourly(self):
+        # Initial run of quota command creates quota.json.
+        dashboard_lanes.main(
+            ["quota"], stdin=io.StringIO(""), stdout=io.StringIO(),
+            stderr=io.StringIO(), env=self.env
+        )
+        self.assertEqual(self.quota_calls, 1)
+
+        # 30 minutes later: within the 1-hour window, quota must not run.
+        self.current_time_str = "2026-10-17T15:30:00Z"
+        self.run_hook("stop", {"stop_hook_active": False})
+        self.assertEqual(self.quota_calls, 1)
+
+        # 61 minutes later: past 1 hour, quota runs.
+        self.current_time_str = "2026-10-17T16:01:00Z"
+        self.run_hook("stop", {"stop_hook_active": False})
+        self.assertEqual(self.quota_calls, 2)
+
+    def test_stop_upload_message_includes_quota_and_budget(self):
+        # Run quota directly to create quota.json and budget.json.
+        dashboard_lanes.main(
+            ["quota"], stdin=io.StringIO(""), stdout=io.StringIO(),
+            stderr=io.StringIO(), env=self.env
+        )
+        out, _ = self.run_hook("stop", {"stop_hook_active": False})
+        decision = json.loads(out)
+        self.assertEqual(decision["decision"], "block")
+        self.assertIn("quota.json", decision["reason"])
+        self.assertIn("budget.json", decision["reason"])
+
+        # Mark uploaded records them and clears block.
+        self.run_hook("mark-uploaded", {})
+        out2, _ = self.run_hook("stop", {"stop_hook_active": False})
+        self.assertEqual(out2, "")
+
+
 if __name__ == "__main__":
     unittest.main()
+
