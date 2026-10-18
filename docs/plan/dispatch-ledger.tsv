@@ -70,3 +70,14 @@ ab965331248b16bcc	2026-10-18T06:04:23Z	dashboard-quota	mechanical	dcfs-mechanica
 a690b2f5e63a2733d	2026-10-18T06:24:29Z	clerk-queue	implementation	dcfs-implementer	claude-sonnet-5-5	medium									
 aab769422f7a9eaf4	2026-10-18T06:48:41Z	Plan: start-time submount/subvolume stubs	implementation	dcfs-implementer	claude-sonnet-5-5	high									
 a89d46a5dd91932bf	2026-10-18T06:56:41Z	Clerk batch: queued plan edits	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+a340b3386c92b02cd	2026-10-18T07:06:29Z	Who added FUSE_ATTR_SUBMOUNT		Explore	haiku										
+a911cd1decdbf8d3d	2026-10-18T07:16:47Z	22.5	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
+a95c7ed532d4e6758	2026-10-18T07:16:47Z	22.5	review	dcfs-reviewer	claude-opus-5-5	high									
+aecce12ba8b34b7fe	2026-10-18T07:22:23Z	Clerk batch 2 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+ae14e5987861aeb4a	2026-10-18T07:39:17Z	Clerk batch 3 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+a6e9c1ea93b713647	2026-10-18T08:03:38Z	Clerk batch 4 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+a50edd33122354c6f	2026-10-18T08:13:51Z	Clerk batch 5 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+ac1f0862d02afdcac	2026-10-18T08:26:31Z	Clerk batch 6 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+ad311e34acb9a37fa	2026-10-18T08:39:31Z	Clerk batch 7 from queue	mechanical	dcfs-mechanical	claude-haiku-5-5	low									
+ac3870df757ba0c87	2026-10-18T08:46:54Z	25.28b	review	dcfs-reviewer	claude-opus-5-5	high									
+ac6bb57820ee50862	2026-10-18T08:46:54Z	25.34	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high									
