@@ -13,7 +13,7 @@ this directory for the hook configuration.
     dashboard_lanes.py post-message    PostToolUse hook, matcher "SendMessage"
     dashboard_lanes.py subagent-stop   SubagentStop hook
     dashboard_lanes.py stop            the main session's Stop hook
-    dashboard_lanes.py mark-uploaded   record the current file as uploaded
+    dashboard_lanes.py mark-uploaded DATASET...  record datasets as uploaded
     dashboard_lanes.py show            print the lanes file
     dashboard_lanes.py quota           read usage meters and update quota/budget
     dashboard_lanes.py lane-state ...  set or clear lane state override
@@ -603,23 +603,18 @@ def quota(env):
         local_dt = now_dt.astimezone(local_tz)
         label = local_dt.strftime("%a %H:%M")
         budget = load_json(env.path("budget.json"), [])
-        readings_before = [
-            r for r in budget
-            if r.get("when", "") <= when and r.get("actual") is not None
-        ]
-        if not readings_before or readings_before[-1].get("actual") != actual:
-            idx = 0
-            while idx < len(budget) and budget[idx].get("when", "") <= when:
-                idx += 1
-            budget.insert(idx, {
-                "when": when,
-                "label": label,
-                "target": None,
-                "actual": actual,
-            })
-            write_atomic(
-                env.path("budget.json"), json.dumps(budget, indent=2) + "\n"
-            )
+        idx = 0
+        while idx < len(budget) and budget[idx].get("when", "") <= when:
+            idx += 1
+        budget.insert(idx, {
+            "when": when,
+            "label": label,
+            "target": None,
+            "actual": actual,
+        })
+        write_atomic(
+            env.path("budget.json"), json.dumps(budget, indent=2) + "\n"
+        )
 
     return ""
 
@@ -897,7 +892,7 @@ def upload_context(env):
         "hookEventName": "PostToolUse",
         "additionalContext": (
             "Dashboard lanes changed: upload %s and run "
-            "dashboard_lanes.py mark-uploaded." % path),
+            "dashboard_lanes.py mark-uploaded lanes." % path),
     }})
 
 
@@ -1274,45 +1269,56 @@ def stop(env, event):
     if not changed:
         return ""
 
+    names = [c[0] for c in changed]
+    mark_command = "dashboard_lanes.py mark-uploaded %s." % " ".join(names)
     if len(changed) == 1:
         name, path = changed[0]
         reason = (
             "Dashboard %s changed: upload %s to the dashboard's %s dataset "
-            "and run dashboard_lanes.py mark-uploaded."
-            % (name, path, name)
+            "and run %s"
+            % (name, path, name, mark_command)
         )
     else:
-        names = [c[0] for c in changed]
         paths = [c[1] for c in changed]
         names_str = ", ".join(names[:-1]) + " and " + names[-1]
         paths_str = ", ".join(paths[:-1]) + " and " + paths[-1]
         reason = (
-            "Dashboard %s changed: upload %s and run dashboard_lanes.py "
-            "mark-uploaded."
-            % (names_str, paths_str)
+            "Dashboard %s changed: upload %s and run %s"
+            % (names_str, paths_str, mark_command)
         )
     return json.dumps({"decision": "block", "reason": reason})
 
 
-def mark_uploaded(env):
+def mark_uploaded(env, names):
+    """Records the named datasets as uploaded; the others stay changed.
+
+    Lane states belong to the lanes dataset: they are shown in its table.
+    """
+    if not names:
+        raise ValueError("usage: mark-uploaded DATASET... (one of: %s)"
+                         % " ".join(DATASETS))
+    for name in names:
+        if name not in DATASETS:
+            raise ValueError("unknown dataset %r" % name)
     marked = False
-    for name in DATASETS:
+    for name in names:
         json_path, sha_path = dataset_paths(env, name)
         if os.path.exists(json_path):
             write_atomic(sha_path, file_digest(json_path) + "\n")
             marked = True
     if not marked:
         raise FileNotFoundError("no dashboard files to mark uploaded")
-    if os.path.exists(env.path("lanes.json")):
+    if "lanes" in names:
+        if os.path.exists(env.path("lanes.json")):
+            write_atomic(
+                env.path("lanes.uploaded.json"),
+                read_text(env.path("lanes.json")),
+            )
+        states_path = env.path("lane_states.json")
         write_atomic(
-            env.path("lanes.uploaded.json"),
-            read_text(env.path("lanes.json")),
+            env.path("lane_states.uploaded.json"),
+            json.dumps(load_json(states_path, {}), indent=2) + "\n",
         )
-    states_path = env.path("lane_states.json")
-    write_atomic(
-        env.path("lane_states.uploaded.json"),
-        json.dumps(load_json(states_path, {}), indent=2) + "\n",
-    )
     return ""
 
 
@@ -1337,7 +1343,7 @@ def lock(env):
 HOOKS = {"post-agent": post_agent, "post-message": post_message,
          "subagent-stop": subagent_stop, "stop": stop}
 # The others are run by hand and read no stdin.
-MANUAL = {"mark-uploaded": mark_uploaded, "show": show, "quota": quota}
+MANUAL = {"show": show, "quota": quota}
 
 
 # A table dispatch, not argparse: a hook must exit 0 with one line on
@@ -1360,6 +1366,8 @@ def main(argv, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
                 stdout.write(ledger(env, argv[1:]))
             elif argv[0] == "lane-state":
                 stdout.write(lane_state(env, argv[1:]))
+            elif argv[0] == "mark-uploaded":
+                stdout.write(mark_uploaded(env, argv[1:]))
             elif argv[0] in MANUAL:
                 stdout.write(MANUAL[argv[0]](env))
             else:

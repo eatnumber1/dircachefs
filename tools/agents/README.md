@@ -106,10 +106,13 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
   lane going to idle by SubagentStop alone triggers no request) or when another
   dataset changed, blocking with a reason naming the files, unless
   `stop_hook_active` is true (no loops) or the caller is a subagent.
-- `mark-uploaded`: records the current files as uploaded (`uploaded.sha256`,
-  `lanes.uploaded.json`, `lane_states.uploaded.json`, `sloc.uploaded.sha256`,
-  `quota.uploaded.sha256`, and `budget.uploaded.sha256`). The orchestrator runs
-  it after uploading.
+- `mark-uploaded DATASET...`: records the named datasets (`lanes`, `sloc`,
+  `quota`, `budget`) as uploaded at their current contents (`uploaded.sha256`,
+  `lanes.uploaded.json` and `lane_states.uploaded.json` for lanes,
+  `sloc.uploaded.sha256`, `quota.uploaded.sha256`, `budget.uploaded.sha256`).
+  Datasets not named stay changed. With no names it is a usage error. The
+  orchestrator runs it with the names the Stop hook's reason gives, after
+  uploading those datasets.
 - `show`: prints the table.
 - `quota`: runs the usage meters (claude_usage.py and agy /usage), writes
   `quota.json`, and appends Claude week to `budget.json`.

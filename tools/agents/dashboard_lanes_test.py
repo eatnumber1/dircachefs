@@ -100,6 +100,13 @@ class Fixture(unittest.TestCase):
         self.assertEqual(code, 0)
         return out.getvalue(), err.getvalue()
 
+    def mark(self, *names):
+        out, err = io.StringIO(), io.StringIO()
+        dashboard_lanes.main(
+            ["mark-uploaded"] + list(names), stdin=io.StringIO(""),
+            stdout=out, stderr=err, env=self.env)
+        return out.getvalue(), err.getvalue()
+
     def rows(self):
         with open(os.path.join(self.dash, "lanes.json"),
                   encoding="utf-8") as f:
@@ -238,7 +245,7 @@ class PostAgentTest(Fixture):
 
     def test_no_context_when_unchanged(self):
         self.launch()
-        self.run_hook("mark-uploaded", {})
+        self.mark(*dashboard_lanes.DATASETS)
         out, _ = self.launch()  # same agent id: same table
         self.assertEqual(out, "")
 
@@ -375,7 +382,7 @@ class PostMessageTest(Fixture):
     def test_resumed_agent_runs_again(self):
         self.launch()
         self.run_hook("subagent-stop", {"agent_id": "a1"})
-        self.run_hook("mark-uploaded", {})
+        self.mark(*dashboard_lanes.DATASETS)
         self.assertEqual(self.rows()["lane-2"]["state"], "idle")
         out, err = self.message("a1")
         self.assertEqual(err, "")
@@ -396,14 +403,14 @@ class PostMessageTest(Fixture):
 
     def test_unknown_or_running_target_prints_nothing(self):
         self.launch()
-        self.run_hook("mark-uploaded", {})
+        self.mark(*dashboard_lanes.DATASETS)
         self.assertEqual(self.message("nobody"), ("", ""))
         self.assertEqual(self.message("a1"), ("", ""))  # still running
 
     def test_unchanged_table_prints_nothing(self):
         self.launch(prompt="no lane here")
         self.run_hook("subagent-stop", {"agent_id": "a1"})
-        self.run_hook("mark-uploaded", {})
+        self.mark(*dashboard_lanes.DATASETS)
         self.assertEqual(self.message("a1"), ("", ""))
 
     def test_subagent_originated_call_is_ignored(self):
@@ -456,7 +463,7 @@ class StopTest(Fixture):
         decision = json.loads(out)
         self.assertEqual(decision["decision"], "block")
         self.assertIn("lanes.json", decision["reason"])
-        self.run_hook("mark-uploaded", {})
+        self.mark(*dashboard_lanes.DATASETS)
         self.assertEqual(self.stop()[0], "")
 
     def test_never_blocks_when_stop_hook_active(self):
@@ -468,7 +475,7 @@ class StopTest(Fixture):
 
     def test_blocks_again_after_a_change(self):
         self.stop()
-        self.run_hook("mark-uploaded", {})
+        self.mark(*dashboard_lanes.DATASETS)
         self.launch()
         self.assertEqual(json.loads(self.stop()[0])["decision"], "block")
 
@@ -515,7 +522,7 @@ class MalformedTest(Fixture):
         self.check("subagent-stop", "")
 
     def test_mark_uploaded_and_show_before_any_file(self):
-        self.check("mark-uploaded", "")
+        self.assertEqual(self.mark("lanes")[0], "")
         self.check("show", "")
 
     def test_show_does_not_read_stdin(self):
@@ -775,7 +782,7 @@ class StopMessageTest(Fixture):
         self.assertIn("Dashboard lanes and sloc changed: upload", reason)
 
         # Mark uploaded clears both.
-        self.run_hook("mark-uploaded", {})
+        self.mark(*dashboard_lanes.DATASETS)
         out, _ = self.run_hook("stop", {"stop_hook_active": False})
         self.assertEqual(out, "")
 
@@ -786,7 +793,7 @@ class StopMessageTest(Fixture):
         self.assertEqual(decision["decision"], "block")
         self.assertIn("lanes.json", decision["reason"])
         self.assertNotIn("sloc.json", decision["reason"])
-        self.run_hook("mark-uploaded", {})
+        self.mark(*dashboard_lanes.DATASETS)
 
         # When only sloc changed (lanes unchanged).
         self.commit_file("dcfs/foo.cc", "int x = 1;\nint y = 2;\n")
@@ -1251,7 +1258,7 @@ class QuotaCommandTest(Fixture):
         self.assertEqual(budget[2]["target"], 60)
         self.assertIsNone(budget[2]["actual"])
 
-    def test_budget_repeat_reading_adds_nothing(self):
+    def test_budget_repeat_reading_is_added_at_its_time(self):
         os.makedirs(self.dash, exist_ok=True)
         plan = [
             {
@@ -1280,7 +1287,11 @@ class QuotaCommandTest(Fixture):
         )
         with open(self.env.path("budget.json"), encoding="utf-8") as f:
             budget = json.load(f)
-        self.assertEqual(budget, plan)
+        self.assertEqual(len(budget), 4)
+        self.assertEqual(budget[:2], plan[:2])
+        self.assertEqual(budget[2]["when"], "2026-10-17T15:00:00Z")
+        self.assertEqual(budget[2]["actual"], 57)
+        self.assertEqual(budget[3], plan[2])
 
 
 class QuotaStopAndUploadTest(Fixture):
@@ -1352,9 +1363,36 @@ class QuotaStopAndUploadTest(Fixture):
         self.assertIn("budget.json", decision["reason"])
 
         # Mark uploaded records them and clears block.
-        self.run_hook("mark-uploaded", {})
+        self.mark(*dashboard_lanes.DATASETS)
         out2, _ = self.run_hook("stop", {"stop_hook_active": False})
         self.assertEqual(out2, "")
+
+    def test_marking_lanes_leaves_changed_quota_changed(self):
+        dashboard_lanes.main(
+            ["quota"], stdin=io.StringIO(""), stdout=io.StringIO(),
+            stderr=io.StringIO(), env=self.env
+        )
+        self.run_hook("stop", {"stop_hook_active": False})
+        self.assertEqual(self.mark("lanes")[1], "")
+        out, _ = self.run_hook("stop", {"stop_hook_active": False})
+        reason = json.loads(out)["reason"]
+        self.assertNotIn("lanes.json", reason)
+        self.assertTrue(reason.endswith(
+            "run dashboard_lanes.py mark-uploaded sloc quota budget."),
+            reason)
+
+    def test_mark_uploaded_without_names_is_a_usage_error(self):
+        out, err = self.mark()
+        self.assertEqual(out, "")
+        self.assertEqual(len(err.splitlines()), 1)
+        self.assertIn("usage", err)
+        self.assertFalse(os.path.exists(self.env.path("uploaded.sha256")))
+
+    def test_mark_uploaded_unknown_name_is_an_error(self):
+        out, err = self.mark("lanez")
+        self.assertEqual(out, "")
+        self.assertIn("lanez", err)
+        self.assertFalse(os.path.exists(self.env.path("uploaded.sha256")))
 
 
 class LaneStateOverrideTest(Fixture):
@@ -1384,7 +1422,7 @@ class LaneStateOverrideTest(Fixture):
         self.assertEqual(decision["decision"], "block")
         self.assertIn("lanes.json", decision["reason"])
 
-        self.run_hook("mark-uploaded", {})
+        self.mark(*dashboard_lanes.DATASETS)
         self.assertEqual(
             self.run_hook("stop", {"stop_hook_active": False})[0], ""
         )
@@ -1407,7 +1445,7 @@ class LaneStateOverrideTest(Fixture):
         row = self.rows()["lane-2"]
         self.assertEqual(row["state"], "waiting")
         self.assertEqual(row["agent"], "review Sunday")
-        self.run_hook("mark-uploaded", {})
+        self.mark(*dashboard_lanes.DATASETS)
 
         # New agent dispatch into lane-2 automatically clears override
         self.launch(prompt="in ~/Sources/dircachefs-lanes/lane-2")
@@ -1433,7 +1471,7 @@ class MaterialUploadRequestsTest(Fixture):
         # 1. Launch agent and mark uploaded: lane-2 running is uploaded.
         self.launch()
         self.run_hook("stop", {"stop_hook_active": False})
-        self.run_hook("mark-uploaded", {})
+        self.mark(*dashboard_lanes.DATASETS)
 
         # 2. Agent pauses for background work: fires SubagentStop.
         out, _ = self.run_hook("subagent-stop", {"agent_id": "a1"})
@@ -1462,7 +1500,7 @@ class MaterialUploadRequestsTest(Fixture):
     def test_new_dispatch_triggers_upload_request(self):
         # Initial state: lane-2 idle is uploaded.
         self.run_hook("stop", {"stop_hook_active": False})
-        self.run_hook("mark-uploaded", {})
+        self.mark(*dashboard_lanes.DATASETS)
         self.assertEqual(self.rows()["lane-2"]["state"], "idle")
 
         # New dispatch: lane-2 goes from idle to running.
@@ -1478,7 +1516,7 @@ class MaterialUploadRequestsTest(Fixture):
             agent_id="a1", prompt="in ~/Sources/dircachefs-lanes/lane-1"
         )
         self.run_hook("stop", {"stop_hook_active": False})
-        self.run_hook("mark-uploaded", {})
+        self.mark(*dashboard_lanes.DATASETS)
         self.assertEqual(self.rows()["lane-1"]["step"], "25.9b")
 
         # Change branch on lane-1 to step-25.9c.
