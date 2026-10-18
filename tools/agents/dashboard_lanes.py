@@ -672,6 +672,8 @@ def ci_read_due(env, origin):
 
 
 DATASETS = ["lanes", "sloc", "quota", "budget", "ci"]
+# The datasets whose changes can ask for an upload; sloc is not among them.
+ASKING = ["lanes", "quota", "budget", "ci"]
 
 
 def dataset_paths(env, name):
@@ -729,9 +731,28 @@ def lanes_material_changed(env):
     return False
 
 
+def ci_outcomes(runs):
+    return {r["run"]: r["result"] for r in runs}
+
+
+def ci_material_changed(env):
+    """Whether ci has news vs the last uploaded runs: a run was added or
+    dropped, or a run's result changed. Other changes (a reread with the
+    same runs, a changed commit or start time) are not news."""
+    if not os.path.exists(env.path("ci.json")):
+        return False
+    up_path = env.path("ci.uploaded.json")
+    if not os.path.exists(up_path):
+        return True
+    return (ci_outcomes(json.loads(read_text(env.path("ci.json"))))
+            != ci_outcomes(json.loads(read_text(up_path))))
+
+
 def dataset_changed(env, name):
     if name == "lanes":
         return lanes_material_changed(env)
+    if name == "ci":
+        return ci_material_changed(env)
     json_path, sha_path = dataset_paths(env, name)
     if not os.path.exists(json_path):
         return False
@@ -1320,25 +1341,24 @@ def stop(env, event):
         write_atomic(env.path("ci.read_sha"), (origin or "") + "\n")
         launch_reader(env, "ci")
 
-    changed = []
-    for name in DATASETS:
-        if dataset_changed(env, name):
-            changed.append((name, env.path("%s.json" % name)))
-
-    if not changed:
+    # Only news asks. sloc never asks on its own: it rides along with an ask.
+    asking = [name for name in ASKING if dataset_changed(env, name)]
+    if not asking:
         return ""
 
-    names = [c[0] for c in changed]
+    names = [
+        name for name in DATASETS
+        if name in asking or (name == "sloc" and dataset_changed(env, name))
+    ]
+    paths = [env.path("%s.json" % name) for name in names]
     mark_command = "dashboard_lanes.py mark-uploaded %s." % " ".join(names)
-    if len(changed) == 1:
-        name, path = changed[0]
+    if len(names) == 1:
         reason = (
             "Dashboard %s changed: upload %s to the dashboard's %s dataset "
             "and run %s"
-            % (name, path, name, mark_command)
+            % (names[0], paths[0], names[0], mark_command)
         )
     else:
-        paths = [c[1] for c in changed]
         names_str = ", ".join(names[:-1]) + " and " + names[-1]
         paths_str = ", ".join(paths[:-1]) + " and " + paths[-1]
         reason = (
@@ -1367,6 +1387,9 @@ def mark_uploaded(env, names):
             marked = True
     if not marked:
         raise FileNotFoundError("no dashboard files to mark uploaded")
+    if "ci" in names and os.path.exists(env.path("ci.json")):
+        write_atomic(
+            env.path("ci.uploaded.json"), read_text(env.path("ci.json")))
     if "lanes" in names:
         if os.path.exists(env.path("lanes.json")):
             write_atomic(

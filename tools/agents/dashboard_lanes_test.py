@@ -795,14 +795,10 @@ class StopMessageTest(Fixture):
         self.assertNotIn("sloc.json", decision["reason"])
         self.mark(*dashboard_lanes.DATASETS)
 
-        # When only sloc changed (lanes unchanged).
+        # When only sloc changed (lanes unchanged): sloc never asks alone.
         self.commit_file("dcfs/foo.cc", "int x = 1;\nint y = 2;\n")
         out, _ = self.run_hook("stop", {"stop_hook_active": False})
-        decision = json.loads(out)
-        self.assertEqual(decision["decision"], "block")
-        self.assertIn("sloc.json", decision["reason"])
-        self.assertNotIn("lanes.json", decision["reason"])
-        self.assertIn("Dashboard sloc changed: upload", decision["reason"])
+        self.assertEqual(out, "")
 
 class DispatchLedgerTest(Fixture):
 
@@ -1558,6 +1554,52 @@ EXPECTED_CI = [
      "result": "in_progress", "trigger": "workflow_dispatch",
      "started": "2026-10-17T14:30:00Z"},
 ]
+
+
+class AskOnNewsTest(Fixture):
+    """Stop asks for an upload only when a dataset carries news."""
+
+    def stop(self):
+        return self.run_hook("stop", {"stop_hook_active": False})[0]
+
+    def write_ci_json(self, runs, indent=None):
+        os.makedirs(self.dash, exist_ok=True)
+        self.write(self.env.path("ci.json"), json.dumps(runs, indent=indent))
+
+    def test_sloc_alone_asks_nothing(self):
+        self.stop()
+        self.mark("lanes", "quota", "budget", "ci")
+        self.commit_file("x.cc", "int x;\n")
+        self.assertEqual(self.stop(), "")
+
+    def test_sloc_rides_along_with_another_ask(self):
+        self.stop()
+        self.mark(*dashboard_lanes.DATASETS)
+        self.commit_file("x.cc", "int x;\n")
+        self.launch()
+        reason = json.loads(self.stop())["reason"]
+        self.assertIn("lanes", reason)
+        self.assertIn("sloc", reason)
+        self.assertTrue(reason.endswith(
+            "run dashboard_lanes.py mark-uploaded lanes sloc."), reason)
+
+    def test_ci_reread_with_the_same_runs_asks_nothing(self):
+        self.write_ci_json(EXPECTED_CI[:1])
+        self.stop()
+        self.mark(*dashboard_lanes.DATASETS)
+        self.write_ci_json(EXPECTED_CI[:1], indent=2)
+        self.assertEqual(self.stop(), "")
+
+    def test_ci_run_result_change_asks(self):
+        self.write_ci_json(EXPECTED_CI[:1])
+        self.stop()
+        self.mark(*dashboard_lanes.DATASETS)
+        changed = [dict(EXPECTED_CI[0], result="failure")]
+        self.write_ci_json(changed)
+        reason = json.loads(self.stop())["reason"]
+        self.assertIn("ci.json", reason)
+        self.assertTrue(reason.endswith(
+            "run dashboard_lanes.py mark-uploaded ci."), reason)
 
 
 class CiRunsTest(Fixture):

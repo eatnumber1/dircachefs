@@ -103,17 +103,23 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
   detached `quota` reader at most once per hour; launches the detached `ci`
   reader once when `origin/main` differs from `ci.read_sha` or `ci.json` has a
   run that is `in_progress` or `queued` (recording `origin/main` in
-  `ci.read_sha`); asks for a lanes upload only
-  on material changes compared with the last uploaded table (a lane's step
-  changed, an agent was newly dispatched, or an override was set or cleared; a
-  lane going to idle by SubagentStop alone triggers no request) or when another
-  dataset changed, blocking with a reason naming the files, unless
-  `stop_hook_active` is true (no loops) or the caller is a subagent.
+  `ci.read_sha`). It asks for an upload only when a dataset carries news,
+  blocking with a reason naming the files, unless `stop_hook_active` is true
+  (no loops) or the caller is a subagent. When each dataset asks:
+  - `lanes`: on material changes compared with the last uploaded table (a
+    lane's step changed, an agent was newly dispatched, or an override was set
+    or cleared; a lane going to idle by SubagentStop alone asks nothing).
+  - `quota` and `budget`: whenever a new meter reading changes them.
+  - `ci`: when a run was added or dropped, or a run's `result` differs from
+    `ci.uploaded.json`. A reread with the same runs asks nothing.
+  - `sloc`: never on its own. When another dataset asks and `sloc` has also
+    changed, `sloc` is named in the same ask.
 - `mark-uploaded DATASET...`: records the named datasets (`lanes`, `sloc`,
   `quota`, `budget`, `ci`) as uploaded at their current contents
   (`uploaded.sha256`, `lanes.uploaded.json` and `lane_states.uploaded.json`
   for lanes, `sloc.uploaded.sha256`, `quota.uploaded.sha256`,
-  `budget.uploaded.sha256`, `ci.uploaded.sha256`).
+  `budget.uploaded.sha256`, `ci.uploaded.sha256` and `ci.uploaded.json`
+  for ci).
   Datasets not named stay changed. With no names it is a usage error. The
   orchestrator runs it with the names the Stop hook's reason gives, after
   uploading those datasets.
