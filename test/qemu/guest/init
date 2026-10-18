@@ -49,51 +49,51 @@
 # kernel.)
 case " $(cat /proc/cmdline) " in
 *" dcfs_noisy=1 "*)
-	DCFS_NOISY=1
-	echo "init: noisy kernel (dcfs_noisy=1): the quiet-kernel sysctls are left at the kernel's defaults"
-	;;
+  DCFS_NOISY=1
+  echo "init: noisy kernel (dcfs_noisy=1): the quiet-kernel sysctls are left at the kernel's defaults"
+  ;;
 *) DCFS_NOISY=0 ;;
 esac
 if [ "$DCFS_NOISY" = 0 ]; then
-	set_sysctl() {
-		if ! echo "$2" >"/proc/sys/vm/$1"; then
-			echo "init: could not set vm.$1 to $2"
-		fi
-	}
-	# The flusher threads' periodic wakeup (every 5 s) that writes back dirty
-	# pages and inodes: off, so a dirty page stays dirty until `sync`, fsync,
-	# syncfs (testutil syncfs, dcfs's sync points), fsfreeze or unmount writes it.
-	# (Writeback driven by the amount of dirty memory still happens: that is the
-	# test's own write volume against the guest's RAM, not time.)
-	set_sysctl dirty_writeback_centisecs 0
-	# How old a dirty page must be before a flusher writes it: a day (a larger
-	# value overflows the kernel's unsigned centisecond-to-millisecond product),
-	# so nothing expires within a test even where something wakes the flusher.
-	set_sysctl dirty_expire_centisecs 8640000
-	# Laptop mode (the kernel's default is off) writes everything dirty after any
-	# read that spins the disk up: explicit, so it stays off.
-	set_sysctl laptop_mode 0
-	# Reclaim of cached dentries and inodes (FORGETs nobody asked for) happens only
-	# under memory pressure, which the MEM line's reclaim_scans reports and
-	# require_no_reclaim fails a test on, so there is no spontaneous event here to
-	# remove; the setting stays at the kernel's default, explicitly. It is NOT
-	# lowered: drop_caches, the tests' explicit trigger for dropping dentries and
-	# inodes (guest/lib.sh drop_caches_quiesced, and `echo 3 >drop_caches`
-	# elsewhere), reaches them through the same slab shrinkers, whose object counts
-	# vfs_cache_pressure scales (vfs_pressure_ratio): at 1, `drop_caches` dropped
-	# 2 of 1091 unused dentries, request_counts_test, syscall_traces_test and
-	# write_test failed because no FORGET or LOOKUP followed, and at 0 the counts
-	# are zero (quiet_kernel_test checks that drop_caches still works).
-	set_sysctl vfs_cache_pressure 100
-	# kernel.randomize_va_space is left at the kernel's default (2). dcfs is PIE
-	# and no behavior of it depends on an address, with one observable exception:
-	# Abseil seeds its hash tables with the address of a static, so ASLR changes
-	# the iteration order of the absl::flat_hash_* members of DirCacheFS. Two
-	# places iterate them (DirCacheFS::Destroy, the order in which the written
-	# files still held at unmount are reconciled; MountFds::Fds), so the order of
-	# those backing syscalls can differ between runs; no test asserts it, and the
-	# result of each is the same. Setting it to 0 would remove even that; left as
-	# it is so that the guests keep the daemon's production layout.
+  set_sysctl() {
+    if ! echo "$2" >"/proc/sys/vm/$1"; then
+      echo "init: could not set vm.$1 to $2"
+    fi
+  }
+  # The flusher threads' periodic wakeup (every 5 s) that writes back dirty
+  # pages and inodes: off, so a dirty page stays dirty until `sync`, fsync,
+  # syncfs (testutil syncfs, dcfs's sync points), fsfreeze or unmount writes it.
+  # (Writeback driven by the amount of dirty memory still happens: that is the
+  # test's own write volume against the guest's RAM, not time.)
+  set_sysctl dirty_writeback_centisecs 0
+  # How old a dirty page must be before a flusher writes it: a day (a larger
+  # value overflows the kernel's unsigned centisecond-to-millisecond product),
+  # so nothing expires within a test even where something wakes the flusher.
+  set_sysctl dirty_expire_centisecs 8640000
+  # Laptop mode (the kernel's default is off) writes everything dirty after any
+  # read that spins the disk up: explicit, so it stays off.
+  set_sysctl laptop_mode 0
+  # Reclaim of cached dentries and inodes (FORGETs nobody asked for) happens only
+  # under memory pressure, which the MEM line's reclaim_scans reports and
+  # require_no_reclaim fails a test on, so there is no spontaneous event here to
+  # remove; the setting stays at the kernel's default, explicitly. It is NOT
+  # lowered: drop_caches, the tests' explicit trigger for dropping dentries and
+  # inodes (guest/lib.sh drop_caches_quiesced, and `echo 3 >drop_caches`
+  # elsewhere), reaches them through the same slab shrinkers, whose object counts
+  # vfs_cache_pressure scales (vfs_pressure_ratio): at 1, `drop_caches` dropped
+  # 2 of 1091 unused dentries, request_counts_test, syscall_traces_test and
+  # write_test failed because no FORGET or LOOKUP followed, and at 0 the counts
+  # are zero (quiet_kernel_test checks that drop_caches still works).
+  set_sysctl vfs_cache_pressure 100
+  # kernel.randomize_va_space is left at the kernel's default (2). dcfs is PIE
+  # and no behavior of it depends on an address, with one observable exception:
+  # Abseil seeds its hash tables with the address of a static, so ASLR changes
+  # the iteration order of the absl::flat_hash_* members of DirCacheFS. Two
+  # places iterate them (DirCacheFS::Destroy, the order in which the written
+  # files still held at unmount are reconciled; MountFds::Fds), so the order of
+  # those backing syscalls can differ between runs; no test asserts it, and the
+  # result of each is the same. Setting it to 0 would remove even that; left as
+  # it is so that the guests keep the daemon's production layout.
 fi
 
 # Kernel modules (step 24.2). The kernel is Alpine's linux-virt, whose
@@ -122,9 +122,9 @@ chmod +x /sbin/dcfs-modprobe
 echo /sbin/dcfs-modprobe >/proc/sys/kernel/modprobe
 
 if [ -f /etc/dcfs-modules ]; then
-	for module in $(cat /etc/dcfs-modules); do
-		insmod "$module" || echo "init: insmod $module failed"
-	done
+  for module in $(cat /etc/dcfs-modules); do
+    insmod "$module" || echo "init: insmod $module failed"
+  done
 fi
 
 # Populate any device nodes devtmpfs didn't create on its own.
@@ -178,12 +178,12 @@ export DCFS_SANITIZER
 # that exits between the glob and the read cannot abort the loop.
 MEMSTAT=${MEMSTAT:-/dev/memstat}
 start_mem_sampler() {
-	RECLAIM_BASE=$(reclaim_counters)
-	export RECLAIM_BASE
-	# The program is a file so that the systemd guest (guest/systemd_run.sh),
-	# which switches root and so cannot go on with this process, can run the
-	# same one: /dev is a devtmpfs, which moves with the switch.
-	cat >/dev/memsampler.awk <<'EOF_SAMPLER'
+  RECLAIM_BASE=$(reclaim_counters)
+  export RECLAIM_BASE
+  # The program is a file so that the systemd guest (guest/systemd_run.sh),
+  # which switches root and so cannot go on with this process, can run the
+  # same one: /dev is a devtmpfs, which moves with the switch.
+  cat >/dev/memsampler.awk <<'EOF_SAMPLER'
 BEGIN {
 	minav = -1
 	for (;;) {
@@ -246,61 +246,61 @@ BEGIN {
 	}
 }
 EOF_SAMPLER
-	ramdisks=0
-	case " $(cat /proc/cmdline) " in
-	*" dcfs_ramdisks="*) ramdisks=1 ;;
-	esac
-	awk -v out="$MEMSTAT" -v ramdisks="$ramdisks" -f /dev/memsampler.awk &
-	MEM_SAMPLER_PID=$!
+  ramdisks=0
+  case " $(cat /proc/cmdline) " in
+  *" dcfs_ramdisks="*) ramdisks=1 ;;
+  esac
+  awk -v out="$MEMSTAT" -v ramdisks="$ramdisks" -f /dev/memsampler.awk &
+  MEM_SAMPLER_PID=$!
 }
 
 # reclaim_counters: "<pgscan_kswapd + pgscan_direct> <slabs_scanned>" now.
 reclaim_counters() {
-	awk '/^pgscan_(kswapd|direct) / { p += $2 } /^slabs_scanned / { s += $2 } END { print p + 0, s + 0 }' /proc/vmstat
+  awk '/^pgscan_(kswapd|direct) / { p += $2 } /^slabs_scanned / { s += $2 } END { print p + 0, s + 0 }' /proc/vmstat
 }
 
 # Stop the sampler and print its last line (nothing if it never completed a
 # sample), then any OOM-killer lines as MEM-OOM: lines and the kernel's oopses
 # and warnings as KERNEL-OOPS: lines.
 mem_report() {
-	# Read the sampler's last line while it still runs, then stop it: the
-	# awk truncates the file each cycle before it writes, and a kill that
-	# lands in that window leaves it empty (a run on a loaded runner lost
-	# its MEM line that way). A test that ends within the first sample's
-	# time (a unit test of a few milliseconds on a slow-starting sampler)
-	# still gets its line: wait for a sample, for up to two seconds.
-	waited=0
-	memline=
-	while [ "$waited" -lt 20 ]; do
-		memline=$(cat "$MEMSTAT" 2>/dev/null)
-		[ -n "$memline" ] && break
-		sleep 0.1
-		waited=$((waited + 1))
-	done
-	[ -n "${MEM_SAMPLER_PID:-}" ] && kill "$MEM_SAMPLER_PID" 2>/dev/null
-	MEM_SAMPLER_PID=
-	if [ -n "$memline" ]; then
-		echo "$memline $(awk -v now="$(reclaim_counters)" -v base="$RECLAIM_BASE" 'BEGIN {
+  # Read the sampler's last line while it still runs, then stop it: the
+  # awk truncates the file each cycle before it writes, and a kill that
+  # lands in that window leaves it empty (a run on a loaded runner lost
+  # its MEM line that way). A test that ends within the first sample's
+  # time (a unit test of a few milliseconds on a slow-starting sampler)
+  # still gets its line: wait for a sample, for up to two seconds.
+  waited=0
+  memline=
+  while [ "$waited" -lt 20 ]; do
+    memline=$(cat "$MEMSTAT" 2>/dev/null)
+    [ -n "$memline" ] && break
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  [ -n "${MEM_SAMPLER_PID:-}" ] && kill "$MEM_SAMPLER_PID" 2>/dev/null
+  MEM_SAMPLER_PID=
+  if [ -n "$memline" ]; then
+    echo "$memline $(awk -v now="$(reclaim_counters)" -v base="$RECLAIM_BASE" 'BEGIN {
 			split(now, n, " ")
 			split(base, b, " ")
 			printf "reclaim_scans=%d slabs_scanned=%d", n[1] - b[1], n[2] - b[2]
 		}')"
-	fi
-	# The console runs at loglevel=3, which hides the OOM killer's own lines
-	# (they are KERN_ERR): fetch them from the kernel log so a run that lost a
-	# process to memory pressure says so in the serial log (run-qemu.sh
-	# reports it on a FAIL), instead of failing on some unrelated-looking
-	# check.
-	dmesg 2>/dev/null | grep -i -E 'out of memory|oom-kill|killed process' |
-		head -n 10 | sed 's/^/MEM-OOM: /'
-	# The same for the kernel's own failures: the console shows only an oops
-	# or a BUG, not a WARNING or the call trace (run-qemu.sh fails a run
-	# that has a KERNEL-OOPS: line). Only real kernel warnings match
-	# ("WARNING: CPU:", older "WARNING: at ", or the "cut here" marker):
-	# the hardware-vulnerability advisories printed at boot on some CPUs
-	# (AMD: "SRSO: WARNING: See ...") are not failures.
-	dmesg 2>/dev/null | grep -E 'BUG:|Oops|kernel BUG at|WARNING: CPU:|WARNING: at |------------\[ cut here \]------------|Call Trace:|Kernel panic|general protection fault' |
-		head -n 20 | sed 's/^/KERNEL-OOPS: /'
+  fi
+  # The console runs at loglevel=3, which hides the OOM killer's own lines
+  # (they are KERN_ERR): fetch them from the kernel log so a run that lost a
+  # process to memory pressure says so in the serial log (run-qemu.sh
+  # reports it on a FAIL), instead of failing on some unrelated-looking
+  # check.
+  dmesg 2>/dev/null | grep -i -E 'out of memory|oom-kill|killed process' |
+    head -n 10 | sed 's/^/MEM-OOM: /'
+  # The same for the kernel's own failures: the console shows only an oops
+  # or a BUG, not a WARNING or the call trace (run-qemu.sh fails a run
+  # that has a KERNEL-OOPS: line). Only real kernel warnings match
+  # ("WARNING: CPU:", older "WARNING: at ", or the "cut here" marker):
+  # the hardware-vulnerability advisories printed at boot on some CPUs
+  # (AMD: "SRSO: WARNING: See ...") are not failures.
+  dmesg 2>/dev/null | grep -E 'BUG:|Oops|kernel BUG at|WARNING: CPU:|WARNING: at |------------\[ cut here \]------------|Call Trace:|Kernel panic|general protection fault' |
+    head -n 20 | sed 's/^/KERNEL-OOPS: /'
 }
 
 start_mem_sampler
@@ -313,71 +313,71 @@ start_mem_sampler
 # verdict.
 COV=$(sed -n 's/.*\bdcfs_cov=\([^ ]*\).*/\1/p' /proc/cmdline)
 if [ -n "$COV" ]; then
-	mkdir -p /cov
-	export LLVM_PROFILE_FILE=/cov/%m%c.profraw
+  mkdir -p /cov
+  export LLVM_PROFILE_FILE=/cov/%m%c.profraw
 fi
 dump_profraw() {
-	[ -n "$COV" ] || return 0
-	# A daemon the test left running writes its profile only when it exits.
-	# First give the processes the test already told to stop (its cleanup
-	# SIGTERMs the daemon and does not wait) three seconds to finish: a
-	# second SIGTERM while the daemon writes its profile at exit kills it
-	# mid-write (libfuse puts the default action back once the session loop
-	# ends), which left a truncated profile one test run in three. Then ask
-	# the rest to stop (SIGTERM is the daemon's normal shutdown) and wait
-	# for every instrumented process to be gone before the tar reads /cov.
-	waited=0
-	while pidof dcfs mount.dcfs fhtest testutil dcfs_bench >/dev/null 2>&1 && [ "$waited" -lt 30 ]; do
-		sleep 0.1
-		waited=$((waited + 1))
-	done
-	if pidof dcfs mount.dcfs fhtest testutil dcfs_bench >/dev/null 2>&1; then
-		killall -TERM dcfs mount.dcfs fhtest testutil dcfs_bench 2>/dev/null
-		waited=0
-		while pidof dcfs mount.dcfs fhtest testutil dcfs_bench >/dev/null 2>&1 && [ "$waited" -lt 100 ]; do
-			sleep 0.1
-			waited=$((waited + 1))
-		done
-		if [ "$waited" -ge 100 ]; then
-			echo "init: an instrumented process is still running; its profile is lost"
-		fi
-	fi
-	# pidof does not see a process that has begun to exit, and a daemon the
-	# test unmounted may still be writing its profile (at exit, 2 MB): wait
-	# until /cov stops changing (observed: archives holding a half-written
-	# profile, one test run in three).
-	last=
-	waited=0
-	while [ "$waited" -lt 100 ]; do
-		now=$(ls -l /cov | md5sum)
-		[ "$now" = "$last" ] && break
-		last=$now
-		sleep 0.3
-		waited=$((waited + 1))
-	done
-	ls -l /cov | sed 's/^/init: cov /'
-	if tar -c -C /cov . >"$COV"; then
-		echo "init: profiles written to $COV"
-	else
-		echo "init: could not write the profiles to $COV"
-	fi
-	sync
+  [ -n "$COV" ] || return 0
+  # A daemon the test left running writes its profile only when it exits.
+  # First give the processes the test already told to stop (its cleanup
+  # SIGTERMs the daemon and does not wait) three seconds to finish: a
+  # second SIGTERM while the daemon writes its profile at exit kills it
+  # mid-write (libfuse puts the default action back once the session loop
+  # ends), which left a truncated profile one test run in three. Then ask
+  # the rest to stop (SIGTERM is the daemon's normal shutdown) and wait
+  # for every instrumented process to be gone before the tar reads /cov.
+  waited=0
+  while pidof dcfs mount.dcfs fhtest testutil dcfs_bench >/dev/null 2>&1 && [ "$waited" -lt 30 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  if pidof dcfs mount.dcfs fhtest testutil dcfs_bench >/dev/null 2>&1; then
+    killall -TERM dcfs mount.dcfs fhtest testutil dcfs_bench 2>/dev/null
+    waited=0
+    while pidof dcfs mount.dcfs fhtest testutil dcfs_bench >/dev/null 2>&1 && [ "$waited" -lt 100 ]; do
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+    if [ "$waited" -ge 100 ]; then
+      echo "init: an instrumented process is still running; its profile is lost"
+    fi
+  fi
+  # pidof does not see a process that has begun to exit, and a daemon the
+  # test unmounted may still be writing its profile (at exit, 2 MB): wait
+  # until /cov stops changing (observed: archives holding a half-written
+  # profile, one test run in three).
+  last=
+  waited=0
+  while [ "$waited" -lt 100 ]; do
+    now=$(ls -l /cov | md5sum)
+    [ "$now" = "$last" ] && break
+    last=$now
+    sleep 0.3
+    waited=$((waited + 1))
+  done
+  ls -l /cov | sed 's/^/init: cov /'
+  if tar -c -C /cov . >"$COV"; then
+    echo "init: profiles written to $COV"
+  else
+    echo "init: could not write the profiles to $COV"
+  fi
+  sync
 }
 
 finish() {
-	sync
-	# `sync` flushes the block devices, not the serial console: the line
-	# just echoed (DCFS-TEST-EXIT=.../ALL-TESTS-PASSED/TEST-FAILED, or even
-	# the TEST ...PASS/FAIL line right before it) is still working its way
-	# from the tty layer through QEMU's emulated UART to the host-side
-	# chardev when reboot -f below forces an immediate triple fault --
-	# observed in practice as run-qemu.sh's grep missing the verdict, or a
-	# PASS line arriving with a kernel "reboot: Restarting system" message
-	# spliced into the middle of it. A short sleep gives that last bit of
-	# output time to actually drain before the reboot yanks the console
-	# out from under it.
-	sleep 0.2
-	reboot -f
+  sync
+  # `sync` flushes the block devices, not the serial console: the line
+  # just echoed (DCFS-TEST-EXIT=.../ALL-TESTS-PASSED/TEST-FAILED, or even
+  # the TEST ...PASS/FAIL line right before it) is still working its way
+  # from the tty layer through QEMU's emulated UART to the host-side
+  # chardev when reboot -f below forces an immediate triple fault --
+  # observed in practice as run-qemu.sh's grep missing the verdict, or a
+  # PASS line arriving with a kernel "reboot: Restarting system" message
+  # spliced into the middle of it. A short sleep gives that last bit of
+  # output time to actually drain before the reboot yanks the console
+  # out from under it.
+  sleep 0.2
+  reboot -f
 }
 
 # What a test costs (step 26.17): guest/cost_lib.sh, which has the reasons. The
@@ -390,10 +390,10 @@ export COST_CGROUP COST_EXEC
 mkdir -p /sys/fs/cgroup /tests
 . /tests/cost_lib.sh
 if ! mount -t cgroup2 none /sys/fs/cgroup || ! echo +io >/sys/fs/cgroup/cgroup.subtree_control || ! mkdir "$COST_CGROUP"; then
-	echo "init: could not make the cgroup $COST_CGROUP that the cost of the test is read from"
-	echo "TEST-FAILED"
-	finish
-	exit 1
+  echo "init: could not make the cgroup $COST_CGROUP that the cost of the test is read from"
+  echo "TEST-FAILED"
+  finish
+  exit 1
 fi
 # The program that puts a command in the cgroup: the cgroup the daemon starts
 # in is the whole of the accounting, and a child is in its parent's, so the
@@ -406,63 +406,63 @@ EOF_COST_EXEC
 chmod +x /tests/cost_exec.sh
 
 if [ -f /test/run ]; then
-	# --- unit-test mode -------------------------------------------------
-	mkdir -p /tmp/test_tmpdir
+  # --- unit-test mode -------------------------------------------------
+  mkdir -p /tmp/test_tmpdir
 
-	if [ -s /test/disk0 ]; then
-		disk_dev="/dev/$(cat /test/disk0)"
-		if ! mount -t ext4 "$disk_dev" /tmp/test_tmpdir; then
-			echo "init: failed to mount $disk_dev on /tmp/test_tmpdir"
-			echo "DCFS-TEST-EXIT=1"
-			finish
-			exit 1
-		fi
-	fi
+  if [ -s /test/disk0 ]; then
+    disk_dev="/dev/$(cat /test/disk0)"
+    if ! mount -t ext4 "$disk_dev" /tmp/test_tmpdir; then
+      echo "init: failed to mount $disk_dev on /tmp/test_tmpdir"
+      echo "DCFS-TEST-EXIT=1"
+      finish
+      exit 1
+    fi
+  fi
 
-	export TEST_TMPDIR=/tmp/test_tmpdir
-	export TEST_SRCDIR=/test/data
-	export HOME=/tmp
-	mkdir -p /tmp/test_undeclared_outputs
-	export TEST_UNDECLARED_OUTPUTS_DIR=/tmp/test_undeclared_outputs
-	# ASan needs ptrace (CAP_SYS_PTRACE / a non-restrictive
-	# yama.ptrace_scope) to unwind and symbolize leak reports; the guest
-	# has neither configured, so leak detection is disabled rather than
-	# have every ASan build fail on an unrelated guest limitation.
-	export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
-	# UBSan (--config=ubsan, fatal at compile time already): the stack of a
-	# report, and an exit status that cannot be mistaken for the test's own.
-	export UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}"
+  export TEST_TMPDIR=/tmp/test_tmpdir
+  export TEST_SRCDIR=/test/data
+  export HOME=/tmp
+  mkdir -p /tmp/test_undeclared_outputs
+  export TEST_UNDECLARED_OUTPUTS_DIR=/tmp/test_undeclared_outputs
+  # ASan needs ptrace (CAP_SYS_PTRACE / a non-restrictive
+  # yama.ptrace_scope) to unwind and symbolize leak reports; the guest
+  # has neither configured, so leak detection is disabled rather than
+  # have every ASan build fail on an unrelated guest limitation.
+  export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
+  # UBSan (--config=ubsan, fatal at compile time already): the stack of a
+  # report, and an exit status that cannot be mistaken for the test's own.
+  export UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}"
 
-	[ -d /test/data ] && cd /test/data
+  [ -d /test/data ] && cd /test/data
 
-	# No -e here or below: the test binary reports failures itself via its
-	# exit status, and word-splitting $(cat /test/args) is deliberate.
-	COST_DISKS_BEFORE=$(cost_disk_counts)
-	$COST_EXEC /test/run $(cat /test/args 2>/dev/null)
-	rc=$?
-	cost_report
-	dump_profraw
-	mem_report
-	echo "DCFS-TEST-EXIT=$rc"
-	finish
-	exit 0
+  # No -e here or below: the test binary reports failures itself via its
+  # exit status, and word-splitting $(cat /test/args) is deliberate.
+  COST_DISKS_BEFORE=$(cost_disk_counts)
+  $COST_EXEC /test/run $(cat /test/args 2>/dev/null)
+  rc=$?
+  cost_report
+  dump_profraw
+  mem_report
+  echo "DCFS-TEST-EXIT=$rc"
+  finish
+  exit 0
 fi
 
 # --- e2e mode -----------------------------------------------------------
 TEST=$(sed -n 's/.*\bdcfs_test=\([^ ]*\).*/\1/p' /proc/cmdline)
 if [ -z "$TEST" ]; then
-	echo "init: no dcfs_test= on the kernel command line"
-	echo "TEST-FAILED"
-	finish
-	exit 1
+  echo "init: no dcfs_test= on the kernel command line"
+  echo "TEST-FAILED"
+  finish
+  exit 1
 fi
 
 SCRIPT="/tests/$TEST"
 if [ ! -f "$SCRIPT" ]; then
-	echo "init: $SCRIPT not found"
-	echo "TEST-FAILED"
-	finish
-	exit 1
+  echo "init: $SCRIPT not found"
+  echo "TEST-FAILED"
+  finish
+  exit 1
 fi
 
 # qemu_test's ram_disks (step 26.17): run-qemu.sh --ram-disks attached no disk
@@ -471,13 +471,13 @@ fi
 # disks it declared whichever way they were made (guest/ramdisk_lib.sh).
 RAMDISKS=$(sed -n 's/.*\bdcfs_ramdisks=\([^ ]*\).*/\1/p' /proc/cmdline)
 if [ -n "$RAMDISKS" ]; then
-	. /tests/ramdisk_lib.sh
-	if ! ram_disks_make "$RAMDISKS"; then
-		echo "init: making the RAM disks $RAMDISKS failed"
-		echo "TEST-FAILED"
-		finish
-		exit 1
-	fi
+  . /tests/ramdisk_lib.sh
+  if ! ram_disks_make "$RAMDISKS"; then
+    echo "init: making the RAM disks $RAMDISKS failed"
+    echo "TEST-FAILED"
+    finish
+    exit 1
+  fi
 fi
 
 # The disks' counters when the test starts: its RAM disks are made, so the
@@ -501,90 +501,90 @@ export UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}"
 # dynamic-linking resolution is never touched (see the sanitizer notes in
 # the body).
 install_dcfs_into() {
-	root=$1
-	mkdir -p $root/usr/local/bin $root/sbin $root/tests
-	cp /bin/dcfs /bin/fhtest /bin/testutil $root/usr/local/bin/
-	cp -a /tests/. $root/tests/
+  root=$1
+  mkdir -p $root/usr/local/bin $root/sbin $root/tests
+  cp /bin/dcfs /bin/fhtest /bin/testutil $root/usr/local/bin/
+  cp -a /tests/. $root/tests/
 
-	# Under --config=asan/--config=ubsan, dcfs/fhtest/testutil above are
-	# dynamically linked (see dcfs/BUILD.bazel's main_static select()),
-	# and need their shared-library closure -- already copied into this
-	# initramfs's own /lib, /lib64 by mkinitramfs.sh's copy_deps() -- to
-	# run inside the chroot too. Two things that don't work, tried in
-	# this order, before landing on "run each binary through its own
-	# copied loader explicitly" below:
-	#
-	#   - Do nothing (just the plain binary copy above): the Debian
-	#     rootfs predates this build toolchain's glibc, so the dynamic
-	#     linker can't find what dcfs needs in the rootfs's own libc:
-	#       /usr/local/bin/dcfs: /lib/x86_64-linux-gnu/libc.so.6: version
-	#       `GLIBC_2.38' not found (required by /usr/local/bin/dcfs)
-	#   - Overwrite the rootfs's /lib, /lib64 with this build's copies
-	#     (relying on glibc's backward-compatibility guarantee -- a
-	#     newer glibc runs binaries built against an older one, the same
-	#     guarantee an in-place distro glibc upgrade depends on): this
-	#     breaks every *other* dynamically linked binary in the chroot
-	#     instead (/bin/sh itself, here), because the loader
-	#     (ld-linux-x86-64.so.2) and the libc.so.6 it loads share
-	#     GLIBC_PRIVATE-tagged symbols that carry no compatibility
-	#     guarantee at all, even across minor versions:
-	#       /bin/sh: symbol lookup error: /lib/x86_64-linux-gnu/libc.so.6:
-	#       undefined symbol: __tunable_is_initialized, version
-	#       GLIBC_PRIVATE
-	#
-	# Fix: leave the rootfs's own /lib, /lib64 (and so every other
-	# binary in it) completely untouched, and instead give
-	# dcfs/fhtest/testutil their own isolated copy of their loader and
-	# library closure under /opt/dcfs-libs, invoked explicitly (`ld.so
-	# --library-path`) instead of through the normal, rootfs-wide
-	# dynamic-linking resolution a bare exec would use. A no-op for a
-	# normal (non-sanitizer) build: mkinitramfs.sh creates no /lib or
-	# /lib64 at all when every binary is fully static, so $interp stays
-	# empty and this block never runs. (Step 15.6: nor in a plain build with
-	# the initramfs holding a glibc loader for some other program, a
-	# benchmark: the sanitizer the build uses, from the kernel command line,
-	# is what says dcfs is dynamic. A static dcfs runs as it ships, which
-	# the systemd guest's process names and exec paths need.)
-	interp=$(find /lib64 /lib -name 'ld-linux*.so*' 2>/dev/null | head -1)
-	if [ -n "$interp" ] && [ -n "$DCFS_SANITIZER" ]; then
-		mkdir -p $root/opt/dcfs-libs
-		for f in $(find /lib /lib64 -type f 2>/dev/null); do
-			cp "$f" "$root/opt/dcfs-libs/$(basename "$f")"
-		done
-		loader="/opt/dcfs-libs/$(basename "$interp")"
-		for bin in dcfs fhtest testutil; do
-			mv "$root/usr/local/bin/$bin" \
-				"$root/usr/local/bin/$bin.real"
-			cat >"$root/usr/local/bin/$bin" <<EOF
+  # Under --config=asan/--config=ubsan, dcfs/fhtest/testutil above are
+  # dynamically linked (see dcfs/BUILD.bazel's main_static select()),
+  # and need their shared-library closure -- already copied into this
+  # initramfs's own /lib, /lib64 by mkinitramfs.sh's copy_deps() -- to
+  # run inside the chroot too. Two things that don't work, tried in
+  # this order, before landing on "run each binary through its own
+  # copied loader explicitly" below:
+  #
+  #   - Do nothing (just the plain binary copy above): the Debian
+  #     rootfs predates this build toolchain's glibc, so the dynamic
+  #     linker can't find what dcfs needs in the rootfs's own libc:
+  #       /usr/local/bin/dcfs: /lib/x86_64-linux-gnu/libc.so.6: version
+  #       `GLIBC_2.38' not found (required by /usr/local/bin/dcfs)
+  #   - Overwrite the rootfs's /lib, /lib64 with this build's copies
+  #     (relying on glibc's backward-compatibility guarantee -- a
+  #     newer glibc runs binaries built against an older one, the same
+  #     guarantee an in-place distro glibc upgrade depends on): this
+  #     breaks every *other* dynamically linked binary in the chroot
+  #     instead (/bin/sh itself, here), because the loader
+  #     (ld-linux-x86-64.so.2) and the libc.so.6 it loads share
+  #     GLIBC_PRIVATE-tagged symbols that carry no compatibility
+  #     guarantee at all, even across minor versions:
+  #       /bin/sh: symbol lookup error: /lib/x86_64-linux-gnu/libc.so.6:
+  #       undefined symbol: __tunable_is_initialized, version
+  #       GLIBC_PRIVATE
+  #
+  # Fix: leave the rootfs's own /lib, /lib64 (and so every other
+  # binary in it) completely untouched, and instead give
+  # dcfs/fhtest/testutil their own isolated copy of their loader and
+  # library closure under /opt/dcfs-libs, invoked explicitly (`ld.so
+  # --library-path`) instead of through the normal, rootfs-wide
+  # dynamic-linking resolution a bare exec would use. A no-op for a
+  # normal (non-sanitizer) build: mkinitramfs.sh creates no /lib or
+  # /lib64 at all when every binary is fully static, so $interp stays
+  # empty and this block never runs. (Step 15.6: nor in a plain build with
+  # the initramfs holding a glibc loader for some other program, a
+  # benchmark: the sanitizer the build uses, from the kernel command line,
+  # is what says dcfs is dynamic. A static dcfs runs as it ships, which
+  # the systemd guest's process names and exec paths need.)
+  interp=$(find /lib64 /lib -name 'ld-linux*.so*' 2>/dev/null | head -1)
+  if [ -n "$interp" ] && [ -n "$DCFS_SANITIZER" ]; then
+    mkdir -p $root/opt/dcfs-libs
+    for f in $(find /lib /lib64 -type f 2>/dev/null); do
+      cp "$f" "$root/opt/dcfs-libs/$(basename "$f")"
+    done
+    loader="/opt/dcfs-libs/$(basename "$interp")"
+    for bin in dcfs fhtest testutil; do
+      mv "$root/usr/local/bin/$bin" \
+        "$root/usr/local/bin/$bin.real"
+      cat >"$root/usr/local/bin/$bin" <<EOF
 #!/bin/sh
 exec $loader --library-path /opt/dcfs-libs /usr/local/bin/$bin.real "\$@"
 EOF
-			chmod +x "$root/usr/local/bin/$bin"
-		done
-		# Step 15.2: dcfs dispatches on argv[0] (mount.dcfs; step 15.6b:
-		# umount.fuse.dcfs and umount.fuse too), which the generic loop above
-		# would lose.
-		for helper in mount.dcfs umount.fuse.dcfs umount.fuse fsck.dcfs; do
-			cat >$root/usr/local/bin/$helper <<EOF
+      chmod +x "$root/usr/local/bin/$bin"
+    done
+    # Step 15.2: dcfs dispatches on argv[0] (mount.dcfs; step 15.6b:
+    # umount.fuse.dcfs and umount.fuse too), which the generic loop above
+    # would lose.
+    for helper in mount.dcfs umount.fuse.dcfs umount.fuse fsck.dcfs; do
+      cat >$root/usr/local/bin/$helper <<EOF
 #!/bin/sh
 exec $loader --argv0 $helper --library-path /opt/dcfs-libs /usr/local/bin/dcfs.real "\$@"
 EOF
-			chmod +x $root/usr/local/bin/$helper
-		done
-	else
-		for helper in mount.dcfs umount.fuse.dcfs umount.fuse fsck.dcfs; do
-			ln -sf dcfs $root/usr/local/bin/$helper
-		done
-	fi
-	ln -sf /usr/local/bin/mount.dcfs $root/sbin/mount.dcfs
-	ln -sf /usr/local/bin/mount.dcfs $root/sbin/mount.fuse.dcfs
-	# Step 15.6b: the helper umount(8) runs for a dcfs mount, systemd's stops
-	# included (dcfs/mount_dcfs.h). umount.fuse, which runs for every FUSE
-	# mount, is the administrator's choice: it is in /usr/local/bin for a test
-	# that links it, and not in /sbin.
-	ln -sf /usr/local/bin/umount.fuse.dcfs $root/sbin/umount.fuse.dcfs
-	# Step 15.5: fsck(8) and systemd-fsck run fsck.dcfs for a line with a passno.
-	ln -sf /usr/local/bin/fsck.dcfs $root/sbin/fsck.dcfs
+      chmod +x $root/usr/local/bin/$helper
+    done
+  else
+    for helper in mount.dcfs umount.fuse.dcfs umount.fuse fsck.dcfs; do
+      ln -sf dcfs $root/usr/local/bin/$helper
+    done
+  fi
+  ln -sf /usr/local/bin/mount.dcfs $root/sbin/mount.dcfs
+  ln -sf /usr/local/bin/mount.dcfs $root/sbin/mount.fuse.dcfs
+  # Step 15.6b: the helper umount(8) runs for a dcfs mount, systemd's stops
+  # included (dcfs/mount_dcfs.h). umount.fuse, which runs for every FUSE
+  # mount, is the administrator's choice: it is in /usr/local/bin for a test
+  # that links it, and not in /sbin.
+  ln -sf /usr/local/bin/umount.fuse.dcfs $root/sbin/umount.fuse.dcfs
+  # Step 15.5: fsck(8) and systemd-fsck run fsck.dcfs for a line with a passno.
+  ln -sf /usr/local/bin/fsck.dcfs $root/sbin/fsck.dcfs
 }
 
 # qemu_test's systemd_image= attribute (step 15.6): run-qemu.sh attaches an
@@ -598,44 +598,44 @@ EOF
 # and verdict.
 SYSTEMD_ROOT=$(sed -n 's/.*\bdcfs_systemd=\([^ ]*\).*/\1/p' /proc/cmdline)
 if [ -n "$SYSTEMD_ROOT" ]; then
-	mkdir -p /newroot
-	# The kernel finds the disk's partitions after the disk itself (it reads
-	# the partition table), and virtio probes the disks as they come: wait
-	# for the root partition's node.
-	i=0
-	while [ ! -b "$SYSTEMD_ROOT" ] && [ "$i" -lt 100 ]; do
-		sleep 0.1
-		i=$((i + 1))
-	done
-	if ! mount -t ext4 "$SYSTEMD_ROOT" /newroot; then
-		echo "init: failed to mount $SYSTEMD_ROOT on /newroot"
-		cat /proc/partitions
-		echo "TEST-FAILED"
-		finish
-		exit 1
-	fi
-	install_dcfs_into /newroot
-	if ! sh /tests/systemd_install.sh /newroot "$TEST"; then
-		echo "init: guest/systemd_install.sh failed"
-		echo "TEST-FAILED"
-		finish
-		exit 1
-	fi
-	# The sampler lives in the old root (its /proc is gone with the switch):
-	# stop it, and leave the counters it began with for the unit's own.
-	echo "$RECLAIM_BASE" >/dev/dcfs-reclaim-base
-	kill "$MEM_SAMPLER_PID" 2>/dev/null
-	MEM_SAMPLER_PID=
-	mkdir -p /newroot/proc /newroot/sys /newroot/dev
-	mount --move /proc /newroot/proc
-	mount --move /sys /newroot/sys
-	mount --move /dev /newroot/dev
-	umount /tmp
-	exec switch_root /newroot /lib/systemd/systemd
-	echo "init: switch_root into $SYSTEMD_ROOT failed"
-	echo "TEST-FAILED"
-	finish
-	exit 1
+  mkdir -p /newroot
+  # The kernel finds the disk's partitions after the disk itself (it reads
+  # the partition table), and virtio probes the disks as they come: wait
+  # for the root partition's node.
+  i=0
+  while [ ! -b "$SYSTEMD_ROOT" ] && [ "$i" -lt 100 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if ! mount -t ext4 "$SYSTEMD_ROOT" /newroot; then
+    echo "init: failed to mount $SYSTEMD_ROOT on /newroot"
+    cat /proc/partitions
+    echo "TEST-FAILED"
+    finish
+    exit 1
+  fi
+  install_dcfs_into /newroot
+  if ! sh /tests/systemd_install.sh /newroot "$TEST"; then
+    echo "init: guest/systemd_install.sh failed"
+    echo "TEST-FAILED"
+    finish
+    exit 1
+  fi
+  # The sampler lives in the old root (its /proc is gone with the switch):
+  # stop it, and leave the counters it began with for the unit's own.
+  echo "$RECLAIM_BASE" >/dev/dcfs-reclaim-base
+  kill "$MEM_SAMPLER_PID" 2>/dev/null
+  MEM_SAMPLER_PID=
+  mkdir -p /newroot/proc /newroot/sys /newroot/dev
+  mount --move /proc /newroot/proc
+  mount --move /sys /newroot/sys
+  mount --move /dev /newroot/dev
+  umount /tmp
+  exec switch_root /newroot /lib/systemd/systemd
+  echo "init: switch_root into $SYSTEMD_ROOT failed"
+  echo "TEST-FAILED"
+  finish
+  exit 1
 fi
 
 # qemu_test's optional rootfs= attribute (test/qemu/qemu_test.bzl) attaches
@@ -648,42 +648,42 @@ fi
 # the chroot, since it's process/namespace, not filesystem, state, and
 # chroot(2) doesn't touch it.
 if [ -n "$ROOTFS" ]; then
-	mkdir -p /newroot
-	if ! mount -t ext4 "$ROOTFS" /newroot; then
-		echo "init: failed to mount $ROOTFS on /newroot"
-		echo "TEST-FAILED"
-		finish
-		exit 1
-	fi
-	mkdir -p /newroot/proc /newroot/sys /newroot/dev /newroot/tests
-	mount -o bind /proc /newroot/proc
-	mount -o bind /sys /newroot/sys
-	mount -o bind /dev /newroot/dev
-	# The cgroup of the cost accounting (the binds are not recursive).
-	mount -o bind /sys/fs/cgroup /newroot/sys/fs/cgroup
-	# Coverage: the chrooted processes write their profiles to /cov too.
-	[ -n "$COV" ] && mkdir -p /newroot/cov && mount -o bind /cov /newroot/cov
-	install_dcfs_into /newroot
+  mkdir -p /newroot
+  if ! mount -t ext4 "$ROOTFS" /newroot; then
+    echo "init: failed to mount $ROOTFS on /newroot"
+    echo "TEST-FAILED"
+    finish
+    exit 1
+  fi
+  mkdir -p /newroot/proc /newroot/sys /newroot/dev /newroot/tests
+  mount -o bind /proc /newroot/proc
+  mount -o bind /sys /newroot/sys
+  mount -o bind /dev /newroot/dev
+  # The cgroup of the cost accounting (the binds are not recursive).
+  mount -o bind /sys/fs/cgroup /newroot/sys/fs/cgroup
+  # Coverage: the chrooted processes write their profiles to /cov too.
+  [ -n "$COV" ] && mkdir -p /newroot/cov && mount -o bind /cov /newroot/cov
+  install_dcfs_into /newroot
 
-	ip link set lo up
+  ip link set lo up
 
-	chroot /newroot /bin/sh "/tests/$TEST"
-	rc=$?
+  chroot /newroot /bin/sh "/tests/$TEST"
+  rc=$?
 else
-	# No -e: the test scripts report every check with their own PASS/FAIL
-	# lines and exit status; -e would abort them silently on the first
-	# nonzero command (e.g. a $(...) capture of a tool that exits 1 after
-	# printing usage).
-	sh "$SCRIPT"
-	rc=$?
+  # No -e: the test scripts report every check with their own PASS/FAIL
+  # lines and exit status; -e would abort them silently on the first
+  # nonzero command (e.g. a $(...) capture of a tool that exits 1 after
+  # printing usage).
+  sh "$SCRIPT"
+  rc=$?
 fi
 
 cost_report
 dump_profraw
 mem_report
 if [ "$rc" -eq 0 ]; then
-	echo "ALL-TESTS-PASSED"
+  echo "ALL-TESTS-PASSED"
 else
-	echo "TEST-FAILED"
+  echo "TEST-FAILED"
 fi
 finish
