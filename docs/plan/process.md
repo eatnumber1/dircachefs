@@ -184,6 +184,13 @@ process (its waves and file ownership table) is in `history.md`.
       and the `at first`/`at last` lines) in the squashed commit's body. The
       step branch keeps the individual commits as the evidence; the tool is run
       on the branch before squashing.
+      Orchestrator's ruling, not russ's words (AGENTS.md, "Test first": it
+      applies to every bug fix and behaviour change, so a pure refactor is
+      outside it; 2026-10-19, 25.53 slice 2):
+      A slice that changes no behaviour (a refactor) has no tests-only commit;
+      its report names the existing tests that pin the behaviour,
+      test_first_tool is not run on it, and the reviewer confirms no behaviour
+      changed.
    4b. <a id="rule-review-continuity"></a>
       (russ, 2026-10-19: "Agreed, but let's write this down into the
       documentation on how reviews work so you don't forget.")

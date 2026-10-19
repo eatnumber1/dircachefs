@@ -4495,3 +4495,31 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
     4-6; row 25 notes 25.52.
   - review-findings.tsv: the 25.52 rows' outcomes are "fixed/merged
     d82f8168"; the round-3 ruling row is unchanged.
+- 2026-10-19, clerk batch 44 (25.53 merge record and reviews; orchestrator's
+  queue):
+  - 25.53 merged 2026-10-19 as 75f49e8b..4d25bdb5: each tests-only commit
+    squashed into its code commit; step-25.53 keeps the evidence and also
+    carries six 25.52 test_first fixes.
+  - Delegation: a Gemini Flash-low survey, 117k tokens; its claims held.
+  - test_first_tool rejected the first split (the tests-only commit added the
+    production //dcfs:subprocess library and changed //dcfs:fsck), which led
+    to the fixes.
+  - process.md rule-reviewed-slices 4a: the refactor-slice sentence, labelled
+    as the orchestrator's ruling (AGENTS.md "Test first" covers bug fixes and
+    behaviour changes only).
+  - phases/25: 25.53 marked done with the hashes, its Test line points at
+    dcfs/subprocess_test.cc, with a merge record; the 25.52 BUILD-files
+    design bullet states the rule as it now is (test_suite and the filegroup
+    test-file allowance; no production-to-testonly; no visibility change).
+  - README: Queue item 2b and M0 show 25.53 done; 25.54 and 25.55 are next,
+    then 25.45 items 4-6.
+  - review-findings.tsv: rounds 3 and 4 of 25.53 and the fresh whole-branch
+    check (round 5) appended; the 25.53 rows' outcomes are "fixed/merged
+    4d25bdb5" except the question to russ (naming read_own) and the rows
+    already marked rejected or fixed elsewhere. Round-5 severities "minor"
+    and "advisory" are recorded as nit (the file allows blocker, should, nit).
+    The fresh reviewer found a design gap that the continuing reviewer had
+    accepted, which is evidence for keeping the fresh final check.
+  - Not done: the stale-doc row for tools/agents/README.md (outside the
+    clerk's scope) stays open; the naming question on read_own is still for
+    russ.

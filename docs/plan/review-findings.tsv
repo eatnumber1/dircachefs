@@ -418,13 +418,24 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-19	25.52	4	Sonnet	should	test-gap	docs/style.md 1.13	test_first_main.cc:56	main untested: usage exit 2, Abseil unknown-flag exit 1, comma-split --bazel_flag, env fallback	no	fixed/merged d82f8168
 2026-10-19	25.52	4	Sonnet	nit	docs	-	tools/agents/README.md:493	two blank lines	could	fixed/merged d82f8168
 2026-10-19	25.52	4	orchestrator	none	none	-	-	round-3 ruling: REJECTED exits 3 so exit 1 (Abseil's unknown flag) cannot read as a rejection		ruling
-2026-10-19	25.53	1	Sonnet	should	correctness	-	dcfs/subprocess.cc:~63-82	hang: parent pipe end held across waitpid after a read error	no	open (fix first)
-2026-10-19	25.53	1	Sonnet	should	style-other	docs/style.md 1.8	dcfs/syscalls_backing_users.txt	library entry uncommented in the tests section	could	open (fix first)
+2026-10-19	25.53	1	Sonnet	should	correctness	-	dcfs/subprocess.cc:~63-82	hang: parent pipe end held across waitpid after a read error	no	fixed/merged 4d25bdb5
+2026-10-19	25.53	1	Sonnet	should	style-other	docs/style.md 1.8	dcfs/syscalls_backing_users.txt	library entry uncommented in the tests section	could	fixed/merged 4d25bdb5
 2026-10-19	25.53	1	Sonnet	should	contract-claim	docs/style.md 1.6	dcfs/subprocess.cc	pipe read goes through the BackingDoor; ruled by the orchestrator: door-free read in 25.53, follow-up 25.55	no	question: ruled door-free read (25.55)
-2026-10-19	25.53	1	Sonnet	nit	style-other	-	dcfs/subprocess.cc	_exit(126) cause unnamed; kOutput unused until slice 2; pid_t not pidfd (25.42)	no	open
+2026-10-19	25.53	1	Sonnet	nit	style-other	-	dcfs/subprocess.cc	_exit(126) cause unnamed; kOutput unused until slice 2; pid_t not pidfd (25.42)	no	fixed/merged 4d25bdb5
 2026-10-19	25.53	1	test_first_tool	should	commit-hygiene	docs/plan/process.md 4a	tools/test_first_tool	first real run REJECTED slice 1: tests-only commit added the production //dcfs:subprocess library and changed //dcfs:fsck	checked	rejected 2026-10-19
 2026-10-19	25.53	1	test_first_tool	nit	commit-hygiene	-	tools/test_first_tool	flagged a test_suite (tool false positive)	checked	fixed as 25.52 follow-up
-2026-10-19	25.53	1	test_first_tool	nit	commit-hygiene	-	tools/test_first_tool	flagged a lint filegroup	checked	open (no outcome recorded)
-2026-10-19	25.53	2	Sonnet	nit	style-other	-	dcfs/BUILD.bazel:339	dep indent	could	open
+2026-10-19	25.53	1	test_first_tool	nit	commit-hygiene	-	tools/test_first_tool	flagged a lint filegroup	checked	fixed/merged 4d25bdb5
+2026-10-19	25.53	2	Sonnet	nit	style-other	-	dcfs/BUILD.bazel:339	dep indent	could	fixed/merged 4d25bdb5
 2026-10-19	25.53	2	Sonnet	nit	naming	docs/style.md 1.5	dcfs/syscalls.h:156	read_own is not a manpage name	no	question to russ (open)
 2026-10-19	25.53	2	Sonnet	should	docs	-	docs/plan/notes/dependency-injection-2026-10-18.md	new --wrap site (//dcfs:subprocess_test) not inventoried in Appendix A	could	fixed in clerk batch 43 (A.10)
+2026-10-19	25.53	3	Sonnet	should	correctness	-	tools/test_first.cc RuleViolation	visibility check bypassed: a test-package entry such as //dcfs/testonly:__pkg__ counts as a test file	could	fixed/merged 4d25bdb5
+2026-10-19	25.53	3	Sonnet	should	correctness	-	tools/test_first.cc OnlyTestFileEntriesDiffer	deps gaining a testonly target and a kind change accepted; shortcut restricted to srcs by the orchestrator	could	fixed/merged 4d25bdb5
+2026-10-19	25.53	3	Sonnet	nit	comment-accuracy	-	tools/test_first.cc:~607	doc comment above the wrong function	could	fixed/merged 4d25bdb5
+2026-10-19	25.53	3	Sonnet	nit	dead-code	-	tools/test_first.cc RuleViolation	redundant parameter	could	fixed/merged 4d25bdb5
+2026-10-19	25.53	4	Sonnet	nit	dead-code	-	tools/test_first.cc BodyEntries	unreachable size guard	could	fixed/merged 4d25bdb5
+2026-10-19	25.53	4	Sonnet	nit	correctness	-	tools/test_first.cc BodyEntries	empty srcs list yields a bogus entry, refusing a test file added to an empty srcs	could	fixed/merged 4d25bdb5
+2026-10-19	25.53	4	Sonnet	none	clean-review	-	-	round-3 findings verified fixed; slice 2 verified behaviour-preserving apart from reaping the child on a read error	no	merged 4d25bdb5
+2026-10-19	25.53	5	Sonnet (fresh)	nit	docs	-	docs/plan/phases/25-style-convergence.md:~2441	stale doc: the 25.52 BUILD-files rule omits the test_suite and srcs test-file allowances	could	fixed/merged 4d25bdb5
+2026-10-19	25.53	5	Sonnet (fresh)	nit	docs	-	tools/agents/README.md:~524	stale doc: the 25.52 BUILD-files rule omits the test_suite and srcs test-file allowances	could	open (tools/ not in the clerk's scope)
+2026-10-19	25.53	5	Sonnet (fresh)	nit	docs	-	docs/plan/phases/25-style-convergence.md:~2472	stale doc: the 25.53 Test line names process_runner_test; tests are in dcfs/subprocess_test.cc; status queued	could	fixed/merged 4d25bdb5
+2026-10-19	25.53	5	Sonnet (fresh)	nit	correctness	-	tools/test_first.cc:~655	design gap (advisory in the review; recorded as nit): the srcs allowance let a test-tree file into a production rule's srcs; the continuing reviewer had accepted it; the orchestrator restricted the allowance to filegroups before merge	could	fixed/merged 4d25bdb5
