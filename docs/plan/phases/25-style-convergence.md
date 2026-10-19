@@ -1882,12 +1882,29 @@ door-guarded library, which 25.57 dissolves, so it is dropped. The design is:
   ```
 
 - One way to reach the kernel, by BUILD visibility. The `syscalls::` library
-  is visible only to `RealSyscalls`'s library plus a named, shrink-only
-  exception list (`FileDescriptor::close`, the daemon's lock file, host
-  tools). A genquery golden test pins the list, like
-  `dcfs/syscalls_backing_users.txt` today. Daemon and backing code reach the
-  kernel only through the `Syscalls &` they are given. This visibility rule
-  and the golden are part of this step (sub-steps 1 and 8).
+  is visible only to `RealSyscalls`'s library and its own kernel tests, with
+  no exceptions (russ, 2026-10-19: "I don't like having
+  FileDescriptor::close having an exemption (nor any other exceptions). How
+  would you recommend removing those exceptions?"). A genquery golden test
+  pins exactly that, like `dcfs/syscalls_backing_users.txt` today. Daemon
+  and backing code reach the kernel only through the `Syscalls &` they are
+  given; `banned_symbols` and `rule-no-raw-syscalls` still stop direct libc
+  calls. This rule and the golden are part of this step (sub-steps 1 and 8).
+  How each former exception goes:
+  1. `FileDescriptor` holds the `Syscalls` that opened it and its destructor
+     calls `syscalls_->Close(fd)`. Only `Syscalls` methods construct one
+     (`Openat` and friends return one bound to `*this`); there is no public
+     constructor from a bare `int`. It grows from 4 to 16 bytes, which is
+     negligible, and fakes can count opens and closes (fd-leak tests).
+  2. The daemon's lock file uses `ctx.syscalls()` like everything else; its
+     old exemption existed only to skip the door, which now lives in
+     `backing::`.
+  3. Each binary's `main` (`fsck.dcfs`, `mount.dcfs`, `tools/process_runner`,
+     `test_first`, `bench`, the daemon) constructs one `RealSyscalls` first
+     and passes `Syscalls &` down; no globals, no default instance. This
+     covers the host tools.
+  4. The subprocess child after `fork` (`dup2`, `execv`, `_exit`) calls
+     through the same `Syscalls &` (a virtual call does not allocate).
 - Restrictions the three libraries carried (only startup forks, only
   `bench/` and the tools reach `execv`) are call-site checks if they are kept
   at all (`tools/banned_symbols.txt`, a `repo_shape` rule), not interface
@@ -1915,7 +1932,7 @@ reached only by BUILD visibility and a genquery test, not the compiler
 Syscalls functions public, but control access via BUILD visibility?", then
 "Yes"). Now the members' only callers are `backing::` (and other code
 holding a `Syscalls &`) and the testonly fakes, and the only caller of the
-`syscalls::` functions is `RealSyscalls` plus the exception list above.
+`syscalls::` functions is `RealSyscalls` (no exceptions, above).
 libfuse gets its own small seam (`FuseLowlevelOps`), separate from
 `Syscalls`.
 
@@ -1926,9 +1943,10 @@ libraries into one, weakening `//tools:syscalls_backing_users_test`; (2) left
 two ways to call a syscall (`RealSyscalls::Default()` and free functions);
 and (3) used virtual-inheritance mixins. This step answers (2) and (3)
 directly: one way to call (`ctx.syscalls()`; the thin `syscalls::` functions
-are reachable only from `RealSyscalls` and the named exception list) and
-single inheritance. For (1), 25.57 has already moved the door's enforcement to the
-`backing::` layer and the check that the backing layers do not call a thin
+are reachable only from `RealSyscalls`, with no exceptions) and
+single inheritance. For (1), 25.57 has already moved the door's enforcement
+to the `backing::` layer and the check that the backing layers do not call a
+thin
 `syscalls::` function that has a `backing::` twin, so one interface no longer
 weakens the invariant.
 
@@ -1972,8 +1990,11 @@ second is a test-only knob in production code, `docs/style.md` 2).
 **Migration order (small mergeable commits, each tested).**
 1. **Define `Syscalls`, `RealSyscalls` and `DelegatingSyscalls`;** make
    `Context` carry it, `backing::` call `ctx.syscalls()`, and restrict the
-   `syscalls::` library's BUILD visibility to `RealSyscalls`'s library plus
-   the exception list, with the genquery golden. Measure `dcfs_bench` before and after (miss-heavy and mutation-heavy). The
+   `syscalls::` library's BUILD visibility to `RealSyscalls`'s library and
+   its kernel tests with no exceptions, with the genquery golden;
+   `FileDescriptor` holds its `Syscalls`; every `main` builds a
+   `RealSyscalls`. Measure `dcfs_bench` before
+   and after (miss-heavy and mutation-heavy). The
    step stops for russ if the cost is not negligible. *Test:* unit tests of
    `RealSyscalls` and `DelegatingSyscalls` plus
    `//tools:syscalls_backing_users_test`.
@@ -1989,16 +2010,18 @@ second is a test-only knob in production code, `docs/style.md` 2).
    `FuseLowlevelOps`; drop the `fuse_*` wraps.
 6. **Migrate `DIR_CACHE_FS_TEST_WRAPS`:** move `NoTransactionAt`,
    `DCFS_INJECT`, `WrappedCalls`, `FakeInodeNumbers`, hooks and
-   `SetgroupsFault` into a `HarnessSyscalls` fake (a `Syscalls`) on the test harness's
-   `Context`; delete the wrap list. *Test:* `bazel test //dcfs:dir_cache_fs_test
+   `SetgroupsFault` into a `HarnessSyscalls` fake (a `Syscalls`) on the
+   test harness's `Context`; delete the wrap list. *Test:*
+   `bazel test //dcfs:dir_cache_fs_test
    //dcfs:dir_cache_fs_poisoned_test //dcfs:dir_cache_fs_slope_test
    //dcfs:dir_cache_fs_fault_sites_test`.
 7. **Migrate `DIR_CACHE_FS_FAULTS` and
    `dir_cache_fs_crash_during_recovery_test`;** replace the eight
    `dcfs/testonly/` `--wrap` libraries with fakes or the authorizer.
 8. **Delete the `--wrap` allow-lists, ban `-Wl,--wrap`, update docs.** Shrink
-   the exception list to its floor and pin it with the genquery golden
-   (BUILD visibility, russ 2026-10-18 and 2026-10-19); remove `__wrap_` and `__real_` exceptions from
+   any remaining direct `syscalls::` caller and pin the empty exception set
+   with the genquery golden (BUILD visibility, russ 2026-10-18 and
+   2026-10-19); remove `__wrap_` and `__real_` exceptions from
    `.clang-tidy` and `tools/raw_syscalls_test.py`; add a `style_checks_test`
    check banning `--wrap` in `BUILD.bazel` and `*.bzl`; update `AGENTS.md`,
    `docs/style.md` and `docs/design.md:3292-3312`. *Test:*
@@ -2011,9 +2034,8 @@ second is a test-only knob in production code, `docs/style.md` 2).
 **Risks.**
 - *Bypassing the injected interface:* a caller invoking a member directly
   would skip `NoTransactionAt` and `FaultSitesTest`. Mitigation: BUILD
-  visibility and the genquery test in sub-step 8; `FileDescriptor::close`
-  (which has no `Context`) is on the named exception list, with the lock file
-  and host tools.
+  visibility and the genquery test in sub-step 8, with no exceptions
+  (`FileDescriptor` closes through its own `Syscalls`).
 - *Variadic `openat`/`ioctl`/`fcntl`:* virtual members cannot be variadic or
   templates. Mitigation: split `Openat` with and without a mode, and the
   `ioctl<OP>`/`fcntl<OP>` templates over per-op members (25.38).

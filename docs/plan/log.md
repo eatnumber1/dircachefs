@@ -4571,3 +4571,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
     `rule-function-names`); the notes/dependency-injection-2026-10-18.md
     header; the handoff-2026-10-19.md line recording the old ruling. The
     2026-10-18 log lines (clerk batch 24) are history and stand.
+- 2026-10-19, no exceptions to the `syscalls::` visibility rule (russ's
+  amendment to the entry above; plan edit by Sonnet 5.5): russ, "I don't
+  like having FileDescriptor::close having an exemption (nor any other
+  exceptions). How would you recommend removing those exceptions?" Decided:
+  the `syscalls::` library is visible only to `RealSyscalls`'s library and
+  its own kernel tests, and the genquery golden pins exactly that. The
+  exception list in the entry above is dropped. `FileDescriptor` holds the
+  `Syscalls` that opened it and closes through it (only `Syscalls` methods
+  construct one); the daemon's lock file uses `ctx.syscalls()`; each
+  binary's `main` constructs one `RealSyscalls` and passes `Syscalls &`
+  down (no globals); the post-`fork` child calls through the same
+  `Syscalls &`. Recorded in 25.41.
