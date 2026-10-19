@@ -269,3 +269,6 @@ ae759e698e7591c62	2026-10-19T18:36:45Z	Rewrite style rule-function-names	impleme
 af46699e8aaf4987b	2026-10-19T19:12:29Z	Plan: RAII types born in Syscalls	implementation	dcfs-implementer	claude-sonnet-5-5	medium	164260	41								12	130	133659	30459
 a11addd4373194788	2026-10-19T19:27:16Z	Plan: thin layer folds into RealSyscalls	implementation	dcfs-implementer	claude-sonnet-5-5	medium	1201052	148								44	5124	1127568	68316
 a30435a00548c7d58	2026-10-19T19:31:55Z	Plan: Syscalls members use man-page names	implementation	dcfs-implementer	claude-sonnet-5-5	medium													
+a720bfcee40661ec4	2026-10-19T21:36:24Z	main-check	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1178839	142								48	433	1117898	60460
+a9dbf68c7171a7349	2026-10-19T21:39:01Z	5.19	mechanical	dcfs-mechanical	haiku	low	117294	15								10	49	98936	18299
+ab445b7358566324b	2026-10-19T21:39:01Z	5.19	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	152386	26								10	50	116629	35697
