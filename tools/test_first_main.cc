@@ -81,7 +81,8 @@ int Run(int argc, char **argv, char **envp) {
   absl::StatusOr<dcfs::test_first::Report> report =
       dcfs::test_first::Check(runner, options);
   if (!report.ok()) {
-    Print(2, absl::StrCat("test_first_tool: ", report.status().ToString(), "\n"));
+    Print(2,
+          absl::StrCat("test_first_tool: ", report.status().ToString(), "\n"));
     return kFailed;
   }
   Print(1, dcfs::test_first::FormatReport(*report));

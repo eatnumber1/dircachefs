@@ -18,8 +18,7 @@ class ProcessRunner : public CommandRunner {
  public:
   explicit ProcessRunner(std::string path) : path_(std::move(path)) {}
 
-  absl::StatusOr<CommandResult> Run(
-      std::span<const std::string> argv) override;
+  absl::StatusOr<CommandResult> Run(std::span<const std::string> argv) override;
 
  private:
   std::string path_;
