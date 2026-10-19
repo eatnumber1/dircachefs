@@ -85,7 +85,7 @@ docs/plan/README.md 4
 docs/plan/review-fixes.md 1
 docs/rules/index-style.md 1
 docs/rules/index-tests.md 1
-docs/style.md 9
+docs/style.md 8
 docs/testing.md 1
 formal/BUILD.bazel 1
 formal/README.md 14

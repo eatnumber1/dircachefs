@@ -2803,17 +2803,5 @@ passes with the allowlist; the existing suites pass unchanged.
   `dcfs/syscalls_backing.cc` and `dcfs/syscalls_process.cc`".
 - The `docs/rules/index-*.md` lines for those rules, where their wording
   names the old layering.
-- `rule-function-names` (about lines 155 to 205) carries the 2026-10-18
-  Context-in-free-functions text, superseded by the thin-wrapper ruling
-  (25.41 carries the rewrite; listed here so the edit is not missed):
-  "Every `syscalls::` free function takes the `Context` as its first
-  argument."; "a call looks like `syscalls::write(ctx, fd, buf)`"; "The
-  Context argument changes none of these deviations from libc"; "Every
-  `syscalls::` free function pulls the right Syscalls interface out of the
-  Context, and calls that interface's CamelCase member (`Write`)."; "The
-  members of the injected syscall interfaces (`BackingSyscalls`,
-  `LocalSyscalls`, `ProcessSyscalls`) ..."; the quoted "pass in the Context
-  or Syscalls object" and "Actually, let's have the syscalls:: free
-  functions take Context" decisions; and "`syscalls::ioctl<OP>(ctx, ...)`
-  and `syscalls::fcntl<OP>(ctx, ...)` are free function templates taking
-  `Context` like every `syscalls::` function".
+- `rule-function-names`: already updated on 2026-10-19, ahead of this step;
+  nothing to do.
