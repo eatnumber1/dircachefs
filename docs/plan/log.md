@@ -4629,3 +4629,25 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   of the entry above for the `Syscalls` members only. Edited: phases/25
   25.41, 25.57; `docs/style.md` `rule-function-names`;
   `docs/rules/index-style.md`.
+
+- 2026-10-19, 5.19 merged as c5162181 (tests-only commit 77a155d3 squashed;
+  branch step-5.19 keeps the evidence; test_first_tool ACCEPTED). Cause:
+  run-qemu.sh:1248 ran a numeric test on "" when awk printed nothing for a
+  target with no reads line in io_budgets.txt, printing `[: Illegal number:`.
+  Fix prints 0 (same verdict); run_qemu_cost_test asserts no `[:` on stderr;
+  kvm_boot_test log clean. Review (Sonnet, merge): 0 findings, one preference
+  note (run_qemu_cost_test.sh:291 PASS message does not name the new
+  assertion), in review-findings.tsv. Clerk batch 49.
+- 2026-10-19, 25.56 merged afe0b169..5420d7c4: the 14 loading-time refusals
+  in qemu_test.bzl and qemu_cc_test.bzl became pure functions in
+  test/qemu/refusals.bzl (same conditions, order, messages; verified side by
+  side), pinned by //test/qemu:refusals_test (exact messages, accept cases,
+  mutation evidence per check). Refactor plus strengthened tests, so
+  test_first_tool did not apply (rule 4a). Review (Sonnet, merge): four nits,
+  three test gaps closed before merge (5420d7c4), commit 65edf038's message
+  corrected at merge (it says 15 refusals; there are 14). Clerk batch 49.
+- 2026-10-19, clerk batch 49 queued 25.58 (orchestrator's proposal, M0 before
+  25.57): readability-identifier-naming enforces CamelCase functions and
+  methods, with the syscall-wrapper exception mechanical. Added to 25.41's
+  docs/style.md list the index-code.md 1.5 bullet ("one thin wrapper per
+  syscall") that changes with 1.5.

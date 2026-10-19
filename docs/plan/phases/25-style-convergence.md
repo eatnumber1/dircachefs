@@ -1885,8 +1885,10 @@ door-guarded library, which 25.57 dissolves, so it is dropped. The design is:
   one, a `NOLINT` region around the interface with the reason, or a small
   clang-query check that lower-case methods occur only in `Syscalls`
   implementations. `docs/style.md` `rule-function-names` then says which.
-  The per-op `ioctl` and `fcntl` members take the request's name in lower
-  case behind the typed `ioctl<OP>`/`fcntl<OP>` front ends; the step may
+  The mechanics for the CamelCase rule on the rest of the code are 25.58
+  (the orchestrator's proposal, clerk batch 49), which runs first and
+  enforces it under 25.39. The per-op `ioctl` and `fcntl` members take the
+  request's name in lower case behind the typed `ioctl<OP>`/`fcntl<OP>` front ends; the step may
   settle the exact form.
   The layering (russ, 2026-10-19; see the superseded note below):
 
@@ -2107,6 +2109,10 @@ then the fault tests per the six-test list in this section.
   wrapper per syscall in free functions named for the manpage; it becomes the
   `Syscalls` interface and `RealSyscalls`. `rule-syscall-wrappers` and "A
   helper that composes wrappers ... never in `dcfs::syscalls`" follow.
+- `docs/rules/index-code.md` (about line 41, the "No raw syscalls anywhere"
+  bullet, "one thin wrapper per syscall, named for its manpage"): it
+  describes style 1.5 as it is today, so it changes with 1.5 when this
+  lands (clerk batch 49, 2026-10-19).
 - The `syscalls::open(...)` namespace example (about line 446) and 1.6's
   examples (about lines 1014 to 1025 and 1101 to 1104) calling
   `syscalls::setfsgid` and the like.
@@ -2755,7 +2761,7 @@ Dependencies: 25.53 merged.
 *Test:* `//tools:syscalls_backing_users_test` passes with the shorter list,
 and the startup and proc_file tests pass unchanged.
 
-## 25.56 qemu_test.bzl refusal tests (orchestrator's proposal, queued)
+## 25.56 qemu_test.bzl refusal tests (orchestrator's proposal, done 2026-10-19)
 
 Orchestrator's proposal, not russ's words. Source: the 5.18 implementer's
 review (`review-findings.tsv`, 5.18), which found that `qemu_test.bzl` refuses
@@ -2772,6 +2778,43 @@ Dependencies: none.
 
 *Test:* each refusal test fails if its `fail(...)` is removed, and passes on
 the current code.
+
+Done 2026-10-19 (afe0b169..5420d7c4). The 14 loading-time refusals in
+`test/qemu/qemu_test.bzl` and `qemu_cc_test.bzl` became pure functions in
+`test/qemu/refusals.bzl` (same conditions, order and messages, verified side
+by side), pinned by `//test/qemu:refusals_test` (skylib unittest: exact
+messages, accept cases, mutation evidence for each check). A refactor plus
+strengthened tests, so `test_first_tool` did not apply (process rule 4a).
+Review by Sonnet at merge: four nits (review-findings.tsv, 25.56), three
+test gaps closed before merge and one commit-message count corrected at
+merge.
+
+## 25.58 CamelCase function names (orchestrator's proposal, 2026-10-19; queued)
+
+Orchestrator's proposal, not russ's words (clerk batch 49). Source:
+`docs/style.md` `rule-function-names` (CamelCase functions and methods;
+lower-case man-page names only on `Syscalls` members) is enforced by no tool.
+`.clang-tidy` enables `readability-*` but gives `readability-identifier-naming`
+no `CheckOptions`, so it checks no case at all; today's code relies on review.
+
+1. Configure `readability-identifier-naming` in `.clang-tidy`: `FunctionCase`
+   and `MethodCase` CamelCase, plus the other cases `docs/style.md` fixes
+   (classes, constants `kName`, members `name_`).
+2. The syscall-wrapper exception is expressed mechanically: an ignored-regex
+   scoped as tightly as clang-tidy allows, or a clang-query check that
+   lower-case functions occur only in today's `syscalls::` namespace and,
+   after 25.41, in `Syscalls` implementations. The step picks the form.
+3. Fix or allowlist the existing violations. The allowlist shrinks only.
+4. Placed in M0 before 25.57, so the renames of 25.57 land under enforcement
+   (`README.md`, Queue item 2e1). Cross-referenced from 25.41's
+   naming-mechanics bullet, which decides the lower-case `Syscalls` members,
+   and from 25.39 (mechanize every style rule).
+
+Owner: not yet assigned. Dependencies: none.
+
+*Test:* a fixture with a lower-case function outside the exception fails the
+check (test first, on the current config); the current tree passes with
+whatever the allowlist records.
 
 ## 25.57 The door moves to `backing::`; one `Syscalls` interface (russ, 2026-10-19; queued)
 

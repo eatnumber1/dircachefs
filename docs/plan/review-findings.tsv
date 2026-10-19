@@ -453,3 +453,8 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-19	5.18	2	Sonnet	nit	comment-accuracy	-	run-qemu.sh:688	comment nit	could	fixed/merged 37c2990a..9957121c
 2026-10-19	5.18	2	Sonnet	nit	comment-accuracy	-	run-qemu.sh:642	comment nit	could	fixed/merged 37c2990a..9957121c
 2026-10-19	5.18	2	Sonnet	nit	style-other	-	guest/init:149	style nit	could	fixed/merged 37c2990a..9957121c
+2026-10-19	5.19	1	Sonnet	nit	test-shape	-	test/qemu/run_qemu_cost_test.sh:291	PASS message does not name the new no-[:-on-stderr assertion	could	preference note; not changed
+2026-10-19	25.56	1	Sonnet	nit	test-gap	docs/style.md 2	test/qemu/refusals_test.bzl:102	mem_refusal boundary not tested	could	fixed before merge (5420d7c4)
+2026-10-19	25.56	1	Sonnet	nit	test-gap	docs/style.md 2	test/qemu/refusals_test.bzl:48	kernel_failure=expected had no accept case	could	fixed before merge (5420d7c4)
+2026-10-19	25.56	1	Sonnet	nit	test-gap	docs/style.md 2	test/qemu/refusals_test.bzl:97	initramfs, matrix and cc refusals lack accept cases	could	fixed before merge (5420d7c4)
+2026-10-19	25.56	1	Sonnet	nit	commit-hygiene	-	commit 65edf038	commit message says 15 refusals; there are 14	no	commit message corrected at merge (afe0b169..5420d7c4)
