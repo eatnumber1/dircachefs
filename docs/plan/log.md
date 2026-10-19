@@ -4478,3 +4478,20 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
     Queue (item 2b) and M0 row, as the orchestrator's proposal. Not russ's
     words.
   - README row 25 and the Queue show 25.50 done and 25.52 next.
+- 2026-10-19, clerk batch 42 (25.52 merge record, test-first at merge;
+  orchestrator's queue):
+  - 25.52 merged 2026-10-19 as 81299351..d82f8168: each slice's tests-only
+    commit squashed into its code commit; the step branch step-25.52 keeps
+    the red commits as evidence.
+  - process.md rule-reviewed-slices: item 1 gains the tests-only sentence;
+    new item 4a makes `tools/test_first_tool` the merge check (ACCEPTED
+    merges, REJECTED goes back, other exits are no verdict) and the squashed
+    cherry-pick with the report quoted in the commit body.
+  - phases/25 25.52: marked done with the hashes; item 2 and the design
+    decisions recorded as the implementer wrote them. Item 3 ("The step
+    decides which") is now decided by rule-reviewed-slices 4a; left as
+    written for russ to reword.
+  - README: Queue and M0 show 25.52 done; 25.53 is next, then 25.45 items
+    4-6; row 25 notes 25.52.
+  - review-findings.tsv: the 25.52 rows' outcomes are "fixed/merged
+    d82f8168"; the round-3 ruling row is unchanged.

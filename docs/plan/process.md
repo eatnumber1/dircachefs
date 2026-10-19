@@ -99,8 +99,8 @@ process (its waves and file ownership table) is in `history.md`.
      `syscalls::` call form, manpage-named wrappers only in `syscalls.h`,
      `enum class`, message wording, and the new Comments & Documentation
      Standards: Self-Explanatory Code First, Document Timeless Invariants /
-     Deliberate Omissions / Subtle Caveats, and Ban Redundant Method-Name-Echoing
-     Docstrings);
+     Deliberate Omissions / Subtle Caveats, and Ban Redundant
+     Method-Name-Echoing Docstrings);
    - behaves like the backing, only faster (russ, 2026-10-17;
      `docs/design.md`, "Behave like the backing, only faster"): for each
      operation the diff touches ask "With dcfs not in the loop, what does
@@ -152,6 +152,9 @@ process (its waves and file ownership table) is in `history.md`.
    1. The implementer works on its step branch in slices of about 800
       changed lines or one subsystem, one or a few commits each. A step's
       failing test or model property is its first slice (test first).
+      Each slice's first commit adds or changes only tests (test files, test
+      data, test-only helpers and the test targets' BUILD rules) and is named
+      in the slice report with the slice's last commit.
    2. After each slice the implementer reports. The orchestrator dispatches
       that slice's review over its diff only, in three passes: mechanical
       gates (no model); a fact pass on a cheaper model (citations, doc
@@ -164,6 +167,23 @@ process (its waves and file ownership table) is in `history.md`.
       gates, the full test tier and a short integration read for
       cross-slice issues, not a second full review. Main is updated by
       cherry-pick or fast-forward (no GitHub PRs; never push).
+   4a. **Test-first evidence is checked mechanically at merge** (step 25.52).
+      For each slice the orchestrator runs, from the implementer's lane with a
+      clean tree,
+      `bazel run //tools:test_first_tool -- --first=<slice's first commit> --last=<slice's last commit> [--bazel_flag=--config=fast]`
+      (`tools/agents/README.md`, "test_first_tool"). The slice merges only if it
+      prints `ACCEPTED` (exit 0): the first commit touches only test files, the
+      tests that read them fail there (a build failure there is accepted and
+      labelled `build failed`, and the reviewer confirms its quoted `ERROR:`
+      lines name a symbol or target the code commit adds) and pass at the last
+      commit. A `REJECTED` slice (exit 3) goes back to the implementer; any
+      other exit is no verdict. Main stays green: the orchestrator does not land
+      the tests-only commit alone. It cherry-picks each slice squashed
+      (`git cherry-pick -n <first>..<last>`, one commit), so the tests and the
+      code arrive together, and quotes the tool's report (the `failing:` lines
+      and the `at first`/`at last` lines) in the squashed commit's body. The
+      step branch keeps the individual commits as the evidence; the tool is run
+      on the branch before squashing.
    5. Findings are recorded per slice in `review-findings.tsv`
       ([`rule-track-review-findings`](#rule-track-review-findings)).
 
