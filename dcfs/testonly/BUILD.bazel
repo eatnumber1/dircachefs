@@ -17,6 +17,7 @@ cc_library(
     visibility = [
         "//dcfs:__pkg__",
         "//test/qemu:__pkg__",
+        "//tools:__pkg__",
     ],
     deps = [
         "@absl//absl/status:status_matchers",

@@ -6,6 +6,7 @@ load("@rules_python//python:py_binary.bzl", "py_binary")
 load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
+load("//test/qemu:qemu_cc_test.bzl", "qemu_cc_test")
 load("//tools:first_party_objects.bzl", "linked_objects")
 load("//tools:style_checks.bzl", "style_findings_here")
 
@@ -788,6 +789,39 @@ py_test(
     srcs = ["style_fix_test.py"],
     target_compatible_with = HOST_ONLY_COMPATIBLE,
     deps = [":style_fix_lib"],
+)
+
+# ---- Step 25.52: the test-first check ------------------------------------
+
+# The check of a slice's first commit and last commit (test_first.h).
+cc_library(
+    name = "test_first",
+    srcs = ["test_first.cc"],
+    hdrs = ["test_first.h"],
+    deps = [
+        "//dcfs:status",
+        "@absl//absl/status",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+    ],
+)
+
+# Logic of //tools:test_first against a scripted runner (no git, no Bazel).
+qemu_cc_test(
+    name = "test_first_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["test_first_test.cc"],
+    deps = [
+        ":test_first",
+        "//dcfs:status",
+        "//dcfs/testonly:assert_ok_and_assign",
+        "@absl//absl/status",
+        "@absl//absl/status:status_matchers",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
 )
 
 style_findings_here()
