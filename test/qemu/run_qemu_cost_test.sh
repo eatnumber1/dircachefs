@@ -283,6 +283,11 @@ run //t:io
 grep -q "== RESULT: FAIL (no I/O counted" "$WORK/stdout" || fail "no FAIL verdict for the uncounted I/O: $(cat "$WORK/stdout")"
 run //t:unlisted
 [ "$RC" -eq 0 ] || fail "a COST line of zeros for a target that has no I/O budget failed: $(cat "$WORK/stdout")"
+# The harness's own test on a value that is not a number prints `[: Illegal
+# number:` (5.19): every end-to-end test would print it, so none may.
+if grep -q '\[:' "$WORK/stdout"; then
+  fail "run-qemu.sh's own test printed a [: error: $(cat "$WORK/stdout")"
+fi
 echo "PASS: a target with a budget for reads whose guest counted none fails"
 
 # --- the load-starvation flag (the host's CPU pressure over the run's wall time) ---

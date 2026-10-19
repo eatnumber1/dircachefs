@@ -1245,7 +1245,7 @@ fi
 # counted no read: the counters read nothing, and a count below its budget always
 # passes, zero below every budget.
 if [ -n "$IO_BUDGETS" ] && [ -n "$COST_LINE" ] && [ "$(cost_count reads)" = 0 ] &&
-	[ "$(awk -v t="$COST_TARGET" '$1 == t && $2 == "reads" { print $3 + 0 }' "$IO_BUDGETS")" -gt 0 ]; then
+	[ "$(awk -v t="$COST_TARGET" '$1 == t && $2 == "reads" { r = $3 + 0 } END { print r + 0 }' "$IO_BUDGETS")" -gt 0 ]; then
 	COST_VERDICT="no I/O counted"
 	COST_FAIL="${COST_FAIL:+$COST_FAIL
 }$COST_TARGET reads (its budget in $(basename "$IO_BUDGETS") is more than 0) and the guest counted no read (guest/cost_lib.sh): the I/O counts are not measuring"
