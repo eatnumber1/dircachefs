@@ -1040,5 +1040,23 @@ in `tla2tools.jar`). Items 1 to 3 come first.
     The check fails closed. There is no CI backstop and no paired
     with/without runs. The same pattern covers any config shortcut that omits a
     step on a soundness argument.
+11. The model includes FUSE passthrough (russ, 2026-10-18: "make sure tests
+    and the formal model would have caught that"). An open that the kernel
+    grants passthrough registers a backing file, and the kernel then never
+    sends READ or WRITE for that handle. The model says exactly which opcodes
+    still reach the server on a passthrough handle: READ and WRITE do not
+    (v6.12 fs/fuse/passthrough.c covers read_iter, write_iter, splice_read,
+    splice_write and mmap only), while FALLOCATE, COPY_FILE_RANGE, SETATTR,
+    FSYNC, FLUSH and the rest do. 25.46's recording FUSE server pins that
+    opcode list as a kernel fact.
+12. Branch reachability: this check reports any model action that can never
+    fire. A dcfs handler whose model action is unreachable is dead code. The
+    actions map to handlers by item 7's model-code name agreement. Under item
+    11, the READ and WRITE handlers are unreachable for a passthrough handle,
+    and FALLOCATE and COPY_FILE_RANGE are reachable. A stub of a reachable
+    handler then shows up as a trace-validation or conformance divergence.
+    The unreachability rests on 25.46's kernel fact that no READ or WRITE
+    reaches the server for a passthrough-opened handle.
 
-Owner: dcfs-protocol for items 5 and 7; dcfs-implementer for the others.
+Owner: dcfs-protocol for items 5, 7, 11 and 12; dcfs-implementer for the
+others.

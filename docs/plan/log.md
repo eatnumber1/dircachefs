@@ -4325,3 +4325,45 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
     test/qemu/README.md, docs/testing.md and the 23.16 as-built notes.
   - dispatch-ledger.tsv: committed unchanged with this batch, as the batch
     named it.
+- 2026-10-19, clerk batch 32 (passthrough fallback kept, 23.16 cancelled,
+  dead-code scope, passthrough model items, 25.27 queued):
+  - Item 1 (dead-code scope): 25.39's "No production caller" bullet now
+    says the gc-sections check catches only leftovers with no production
+    caller, not a handler the kernel never invokes; 12.27 gains items 11
+    (the model includes FUSE passthrough) and 12 (branch reachability).
+  - Item 2 (opcodes on a passthrough handle): 12.27 item 11 says which
+    opcodes still reach the server (FALLOCATE, COPY_FILE_RANGE, SETATTR,
+    FSYNC, FLUSH and the rest) and which do not (READ, WRITE), pinned by
+    25.46's recording server; item 12 maps a stub of a reachable handler to
+    a trace-validation or conformance divergence.
+  - Item 3 (25.27): the heading reads "queued for after the Gemini pool
+    resets (2026-10-23 20:07 PDT); russ 2026-10-18: "Yes. Enqueue 25.27"",
+    with a status paragraph (Gemini via agy/foreman, threshold and
+    allowlist back to russ before commit, pairs with 25.45). Not applied:
+    docs/plan/README.md row 25 has no "parked, after the reset" wording to
+    change; the 25.27 mention is in the M2 row, which says only "25.27".
+  - Item 4 (kernel-patches row 11): fadvise and readahead on a passthrough
+    file send FUSE_READ to the server. The row's owning step is "none yet":
+    its batch text named 23.16, which is cancelled, so the workaround has
+    no owner.
+  - Item 5 (the ruling, "I choose C: we clearly have to keep the fallback
+    behavior in place in its entirety", 2026-10-18): 23.16 CANCELLED, its
+    branch step-23.16 in lane-2 kept unmerged, do not merge. Its 22
+    review-findings.tsv rows set to "moot: step cancelled 2026-10-18".
+    23.17 reverted to its prior state (the "moot" bullet from batch 30 is
+    removed; not moot). 23.18 queued (not started, dcfs-mechanical): the
+    code-comment and test-name cleanup, starting with
+    dcfs/dir_cache_fs_test.cc:7429. docs/plan/README.md row 23 and
+    kernel-patches row 10 updated to match (row 10 is not moot).
+    docs/design.md: the passthrough paragraph names the ELOOP refusal per
+    backing (fs/fuse/backing.c:112 (Linux v7.3-rc7)) and makes the fallback
+    the supported path; the two "goes with 23.16" markers are gone. README.md
+    names the fallback path in place of "until plan step 23.16 retires that
+    path". grep found no 23.16 or fallback-deletion claim in
+    docs/testing.md, docs/maintainability.md or test/qemu/README.md, so
+    those are untouched.
+  - Not applied: the batch's repo_shape rules (80 columns, split backtick
+    spans, commit subject and body widths) need a rule in tools/ and an
+    anchor and index entry in docs/rules/. That is code work, outside the
+    clerk's files, so it is queued for the orchestrator to dispatch.
+  - dispatch-ledger.tsv: committed with this batch as it stood.

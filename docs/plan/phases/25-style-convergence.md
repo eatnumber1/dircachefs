@@ -929,7 +929,11 @@ WARNING path: the administrator fixes it), and the README's section on
 cache permissions says that one rule. Tests: the permission-comparison
 tests become the two refusals. No back-compat. Mechanical.
 
-## 25.27 Mechanical duplicate-code detection (russ, 2026-10-11; parked, after the reset)
+## 25.27 Mechanical duplicate-code detection (russ, 2026-10-11; queued for after the Gemini pool resets (2026-10-23 20:07 PDT); russ 2026-10-18: "Yes. Enqueue 25.27")
+
+Queued 2026-10-19. Runs on Gemini via agy/foreman, as already reassigned.
+The threshold and the allowlist come back to russ before commit. It pairs
+with 25.45 (mechanize what reviewers keep finding).
 
 russ: "let's schedule some time to investigate mechanical tools for
 measuring code duplication. I've seen several cases where there's clearly
@@ -1677,7 +1681,13 @@ Steps:
      that the linker discards (no shipped caller), and fails on any not in an
      allowlist with a reason. A test-only caller does not count, and
      `testonly` targets are excluded. The allowlist only shrinks: a new entry
-     fails the test. It is a Bazel test, so it runs before review.
+     fails the test. It is a Bazel test, so it runs before review. Scope
+     (russ, 2026-10-18: "the linker wouldn't catch it, since it's still
+     called from production code. The kernel just never sends the
+     message"): this check catches only functions with no production caller,
+     the leftovers after a deletion. It does not catch a handler the kernel
+     never invokes; that is 12.27's branch-reachability check on the model
+     with FUSE passthrough (items 11 and 12 there).
      Guidance (orchestrator, 2026-10-19): where a startup refusal makes a
      runtime-conditional path impossible, make the path unrepresentable by
      type (for example, a passthrough handle type), so the compiler rejects

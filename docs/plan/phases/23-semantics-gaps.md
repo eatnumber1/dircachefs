@@ -1152,26 +1152,21 @@ backing's O_DIRECT rules are not carried through.
 Owner: dcfs-implementer. Numbered 23.15 because 23.14 is named above as
 the follow-up for 23.13's sub-items (7) and (9).
 
-## 23.16 Passthrough required at mount (russ, 2026-10-18: passthrough ruling; queued)
+## 23.16 Passthrough required at mount (russ, 2026-10-18: passthrough ruling; CANCELLED 2026-10-18)
 
-Passthrough is a required kernel feature like the others. Its fallback
-for a kernel without it is removed, not kept beside the requirement.
+CANCELLED 2026-10-18. russ's ruling: "I choose C: we clearly have to keep
+the fallback behavior in place in its entirety." The cause was found in
+23.16's review: the kernel refuses passthrough per backing filesystem
+(`fuse_backing_open` returns ELOOP when the backing's stack depth is at or
+above `max_stack_depth`: overlay on overlay, dcfs over dcfs,
+fs/fuse/backing.c:112 (Linux v7.3-rc7)), and only the fallback can serve
+those files. The fallback is the supported path, not a stopgap: it keeps its
+tests and its model coverage (the W_sys interruption point stays in
+`formal/`).
 
-Unblocked by 17.2e's merge (26bf55c1, 2026-10-18); not started.
-
-- Require FUSE_CAP_PASSTHROUGH at mount, as the other required kernel
-  features are. Refuse to mount with FailedPrecondition in DirCacheFS
-  Init, next to the existing "which dcfs requires; refusing to mount"
-  check.
-- Delete the kernel-without-passthrough branch and its WARNING
-  (dcfs/dir_cache_fs.cc:326, "a missing capability with a fallback").
-- README and `docs/design.md` gain passthrough in the kernel-features list.
-- Test first: a guest kernel or config without passthrough is refused, or
-  the Init path is run with the capability withheld, and the refusal is
-  asserted. Quote the failing run before the change.
-
-Owner: dcfs-implementer. The declined path (setuid+setgid without group
-execute) stays until 23.17.
+Branch step-23.16 in lane-2 is kept unmerged for reference. Do not merge it.
+Its review findings are moot (review-findings.tsv: "moot: step cancelled
+2026-10-18").
 
 ## 23.17 Delete the declined passthrough write path (deferred until kernel-patches row 10 ships)
 
@@ -1184,7 +1179,17 @@ expectations for that mode move to the passthrough path.
 - Until then, the decline and `WriteFile`'s caller-credential write carry a
   top comment naming kernel-patches row 10. The first step that touches
   either adds it.
-- It is not unblocked by kernel-patches row 10 shipping: it becomes moot
-  once 23.16 deletes the non-passthrough path, and that is what retires it.
 
 Owner: dcfs-implementer.
+
+## 23.18 Comments that name the cancelled 23.16 (queued, not started)
+
+23.16 is cancelled and the fallback stays in full, so comments that say the
+fallback goes with 23.16 are wrong. Remove them, and any comment that calls
+the fallback temporary. Known at queueing: `dcfs/dir_cache_fs_test.cc:7429`
+("Goes with 23.16, which retires the path..."). Find the rest with
+`grep -rn 23.16 dcfs test formal`. The test name
+`FallbackWriteRemovesNoPrivilegesItself` stays. This is code work, not a plan
+edit: a comment-only change with no behaviour change.
+
+Owner: dcfs-mechanical.

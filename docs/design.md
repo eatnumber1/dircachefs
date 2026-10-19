@@ -2115,10 +2115,15 @@ only for `EACCES`, `EROFS` or `EPERM` (an immutable file, a read-only
 filesystem). Whether a given open may write is still decided by the
 kernel from the FUSE file's own mode; a read-only open cannot write
 through a shared mapping even though the backing descriptor is `O_RDWR`.
-If the kernel did not grant passthrough, or dcfs declined it (a file with
-setuid and setgid but not group execute; see
-[Caller credentials](#caller-credentials)), `Read` and `Write` serve the
-data through the same descriptor.
+Passthrough is granted per backing file. The kernel refuses it when the
+backing filesystem's stack depth is at or above the connection's
+`max_stack_depth` (overlay on overlay, or dcfs over dcfs), with `ELOOP` from
+`fuse_backing_open` (fs/fuse/backing.c:112 (Linux v7.3-rc7)). Where the kernel
+refuses passthrough, or dcfs declines it (a file with setuid and setgid but
+not group execute; see [Caller credentials](#caller-credentials)), `Read` and
+`Write` serve the data through the same descriptor. That fallback is the
+supported path for those files, not a stopgap, and it needs its own tests and
+model coverage.
 
 `FUSE_CAP_ATOMIC_O_TRUNC` is turned off, so an `O_TRUNC` open arrives as
 an OPEN followed by a separate `SETATTR(size=0)`, which the ordinary
@@ -2589,8 +2594,8 @@ WARNING (at most one per minute).
 `openat(O_CREAT)`, `unlinkat`, `renameat2`, the chown (including the
 otherwise empty `chown(path, -1, -1)` the kernel forwards, which still
 updates ctime), utimes, the truncate, `setxattr`, `removexattr`,
-`fallocate` (including punch and zero), the write fallback (`WriteFile`,
-which goes with 23.16), and `copy_file_range` (`CopyFileRangeFd`). The
+`fallocate` (including punch and zero), the write fallback (`WriteFile`),
+and `copy_file_range` (`CopyFileRangeFd`). The
 truncate, fallocate, write fallback and copy_file_range keep `CAP_FSETID`
 (`AsCallerKeepingCapFsetid`: after the switch to a nonzero fsuid took it
 from the effective set, `capset` raises it again from the permitted set),
@@ -2688,8 +2693,7 @@ kernel sends with it:
   served by `WriteFile`, which keeps `CAP_FSETID` as the fallocate does:
   the kernel sent its removal first (below), and the
   `FUSE_WRITE_KILL_SUIDGID` it carries, which the pinned libfuse 3.18.2
-  does not hand over, is not needed (goes with 23.16, which retires that
-  path). A CREATE with `O_TRUNC` carries `FUSE_OPEN_KILL_SUIDGID`, but it
+  does not hand over, is not needed. A CREATE with `O_TRUNC` carries `FUSE_OPEN_KILL_SUIDGID`, but it
   makes a new file, which no open truncates.
 - A write, fallocate or copy_file_range first goes through the kernel's
   `file_remove_privs` on the FUSE inode (fs/inode.c:2371-2395 (Linux
