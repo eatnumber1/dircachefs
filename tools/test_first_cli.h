@@ -20,7 +20,7 @@ struct ToolArgs {
 
 // What the command writes and returns.
 struct ToolResult {
-  int exit_code = 0;  // 0 accepted, 1 rejected, 2 the check could not be made
+  int exit_code = 0;  // 0 accepted, 3 rejected; 2: no verdict
   std::string out;    // the report, for standard output
   std::string err;    // the reason it could not be made, for standard error
 };

@@ -22,16 +22,15 @@ ToolResult RunTool(const ToolArgs &args, CommandRunner &runner) {
                                   moved.ToString(), "\n")};
     }
   }
-  const Options options = {.first = args.first,
-                           .last = args.last,
-                           .bazel_flags = args.bazel_flags};
+  const Options options = {
+      .first = args.first, .last = args.last, .bazel_flags = args.bazel_flags};
   absl::StatusOr<Report> report = Check(runner, options);
   if (!report.ok()) {
     return {.exit_code = 2,
             .err = absl::StrCat("test_first_tool: ", report.status().ToString(),
                                 "\n")};
   }
-  return {.exit_code = report->Accepted() ? 0 : 1,
+  return {.exit_code = report->Accepted() ? 0 : 3,
           .out = FormatReport(*report)};
 }
 

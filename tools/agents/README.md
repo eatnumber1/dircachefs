@@ -535,6 +535,6 @@ What it does:
 
 The report (stdout) is what the merge record quotes: `ACCEPTED` or `REJECTED`,
 the targets, the failing test names at the first commit (one `failing:` line
-each) and the reasons for a rejection. Exit code 0 is accepted, 1 rejected, 2
-the check could not be made or the usage is wrong; a flag Abseil does not know
-exits 1 before the tool runs.
+each) and the reasons for a rejection. Exit code 0 is accepted and 3 rejected.
+Any other code means no verdict: 2 when the check could not be made or the
+usage is wrong, and 1 for a flag Abseil does not know.

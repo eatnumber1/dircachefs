@@ -6,8 +6,8 @@
 //
 // Run it from the lane that holds the branch (the work tree must be clean).
 // It prints the report the merge record quotes; the exit code is 0 for an
-// accepted slice, 1 for a rejected one and 2 when the check could not be made
-// (a flag Abseil does not know exits 1 before this file runs).
+// accepted slice and 3 for a rejected one. 2 (usage, or the check could not be
+// made) and 1 (a flag Abseil does not know) mean there is no verdict.
 #include <string>
 #include <string_view>
 #include <vector>

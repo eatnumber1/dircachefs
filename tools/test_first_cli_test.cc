@@ -88,11 +88,11 @@ TEST(RunToolTest, AnAcceptedSliceExitsZeroAndPrintsTheReport) {
   EXPECT_THAT(result.err, IsEmpty());
 }
 
-TEST(RunToolTest, ARejectedSliceExitsOne) {
+TEST(RunToolTest, ARejectedSliceExitsThree) {
   SliceRunner runner;
   runner.touched = "M\tdcfs/x.cc\n";
   const ToolResult result = RunTool(Slice(), runner);
-  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_EQ(result.exit_code, 3);
   EXPECT_THAT(result.out, HasSubstr("test-first: REJECTED"));
 }
 
