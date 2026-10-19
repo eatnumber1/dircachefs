@@ -143,6 +143,10 @@ CONFIG_FUSE_PASSTHROUGH=y
 CONFIG_FUSE_IO_URING=y
 CONFIG_IO_URING=y
 
+# --- overlayfs (stacked_backing_test: dcfs over an overlayfs on an overlayfs,
+# whose stack depth the kernel refuses passthrough for) ----------------------
+CONFIG_OVERLAY_FS=y
+
 # --- NFS export and the real NFSv4 round trip (nfs_test) -------------------
 CONFIG_FHANDLE=y
 CONFIG_EXPORTFS=y

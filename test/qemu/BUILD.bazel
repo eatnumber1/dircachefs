@@ -2378,6 +2378,35 @@ alias(
     actual = ":removed_test_ext4",
 )
 
+# dcfs serves a backing the kernel refuses FUSE passthrough for (an overlayfs
+# over an overlayfs: ELOOP, stack depth 2) with its own reads, writes and
+# fallocate, and the results equal the backing's; an overlayfs over the disk
+# (depth 1) still gets passthrough. The overlay module is Alpine's
+# CONFIG_OVERLAY_FS=m.
+qemu_cc_test(
+    name = "stacked_backing_test",
+    size = "small",
+    timeout = "moderate",
+    srcs = ["guest/stacked_backing_test.cc"],
+    dcfs = True,
+    disks = [("vdb", "ext4", "320M")],
+    modules = ["overlay"],
+    deps = [
+        ":guest",
+        "//dcfs:status",
+        "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
+        "//dcfs/testonly:assert_ok_and_assign",
+        "//dcfs/testonly:files",
+        "@absl//absl/status:status_macros",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+        "@absl//absl/strings:str_format",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # The C++ sources, for //tools:raw_syscalls_test.
 filegroup(
     name = "cxx_sources",
