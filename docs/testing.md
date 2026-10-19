@@ -247,9 +247,10 @@ table and the daemon's exit, never on a time), `InChild` (run a function in a
 forked child, optionally as another uid/gid/groups, with its `Status` carried
 back whole), `Snapshot`, `CompareTrees` and `ExpectSameAsBacking`. A new
 `*.sh` under `test/qemu/` is refused by `tools/repo_shape.py` unless
-`tools/repo_shape_guest_shell.txt` lists it. Three C++ guest tests exist
-today (`guest_test.cc`, `removed_test.cc`, `kernel_facts_test.cc`); the
-existing shell tests are being ported (plan M2).
+`tools/repo_shape_guest_shell.txt` lists it. Four C++ guest tests exist
+today (`guest_test.cc`, `removed_test.cc`, `kernel_facts_test.cc`,
+`caller_capabilities_test.cc`); the existing shell tests are being ported
+(plan M2).
 
 **Which dcfs a guest runs.** `small` and `medium` tests (and the large ACE
 tests, `test/qemu/README.md`) boot
@@ -696,12 +697,16 @@ than an eighth of the tests ran. The slow shards (24, `manual`) and native
 sanitizers (shards are incompatible with them; a curated subset is step
 17.1c), and tests needing a raw block device.
 
-**Kernel facts** (`test/qemu/guest/kernel_facts_test.cc`, seven tests, ext4, xfs
-and btrfs, `manual`, run weekly by the `noisy` job). Each pins a fact about the
-kernel that dcfs relies on, with its citation in `path:line (Linux v7.3-rc7)`
-form, and fails when the kernel stops doing it. Today they pin only two areas,
-`O_DIRECT` through passthrough and inotify; nothing about handles, generations
-or `syncfs`. An `O_DIRECT` open of a FUSE passthrough file is an `O_DIRECT` open
+**Kernel facts** (`test/qemu/guest/kernel_facts_test.cc`, fifteen tests, ext4,
+xfs and btrfs, `manual`, run weekly by the `noisy` job). Each pins a fact about
+the kernel that dcfs relies on, with its citation in `path:line (Linux
+v7.3-rc7)` form, and fails when the kernel stops doing it. Today they pin three
+areas: `O_DIRECT` through passthrough, inotify, and the rules dcfs's own
+removal of setuid, setgid and file capabilities follows (step 17.2e: whom a
+write, truncate, fallocate, copy_file_range or chown clears them for,
+natively; a chmod of the setid bits keeping the access ACL; the user namespace
+check; what `/proc` lets dcfs read); nothing about handles, generations or
+`syncfs`. An `O_DIRECT` open of a FUSE passthrough file is an `O_DIRECT` open
 of the backing file (`fs/fuse/passthrough.c:170`, `fs/backing-file.c:34-57`),
 `F_SETFL` clearing it leaves the backing file direct, and inotify sees changes
 made through the mount, a passthrough write raises `IN_MODIFY` on both, a
@@ -1082,7 +1087,8 @@ or unmodelled and the planned step that would address it, if there is one.
 - The kernel's FUSE caching is not modelled (12.20, queued). The identity and
   durability claims that depend on kernel behaviour rest on `handles_test`,
   `nfs_test`, `sqlite_durability_test`, the power-cut tests and the guests;
-  `kernel_facts_test` pins only `O_DIRECT` through passthrough and inotify.
+  `kernel_facts_test` pins only `O_DIRECT` through passthrough, inotify and
+  the setid, capability and user namespace rules of step 17.2e.
 - The backing filesystem's crash behaviour is one of three modelled regimes.
   Whether real ext4, xfs and btrfs stay inside them is tested by ACE sequences
   and litmus programs, not proved.

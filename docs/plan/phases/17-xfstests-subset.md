@@ -208,6 +208,24 @@ rather than running as root (the review's suggestion), one mechanism with
 fallocate's. No model change: a setattr's phases are unchanged. Coverage
 baseline: main's (97.27 / 83.97).
 
+Round 5 (a fresh agent, the round 4 findings, 2026-10-18): `capget` is
+fallible again (`security_capget`), its failure covered by
+`backing_fault_test`'s `--wrap=capget`; `mount.dcfs` refuses a daemon
+without `CAP_FSETID` in its permitted set (`backing::RequireCapFsetid`);
+capability masks are a `CapabilitySet` (`dcfs/capability_set.h`); pid 0
+is `std::nullopt` in `FuseRequest` (no `/proc` lookup), and
+`CallerStatus` is `CallerProcCredentials`; `ParseProcStatus` refuses with
+`InvalidArgument`; `proc_file_test`. The blocks 17.2e had added to
+`credentials.sh` that mount on their own moved to
+`caller_capabilities_test` (`syscalls::prctl<PR_CAPBSET_DROP>`,
+`syscalls::unshare`), which also pins the refusal and the new price: a
+caller holding `CAP_FSETID` only in a user namespace that maps the file
+loses setgid through dcfs where native keeps it (native 2666, mount 666).
+`kernel_facts_test` pins the kernel rules the step relies on. Declined:
+`NS_GET_PARENT` for the init namespace check (it fails with `EPERM` in
+every user namespace, pinned). Long comments point to design.md. Coverage
+not measured this round (quota).
+
 ## 17.2f Setuid and setgid, every case, against native (russ, 2026-10-17: "Yes"; after 17.2e)
 
 russ asked whether 17.2e's review showed completeness, not only
