@@ -305,6 +305,9 @@ It runs directly with `python3 -I`, no Bazel needed; the tests are
 Drives a queued development step end to end on Gemini in a lane, running worker
 and review/fix rounds, and leaving a merge-ready branch plus `summary.md`.
 
+How to use it as an agent (when, quota, prompt, ledger, report) is the
+`dcfs-foreman` skill, `.claude/skills/dcfs-foreman/SKILL.md`.
+
 Usage:
 
 ```bash

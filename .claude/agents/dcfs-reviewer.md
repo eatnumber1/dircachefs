@@ -29,3 +29,6 @@ you suspect. Say plainly when you found nothing.
 
 End every report with the findings block `docs/plan/process.md` describes
 (rule "Track review findings so trends show").
+
+The `dcfs-foreman` skill (`.claude/skills/dcfs-foreman/SKILL.md`) hands
+bounded read-only surveys to Gemini.

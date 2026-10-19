@@ -2140,6 +2140,10 @@ themselves leveraging dumber agents for more of the menial work"
 3. Briefs carry a decomposition section; step reports carry a `Delegated` line.
 4. Measure in the ledger: parent tokens with and without delegation.
 
+Status: item 1 (the rule, `rule-delegate-down`, and the agent definitions)
+and the `dcfs-foreman` skill are done by 25.49a. Items 2 (`delegate.py`),
+3 (briefs and the report line's check) and 4 (measurement) remain.
+
 Owner: not yet assigned (the orchestrator chooses). Dependencies: 25.48.
 
 *Test:* `delegate.py` comes with tests under `tools/agents/`.

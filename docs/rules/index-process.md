@@ -107,6 +107,10 @@ reasoning. `AGENTS.md` says which indexes to read for which task.
   [process](/docs/plan/process.md#rule-agy-invocation),
   [process](/docs/plan/process.md#rule-dont-start-unfinishable),
   [process](/docs/plan/process.md#rule-agy-write-jobs)
+- Delegate menial chunks to Gemini through foreman, by the `dcfs-foreman`
+  skill, not a bare `agy -p` (russ, 2026-10-19: "Make use of foreman a skill
+  and put it in AGENTS.md."; "Use the foreman script instead of calling agy
+  directly."). [process](/docs/plan/process.md#rule-delegate-down)
 - Quota: read the pools live, pace the Claude plan, move read-only jobs off it
   (russ, 2026-10-18). [process](/docs/plan/process.md#rule-live-quota-readings),
   [process](/docs/plan/process.md#rule-pace-claude-quota),

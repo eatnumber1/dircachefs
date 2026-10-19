@@ -699,6 +699,24 @@ reading. Not for writing code, nor for subtle protocol judgement.
    check headroom before each such job and give it work that is safe to
    abandon.
 
+12. <a id="rule-delegate-down"></a>
+    **Delegate menial chunks down** (russ, 2026-10-19: "Make use of foreman
+   a skill and put it in AGENTS.md." and "I'd like it if our subagents
+   started doing this too, and themselves leveraging dumber agents for
+   more of the menial work." and "Use the foreman script instead of
+   calling agy directly."). Every agent, orchestrator or subagent, hands a
+   bounded chunk that needs labour rather than judgement (surveys, greps
+   across trees, doc passes, test boilerplate, warning-fix batches) to
+   Gemini through `tools/agents/foreman.py`, by the `dcfs-foreman` skill
+   (`.claude/skills/dcfs-foreman/SKILL.md`). It reconciles rule 10: jobs
+   go through foreman, not a bare `agy -p`; only `agy -p '/quota'` and
+   `/usage` stay direct. A Claude subagent cannot spawn another Claude
+   subagent, so foreman is how it delegates down, and the Claude quota it
+   would have spent stays for judgement work. The delegating agent reads
+   the pool first, reviews the result before using it, records a ledger
+   row naming its parent step, and puts a `Delegated:` line in its
+   report. Rule 6's table still decides what may be delegated.
+
 ## Quota management, Claude and Gemini together (russ, 2026-10-16)
 
 russ: "I'd like you to manage all quota spend, both Gemini and Claude. That

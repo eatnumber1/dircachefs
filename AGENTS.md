@@ -42,6 +42,10 @@ always reads and restate no rule.
   build the pinned kernel with Bazel`, and end with a Co-Authored-By trailer
   naming the model that wrote the commit.
   ([style 7](/docs/style.md#rule-commit-subject))
+- **Delegate menial chunks to Gemini through foreman**, by the
+  `dcfs-foreman` skill (`.claude/skills/dcfs-foreman/SKILL.md`), never a bare
+  `agy -p`; your report has a `Delegated:` line.
+  ([process](/docs/plan/process.md#rule-delegate-down))
 - **Stop and report on a permission denial**; do not work around it.
   ([process](/docs/plan/process.md#rule-stop-on-denial))
 

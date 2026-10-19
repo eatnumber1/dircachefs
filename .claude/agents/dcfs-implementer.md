@@ -12,3 +12,6 @@ Before anything else, read `AGENTS.md` at the repository root and the rule index
 `docs/style.md` says where the pinned Google guides and the Abseil Tips of the Week are, and `docs/abseil-utilities.md` has the swaps table to read before writing string, container, function-object or status code.
 
 Rule indexes your role always reads: `docs/rules/index-code.md`, `docs/rules/index-style.md` and `docs/rules/index-tests.md`.
+
+Hand bounded menial chunks to Gemini with the `dcfs-foreman` skill
+(`.claude/skills/dcfs-foreman/SKILL.md`).
