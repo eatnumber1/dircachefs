@@ -5,3 +5,5 @@ a7a3e7126c0d16354dbe479c1f573ccc6e9e8967
 67f7230fa5698d3232242fa83fca2c86fc55b1f5
 # 26.17c: shfmt -i 2 of guest/strace_lib.sh and run_qemu_cost_test.sh.
 210e3997a244363769b3e8b489b2a2c09645c9b9
+# 17.2e: shfmt -i 2 of test/qemu/guest/credentials.sh.
+4e587057695cd075232022b254abc7ecd7995315
