@@ -2247,11 +2247,11 @@ This replaces the research mode this section described earlier on 2026-10-19
 2. `--single`: one held-open worker session, with no review and no fix
    rounds.
 3. `--read-only` combines with `--single` only: agy plan mode, no branch
-   setup, and the worker's final text is saved as `report.md`.
+   setup, and its text, minus the JOB-COMPLETE line, is saved as `report.md`.
 4. Foreman records its session in `tokens.json` and adds the ledger row
    (25.49d).
 
-Owner: not yet assigned (the orchestrator chooses). Dependencies: none.
+Owner: dcfs-implementer. Dependencies: none.
 
 *Test:* `//tools/agents:foreman_test` covers both modes and the
 `--single --read-only` combination.

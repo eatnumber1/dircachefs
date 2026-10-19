@@ -40,7 +40,8 @@ Checklist for the prompt file:
 ## Single mode (a bounded chunk)
 
 Run it with `--single`; a survey that edits nothing also takes `--read-only`
-(plan mode, no branch), and its final answer is saved as `report.md`.
+(plan mode, no branch), and its text, minus the JOB-COMPLETE line, is saved
+as `report.md`.
 
 Template (fill the capitals; keep it under one screen):
 

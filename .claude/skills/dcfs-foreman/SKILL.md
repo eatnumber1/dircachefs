@@ -45,17 +45,18 @@ delegate and say so in your report.
 
    ```bash
    cd YOUR_LANE && python3 -I tools/agents/foreman.py \
-       STEP LANE BRANCH PROMPT_FILE --single --out DIR
+       STEP LANE BRANCH PROMPT_FILE --single --out OUT_DIR
    cd YOUR_LANE && python3 -I tools/agents/foreman.py \
-       STEP DIR PROMPT_FILE --single --read-only --out DIR
+       STEP WORKDIR PROMPT_FILE --single --read-only --out OUT_DIR
    ```
 
-   The first is a write chunk; the second a survey (no branch, `DIR` is only
-   the working directory). Omit `--single` for a whole step with review
+   The first is a write chunk; the second a survey (no branch; `WORKDIR` is
+   only the working directory). `OUT_DIR` is where the results go: put it
+   under your scratchpad. Omit `--single` for a whole step with review
    rounds.
-5. **Read the result.** Under `--out`: `report.md` (read-only mode: the
-   report) or `worker.out`,
-   `review*.out`, `summary.md` (with a token table), `tokens.json`
+5. **Read the result.** Under `--out`: `worker.out` (the worker's text); in
+   read-only mode also `report.md` (that text minus the `JOB-COMPLETE`
+   line); `review*.out`, `summary.md` (with a token table), `tokens.json`
    (per-session Gemini token counts), `usage.before` and `usage.after`.
    Foreman adds the run's dispatch-ledger row itself. Verify its claims
    before you use them: grep or read what it cites.

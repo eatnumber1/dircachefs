@@ -748,21 +748,25 @@ reading. Not for writing code, nor for subtle protocol judgement.
    `--read-only` adds plan mode and no branch) for bounded chunks.
    Every agent hands a bounded chunk that needs labour rather than judgement
    (surveys, greps across trees, doc passes, test boilerplate, warning-fix
-   batches) to Gemini
-   through `tools/agents/foreman.py`, by the `dcfs-foreman` skill
-   (`.claude/skills/dcfs-foreman/SKILL.md`); rule 9 (routing) decides what
-   may go, and rule 6 only the model and effort. It reconciles rule 10: every
-   agy job goes through foreman, not a bare `agy -p`. A Claude subagent
-   cannot spawn another Claude subagent, so foreman is how it delegates down,
-   and the Claude quota it would have spent stays for judgement work. A
-   subagent delegates only into a lane its brief names as its delegation
-   lane; with none named it does not delegate and says so in its report. The
-   reviewers (`dcfs-reviewer`, `dcfs-style-reviewer`) delegate only read-only
-   surveys (`--single --read-only`). The delegating agent reads the pool first,
-   reviews the result before using it, and records a ledger row naming its
-   parent step. The step report of an implementer, mechanical, investigator
-   or protocol agent carries a `Delegated:` line (`none` if nothing was); a
-   reviewer adds one only if it delegated.
+   batches) to Gemini through `tools/agents/foreman.py`, by the
+   `dcfs-foreman` skill (`.claude/skills/dcfs-foreman/SKILL.md`); rule 9
+   (routing) decides what may go, and rule 6 only the model and effort. It
+   reconciles rule 10: every agy job goes through foreman, not a bare
+   `agy -p`. A Claude subagent cannot spawn another Claude subagent, so
+   foreman is how it delegates down, and the Claude quota it would have spent
+   stays for judgement work. A subagent delegates only into a lane its brief
+   names as its delegation lane; with none named it does not delegate and
+   says so in its report. The reviewers (`dcfs-reviewer`,
+   `dcfs-style-reviewer`) delegate only read-only surveys
+   (`--single --read-only`). A foreman run writes only its --out directory
+   and one dispatch-ledger row in the main checkout; that row is
+   tool-written bookkeeping like the dispatch hook's, not an edit by the
+   agent, so it is allowed for reviewers and under rule-stay-in-lane. The
+   delegating agent reads the pool first, reviews the result before using
+   it, and records a ledger row naming its parent step. The step report of an
+   implementer, mechanical, investigator or protocol agent carries a
+   `Delegated:` line (`none` if nothing was); a reviewer adds one only if it
+   delegated.
 
 ## Quota management, Claude and Gemini together (russ, 2026-10-16)
 

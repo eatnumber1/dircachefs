@@ -333,8 +333,10 @@ python3 -I tools/agents/foreman.py STEP DIR PROMPT_FILE --single --read-only \
 ```
 
 - `STEP` (required): name of the step (e.g. `25.33`).
-- `LANE` (required): lane repository directory.
-- `BRANCH` (required): branch name to check out from `FETCH_HEAD` of main.
+- `LANE` (required): lane repository directory (with `--read-only`, `DIR`: only
+  the working directory).
+- `BRANCH` (required except with `--read-only`): branch name to check out from
+  `FETCH_HEAD` of main.
 - `PROMPT_FILE` (required): path to the worker's initial prompt file.
 - `--model M`: model for worker and fix sessions (default:
   `gemini-3.8-flash-medium`).
@@ -350,14 +352,15 @@ python3 -I tools/agents/foreman.py STEP DIR PROMPT_FILE --single --read-only \
   `JOB-COMPLETE` line, is saved as `report.md` in `--out`. `summary.md` says
   "read-only run in DIR" and has no commit sections; the ledger row says
   `mode=read-only`.
-- `--out DIR`: output directory where `.jsonl`, `.out`, usage readings, and
-  `summary.md` are saved (default: scratchpad foreman directory or
-  `/tmp/foreman/<step>`).
+- `--out DIR`: output directory where `.jsonl`, `.out`, usage readings,
+  `summary.md`, `tokens.json` and (read-only mode) `report.md` are saved
+  (default: scratchpad foreman directory or `/tmp/foreman/<step>`).
 
 ### Execution and protocol
 
 1. Checks out a fresh branch in `LANE` tracking `FETCH_HEAD` of the main
    repository (`$DCFS_MAIN_REPO` or `~/Sources/dircachefs`), and records `base`.
+   With `--read-only` it skips this step: no git command runs.
 2. Measures quota before the run via `agy -p /usage` filtering for Gemini
    models.
 3. Runs the worker session in `stream-json` mode:

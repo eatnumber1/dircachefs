@@ -30,6 +30,5 @@ you suspect. Say plainly when you found nothing.
 End every report with the findings block `docs/plan/process.md` describes
 (rule "Track review findings so trends show").
 
-Hand read-only surveys to Gemini with the `dcfs-foreman` skill
-(`.claude/skills/dcfs-foreman/SKILL.md`, `--single --read-only`) when your
-brief names a delegation lane; add a `Delegated:` line only if you did.
+Delegation: `docs/plan/process.md` rule 12 (read-only surveys only;
+`.claude/skills/dcfs-foreman/SKILL.md`).

@@ -5,7 +5,8 @@ Harness tool, not part of dcfs; see tools/agents/README.md. Drives worker
 and review/fix rounds via agy in stream-json mode, holding stdin open until
 JOB-COMPLETE is signaled. With --single it runs the one worker session and
 nothing else; with --read-only as well it runs in agy plan mode, leaves the
-lane's git state alone and saves the worker's final text as report.md.
+lane's git state alone and saves its text, minus the JOB-COMPLETE line, as
+report.md.
 """
 
 import argparse
