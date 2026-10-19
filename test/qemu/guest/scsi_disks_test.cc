@@ -3,9 +3,10 @@
 // named sd<letter>) are found by their LUN, not by the kernel's name: the
 // kernel names SCSI disks in the order their asynchronous probes finish, so
 // /dev/sdb may be LUN 2. guest/init links /dev/dcfs-scsi/sd<letter> to the
-// disk of LUN <letter> - 'a'. Each such disk has the size its spec gave, and
-// the first is usable as a filesystem (guest/init mounted it as the test's
-// directory).
+// disk of LUN <letter> - 'a'. The test's disks are sdb and sdd (LUNs 1 and 3),
+// never a and b, which the kernel would name them: a link made from the
+// kernel's names does not pass. Each has the size its spec gave, and the first
+// is usable as a filesystem (guest/init mounted it as the test's directory).
 
 #include <fcntl.h>
 // include-cleaner looks for SEEK_END in <stdio.h>, not <cstdio>.
@@ -40,13 +41,13 @@ absl::StatusOr<uint64_t> SizeOfDevice(std::string_view path) {
 }
 
 TEST(ScsiDisksTest, EachDiskHasItsSpecsSize) {
-  EXPECT_THAT(SizeOfDevice("/dev/dcfs-scsi/sda"), IsOkAndHolds(Eq(64u << 20)));
   EXPECT_THAT(SizeOfDevice("/dev/dcfs-scsi/sdb"), IsOkAndHolds(Eq(96u << 20)));
+  EXPECT_THAT(SizeOfDevice("/dev/dcfs-scsi/sdd"), IsOkAndHolds(Eq(64u << 20)));
 }
 
 TEST(ScsiDisksTest, TheFirstDiskIsTheTestsDirectory) {
   absl::StatusOr<struct stat> directory = syscalls::stat("/tmp/test_tmpdir");
-  absl::StatusOr<struct stat> disk = syscalls::stat("/dev/dcfs-scsi/sda");
+  absl::StatusOr<struct stat> disk = syscalls::stat("/dev/dcfs-scsi/sdb");
   ASSERT_THAT(directory, IsOk());
   ASSERT_THAT(disk, IsOk());
   EXPECT_THAT(directory->st_dev, Eq(disk->st_rdev));

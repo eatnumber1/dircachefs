@@ -234,8 +234,8 @@ qemu_cc_test(
     timeout = "moderate",
     srcs = ["guest/scsi_disks_test.cc"],
     disks = [
-        ("sda", "ext4", "64M"),
         ("sdb", "ext4", "96M"),
+        ("sdd", "ext4", "64M"),
     ],
     deps = [
         "//dcfs:syscalls",
