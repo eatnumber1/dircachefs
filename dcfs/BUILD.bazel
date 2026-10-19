@@ -489,6 +489,23 @@ cc_library(
     ],
 )
 
+qemu_cc_test(
+    name = "proc_file_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["proc_file_test.cc"],
+    deps = [
+      ":proc_file",
+      ":status",
+      ":syscalls",
+      ":syscalls_backing",
+      "//dcfs/testonly:assert_ok_and_assign",
+      "@absl//absl/status:status_matchers",
+      "@absl//absl/strings",
+      "@googletest//:gtest_main",
+    ],
+)
+
 # Step 17.2e: a FUSE caller's ids, groups and capabilities, and its user
 # namespace, from /proc (FuseRequest::Caller, CallerHasCapFsetid).
 cc_library(

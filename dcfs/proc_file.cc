@@ -16,9 +16,9 @@
 namespace dcfs {
 
 absl::StatusOr<std::string> ReadProcFile(std::string_view path) {
-  // Off the backing filesystem: opened by path (syscalls.h, which no
-  // backing door guards), and read with syscalls_backing.h's read, the read
-  // wrapper there is.
+  // procfs is not the backing filesystem, so the open is syscalls.h's, which
+  // counts as no backing syscall. read(2) has one wrapper only,
+  // syscalls_backing.h's.
   ASSIGN_OR_RETURN(FileDescriptor fd, syscalls::open(path, O_RDONLY));
   std::string contents;
   char buf[65536];

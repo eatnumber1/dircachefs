@@ -63,6 +63,7 @@
 //dcfs:fuse_request_channel_test_bin
 //dcfs:mount_fds_test_bin
 //dcfs:mounts_below_test_bin
+//dcfs:proc_file_test_bin
 //dcfs:sqlite_test_bin
 //dcfs:sqlite_durable_test_bin
 //dcfs:absolute_paths_test_bin

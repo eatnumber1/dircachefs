@@ -14,7 +14,8 @@ namespace dcfs {
 // as it is read; nothing on the backing filesystem is touched.
 absl::StatusOr<std::string> ReadProcFile(std::string_view path);
 
-// The text of /proc/self/mountinfo.
+// The mount table of this process's mount namespace (proc_pid_mountinfo(5)),
+// whole.
 absl::StatusOr<std::string> ReadMountinfo();
 
 }  // namespace dcfs
