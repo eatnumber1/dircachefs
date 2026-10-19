@@ -261,12 +261,28 @@ the slope at zero.
   would serialize two daemons' transactions but not their three-phase
   protocols or their in-memory state.
 - <a id="rule-test-minimum-kernel"></a>
-  **Test against the minimum supported kernel.** The QEMU test kernel is the
-  documented minimum supported kernel, and we should test against the minimum
-  supported kernel. Under the idea that the kernel is backwards compatible,
-  that should make it safe to use dcfs with more recent kernels than we're
-  testing with (russ, 2026-10-18). The kernel headers match that kernel too
-  (`docs/style.md`, `rule-kernel-headers-match-test-kernel`).
+  **Test against the minimum supported kernel.** The minimum supported kernel
+  is Linux 6.12 LTS (russ, 2026-10-18); 6.9 was the minimum until step 24.2
+  lands. Under the idea that the kernel is backwards compatible, testing
+  against the minimum should make it safe to use dcfs with more recent
+  kernels than we test with (russ, 2026-10-18). Planned for step 24.2
+  (Thursday 2026-10-22): the test kernel is Alpine v3.22's `linux-virt`
+  6.12.x, patch version floating, and the kernel headers come from the same
+  branch's `linux-virt-dev` (`docs/style.md`,
+  `rule-kernel-headers-match-test-kernel`). Until 24.2 lands, the test kernel
+  is 6.18 (v3.24) and 6.12 is not tested yet. The one exception to the
+  headers rule is the `USER_NS_INIT_INO` `#ifndef` block (russ, 2026-10-18).
+- <a id="rule-kernel-pin-major-minor"></a>
+  **Pin the test kernel by major.minor; let the patch version float** (russ,
+  2026-10-18: "if the Alpine precompiled kernels float with their patch
+  version, and a pinned one won't be available long-term, I don't want to
+  switch to compiling the kernel ourselves. We can change the pin, but when
+  we do we'll pin to a major+minor, and let the patch version float."). The
+  test kernel is Alpine's `linux-virt`, pinned by its branch's series (6.18
+  today, branch v3.24). There is no from-source kernel build; step 3.2 stays
+  retired. Lanes' kernel versions may diverge; the 150G disk-cache cap covers
+  that (russ, 2026-10-18: "as long as the bazel build cache is large enough
+  to handle that, I'm ok with it").
 - <a id="rule-root-required"></a>
   **Root.** dcfs needs `CAP_DAC_READ_SEARCH` for `open_by_handle_at`,
   `CAP_SYS_ADMIN` to mount and to register passthrough backing files, and

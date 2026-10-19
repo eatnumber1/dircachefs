@@ -1184,5 +1184,7 @@ expectations for that mode move to the passthrough path.
 - Until then, the decline and `WriteFile`'s caller-credential write carry a
   top comment naming kernel-patches row 10. The first step that touches
   either adds it.
+- It is not unblocked by kernel-patches row 10 shipping: it becomes moot
+  once 23.16 deletes the non-passthrough path, and that is what retires it.
 
 Owner: dcfs-implementer.

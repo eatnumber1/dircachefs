@@ -17,6 +17,20 @@ release). The kernel and its modules always come from the same apk. A new
 branch with another series needs `boot.sh`'s pattern updated (the failure
 says so).
 
+We pin the major.minor and let the patch version float (russ, 2026-10-18:
+"if the Alpine precompiled kernels float with their patch version, and a
+pinned one won't be available long-term, I don't want to switch to compiling
+the kernel ourselves. We can change the pin, but when we do we'll pin to a
+major+minor, and let the patch version float."). There is no from-source
+kernel build; step 3.2 stays retired. Lanes' kernel versions may diverge,
+and the 150G disk-cache cap covers that.
+
+Planned for step 24.2 (Thursday 2026-10-22): branch v3.22 (`linux-virt` and
+`linux-virt-dev` 6.12.x, supported until 2027-05-01), so the minimum
+supported kernel is 6.12 LTS. `boot.sh` then accepts `6.12.*-virt`, and the
+toolchain's UAPI headers come from the same branch's `linux-virt-dev` through
+a genrule. Until 24.2 lands, this README describes 6.18 (v3.24).
+
 ## Modules
 
 Alpine builds most drivers as modules (virtio_blk, fuse, ext4, xfs, btrfs,

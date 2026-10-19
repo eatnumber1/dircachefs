@@ -85,3 +85,45 @@ feasible in the QEMU harness, and what the test kernel config needs
 (CONFIG_SECURITY_SELINUX, and the policy's userspace tools if any).
 
 Owner: dcfs-investigator for the first sub-step; the implementer after that.
+
+## 24.2 Minimum kernel 6.12: Alpine v3.22 (russ, 2026-10-18; queued for Thursday 2026-10-22, not before)
+
+russ, 2026-10-18: "Minimum kernel 6.12: Alpine v3.22". Facts (2026-10-18): v3.22
+ships `linux-virt` and `linux-virt-dev` 6.12.113-r0, supported until
+2027-05-01. v3.21 also has 6.12 but ends 2026-11-01; v3.23 and v3.24 are 6.18.
+russ's rulings of 2026-10-18: the minimum supported kernel becomes Linux 6.12
+LTS (was 6.9; 6.9-6.11 are EOL non-LTS); the test kernel is Alpine's
+`linux-virt` 6.12.x from the branch that carries it, patch version floating
+(`third_party/linux/README.md`, "Series, not version"); the toolchain's UAPI
+headers come from the same branch's `linux-virt-dev` through a genrule ("A
+genrule is acceptable"), floating in lockstep with the kernel.
+
+Work:
+
+- MODULE.bazel: `alpine_index` branch v3.24 -> v3.22, one branch for every
+  Alpine package (the single-pin design); QEMU and the filesystem tools move
+  with it.
+- `test/qemu/guest/boot.sh`: `6.18.*-virt` -> `6.12.*-virt`.
+- `third_party/linux/README.md` and `test/qemu/README.md`: 6.18 -> 6.12, and
+  the minimum-kernel text.
+- A genrule turns `linux-virt-dev`'s raw kernel headers into a UAPI include
+  tree and puts it ahead of the Debian sysroot's `linux-libc-dev` in the
+  toolchain (or replaces that deb).
+- `dcfs/proc_status.cc`: the `USER_NS_INIT_INO` exception, exactly as russ
+  wrote it (russ, 2026-10-18; 6.12's headers lack the constant, it entered
+  UAPI in 6.17):
+
+  ```
+  #ifndef USER_NS_INIT_INO
+  #define USER_NS_INIT_INO 0xEFFFFFFD
+  #endif  // USER_NS_INIT_INO
+  ```
+
+- README: the minimum 6.9 -> 6.12 (the requirements bullet and the badge);
+  the "Kernel matrix" bullet, which describes testing the minimum as not yet
+  done, is re-checked for the new minimum.
+- Then re-run every tier, and re-baseline what the kernel and tool change
+  moves: io and cpu budgets, the xfstests and pjdfstest expected-failure
+  lists, `kernel_facts`, and state counts if any. Each re-baseline commit says
+  why.
+Owner: dcfs-investigator, then dcfs-implementer.
