@@ -9,6 +9,7 @@ load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 load(":guest_libs.bzl", "GUEST_LIBS_ENV", "GUEST_LIBS_TOOLS")
 load(":qemu_cc_test.bzl", "qemu_cc_test")
 load(":qemu_test.bzl", "CONCURRENT_CPUS", "qemu_test", "qemu_test_matrix")
+load(":refusals_test.bzl", "refusals_test_suite")
 load(":xfstests.bzl", "xfstests_test")
 load("//third_party/xfstests:helpers.bzl", "XFSTESTS_HELPERS", "XFSTESTS_VFS_HELPERS")
 load("//tools:style_checks.bzl", "style_findings_here")
@@ -2441,3 +2442,6 @@ filegroup(
 )
 
 style_findings_here()
+
+# Every refusal of qemu_test, qemu_test_matrix and qemu_cc_test (step 25.56).
+refusals_test_suite(name = "refusals_test")
