@@ -72,19 +72,21 @@ void NoteBestEffort(std::string_view what, const absl::Status &status) {
 // attributes the operation changes.
 //
 //  - system.posix_acl_access: any chmod of a file with an access ACL
-//    rewrites the ACL to match the new mode (posix_acl_chmod: ext4, xfs,
-//    btrfs), for FUSE_SET_ATTR_MODE. The chmod dcfs makes for KILL_PRIV
-//    (backing::SetAttr) changes setuid and setgid alone, which the ACL does
-//    not hold (__posix_acl_chmod_masq takes the owner, group and other
-//    bits, fs/posix_acl.c:516-559 (Linux v7.3-rc7)), so it rewrites the
-//    ACL as it was. system.posix_acl_default is never touched by a chmod.
-//  - security.capability: removed by chown/chgrp (even chown(-1, -1)) and
-//    truncate (ATTR_KILL_PRIV, fs/open.c, fs/attr.c) and by any write or
-//    fallocate
-//    (file_remove_privs). Note the kernel also removes it itself through
-//    the mount (setattr_prepare's REMOVEXATTR ahead of the SETATTR or
-//    write, with FUSE_CAP_HANDLE_KILLPRIV_V2 too), so this is the backstop
-//    for what the backing filesystem does on its own.
+//    rewrites the ACL to match the new mode (posix_acl_chmod,
+//    fs/posix_acl.c:611: ext4, xfs, btrfs), for FUSE_SET_ATTR_MODE. The
+//    chmod dcfs makes for KILL_PRIV (backing::SetAttr) changes setuid and
+//    setgid alone, which the ACL does not hold (__posix_acl_chmod_masq takes
+//    the owner, group and other bits, fs/posix_acl.c:516-559), so it
+//    rewrites the ACL as it was. system.posix_acl_default is never touched
+//    by a chmod.
+//  - security.capability: removed by chown/chgrp (even chown(-1, -1);
+//    chown_common's ATTR_KILL_PRIV, fs/open.c:816-818) and truncate
+//    (do_truncate, fs/open.c:57) and by any write or fallocate
+//    (file_remove_privs, fs/inode.c:2406). The kernel also removes it itself
+//    through the mount (setattr_prepare's REMOVEXATTR, fs/attr.c:229, ahead
+//    of the SETATTR or write, with FUSE_CAP_HANDLE_KILLPRIV_V2 too), so this
+//    is the backstop for what the backing filesystem does on its own. (All
+//    Linux v7.3-rc7.)
 //
 // Not covered (not verified, and not something dcfs changes itself): LSM
 // relabeling, security.evm/security.ima rewrites.
@@ -296,9 +298,10 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   // FUSE_CAP_HANDLE_KILLPRIV_V2 (step 17.2e): dcfs removes setuid and
   // setgid on a write, a truncate and a chown itself, by the backing
   // filesystem's rule (docs/design.md, "Caller credentials"). Without it
-  // the kernel re-derives the mode by its pre-6.2 rule (fuse_setattr), and
-  // keeps SB_NOSEC off the superblock, so every passthrough write first
-  // asks for security.capability with a GETXATTR round trip
+  // the kernel re-derives the mode by its pre-6.2 rule (fuse_setattr,
+  // fs/fuse/dir.c:2350-2367), and leaves SB_NOSEC off the superblock
+  // (fs/fuse/inode.c:1365-1367 (Linux v7.3-rc7)), so every passthrough write
+  // first asks for security.capability with a GETXATTR round trip
   // (docs/plan/notes/passthrough-write-cost-17.2c.md).
   //
   // All three are required, not optional: running without them would
@@ -810,7 +813,7 @@ absl::Status DirCacheFS::Setattr(FuseRequest &req, fuse_ino_t ino,
   // SETATTR (BackingFile::capability_removed): consumed by this SETATTR,
   // whatever it sets.
   auto backing_it = backing_files_.find(id);
-  const bool capability_removed =
+  bool capability_removed =
       backing_it != backing_files_.end() &&
       std::exchange(backing_it->second.capability_removed, false);
   // A SETATTR that sets nothing is a chown(path, -1, -1) or the kernel's
@@ -818,25 +821,17 @@ absl::Status DirCacheFS::Setattr(FuseRequest &req, fuse_ino_t ino,
   // FUSE_CAP_HANDLE_KILLPRIV_V2, fs/fuse/dir.c:2340-2342 (Linux v7.3-rc7)),
   // which always comes while the file is open for writing; then it is
   // taken for the second (docs/design.md, "Caller credentials").
-  const bool write_removal =
+  bool write_removal =
       backing::SetsNothing(to_set) && open_for_write_.contains(id);
-  // The kernel sends a write's removal (dentry_needs_remove_privs,
-  // fs/inode.c:2339 (Linux v7.3-rc7)) for a writer without CAP_FSETID in
-  // the init user namespace, of a setuid or setgid file
-  // (setattr_should_drop_suidgid, fs/attr.c:63-77 (Linux v7.3-rc7)), or for
-  // anyone's write of a file with security.capability, right after taking
-  // that away. Only then may the writer hold CAP_FSETID, and keep both
-  // bits: nothing is left to change, and the SETATTR is answered as a
-  // GETATTR. Anyone's chown(path, -1, -1) of a held file with
-  // security.capability arrives the same way (chown_common's
-  // ATTR_KILL_PRIV, fs/open.c:816-818 (Linux v7.3-rc7)), and root's or
-  // another CAP_FSETID holder's then keeps setuid where the native chown
-  // clears it: the unsafe direction, a price docs/design.md lists.
-  const bool writer_may_keep_bits = write_removal && capability_removed;
-  ASSIGN_OR_RETURN(const bool writer_keeps_bits,
-                   writer_may_keep_bits ? req.CallerHasCapFsetid()
-                                        : absl::StatusOr<bool>(false));
-  if (writer_keeps_bits) return Getattr(req, ino, fi);
+  // Only a write's removal right after the kernel took security.capability
+  // away may come from a writer holding CAP_FSETID, whose bits stay: the
+  // SETATTR is answered as a GETATTR. docs/design.md ("Caller credentials",
+  // "Setuid and setgid on writes") says why, and what a chown(path, -1, -1)
+  // taken for it costs.
+  if (write_removal && capability_removed) {
+    ASSIGN_OR_RETURN(bool writer_keeps_bits, req.CallerHasCapFsetid());
+    if (writer_keeps_bits) return Getattr(req, ino, fi);
+  }
   // Any other write's removal is a writer's without CAP_FSETID: setuid and
   // setgid go as its write would take them, not by a chown, which a
   // non-owner may not make.

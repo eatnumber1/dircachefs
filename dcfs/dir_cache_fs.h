@@ -657,20 +657,10 @@ class DirCacheFS : private events::Bookkeeping {
     bool write_fd_appends = false;
     // Whether the last REMOVEXATTR of this inode while writable_refs > 0
     // took security.capability away, and no SETATTR has come since
-    // (Removexattr sets it, Setattr consumes it; step 17.2e). A write by
-    // anyone of a file with security.capability makes the kernel remove it
-    // and then send the SETATTR that sets nothing (file_remove_privs_flags,
-    // fs/inode.c:2371-2395; setattr_prepare's security_inode_killpriv, the
-    // REMOVEXATTR, fs/attr.c:229, called from fuse_do_setattr at
-    // fs/fuse/dir.c:2167 before it sends the SETATTR at :2248 (Linux
-    // v7.3-rc7)), with the inode locked from the one to the other
-    // (fs/fuse/passthrough.c:73 (Linux v7.3-rc7)), so no other SETATTR or
-    // REMOVEXATTR of it comes in between. That SETATTR is the only one a
-    // writer with CAP_FSETID sends. So does anyone's chown(path, -1, -1) of
-    // such a file (chown_common's ATTR_KILL_PRIV, fs/open.c:816-818 (Linux
-    // v7.3-rc7)), and a removexattr(2) of the capability sets it too, for
-    // the next SETATTR, whichever that is: docs/design.md, "Caller
-    // credentials", lists the prices.
+    // (Removexattr sets it, Setattr consumes it): the kernel's sign that the
+    // next SETATTR may be the write removal of a writer holding CAP_FSETID.
+    // docs/design.md, "Caller credentials", gives the kernel's order and what
+    // else sets it.
     bool capability_removed = false;
     // The descriptor fallback writes, fallocate and copy_file_range use.
     int WriteFd() const { return write_fd.has_value() ? **write_fd : *fd; }

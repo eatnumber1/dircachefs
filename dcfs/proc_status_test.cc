@@ -61,9 +61,9 @@ TEST(ProcStatusTest, AnEmptyGroupsLineIsNoGroups) {
 // Whatever the kernel would never write is refused as an invalid argument,
 // each line on its own.
 TEST(ProcStatusTest, WhatIsNotAStatusFileIsRefused) {
-  const std::string uid = "Uid:\t0\t0\t0\t0\n";
-  const std::string groups = "Groups:\t0\n";
-  const std::string cap = "CapEff:\t0\n";
+  std::string uid = "Uid:\t0\t0\t0\t0\n";
+  std::string groups = "Groups:\t0\n";
+  std::string cap = "CapEff:\t0\n";
   for (const std::string &status : {
            absl::StrCat(groups, cap),                     // no Uid
            absl::StrCat(uid, cap),                        // no Groups

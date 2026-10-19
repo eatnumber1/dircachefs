@@ -639,34 +639,19 @@ absl::Status FinishRun(Context &ctx);
 // those for a real fd could block or have a side effect); a symlink's
 // mode cannot be changed at all on Linux (there is no lchmod) and this
 // fails with EOPNOTSUPP. FUSE_SET_ATTR_KILL_PRIV without FUSE_SET_ATTR_MODE
-// sets the mode the node had when SetAttr began less the setuid and setgid
-// bits that a write by `caller`, taken to lack CAP_FSETID, clears
-// (setattr_should_drop_suidgid, fs/attr.c:63-77 (Linux v7.3-rc7)): S_ISUID,
-// and S_ISGID if the node is group-executable or `caller` is outside its
-// group; with neither bit to clear it makes no chmod. Whether the caller
-// lacks CAP_FSETID is DirCacheFS::Setattr's to decide before asking for
-// this. FUSE_SET_ATTR_KILL_SUID (the kernel's FATTR_KILL_SUIDGID) is not
-// acted on here: DirCacheFS::Setattr turns a truncate's into KILL_PRIV, and
-// a chown clears what it clears as `caller`.
+// clears from the node's mode, as root, what a write by `caller`, taken to
+// lack CAP_FSETID, clears, and makes no chmod where that is nothing;
+// FUSE_SET_ATTR_KILL_SUID is not acted on here (docs/design.md, "Caller
+// credentials", "Setuid and setgid on writes").
 // Owner and times use the same regular/dir-vs-other-types split as mode,
 // except that both are unremarkable on a symlink (unlike mode); size is
 // only ever valid for a regular file -- EISDIR/EINVAL otherwise, as the
 // kernel itself would report.
 //
-// Credentials: the chown, the utimes and the ftruncate run as `caller`
-// (AsCaller) -- chown's and utimes's rules, and whether a chown clears
-// setuid/setgid, are decided for the caller. The ftruncate keeps CAP_FSETID
-// (backing.cc's AsCallerKeepingCapFsetid) and clears neither bit itself:
-// the kernel decided for the truncate, with the caller's capabilities, and
-// said so with FATTR_KILL_SUIDGID (KILL_PRIV above). The ftruncate's fd is
-// still reopened as root (a truncate needs no permission beyond the one the
-// kernel checked on the FUSE side, and ftruncate of an fd the caller opened
-// for writing must work even if the file's mode no longer grants it). The
-// chmod runs as root: a KILL_PRIV clear for a caller who does not own the
-// node is a mode change the caller's own chmod would be refused, and a
-// FUSE_SET_ATTR_MODE is applied as asked, its permission being the
-// kernel's to check (setattr_prepare, including clearing setgid for a
-// caller outside the file's group) before the request is sent.
+// Credentials: the chown, the utimes and the ftruncate run as `caller`, the
+// ftruncate keeping CAP_FSETID, through a descriptor reopened as root; the
+// chmod runs as root (docs/design.md, "Caller credentials", "Run as the
+// caller" and "Stay root").
 absl::Status SetAttr(Context &ctx, const Credentials &caller, InodeId id,
                      const struct stat &attr, int to_set);
 

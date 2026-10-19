@@ -244,9 +244,10 @@ absl::Status FutimensOPath(int fd, const struct timespec times[2]) {
 // kernel removes from the effective set while fsuid is not 0 (together
 // with every other filesystem capability: CAP_CHOWN, CAP_DAC_OVERRIDE,
 // CAP_FOWNER, CAP_FSETID, CAP_LINUX_IMMUTABLE, CAP_MAC_OVERRIDE, CAP_MKNOD;
-// cap_task_fix_setuid; AsCallerKeepingCapFsetid raises CAP_FSETID again
-// for the calls whose removal of setuid and setgid the kernel has already
-// decided), and restores when it returns to 0. Reaching the
+// cap_task_fix_setuid, security/commoncap.c:1179-1188 (Linux v7.3-rc7);
+// AsCallerKeepingCapFsetid raises CAP_FSETID again for the calls whose
+// removal of setuid and setgid the kernel has already decided), and
+// restores when it returns to 0. Reaching the
 // object is dcfs's own business (identity-checked by OpenNode); what the
 // caller may do to it is the kernel's, and default_permissions has the
 // kernel check that on the FUSE side too before the request is even sent.
@@ -333,17 +334,10 @@ absl::Status RaiseCapFsetid() {
   return syscalls::capset(sets);
 }
 
-// AsCaller, keeping CAP_FSETID: for a backing write, fallocate,
-// copy_file_range or truncate, whose own removal of setuid and setgid
-// (file_remove_privs_flags, fs/inode.c:2371-2395 (Linux v7.3-rc7), and
-// do_truncate's dentry_needs_remove_privs, fs/open.c:57 (Linux v7.3-rc7)) would
-// decide by the fsuid's capabilities, none for a nonzero one, and so clear bits
-// where the kernel's own decision on the FUSE side kept them. That decision,
-// made with the caller's real capabilities, is the only one: the SETATTR that
-// sets nothing before a write, fallocate or copy_file_range, and a
-// truncate's FATTR_KILL_SUIDGID (DirCacheFS::Setattr). A passthrough write
-// reaches the backing file with the daemon's credentials, CAP_FSETID
-// included, and removes nothing either.
+// AsCaller, keeping CAP_FSETID, for a write, fallocate, copy_file_range or
+// truncate: their own removal of setuid and setgid would decide by the
+// fsuid's capabilities, where the kernel has decided by the caller's on the
+// FUSE side (docs/design.md, "Caller credentials", "Run as the caller").
 template <typename Op>
 std::invoke_result_t<Op> AsCallerKeepingCapFsetid(const Credentials &caller,
                                                   Op &&op) {
@@ -2443,9 +2437,9 @@ absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
 // file is group-executable or the caller is outside its group.
 mode_t SuidgidClearedByWrite(const Credentials &caller, mode_t mode,
                              gid_t gid) {
-  const bool in_group =
+  bool in_group =
       caller.gid == gid || absl::c_linear_search(caller.groups, gid);
-  const bool clears_setgid = (mode & S_IXGRP) != 0 || !in_group;
+  bool clears_setgid = (mode & S_IXGRP) != 0 || !in_group;
   return S_ISUID | (clears_setgid ? S_ISGID : 0);
 }
 
@@ -2519,9 +2513,8 @@ absl::Status SetAttrFd(const Credentials &caller, int fd,
   // CAP_FSETID, clears them, from the mode read above (a truncate before
   // this, with CAP_FSETID, clears nothing); no chmod where none is set,
   // the mode every truncate by such a caller asks this for.
-  const mode_t mode = stx.stx_mode & 07777;
-  const mode_t cleared =
-      mode & SuidgidClearedByWrite(caller, mode, stx.stx_gid);
+  mode_t mode = stx.stx_mode & 07777;
+  mode_t cleared = mode & SuidgidClearedByWrite(caller, mode, stx.stx_gid);
   if (to_set & FUSE_SET_ATTR_MODE) {
     RETURN_IF_ERROR(ApplyMode(fd, type, attr.st_mode));
   } else if ((to_set & FUSE_SET_ATTR_KILL_PRIV) != 0 && cleared != 0) {

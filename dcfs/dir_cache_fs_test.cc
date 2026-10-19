@@ -1240,7 +1240,7 @@ class DirCacheFSTest : public ::testing::Test {
   // A SETATTR that sets nothing, from `uid`:`gid`: what chown(path, -1, -1)
   // sends, and what the kernel sends to remove privileges before a write
   // (fuse_setattr drops ATTR_KILL_SUID and ATTR_KILL_SGID under
-  // FUSE_CAP_HANDLE_KILLPRIV_V2).
+  // FUSE_CAP_HANDLE_KILLPRIV_V2, fs/fuse/dir.c:2340-2342 (Linux v7.3-rc7)).
   Reply SetNothing(InodeId id, uid_t uid, gid_t gid) {
     struct fuse_setattr_in in = {};
     std::string body;
@@ -6785,8 +6785,8 @@ std::vector<gid_t> ThreadGroups() {
   });
 }
 
-// Steps 17.2 and 17.2e: the fallocate itself removes no privileges, from
-// root, a group member or a caller outside the file's group alike: it runs
+// The fallocate itself removes no privileges, from root, a group member or a
+// caller outside the file's group alike: it runs
 // with CAP_FSETID. A caller without CAP_FSETID has the kernel send the
 // SETATTR that sets nothing first (file_modified, fs/fuse/file.c:2881
 // (Linux v7.3-rc7)), which removes them
@@ -6854,9 +6854,8 @@ TEST_F(DirCacheFSTest, FallocateRemovesNoPrivilegesItself) {
   }
 }
 
-// Steps 17.2 and 17.2e: as FallocateRemovesNoPrivilegesItself, for the
-// destination of a copy_file_range (file_modified, fs/fuse/file.c:2975
-// (Linux v7.3-rc7)).
+// As FallocateRemovesNoPrivilegesItself, for the destination of a
+// copy_file_range (file_modified, fs/fuse/file.c:2975 (Linux v7.3-rc7)).
 TEST_F(DirCacheFSTest, CopyFileRangeRemovesNoPrivilegesItself) {
   auto restore_groups = WithThreadGroups({1000});
 
@@ -6934,24 +6933,12 @@ TEST_F(DirCacheFSTest, CopyFileRangeRemovesNoPrivilegesItself) {
 constexpr uint8_t kFileCapability[] = {0, 0, 0, 2, 0, 0x20, 0, 0, 0, 0,
                                        0, 0, 0, 0, 0, 0,    0, 0, 0, 0};
 
-// Steps 17.2b and 17.2e: before a write by a caller without CAP_FSETID of a
-// setuid or setgid file, the kernel asks to remove privileges with a SETATTR
-// that sets nothing (under FUSE_CAP_HANDLE_KILLPRIV_V2 it drops the
-// ATTR_KILL_* bits and sends no mode), the request a chown(path, -1, -1)
-// makes. While the file is open for writing it is the write's: setuid and
-// setgid go as the backing filesystem's own write by a caller without
-// CAP_FSETID would take them (setattr_should_drop_suidgid), from a non-owner
-// too, whose chown would be refused: setuid, and setgid with group execute
-// or from a caller outside the group. Group members (by their group or a
-// supplementary one) keep setgid without group execute; uid 0 is no
-// exception, whatever /proc shows (the kernel sends this SETATTR to a writer
-// with CAP_FSETID only for a file carrying security.capability).
-//
-// A writer with CAP_FSETID sends it for a file carrying security.capability,
-// right after the REMOVEXATTR that takes the capability away ("capability"
-// cases). Then the bits stay where /proc shows CAP_FSETID for the request's
-// uid: for this process as uid 0, not as uid 1000 (a kernel caller with
-// overridden credentials shows its own fsuid) nor for a thread without it.
+// A SETATTR that sets nothing on a file open for writing is a write's removal
+// of setuid and setgid, applied by the rule of a writer without CAP_FSETID,
+// from a non-owner and from uid 0 too; after a REMOVEXATTR of
+// security.capability ("capability" cases) the bits stay where /proc vouches
+// for CAP_FSETID (docs/design.md, "Caller credentials", "Setuid and setgid on
+// writes").
 TEST_F(DirCacheFSTest,
        EmptySetattrOfAFileOpenForWritingDropsSetuidAndSetgidAsAWrite) {
   struct Case {
@@ -7157,8 +7144,8 @@ TEST_F(DirCacheFSTest, EmptySetattrOfAFileNotOpenForWritingIsTheCallersChown) {
   EXPECT_EQ(st.st_mode & 07777, 0666u);
 }
 
-// Step 17.2e: only a REMOVEXATTR of security.capability right before it,
-// while the file is open for writing, makes a SETATTR that sets nothing the
+// Only a REMOVEXATTR of security.capability right before it, while the file
+// is open for writing, makes a SETATTR that sets nothing the
 // write's removal of a writer that may hold CAP_FSETID. After a REMOVEXATTR
 // of another name, or one that failed, or one made before the file was
 // open for writing (with no open, or a read-only one), or one another
@@ -7258,8 +7245,8 @@ TEST_F(DirCacheFSTest, OnlyTheCapabilityRemovalRightBeforeTheSetattrCounts) {
   }
 }
 
-// Step 17.2e: the same for a file unlinked while open for writing, which
-// dcfs serves through the descriptor its record holds: root's write of it,
+// The same for a file unlinked while open for writing, which dcfs serves
+// through the descriptor its record holds: root's write of it,
 // carrying security.capability, keeps setuid; root's next SETATTR that
 // sets nothing, with no removal right before it, clears setuid.
 TEST_F(DirCacheFSTest,
@@ -7287,13 +7274,14 @@ TEST_F(DirCacheFSTest,
   EXPECT_EQ(Release(f, fh).error, 0);
 }
 
-// Step 17.2e: a truncate arrives as a SETATTR of the size, never with a
-// mode, and with FATTR_KILL_SUIDGID exactly when the caller lacks
-// CAP_FSETID (fuse_do_setattr's !capable(CAP_FSETID), fs/fuse/dir.c:2241-2243
-// (Linux v7.3-rc7)). The flag decides, whatever the uid: with it, a caller
-// outside the group loses both bits and a group member setuid alone, as root
-// without CAP_FSETID does (though /proc, this process's, shows it); without
-// it, root and a non-root caller holding CAP_FSETID keep both.
+// A truncate arrives as a SETATTR of the size, never with a mode, and with
+// FATTR_KILL_SUIDGID exactly when the caller lacks CAP_FSETID in the init
+// user namespace (fuse_do_setattr's !capable(CAP_FSETID),
+// fs/fuse/dir.c:2241-2243 (Linux v7.3-rc7)). The flag decides, whatever the
+// uid: with it, a caller outside the group loses both bits and a group member
+// setuid alone, as root without CAP_FSETID does (though /proc, this process's,
+// shows it); without it, root and a non-root caller holding CAP_FSETID keep
+// both.
 TEST_F(DirCacheFSTest, TruncateRemovesPrivilegesByTheKernelsFlag) {
   struct Case {
     std::string name;
@@ -7359,8 +7347,8 @@ TEST_F(DirCacheFSTest, TruncateRemovesPrivilegesByTheKernelsFlag) {
   EXPECT_EQ(st.st_mode & 07777, 02666u);
 }
 
-// Step 17.2e: every truncate by a caller without CAP_FSETID carries
-// FATTR_KILL_SUIDGID, whatever the file's mode (fs/fuse/dir.c:2241-2243
+// Every truncate by a caller without CAP_FSETID carries FATTR_KILL_SUIDGID,
+// whatever the file's mode (fs/fuse/dir.c:2241-2243
 // (Linux v7.3-rc7)). On a file with neither setuid nor setgid it costs
 // nothing over the same truncate without it, from root or anyone else: no
 // reopen and fchmod, and no access ACL to read back (a chmod that changes
@@ -7370,7 +7358,7 @@ TEST_F(DirCacheFSTest, TruncateKillCostsAFileWithoutSetidBitsNothing) {
   const uid_t uids[] = {0, 1000};
   for (uid_t uid : uids) {
     for (std::string_view flag : {"kill", "plain"}) {
-      const std::string name = absl::StrCat(flag, uid);
+      std::string name = absl::StrCat(flag, uid);
       WriteFile(Path(name), "data");
       CHECK_OK(syscalls::fchmodat(AT_FDCWD, Path(name), 0666, 0));
     }
@@ -7405,10 +7393,10 @@ TEST_F(DirCacheFSTest, TruncateKillCostsAFileWithoutSetidBitsNothing) {
   }
 }
 
-// Step 17.2e: a truncate's ftruncate runs as the caller with CAP_FSETID
-// raised again from the daemon's permitted set. A daemon without it there
-// (a thread that dropped it) fails the truncate with capset's EPERM, and the
-// file is as it was.
+// A truncate's ftruncate runs as the caller with CAP_FSETID raised again
+// from the daemon's permitted set. A daemon thread that dropped it there
+// since startup (which refuses a daemon without it) fails the truncate with
+// capset's EPERM, and the file is as it was.
 TEST_F(DirCacheFSTest, ATruncateFailsWhereTheDaemonLacksCapFsetid) {
   WriteFile(Path("f"), "data");
   auto restore_groups = WithThreadGroups({1000});
@@ -7432,8 +7420,8 @@ TEST_F(DirCacheFSTest, ATruncateFailsWhereTheDaemonLacksCapFsetid) {
   EXPECT_EQ(st.st_size, 4);
 }
 
-// Step 17.2e: a write that does not go through passthrough comes after the
-// kernel's own removal, as a passthrough write does: fuse_cache_write_iter
+// A write that does not go through passthrough comes after the kernel's own
+// removal, as a passthrough write does: fuse_cache_write_iter
 // calls kiocb_modified (fs/fuse/file.c:1518 (Linux v7.3-rc7)), which sends
 // the SETATTR that sets nothing for a writer without CAP_FSETID. So the
 // write itself, run with CAP_FSETID, removes nothing, whoever sends it, and
@@ -7488,8 +7476,8 @@ TEST_F(DirCacheFSTest, FallbackWriteRemovesNoPrivilegesItself) {
   }
 }
 
-// Step 17.2e: every file gets passthrough, whatever its mode, from an open,
-// a create or an O_TMPFILE: the kernel's SETATTR before a passthrough write
+// Every file gets passthrough, whatever its mode, from an open, a create or
+// an O_TMPFILE: the kernel's SETATTR before a passthrough write
 // removes setuid and setgid (EmptySetattrOfAFileOpenForWriting...), so no
 // mode needs dcfs's own write path.
 TEST_F(DirCacheFSTest, PassthroughForEveryMode) {
@@ -8434,8 +8422,8 @@ TEST_F(DirCacheFSTest, InitWithoutDontMaskIsRefused) {
       << absl::StrJoin(capture.lines, "\n");
 }
 
-// Step 17.2e: a kernel that does not offer FUSE_CAP_HANDLE_KILLPRIV_V2
-// (protocol 7.33, Linux 5.11, older than every kernel dcfs supports) would
+// A kernel that does not offer FUSE_CAP_HANDLE_KILLPRIV_V2 (protocol 7.33,
+// Linux 5.11, older than every kernel dcfs supports) would
 // remove setuid and setgid by its own pre-6.2 rule, which dcfs no longer
 // works around: Init() fails, naming it, and the INIT is refused.
 TEST_F(DirCacheFSTest, InitWithoutHandleKillprivV2IsRefused) {

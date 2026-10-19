@@ -410,7 +410,7 @@ chmod 02666 "$MNT/pub/sgid_ops/f_grp"
 expect_ok sgid-group-member-write alice sh -c "echo 'x' >>'$MNT/pub/sgid_ops/f_grp'"
 expect_stat sgid-group-member-keeps '%a' pub/sgid_ops/f_grp 2666
 
-# --- steps 17.2b, 17.2e: setuid and setgid through passthrough ------------
+# --- setuid and setgid through passthrough --------------------------------
 #
 # Each case runs one write-family operation as one user on a file of a
 # given owner and mode, once in a native directory and once through the
@@ -431,8 +431,8 @@ expect_stat sgid-group-member-keeps '%a' pub/sgid_ops/f_grp 2666
 #   root.
 # - "held": root holds a read-only open while bob writes (one backing file
 #   per inode). "chmodheld": root holds a writable open of a 0666 file,
-#   makes it 6666 and the user writes it (before 17.2e the file kept the
-#   passthrough choice of its first open, and setgid on bob's write).
+#   makes it 6666 and the user writes it (a file whose backing file and
+#   passthrough were set up while it was 0666).
 # - A truncate, or an O_TRUNC open ("otrunc"): a SETATTR of the size, with
 #   FATTR_KILL_SUIDGID from a caller without CAP_FSETID.
 # - Root (CAP_FSETID) clears nothing. Root without CAP_FSETID ("nofsetid"),
@@ -448,7 +448,7 @@ expect_stat sgid-group-member-keeps '%a' pub/sgid_ops/f_grp 2666
 # - "capwrite" sets security.capability first, so the kernel removes it
 #   (a REMOVEXATTR) and sends that SETATTR for any writer: then dcfs asks
 #   /proc whether the writer holds CAP_FSETID, in dcfs's user namespace and
-#   for the request's uid (step 17.2e).
+#   for the request's uid.
 # - "chown" is chown(path, -1, -1); "chownheld" the same while root holds
 #   the file open for writing, when it reaches dcfs as the SETATTR before a
 #   write does; "capchownheld" sets security.capability first, so the
@@ -472,15 +472,18 @@ chmod 0666 "$NAT2/src" "$MNT/$P2/src"
 # A version 2 file capability: cap_net_raw permitted.
 CAPHEX=0000000200200000000000000000000000000000
 
+# include/uapi/linux/capability.h's number for it.
+readonly CAP_FSETID=4
+
 root() { "$@"; }
-# Root without CAP_FSETID (4; outside group 2000): clears what bob would.
-nofsetid() { "$TESTUTIL" dropcap 4 -- "$@"; }
+# Root without CAP_FSETID (outside group 2000): clears what bob would.
+nofsetid() { "$TESTUTIL" dropcap "$CAP_FSETID" -- "$@"; }
 # Root of a user namespace mapping only uid and gid 0: its CAP_FSETID does
 # not cover a file of group 2000, so it clears what bob would.
 userns() { "$TESTUTIL" userns -- "$@"; }
-# bob (outside group 2000) holding CAP_FSETID (4), an ambient capability that
+# bob (outside group 2000) holding CAP_FSETID, an ambient capability that
 # every command it runs keeps: clears what root would, nothing.
-fsetid() { "$TESTUTIL" runascap 4 1001 1001 1001 -- "$@"; }
+fsetid() { "$TESTUTIL" runascap "$CAP_FSETID" 1001 1001 1001 -- "$@"; }
 
 # sgid_op USER OP DIR FILE: OP on DIR/FILE as USER; prints its exit status,
 # 0 or 1.
@@ -640,7 +643,7 @@ done <<EOF
 $SGID2B_CASES
 EOF
 
-# --- step 17.2e: a write removes security.capability ----------------------
+# --- a write removes security.capability ----------------------------------
 #
 # The kernel removes it through the mount (a REMOVEXATTR) before a write by
 # anyone, root included. A mount that negotiated
@@ -658,14 +661,21 @@ cap-root-write root 0666 666
 cap-root-setuid-write root 4666 4666
 "
 
+# cap_state PATH: PATH's security.capability in hex (or testutil's error)
+# and its mode.
+cap_state() {
+  cap=$("$TESTUTIL" getxattrhex "$1" security.capability)
+  echo "$cap:$(stat -c '%a' "$1")"
+}
+
 # cap_check TEST FILE USER WANT: as sgid_check, for the capability and mode.
 cap_check() {
   for d in "$NAT2" "$MNT/$P2"; do
     $3 sh -c "echo x >>'$d/$2'" </dev/null >/dev/null 2>&1
   done
-  nat="$("$TESTUTIL" getxattrhex "$NAT2/$2" security.capability):$(stat -c '%a' "$NAT2/$2")"
-  mnt="$("$TESTUTIL" getxattrhex "$MNT/$P2/$2" security.capability):$(stat -c '%a' "$MNT/$P2/$2")"
-  src="$("$TESTUTIL" getxattrhex "$SRC/$P2/$2" security.capability):$(stat -c '%a' "$SRC/$P2/$2")"
+  nat="$(cap_state "$NAT2/$2")"
+  mnt="$(cap_state "$MNT/$P2/$2")"
+  src="$(cap_state "$SRC/$P2/$2")"
   want="ERR ENODATA:$4"
   if [ "$nat" = "$want" ] && [ "$mnt" = "$want" ] && [ "$src" = "$want" ]; then
     pass "$1"

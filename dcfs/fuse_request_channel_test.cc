@@ -332,8 +332,8 @@ TEST(FuseRequestChannelTest, CallerOfPidZeroHasNoGroupsAndIsWarnedAbout) {
       << absl::StrJoin(capture.lines, "\n");
 }
 
-// Step 17.2e: CAP_FSETID counts where /proc shows it for the request's uid
-// in dcfs's user namespace: this process (root, every capability) as uid 0,
+// CAP_FSETID counts where /proc shows it for the request's uid in dcfs's
+// user namespace: this process (root, every capability) as uid 0,
 // but not as uid 1000 (a kernel caller acting with overridden credentials
 // shows its own uid in /proc, not the request's).
 TEST(FuseRequestChannelTest, CallerHasCapFsetidWhereProcShowsItForItsUid) {

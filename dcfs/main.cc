@@ -634,7 +634,7 @@ absl::Status RequireRoot(std::string_view program) {
 // and the capable(CAP_FSETID) of a write's privilege removal that
 // FuseRequest::CallerHasCapFsetid vouches for).
 absl::Status RequireInitUserNamespace(std::string_view program) {
-  ASSIGN_OR_RETURN(const bool init, InInitUserNamespace());
+  ASSIGN_OR_RETURN(bool init, InInitUserNamespace());
   if (init) return absl::OkStatus();
   return FailedPreconditionErrorBuilder()
          << program

@@ -2572,9 +2572,14 @@ truncate, fallocate, write fallback and copy_file_range keep `CAP_FSETID`
 (`AsCallerKeepingCapFsetid`: after the switch to a nonzero fsuid took it
 from the effective set, `capset` raises it again from the permitted set),
 so the backing filesystem's own removal of setuid and setgid
-(`file_remove_privs`, do_truncate's `dentry_needs_remove_privs`) removes
+(`file_remove_privs_flags`, fs/inode.c:2371-2395, and do_truncate's
+`dentry_needs_remove_privs`, fs/open.c:57 (Linux v7.3-rc7)), which would
+decide by the fsuid's capabilities, none for a nonzero one, removes
 nothing: the kernel has decided on the FUSE side, with the caller's real
-capabilities (below). A daemon without `CAP_FSETID` in its permitted set
+capabilities (the SETATTR that sets nothing before a write, fallocate or
+copy_file_range, and a truncate's `FATTR_KILL_SUIDGID`; below). A
+passthrough write reaches the backing file with the daemon's credentials,
+`CAP_FSETID` included, and removes nothing either. A daemon without `CAP_FSETID` in its permitted set
 would fail them with `EPERM` (the `capset`'s), so `mount.dcfs` refuses to
 start without it (`backing::RequireCapFsetid`, beside the root and user
 namespace checks; `caller_capabilities_test`'s
@@ -2587,7 +2592,11 @@ reads the mode back from the backing filesystem.
 
 - reaching objects: `open_by_handle_at` needs `CAP_DAC_READ_SEARCH`, which
   the kernel drops while fsuid is not 0 (together with every other
-  filesystem capability), and the `/proc/self/fd` reopens;
+  filesystem capability), and the `/proc/self/fd` reopens, the one a
+  truncate's `ftruncate` goes through included (a truncate needs no
+  permission beyond the one the kernel checked on the FUSE side, and an
+  `ftruncate` of a descriptor the caller opened for writing must work
+  even where the file's mode no longer grants it);
 - `linkat` with `AT_EMPTY_PATH` (also needs `CAP_DAC_READ_SEARCH`; a new
   link creates no new owner or group, and the kernel already checked the
   caller's permissions on the FUSE side);
@@ -2669,9 +2678,14 @@ kernel sends with it:
   only: for a writer without `CAP_FSETID` (in the init user namespace) of
   a setuid or setgid file, and for anyone's write of a file with
   `security.capability`, right after removing that with a REMOVEXATTR
-  (`setattr_prepare`'s `security_inode_killpriv`, fs/attr.c:229 (Linux
-  v7.3-rc7)), the inode locked from the one to the other
-  (fs/fuse/passthrough.c:73 (Linux v7.3-rc7)). That is all dcfs learns: a
+  (`setattr_prepare`'s `security_inode_killpriv`, fs/attr.c:229, which
+  `fuse_do_setattr` calls at fs/fuse/dir.c:2167 before it sends the
+  SETATTR at :2248), the inode locked from the one to the other
+  (fs/fuse/passthrough.c:73; `notify_change` asserts it, fs/attr.c:436
+  (Linux v7.3-rc7)), so no other SETATTR or REMOVEXATTR of it comes in
+  between. A `removexattr(2)` of the capability, which takes
+  `CAP_SETFCAP`, marks the next SETATTR the same way, whichever that is
+  (the prices below). That is all dcfs learns: a
   passthrough write reaches the backing file as the daemon (`CAP_FSETID`),
   and dcfs's own fallocate, copy_file_range and write keep `CAP_FSETID`
   (above), so none of them removes anything itself. The removal always

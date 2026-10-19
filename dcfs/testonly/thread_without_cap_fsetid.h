@@ -15,8 +15,9 @@ namespace dcfs::testonly {
 // A thread of this process whose /proc entry (/proc/<tid>/task/<tid>)
 // shows filesystem uid 1000 and no CAP_FSETID: setting a thread's
 // filesystem uid away from 0 drops the filesystem capabilities, CAP_FSETID
-// among them, from its effective set (cap_task_fix_setuid). It waits until
-// this is destroyed.
+// among them, from its effective set (cap_task_fix_setuid,
+// security/commoncap.c:1179-1183 (Linux v7.3-rc7)). It waits until this is
+// destroyed.
 class ThreadWithoutCapFsetid {
  public:
   ThreadWithoutCapFsetid()
