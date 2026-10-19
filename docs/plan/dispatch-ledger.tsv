@@ -272,3 +272,5 @@ a30435a00548c7d58	2026-10-19T19:31:55Z	Plan: Syscalls members use man-page names
 a720bfcee40661ec4	2026-10-19T21:36:24Z	main-check	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1178839	142								48	433	1117898	60460
 a9dbf68c7171a7349	2026-10-19T21:39:01Z	5.19	mechanical	dcfs-mechanical	haiku	low	117294	15								10	49	98936	18299
 ab445b7358566324b	2026-10-19T21:39:01Z	5.19	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	152386	26								10	50	116629	35697
+aa2d03b5291238da3	2026-10-19T21:43:17Z	5.19	implementation	dcfs-implementer	claude-sonnet-5-5	medium	1539479	346								60	494	1469369	69556
+a0bdf786e8fe941ba	2026-10-19T21:46:11Z	25.56	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	165432	43								10	67	130919	34436
