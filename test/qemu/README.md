@@ -1666,8 +1666,8 @@ Every `dcfs/BUILD.bazel` test target is one of these. It builds:
   file holding `args =` (space-joined; `guest/init` word-splits it running
   `/test/run $(cat /test/args)`).
 - `foo_test`: an `sh_test` running `scripts/run-qemu.sh --unit`, tagged
-  `no-sandbox` and `requires-kvm` (**not** `exclusive`: unit-test VMs are
-  cheap enough to run in parallel with each other). It passes iff the
+  `no-sandbox` (**not** `exclusive`: unit-test VMs are cheap enough to run
+  in parallel with each other). It passes iff the
   serial log contains `DCFS-TEST-EXIT=0`; the log is copied to
   `$TEST_UNDECLARED_OUTPUTS_DIR/serial.log`.
 
@@ -1792,7 +1792,7 @@ slower, whole-daemon tests: they boot `//dcfs:main_static` and
 `//tools:fhtest` in a shared initramfs and drive them through a
 `guest/<name>.sh` script picked by the `dcfs_test=` kernel command-line
 parameter. They're tagged `e2e` (not `qemu` -- that distinction is gone now
-that everything is QEMU) plus `no-sandbox`, `requires-kvm` and the
+that everything is QEMU) plus `no-sandbox` and the
 resource tags in "Test tiers" (no longer `exclusive`), and run as part of
 a plain `bazel test //...`; `--config=fast`/`presubmit` select tiers.
 

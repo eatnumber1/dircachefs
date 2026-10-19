@@ -327,7 +327,6 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
         tags = [
             "e2e",
             "no-sandbox",
-            "requires-kvm",
         ] + resource_tags + tags,
         size = size,
         timeout = timeout,

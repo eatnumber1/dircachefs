@@ -218,7 +218,7 @@ def qemu_cc_test(
             "$(location :" + initramfs_out + ")",
         ] + disk_args,
         # run-qemu.sh --unit: -smp 1 and the allowance above.
-        tags = ["no-sandbox", "requires-kvm", "cpu:1", "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)] + tags,
+        tags = ["no-sandbox", "cpu:1", "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)] + tags,
         env = env,
         size = size,
         timeout = timeout,

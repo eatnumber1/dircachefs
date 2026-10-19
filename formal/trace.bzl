@@ -257,7 +257,7 @@ _tla_trace_test = rule(
 def tla_trace_test(name, tags = [], disks = [], modules = [], mem = None, asan_mem = None, cpus = E2E_CPUS, **kwargs):
     """Declares a trace validation test (see _tla_trace_test's attributes).
 
-    It boots a QEMU guest, so it carries qemu_test's tags (KVM, no sandbox,
+    It boots a QEMU guest, so it carries qemu_test's tags (no sandbox,
     the guest's resources) on top of `tags`, and takes the same guest memory
     allowances (test/qemu/qemu_test.bzl; the unit or e2e defaults). `modules`
     are the kernel modules beyond the defaults (qemu_test's); `cpus` the
@@ -279,7 +279,7 @@ def tla_trace_test(name, tags = [], disks = [], modules = [], mem = None, asan_m
             [d.split(":") for d in disks],
             modules,
         )),
-        tags = ["e2e", "no-sandbox", "requires-kvm", "cpu:%d" % cpus, "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)] + tags,
+        tags = ["e2e", "no-sandbox", "cpu:%d" % cpus, "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)] + tags,
         **kwargs
     )
 

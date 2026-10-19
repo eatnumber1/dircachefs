@@ -69,7 +69,6 @@ sh_test(
     ],
     tags = [
         "no-sandbox",
-        "requires-kvm",
     ],
 )
 
