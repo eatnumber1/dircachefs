@@ -159,9 +159,10 @@ process (its waves and file ownership table) is in `history.md`.
    quota readings
    from "Quota management" below; `gh run list --limit 12`; and
    `~/.cache/dcfs-dashboard/plan.json`, every plan step, its phase, title,
-   state and evidence, which `dashboard_lanes.py` regenerates from
-   `phases/*.md` and `log.md` (25.47 item 7; the orchestrator does not
-   hand-maintain it, so a merge needs no edit to it),
+   state and evidence. plan.json is maintained by hand until 25.47 item 7
+   adds its generator (`dashboard_lanes.py`, from `phases/*.md` and
+   `log.md`); until then the dashboard's plan census is stale from
+   2026-10-17,
    upload each as an asset and point its dataset at the new file with a
    fresh `updated` time, all datasets in one batch write. At most one
    refresh per turn, at its end, covering every change in it; old

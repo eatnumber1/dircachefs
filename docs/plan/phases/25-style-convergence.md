@@ -1887,6 +1887,10 @@ Steps:
    first, as the rule requires) or reword it as planned, naming this step or
    the step that will make it true.
 3. Add the `size` and `timeout` declarations and the check for the 72 tests.
+4. Split `docs/style.md` into the rules (what agents read) and an archive of
+   reasons and rulings, and move orchestrator-only text out of
+   `docs/plan/process.md`, to cut the fixed reading cost of every dispatch.
+   Clerk batch 28, 2026-10-18 (from an outside AI review russ shared that day).
 
 Test: a check that fails on a test that lacks `size` or `timeout`, shown
 failing first; the implementer names the commands when the step starts.
@@ -1926,6 +1930,15 @@ them marked "could" be mechanical) says yes. Build these in order, each a
    block longer than 10 lines above a declaration; no first person in
    `docs/style.md` or the reference docs (about 8 findings, S).
 5. A clang-query matcher for const non-reference scalar locals (about 6, S-M).
+6. A PreToolUse hook on Bash for subagents that refuses `bazel ...|` piped
+   into `tail`, `head` or `grep` when chained with `&&` (the rule is
+   `rule-no-pipe-bazel`, which the hook enforces; `set -o pipefail` or a
+   separate command is allowed), with a self-check test. The 17.2e final
+   round's Bazel log had about 35 such pipes, once as `bazel test ... | tail
+   -1 && git commit`, which commits even when the test fails. With
+   `--config=agent` in lanes the pipes are unnecessary anyway. Clerk batch 28,
+   2026-10-18, from the 17.2e final round's log (russ: "let's learn from its
+   mistakes"); mechanical first, after the 2026-10-23 reset.
 
 Then: pasted UAPI constants (M), and finishing 7.6b (shfmt, shellcheck and
 buildifier). Together these should cover about 20% of the should and nit
@@ -2002,6 +2015,26 @@ attribution check covers them). Scripts under `tools/agents/` come with tests.
 9. `review_findings.py`: a `checks-owed` subcommand lists every row with
    `mechanizable=could`; the clerk adds each new kind to 25.45's list, so no
    mechanizable finding is lost. Clerk batch 27, 2026-10-18.
+10. Per-step spend metric. At merge the clerk sums every dispatch-ledger row
+    for the step (implementer, fix rounds, reviews, clerk work, and the
+    orchestrator's share apportioned by time) and converts the sum to "% of
+    week per merged step" using the quota readings; a weekly dashboard chart
+    shows it. Needs the token capture on branch ledger-token-capture. Clerk
+    batch 28, 2026-10-18 (outside AI review, 2026-10-18).
+11. Stop hook nags instead of blocking: a blocking hook forced 30 or more
+    orchestrator turns on 2026-10-18. Dashboard refreshes are batched, and the
+    quota read happens inside the hook. Clerk batch 28, 2026-10-18.
+12. A measured trial of the style reviewer at medium effort for routine
+    steps, once tokens are recorded (item 10's data), compared with high on
+    the same steps. Clerk batch 28, 2026-10-18.
+13. Scoped style check for the inner loop: `bazel run //tools:style_check --
+    <changed files or targets>` runs clang-tidy and the matchers only on the
+    given translation units. The repo-wide `//tools:style_checks_test` (a
+    repo-wide clang-tidy aspect and matchers) cost 8 to 10 minutes per
+    uncached run, and the 17.2e final round ran it about 12 times in its edit
+    loop (about 35 of 52 Bazel minutes). Add to `rule-quiet-output` that the
+    repo-wide style test runs once before reporting. Clerk batch 28,
+    2026-10-18, from the 17.2e final round's log.
 
 *Test:* the scripts come with tests under `tools/agents/`.
 

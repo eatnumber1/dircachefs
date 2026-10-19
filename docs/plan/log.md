@@ -4266,3 +4266,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   - russ declined cancelling superseded main CI runs ("CI credits aren't scarce yet. No need for the cancellation.").
   - Off-limits files untouched: docs/design.md, README.md, docs/plan/phases/17-xfstests-subset.md.
   - dispatch-ledger.tsv: its pending change is committed with this batch, unchanged.
+- 2026-10-18, clerk batch 28 (17.2e deferrals re-queued, Stop-hook and spend-metric queue, plan.json wording; orchestrator's queue):
+  - Item 1 (kernel-patches.md row 4 and the 17.2d paragraph): NOT applied; 17.2e has not merged. Re-queued unchanged with `clerk-queue add`; confirmed in clerk_queue.md.
+  - Item 2 (README.md:811 and docs/design.md:3157 KVM wording): NOT applied; 17.2e's branch edits them, and both files are off-limits here. Re-queued unchanged with `clerk-queue add`; confirmed in clerk_queue.md.
+  - Item 3: process.md step 6 now says plan.json is maintained by hand until 25.47 item 7 adds its generator, and that the census is stale from 2026-10-17. Phase 26 status row in plan README mentions 26.44 and 26.45 (queued, not started).
+  - Item 4: (a) per-step spend metric is 25.47 item 10; (b) the style.md rules/archive split and the move of orchestrator-only text out of process.md is 25.44 item 4; (c) the Stop-hook nag, batched refreshes and in-hook quota read is 25.47 item 11; (d) the measured medium-effort style-reviewer trial is 25.47 item 12, placed there because the batch named no step. Queued, not started, after the 2026-10-23 reset.
+  - Item 5: (1) the scoped style check (`bazel run //tools:style_check -- <files>`) and the rule-quiet-output sentence are 25.47 item 13; (2) the PreToolUse hook refusing `bazel ... |` piped into tail/head/grep under `&&` is 25.45 item 6, which the batch allowed ("25.47 or 25.45"); placed with the mechanizing step because it enforces an existing rule. Both queued, mechanical first, after the reset.
+  - No rule was added or changed, so no anchor, index entry or repo_shape run was needed.
+  - dispatch-ledger.tsv: its pending change was NOT committed with this batch (it was not named in batch 28); it is left unstaged in the main checkout.
