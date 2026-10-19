@@ -19,9 +19,6 @@ namespace dcfs::test_first {
 absl::StatusOr<std::string> Resolve(std::string_view name,
                                     std::string_view path);
 
-// Everything `fd` yields until its end; a failed read is an error.
-absl::StatusOr<std::string> ReadAll(int fd);
-
 // Runs the programs of the test-first check as child processes: argv[0] is
 // searched for in `path` (a ':'-separated list, as PATH) unless it has a '/',
 // and the child's standard output and error come back together. A child that

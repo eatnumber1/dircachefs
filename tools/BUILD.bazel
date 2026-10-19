@@ -839,9 +839,8 @@ cc_library(
     deps = [
         ":test_first",
         "//dcfs:status",
+        "//dcfs:subprocess",
         "//dcfs:syscalls",
-        "//dcfs:syscalls_backing",
-        "//dcfs:syscalls_process",
         "@absl//absl/status",
         "@absl//absl/status:statusor",
         "@absl//absl/strings",
@@ -952,6 +951,7 @@ qemu_cc_test(
     deps = [
         ":process_runner",
         ":test_first",
+        "//dcfs:subprocess",
         "//dcfs:syscalls",
         "//dcfs:syscalls_backing",
         "//dcfs/testonly:assert_ok_and_assign",

@@ -13,6 +13,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "dcfs/fd.h"
+#include "dcfs/subprocess.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"

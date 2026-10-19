@@ -26,7 +26,6 @@ namespace {
 using ::absl_testing::IsOk;
 using ::absl_testing::StatusIs;
 using ::testing::HasSubstr;
-using ::testing::Not;
 
 absl::StatusOr<CommandResult> RunSh(const std::string &script,
                                     const std::string &path = "/bin") {
@@ -137,13 +136,6 @@ TEST_F(ResolveTest, ADirectoryOfThatNameIsSkipped) {
 TEST_F(ResolveTest, ADirectoryThatDoesNotExistIsSkipped) {
   ASSERT_OK_AND_ASSIGN(std::string found, Resolve("echo", "/nonexistent:/bin"));
   EXPECT_EQ(found, "/bin/echo");
-}
-
-TEST(ReadAllTest, AFailedReadIsReturnedNotTakenForTheEnd) {
-  // Reading a directory fails with EISDIR.
-  ASSERT_OK_AND_ASSIGN(FileDescriptor dir,
-                       syscalls::openat(AT_FDCWD, "/", O_RDONLY | O_DIRECTORY));
-  EXPECT_THAT(ReadAll(*dir), Not(IsOk()));
 }
 
 }  // namespace
