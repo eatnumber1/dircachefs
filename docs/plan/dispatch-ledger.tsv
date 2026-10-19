@@ -255,6 +255,8 @@ aabd71adfe3fe47a1	2026-10-19T16:19:34Z	main-check	investigation	dcfs-investigato
 ad2f1c85d1b360c93	2026-10-19T16:21:11Z	25.53	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	627106	104								26	122	570959	55999
 a52080ae3f9fc1c25	2026-10-19T16:25:02Z	25.53	mechanical	dcfs-mechanical	haiku	low													
 ae46815beb2088b46	2026-10-19T16:25:15Z	Clerk batch 44	mechanical	dcfs-mechanical	claude-haiku-5-5	low	741328	111								30	11177	670608	59513
-a19fc5206672fbbd1	2026-10-19T17:14:42Z	oops-investigation	investigation	dcfs-investigator	claude-sonnet-5-5	high	15192746	2791								222	1173	14821307	370044
+a19fc5206672fbbd1	2026-10-19T17:14:42Z	oops-investigation	investigation	dcfs-investigator	claude-sonnet-5-5	high	16518157	3035								236	1214	16137805	378902
 a1bd1715391b9052d	2026-10-19T17:24:23Z	5.18	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	1752392	2321								52	205	1579595	172540
 a69fcdc5ce177dc11	2026-10-19T18:03:43Z	Clerk batch 45	mechanical	dcfs-mechanical	claude-haiku-5-5	low	717707	75								28	110	654585	62984
+af1862490b4a590dd	2026-10-19T18:05:31Z	5.18	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	673392	95								28	155	619062	54147
+a3127e9f97c6c98c4	2026-10-19T18:07:16Z	5.18	mechanical	dcfs-mechanical	claude-haiku-5-5	low	464243	100								24	3433	419900	40886
