@@ -6,19 +6,25 @@ and review/fix rounds via agy in stream-json mode, holding stdin open until
 JOB-COMPLETE is signaled. With --single it runs the one worker session and
 nothing else; with --read-only as well it runs in agy plan mode, leaves the
 lane's git state alone and saves its text, minus the JOB-COMPLETE line, as
-report.md.
+report.md. It refuses to start (exit 2, nothing changed) when the Gemini
+weekly pool is under --min-weekly-pct, and --parent records the delegating
+step in the ledger row.
 """
 
 import argparse
 import dataclasses
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import time
 
 DEFAULT_MODEL = "gemini-3.8-flash-medium"
+# Refuse to start when less of the Gemini weekly pool than this remains:
+# work started on a nearly empty pool dies half done.
+DEFAULT_MIN_WEEKLY_PCT = 10
 DEFAULT_FOREMAN_BASE = (
     "/tmp/claude-1000/-home-russ-Sources-dircachefs/"
     "4cb5bd53-9fd3-4845-aa05-5c5668254104/scratchpad/foreman"
@@ -140,13 +146,18 @@ def tokens_table(tokens):
   return "\n".join(lines)
 
 
-def record_ledger_row(step, model, mode, tokens, rounds, error, environ):
+def record_ledger_row(
+    step, model, mode, tokens, rounds, error, environ, parent=None
+):
   """Adds this run's dispatch-ledger row through dashboard_lanes.py."""
   total = tokens["total"]
   breakdown = "; ".join(
       f"{s['name']}={s['usage']['total_tokens']}" for s in tokens["sessions"]
   )
-  notes = f"foreman mode={mode}; {breakdown}"
+  notes = f"foreman mode={mode}; "
+  if parent:
+    notes += f"parent={parent}; "
+  notes += breakdown
   if error:
     notes += "; failed"
   cmd = [
@@ -232,6 +243,37 @@ def read_usage(agy_bin, lane, timeout=120, environ=os.environ):
     return f"usage meter failed: {e}\n"
   lines = [line for line in res.stdout.splitlines() if "Gemini Models" in line]
   return "\n".join(lines) + ("\n" if lines else "")
+
+
+def weekly_remaining_pct(usage_text):
+  """Returns the Gemini weekly pool's remaining percent, or None."""
+  for line in usage_text.splitlines():
+    parts = [p.strip() for p in line.split("\t")]
+    if len(parts) >= 3 and "Weekly" in parts[1]:
+      m = re.search(r"(\d+)%", parts[2])
+      if m:
+        return int(m.group(1))
+  return None
+
+
+def quota_refusal(usage_text, min_weekly_pct):
+  """Returns why a run must not start on this meter reading, or None."""
+  if min_weekly_pct <= 0:
+    return None
+  pct = weekly_remaining_pct(usage_text)
+  if pct is None:
+    return (
+        "cannot read the Gemini weekly pool from the usage meter "
+        f"({usage_text.strip() or 'no output'}); not starting. Rerun with "
+        "--min-weekly-pct 0 to start anyway."
+    )
+  if pct < min_weekly_pct:
+    return (
+        f"Gemini weekly pool has {pct}% left, under --min-weekly-pct "
+        f"{min_weekly_pct}; not starting. Wait for the reset or do the work "
+        "yourself."
+    )
+  return None
 
 
 def run_stream_session(
@@ -528,10 +570,17 @@ def run_foreman(
     git_bin="git",
     single=False,
     read_only=False,
+    parent=None,
+    min_weekly_pct=DEFAULT_MIN_WEEKLY_PCT,
     clock=time.time,
     environ=os.environ,
 ):
   """Runs one queued step end to end on Gemini in a lane.
+
+  Before touching the lane it reads the usage meter and, when the Gemini
+  weekly pool is under min_weekly_pct (0 turns the check off) or unreadable,
+  prints why on stderr and returns 2 having done nothing else. parent names
+  the step whose subagent delegated this run; it goes in the ledger row.
 
   With single, runs one held-open worker session and no review or fix rounds.
   With read_only (requires single), the worker runs in agy plan mode, nothing
@@ -551,6 +600,12 @@ def run_foreman(
   with open(prompt_file, "r", encoding="utf-8") as f:
     worker_prompt = f.read()
 
+  ub = read_usage(agy_bin, lane, environ=environ)
+  refusal = quota_refusal(ub, min_weekly_pct)
+  if refusal:
+    print(f"foreman: {refusal}", file=sys.stderr)
+    return 2
+
   base = None
   if not read_only:
     base = setup_git_branch(
@@ -560,7 +615,6 @@ def run_foreman(
         environ=environ,
     )
 
-  ub = read_usage(agy_bin, lane, environ=environ)
   with open(os.path.join(out_dir, "usage.before"), "w", encoding="utf-8") as f:
     f.write(ub)
 
@@ -581,7 +635,9 @@ def run_foreman(
         out_dir, step, lane, branch, base, git_bin=git_bin, error_msg=error,
         tokens=tokens, single=single, read_only=read_only,
     )
-    record_ledger_row(step, model, mode, tokens, rounds, error, environ)
+    record_ledger_row(
+        step, model, mode, tokens, rounds, error, environ, parent=parent
+    )
     return 1 if error else 0
 
   def run_session(role, name, prompt):
@@ -686,6 +742,19 @@ def main(argv):
       action="store_true",
       help="With --single: agy plan mode, no branch setup, saves report.md",
   )
+  parser.add_argument(
+      "--parent",
+      default=None,
+      help="Step of the subagent delegating this run, recorded in the "
+      "ledger row so its delegated tokens can be summed",
+  )
+  parser.add_argument(
+      "--min-weekly-pct",
+      type=int,
+      default=DEFAULT_MIN_WEEKLY_PCT,
+      help="Refuse to start when the Gemini weekly pool has less than this "
+      f"percent left; 0 skips the check (default: {DEFAULT_MIN_WEEKLY_PCT})",
+  )
   args = parser.parse_args(argv)
   if args.read_only and not args.single:
     parser.error("--read-only requires --single")
@@ -712,6 +781,8 @@ def main(argv):
       git_bin=args.git_bin,
       single=args.single,
       read_only=args.read_only,
+      parent=args.parent,
+      min_weekly_pct=args.min_weekly_pct,
   )
 
 

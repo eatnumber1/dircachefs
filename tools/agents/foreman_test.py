@@ -41,8 +41,11 @@ if log_file:
     f.write(json.dumps(args) + "\\n")
 
 if "-p" in args and "/usage" in args:
+  pct = os.environ.get("FAKE_AGY_WEEKLY_PCT", "50%")
   sys.stdout.write(
-      "Gemini Models\\tWeekly Limit Remaining\\t50%\\t2026-10-24T03:07:32Z\\n"
+      "Gemini Models\\tFive Hour Limit Remaining\\t99%\\t2026-10-19T03:00:00Z\\n"
+      "Gemini Models\\tWeekly Limit Remaining\\t" + pct
+      + "\\t2026-10-24T03:07:32Z\\n"
   )
   sys.stdout.flush()
   sys.exit(0)
@@ -740,6 +743,82 @@ class ForemanTest(unittest.TestCase):
       summary = f.read()
     self.assertNotIn("## last review", summary)
     self.assertIn("| single |", summary)
+
+  def test_parent_is_recorded_in_the_ledger_row(self):
+    self.assertEqual(self._run(step="25.99", single=True, parent="25.49"), 0)
+    row = self._ledger_rows()[0]
+    self.assertEqual(row["step"], "25.99")
+    self.assertEqual(
+        row["notes"], "foreman mode=single; parent=25.49; worker=2200"
+    )
+
+  def test_no_parent_leaves_notes_unchanged(self):
+    self.assertEqual(self._run(single=True), 0)
+    self.assertNotIn("parent=", self._ledger_rows()[0]["notes"])
+
+  def test_low_weekly_pool_refuses_before_any_work(self):
+    log_file = os.path.join(self.root, "agy_args.log")
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+      ret = self._run(
+          single=True,
+          min_weekly_pct=20,
+          env={"FAKE_AGY_WEEKLY_PCT": "15%", "FAKE_AGY_LOG": log_file},
+      )
+    self.assertEqual(ret, 2)
+    self.assertIn("15%", stderr.getvalue())
+    self.assertIn("--min-weekly-pct 20", stderr.getvalue())
+    with open(log_file, "r", encoding="utf-8") as f:
+      calls = [json.loads(line) for line in f]
+    self.assertEqual(calls, [["-p", "/usage"]])
+    self.assertFalse(os.path.exists(os.path.join(self.out_dir, "tokens.json")))
+    self.assertFalse(
+        os.path.exists(
+            os.path.join(self.main_repo, "docs", "plan", "dispatch-ledger.tsv")
+        )
+    )
+    self.assertFalse(os.path.exists(os.path.join(self.lane, "hello.txt")))
+
+  def test_weekly_pool_at_the_threshold_runs(self):
+    self.assertEqual(
+        self._run(
+            single=True, min_weekly_pct=15, env={"FAKE_AGY_WEEKLY_PCT": "15%"}
+        ),
+        0,
+    )
+
+  def test_unreadable_weekly_pool_refuses(self):
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+      ret = self._run(single=True, env={"FAKE_AGY_WEEKLY_PCT": "n/a"})
+    self.assertEqual(ret, 2)
+    self.assertIn("cannot read", stderr.getvalue())
+
+  def test_zero_threshold_skips_the_check(self):
+    self.assertEqual(
+        self._run(
+            single=True, min_weekly_pct=0, env={"FAKE_AGY_WEEKLY_PCT": "n/a"}
+        ),
+        0,
+    )
+
+  def test_weekly_remaining_pct_parses_the_weekly_line(self):
+    text = (
+        "Gemini Models\tFive Hour Limit Remaining\t99%\tx\n"
+        "Gemini Models\tWeekly Limit Remaining\t42%\tx\n"
+    )
+    self.assertEqual(foreman.weekly_remaining_pct(text), 42)
+    self.assertIsNone(foreman.weekly_remaining_pct("usage meter failed: x\n"))
+
+  def test_main_takes_parent_and_min_weekly_pct(self):
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+      ret = foreman.main([
+          "25.97", self.lane, "--single", "--parent", "25.49",
+          "--min-weekly-pct", "90", "--out", self.out_dir,
+          "--agy-bin", self.fake_agy_path, "br", self.prompt_file,
+      ])
+    self.assertEqual(ret, 2)
 
   def test_single_mode_failure_is_recorded(self):
     self.assertEqual(
