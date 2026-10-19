@@ -2031,10 +2031,11 @@ Steps:
    side effects is needed in the differential tests."). They observe side
    effects only as events or as state reached after an ordering barrier: dcfs's
    own backing-syscall trace (`syscall_traces` / `BackingCall`); a
-   `cachestat(2)` snapshot taken after a synchronous, always-sent FUSE request that orders the
-   background READ; guest ftrace tracepoint counts filtered by inode where the
-   kernel's side must be seen. Never cgroup `io.stat` byte or request counters,
-   which move with load (the 26.41 lesson). The same rule as 23.19.
+   `cachestat(2)` snapshot taken after a synchronous, always-sent FUSE
+   request that orders the background READ; guest ftrace tracepoint counts
+   filtered by inode where the kernel's side must be seen. Never cgroup
+   `io.stat` byte or request counters, which move with load (the 26.41
+   lesson). The same rule as 23.19.
 
 Test: each new case fails first on a deliberately wrong expectation, then passes
 on the pinned kernel; the step names the commands when it starts.
@@ -2111,7 +2112,10 @@ attribution check covers them). Scripts under `tools/agents/` come with tests.
 
 *Test:* the scripts come with tests under `tools/agents/`.
 
-## 25.48 Foreman research mode (russ, 2026-10-19: "Use the foreman script instead of calling agy directly"; queued, not started)
+## 25.48 Foreman research mode
+
+russ, 2026-10-19: "Use the foreman script instead of calling agy
+directly". Queued, not started.
 
 A `--read-only` flag on the foreman script. Today every read-only job pays an
 empty-diff review and a throwaway branch.
@@ -2125,10 +2129,11 @@ Owner: not yet assigned (the orchestrator chooses). Dependencies: none.
 
 *Test:* the foreman script's tests under `tools/` cover the flag.
 
-## 25.49 Subagents delegate down (russ, 2026-10-19; queued, not started; after 25.48)
+## 25.49 Subagents delegate down
 
-russ, 2026-10-19: "I'd like it if our subagents started doing this too, and
-themselves leveraging dumber agents for more of the menial work"
+Queued; after 25.48 (25.49a is done). russ, 2026-10-19: "I'd like it if
+our subagents started doing this too, and themselves leveraging dumber
+agents for more of the menial work"
 
 1. A rule in `docs/plan/process.md` with an index line in
    `docs/rules/index-process.md`. Each `.claude/agents/*.md` names the
