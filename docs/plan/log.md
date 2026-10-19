@@ -4523,3 +4523,21 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   - Not done: the stale-doc row for tools/agents/README.md (outside the
     clerk's scope) stays open; the naming question on read_own is still for
     russ.
+- 2026-10-19, clerk batch 46 (5.18 merge record and review outcomes; 5.18's
+  last pair ruling; orchestrator's queue):
+  - 5.18 merged 2026-10-19 as 37c2990a..9957121c (first tests-only pair
+    squashed; step-5.18 keeps the evidence). phases/05: 5.18 marked done with
+    the merge record: `bazel coverage` on mount_dcfs_systemd_test 5/5 green
+    (main was 5/5 red); SCSI disks behind one virtio-scsi controller, links by
+    LUN; cost_disks counts sd*; fresh final check, three doc fixes in
+    20a4be5d; b3bf5686 strengthens scsi_disks_test to LUNs 1 and 3 and was
+    shown failing against a scratch guest/init that linked by kernel name.
+  - README: phase 5 row, Queue item 0 and M0 show 5.18 done.
+  - process.md rule-reviewed-slices 4a: the strengthened-test sentence, labelled
+    as the orchestrator's ruling (2026-10-19, 5.18's last pair, rejected by
+    test_first_tool as "every test passed at the first commit").
+  - phases/25: 25.56 refusal tests for qemu_test.bzl queued (orchestrator's
+    proposal, found in 5.18); README Queue item 2e and M0 list it.
+  - review-findings.tsv: the 5.18 rows' outcomes are "fixed/merged
+    37c2990a..9957121c".
+  - Not done: none in this batch. dispatch-ledger.tsv left alone.

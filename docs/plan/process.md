@@ -191,6 +191,13 @@ process (its waves and file ownership table) is in `history.md`.
       its report names the existing tests that pin the behaviour,
       test_first_tool is not run on it, and the reviewer confirms no behaviour
       changed.
+      Orchestrator's ruling, not russ's words (2026-10-19, 5.18's last pair,
+      which test_first_tool rejected with "every test passed at the first
+      commit" because it strengthened a test for code already correct):
+      A slice that only strengthens a test for behaviour already correct
+      cannot fail at its first commit; its report instead shows the test
+      failing against a deliberate, uncommitted break of the code (a
+      recorded mutation), and test_first_tool is not run on it.
    4b. <a id="rule-review-continuity"></a>
       (russ, 2026-10-19: "Agreed, but let's write this down into the
       documentation on how reviews work so you don't forget.")

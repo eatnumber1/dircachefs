@@ -2542,3 +2542,21 @@ Dependencies: 25.53 merged.
 *Test:* `//tools:syscalls_backing_users_test` passes with the shorter list,
 and the startup and proc_file tests pass unchanged.
 
+## 25.56 qemu_test.bzl refusal tests (orchestrator's proposal, queued)
+
+Orchestrator's proposal, not russ's words. Source: the 5.18 implementer's
+review (`review-findings.tsv`, 5.18), which found that `qemu_test.bzl` refuses
+bad calls and no test pins those refusals.
+
+1. Each `fail(...)` in `test/qemu/qemu_test.bzl` gets an analysis test that
+   makes the bad call and asserts the refusal. Today's refusals include
+   `ram_disks` with a disk named `vda`, `ram_disks` with a SCSI disk, and the
+   others the file has.
+2. The tests are mechanical: no change to the refusals' behaviour.
+
+Placed in M0 (`README.md`, Queue item 2e). Owner: not yet assigned.
+Dependencies: none.
+
+*Test:* each refusal test fails if its `fail(...)` is removed, and passes on
+the current code.
+
