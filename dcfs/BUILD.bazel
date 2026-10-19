@@ -395,13 +395,7 @@ qemu_cc_test(
     ],
 )
 
-qemu_cc_test(
-    name = "syscalls_test",
-    size = "small",
-    timeout = "short",
-    srcs = ["syscalls_test.cc"],
-    disks = [("vdb", "ext4", "32M")],  # name_to_handle_at/FS_IOC_GETVERSION/xattrs need a real filesystem
-    deps = [
+SYSCALLS_TEST_DEPS = [
       ":backing_door",
       ":status",
       ":syscalls",
@@ -414,9 +408,29 @@ qemu_cc_test(
       "@absl//absl/log",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
-        "@absl//absl/time",
+      "@absl//absl/time",
       "@googletest//:gtest_main",
-    ],
+]
+
+qemu_cc_test(
+    name = "syscalls_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["syscalls_test.cc"],
+    disks = [("vdb", "ext4", "32M")],  # name_to_handle_at/FS_IOC_GETVERSION/xattrs need a real filesystem
+    deps = SYSCALLS_TEST_DEPS,
+)
+
+# Step 26.44: the same tests under forced TCG, with the TCG checks linked in:
+# the unit-test smoke that a test binary runs on a host without KVM.
+qemu_cc_test(
+    name = "syscalls_tcg_test",
+    size = "medium",
+    timeout = "moderate",
+    srcs = ["syscalls_test.cc"],
+    disks = [("vdb", "ext4", "32M")],
+    env = {"DCFS_FORCE_TCG": "1"},
+    deps = SYSCALLS_TEST_DEPS + ["//test/qemu:tcg_boot_lib"],
 )
 
 # Fault-injection test for the retry loops in backing.cc (xattr size races,

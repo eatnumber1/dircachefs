@@ -173,17 +173,33 @@ qemu_test(
 
 # Step 26.44: a guest boots under forced TCG (guest/tcg_boot_test.cc), the
 # fallback for hosts without a usable /dev/kvm. TCG is 2-12x slower than KVM,
-# so the tier is medium; the verdict is an event, never a time.
-qemu_cc_test(
-    name = "tcg_boot_test",
-    size = "medium",
-    timeout = "moderate",
+# so the tier is medium; the verdict is an event, never a time. The two checks
+# are a library (alwayslink: a test registers itself with a static
+# initializer) so that a TCG variant of another test links them in and so
+# asserts it really ran under TCG (removed_test_ext4_tcg here, syscalls_tcg_test
+# in //dcfs).
+cc_library(
+    name = "tcg_boot_lib",
+    testonly = 1,
     srcs = ["guest/tcg_boot_test.cc"],
-    env = {"DCFS_FORCE_TCG": "1"},
+    alwayslink = True,
+    visibility = ["//visibility:public"],
     deps = [
         "//dcfs/testonly:assert_ok_and_assign",
         "//dcfs/testonly:files",
         "//dcfs/testonly:hypervisor",
+        "@googletest//:gtest",
+    ],
+)
+
+qemu_cc_test(
+    name = "tcg_boot_test",
+    size = "medium",
+    timeout = "moderate",
+    srcs = [],
+    env = {"DCFS_FORCE_TCG": "1"},
+    deps = [
+        ":tcg_boot_lib",
         "@googletest//:gtest_main",
     ],
 )
@@ -2338,6 +2354,24 @@ cc_library(
         "@googletest//:gtest_main",
     ],
 ) for fstype in ["ext4", "xfs", "btrfs"]]
+
+# Step 26.44: the same binary's tests under forced TCG, with the TCG checks
+# linked in: the end-to-end smoke that a mounted dcfs works on a host without
+# KVM. TCG boots and mounts several times slower, hence medium.
+qemu_cc_test(
+    name = "removed_test_ext4_tcg",
+    size = "medium",
+    timeout = "moderate",
+    srcs = [],
+    dcfs = True,
+    disks = [("vdb", "ext4", "320M")],
+    env = {"DCFS_FORCE_TCG": "1"},
+    deps = [
+        ":removed_test_lib",
+        ":tcg_boot_lib",
+        "@googletest//:gtest_main",
+    ],
+)
 
 alias(
     name = "removed_test",
