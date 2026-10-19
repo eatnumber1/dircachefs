@@ -19,45 +19,70 @@ def mem_refusal(mem, asan_mem):
         return "asan_mem (%d) is smaller than mem (%d)" % (asan_mem, mem)
     return None
 
-def qemu_test_refusal(name, size, timeout, kernel_failure, systemd_image, rootfs, boots, power_cut, ram_disks, mem, disks):
+_TIER = "size and timeout are required (the test tier; see test/qemu/README.md)"
+
+def qemu_test_refusal(
+        name,
+        size,
+        timeout,
+        kernel_failure,
+        systemd_image,
+        rootfs,
+        boots,
+        power_cut,
+        ram_disks,
+        mem,
+        disks):
     """Why qemu_test(name, ...) refuses this call, or None."""
+    prefix = "qemu_test(%s): " % name
     if size == None or timeout == None:
-        return "qemu_test(%s): size and timeout are required (the test tier; see test/qemu/README.md)" % name
+        return prefix + _TIER
     if kernel_failure not in (None, "expected"):
-        return "qemu_test(%s): kernel_failure must be None or \"expected\"" % name
+        return prefix + "kernel_failure must be None or \"expected\""
     if systemd_image and rootfs:
-        return "qemu_test(%s): systemd_image and rootfs exclude each other" % name
+        return prefix + "systemd_image and rootfs exclude each other"
     if boots < 1 or (boots > 1 and power_cut):
-        return "qemu_test(%s): boots is 1 or more, and excludes power_cut" % name
+        return prefix + "boots is 1 or more, and excludes power_cut"
     if ram_disks and (power_cut or boots > 1 or rootfs or systemd_image):
-        return "qemu_test(%s): ram_disks excludes power_cut, boots, rootfs and systemd_image (the disks are in the guest's RAM)" % name
+        return prefix + (
+            "ram_disks excludes power_cut, boots, rootfs and systemd_image " +
+            "(the disks are in the guest's RAM)"
+        )
     if ram_disks and [d for d in disks if len(d) > 3]:
-        return "qemu_test(%s): ram_disks disks carry no mkfs options" % name
+        return prefix + "ram_disks disks carry no mkfs options"
 
     # The guest holds its disks: the 256 MiB default has no room for them, and
     # a test that forgot to size it would run with a warning every time.
     if ram_disks and mem == None:
-        return "qemu_test(%s): ram_disks needs an explicit mem (the guest holds its disks; size it from the MEM line, README.md \"Guest memory\")" % name
+        return prefix + (
+            "ram_disks needs an explicit mem (the guest holds its disks; " +
+            "size it from the MEM line, README.md \"Guest memory\")"
+        )
 
     # The profile disk of `bazel coverage` is /dev/vda when no virtio disk is
     # attached, so a RAM disk of that name would collide with it.
     if ram_disks and [d for d in disks if d[0] == "vda"]:
-        return "qemu_test(%s): a ram_disks disk cannot be named vda (the coverage disk's name)" % name
+        return prefix + (
+            "a ram_disks disk cannot be named vda (the coverage disk's name)"
+        )
     if ram_disks and [d for d in disks if d[0].startswith("sd")]:
-        return "qemu_test(%s): a ram_disks disk cannot be a SCSI disk" % name
+        return prefix + "a ram_disks disk cannot be a SCSI disk"
     return None
 
 def qemu_test_matrix_refusal(name, disks, size, other_size, timeout):
     """Why qemu_test_matrix(name, ...) refuses this call, or None."""
+    prefix = "qemu_test_matrix(%s): " % name
     if not disks:
-        return ("qemu_test_matrix(%s): disks must have at least one entry " % name +
-                "(the backing source disk, vdb, whose fstype is varied)")
+        return prefix + (
+            "disks must have at least one entry " +
+            "(the backing source disk, vdb, whose fstype is varied)"
+        )
     if size == None or other_size == None or timeout == None:
-        return "qemu_test_matrix(%s): size, other_size and timeout are required" % name
+        return prefix + "size, other_size and timeout are required"
     return None
 
 def qemu_cc_test_refusal(name, size, timeout):
     """Why qemu_cc_test(name, ...) refuses this call, or None."""
     if size == None or timeout == None:
-        return "qemu_cc_test(%s): size and timeout are required (the test tier; see test/qemu/README.md)" % name
+        return "qemu_cc_test(%s): %s" % (name, _TIER)
     return None
