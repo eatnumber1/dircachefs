@@ -1857,11 +1857,15 @@ more fake syscalls implementations for tests?" The three-way split
 (`BackingSyscalls`, `LocalSyscalls`, `ProcessSyscalls`) only mirrored the
 door-guarded library, which 25.57 dissolves, so it is dropped. The design is:
 
-- One pure virtual `Syscalls` interface, with one CamelCase member per
-  syscall (`Read`, `Openat`, ...).
+- One pure virtual `Syscalls` interface, with one member per syscall named
+  for its libc and manpage name in lower case (`read`, `openat`, ...; russ,
+  2026-10-19: "Let's make the Syscalls interface use the man page naming
+  convention."). This is the one naming exception; every other function
+  stays CamelCase, including the door-guarded `backing::Read` and
+  `backing::Openat` above the seam.
 - `RealSyscalls`, the one production implementation, whose members are the
-  thin layer: each makes the libc call itself (`RealSyscalls::Read` calls
-  `::read`; `RealSyscalls::Openat` calls `::openat` and wraps the result at
+  thin layer: each makes the libc call itself (`RealSyscalls::read` calls
+  `::read`; `RealSyscalls::openat` calls `::openat` and wraps the result at
   once in a `FileDescriptor` bound to `*this`). There are no separate
   `syscalls::` free functions and no `RawFd` type.
 - Test fakes derive from a `DelegatingSyscalls` base in `testonly/` that holds
@@ -1873,13 +1877,24 @@ door-guarded library, which 25.57 dissolves, so it is dropped. The design is:
   and nothing else is the rule for every member. `RealSyscalls`'s members
   are tested directly against the real kernel in the guest; tests elsewhere
   fake `Syscalls`. The `Syscalls` interface is the only seam.
+- Naming mechanics (russ, 2026-10-19, above). `.clang-tidy` enables
+  `readability-identifier-naming` (through `readability-*`) with no
+  `CheckOptions` for it, so its defaults apply; the step makes it accept
+  lower_case methods on `Syscalls` and its implementations only. The step
+  decides how: a per-class naming configuration if clang-tidy supports
+  one, a `NOLINT` region around the interface with the reason, or a small
+  clang-query check that lower-case methods occur only in `Syscalls`
+  implementations. `docs/style.md` `rule-function-names` then says which.
+  The per-op `ioctl` and `fcntl` members take the request's name in lower
+  case behind the typed `ioctl<OP>`/`fcntl<OP>` front ends; the step may
+  settle the exact form.
   The layering (russ, 2026-10-19; see the superseded note below):
 
   ```
   backing::ReadFile(ctx, ...)
     -> backing::Read(ctx, ...)         door check, then:
-    -> ctx.syscalls().Read(...)        the seam: RealSyscalls or a test fake
-    -> RealSyscalls::Read(...)         the thin layer: one libc call
+    -> ctx.syscalls().read(...)        the seam: RealSyscalls or a test fake
+    -> RealSyscalls::read(...)         the thin layer: one libc call
     -> ::read
   ```
 
@@ -1896,17 +1911,17 @@ door-guarded library, which 25.57 dissolves, so it is dropped. The design is:
   How each former exception goes:
   1. Ownership is RAII at creation (russ, 2026-10-19: "No, RAII-at-create
      avoids leaks. I want other options.", then "Ok to Option 1."). Every
-     member that obtains a kernel resource (`Openat`, `PidfdOpen`,
-     `Socketpair`, `Eventfd`, `Signalfd`, ...) returns an owning type
-     bound to the `Syscalls` that made it: `RealSyscalls::Openat` calls
+     member that obtains a kernel resource (`openat`, `pidfd_open`,
+     `socketpair`, `eventfd`, `signalfd`, ...) returns an owning type
+     bound to the `Syscalls` that made it: `RealSyscalls::openat` calls
      `::openat` and wraps the result at once in a `FileDescriptor` bound
-     to `*this`, whose destructor calls `syscalls_->Close(...)`. The
+     to `*this`, whose destructor calls `syscalls_->close(...)`. The
      constructor is reachable only by `Syscalls` implementations, through
      a passkey type, so nothing else can make an owning descriptor that
      closes behind the seam. Fakes construct `FileDescriptor`s bound to
      themselves and see every close, so they can count opens and closes
      (fd-leak tests). `FileDescriptor` grows from 4 to 16 bytes, which is
-     negligible. `RealSyscalls::Close` is the one place that calls
+     negligible. `RealSyscalls::close` is the one place that calls
      `::close`.
   2. The daemon's lock file uses `ctx.syscalls()` like everything else; its
      old exemption existed only to skip the door, which now lives in
@@ -1982,15 +1997,15 @@ second is a test-only knob in production code, `docs/style.md` 2).
   counter on matching calls and returns `ErrnoToStatus(err, op)` when
   `++calls == fail_at` or while `times-- > 0` (for the existing wrap tests).
 - **Typed ioctl and fcntl:** member templates cannot be virtual, so the
-  `Syscalls` interface has the per-op virtual CamelCase members
-  (`IoctlGetVersion`, `IoctlGetFsUuid`, `IoctlBtrfsFsInfo`,
-  `IoctlBtrfsSubvolInfo`, `IoctlFlags`, `IoctlRaw`, and the `fcntl`
-  equivalents), each of which `RealSyscalls` implements with one `::ioctl`
-  or `::fcntl` call. The typed `ioctl<OP>(...)` and `fcntl<OP>(...)` front
-  ends (russ, 2026-10-18: "Yes, ioctl and fcntl become free function
-  templates.") are non-virtual templates, on `Syscalls` or free templates
-  taking a `Syscalls &`, that pick the member for `OP`, as in 25.38. The
-  step settles which of the two reads simplest and uses it everywhere.
+  `Syscalls` interface has per-op virtual members named for the request in
+  lower case (for example `ioctl_fs_ioc_getfsuuid`, `fcntl_getfl`; the step
+  settles the exact form), each of which `RealSyscalls` implements with one
+  `::ioctl` or `::fcntl` call. The typed `ioctl<OP>(...)` and
+  `fcntl<OP>(...)` front ends (russ, 2026-10-18: "Yes, ioctl and fcntl
+  become free function templates.") are non-virtual templates, on
+  `Syscalls` or free templates taking a `Syscalls &`, that pick the member
+  for `OP`, as in 25.38. The step settles which of the two reads simplest
+  and uses it everywhere.
 - **Libfuse seam:** a `FuseLowlevelOps` interface on `FuseSession` and
   `FuseRequest` for `fuse_passthrough_open`, `fuse_passthrough_close` and
   `fuse_reply_none`, replacing three wraps.
@@ -2060,7 +2075,7 @@ second is a test-only knob in production code, `docs/style.md` 2).
   library confinement and the genquery test in sub-step 8, with no
   exceptions (`FileDescriptor` closes through the `Syscalls` that made it).
 - *Variadic `openat`/`ioctl`/`fcntl`:* virtual members cannot be variadic or
-  templates. Mitigation: split `Openat` with and without a mode, and the
+  templates. Mitigation: split `openat` with and without a mode, and the
   `ioctl<OP>`/`fcntl<OP>` front ends over per-op virtual members (25.38).
 - *Coverage baseline:* every `RealSyscalls` member and error branch stays
   covered, so total coverage never drops.
@@ -2779,17 +2794,20 @@ more fake syscalls implementations for tests?" He confirmed the plan with
    `backing::Openat`, `backing::Fstatat`, and so on. Each is
    `RETURN_IF_ERROR(BackingDoor())` and then the thin call.
 2. Until 25.41, the thin wrappers in `dcfs/syscalls.h` keep the man-page
-   names (`syscalls::read`, ...); today's `syscalls::read_own` becomes
-   `syscalls::read`. `//dcfs:syscalls_backing`'s thin layer goes away, and
-   with it the second set of by-name wrappers. The layering (russ,
+   names (`syscalls::read`, ...), which 25.41 keeps as the lower-case
+   members of `Syscalls` (russ, 2026-10-19: "Let's make the Syscalls
+   interface use the man page naming convention."); today's
+   `syscalls::read_own` becomes `syscalls::read`.
+   `//dcfs:syscalls_backing`'s thin layer goes away, and with it the second
+   set of by-name wrappers. The layering (russ,
    2026-10-19; 25.41 then folds the thin layer into `RealSyscalls`, see the
    [log entry](/docs/plan/log.md), "the thin layer is `RealSyscalls`") is:
 
    ```
    backing::ReadFile(ctx, ...)
      -> backing::Read(ctx, ...)         door check, then:
-     -> ctx.syscalls().Read(...)        the seam: RealSyscalls or a test fake
-     -> RealSyscalls::Read(...)         the thin layer: one libc call
+     -> ctx.syscalls().read(...)        the seam: RealSyscalls or a test fake
+     -> RealSyscalls::read(...)         the thin layer: one libc call
      -> ::read
    ```
 

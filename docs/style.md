@@ -154,16 +154,27 @@ use it as design guidance rather than firm rules."
   **`std::string_view`, `std::optional`**, not the `absl::` aliases (none
   left in production code).
 - <a id="rule-function-names"></a>
-  **Function names**: every function is CamelCase (`SetXattr`), with no
-  lowercase man-page-name exception. The thin layer over libc is the
-  members of the one `Syscalls` interface, which `RealSyscalls`
-  implements: `Read`, `Write`, `Openat`, `Setxattr`, ... Each
-  `RealSyscalls` member makes one libc call (`RealSyscalls::Read` calls
-  `::read`), with a typed signature, and nothing else. Door-guarded
-  `backing::Read`, `backing::Openat` and the rest (step 25.57) are
-  higher-level CamelCase functions in `backing::`.
+  **Function names**: every function is CamelCase (`SetXattr`), with one
+  exception (russ, 2026-10-19: "Let's make the Syscalls interface use the
+  man page naming convention."): the members of the one `Syscalls`
+  interface, and so of `RealSyscalls` and the test fakes, are named for
+  their libc and manpage name in lower case: `read`, `write`, `openat`,
+  `fstatat`, `setxattr`, ... The thin layer over libc is those members.
+  Each `RealSyscalls` member makes one libc call (`RealSyscalls::read`
+  calls `::read`), with a typed signature, and nothing else. The
+  door-guarded `backing::Read`, `backing::Openat` and the rest (step
+  25.57) sit above the seam, are not thin, and so are ordinary CamelCase
+  functions in `backing::`. The lower-case names again mark exactly the
+  thin kernel boundary.
+  - Enforcing the exception: `readability-identifier-naming` in
+    `.clang-tidy` must accept lower_case methods on `Syscalls` and its
+    implementations only. Step 25.41 decides how (a per-class naming
+    configuration if clang-tidy supports one, a `NOLINT` region around
+    the interface with the reason, or a small clang-query check that
+    lower-case methods occur only in `Syscalls` implementations), and
+    this rule says which once it is chosen.
   - The typed signatures stay: a call looks like
-    `ctx.syscalls().Write(fd, buf)` with `buf` a
+    `ctx.syscalls().write(fd, buf)` with `buf` a
     `std::span<const std::byte>`, not `(fd, buf, n)`; names are
     `std::string_view`, not `char *`; errors come back as `Status` or
     `StatusOr` ([`rule-status-only-error-channel`](#rule-status-only-error-channel)).
@@ -173,7 +184,9 @@ use it as design guidance rather than firm rules."
     invalidate the other libc deviations we've already done (such as
     changing pointer+len to std::span, or changing char* to string_view).").
   - `ioctl` and `fcntl`: member templates cannot be virtual, so `Syscalls`
-    has per-op virtual members (`IoctlGetFsUuid`), each implemented by
+    has per-op virtual members named for the request in lower case
+    (`ioctl_fs_ioc_getfsuuid`, `fcntl_getfl`; step 25.41 settles the exact
+    form), each implemented by
     `RealSyscalls` with one libc call, and the typed `ioctl<OP>(...)` and
     `fcntl<OP>(...)` front ends are non-virtual templates that pick the
     member (russ, 2026-10-18: "Yes, ioctl and fcntl become free function
@@ -181,7 +194,7 @@ use it as design guidance rather than firm rules."
     templates taking a `Syscalls &` is settled by step 25.41.
   - The layering is `backing::ReadFile(ctx, ...)`, then
     `backing::Read(ctx, ...)` (the door check), then
-    `ctx.syscalls().Read(...)` (the seam), then `RealSyscalls::Read`, then
+    `ctx.syscalls().read(...)` (the seam), then `RealSyscalls::read`, then
     `::read`. The `Syscalls` interface is the only seam. `Context` carries
     it; daemon and backing code reach the kernel only through
     `ctx.syscalls()` (or a `Syscalls &` passed down). Tests elsewhere fake

@@ -4612,3 +4612,20 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   `RawFd` design and 89b25694's thin-free-function layer. Edited: phases/25
   25.41, 25.57; `docs/style.md` `rule-function-names` and
   `rule-no-raw-syscalls`; `docs/rules/index-style.md`; the notes file header.
+
+- 2026-10-19, Syscalls members take man-page names: russ: "Let's make the
+  Syscalls interface use the man page naming convention." The members of
+  the one `Syscalls` interface (and so of `RealSyscalls` and the test
+  fakes) are named for their libc and manpage name in lower case
+  (`ctx.syscalls().read(fd, buf)`, `RealSyscalls::openat`); every other
+  function stays CamelCase, including the door-guarded `backing::Read` and
+  `backing::Openat`, which sit above the seam. The man-page names again
+  mark exactly the thin kernel boundary. Per-op ioctl and fcntl members
+  take the request's name in lower case (`ioctl_fs_ioc_getfsuuid`,
+  `fcntl_getfl`); 25.41 settles the form and how clang-tidy's
+  `readability-identifier-naming` accepts lower_case members on `Syscalls`
+  implementations only (`.clang-tidy` sets no options for that check
+  today). This reverses the "lowercase man-page-name exception ends" line
+  of the entry above for the `Syscalls` members only. Edited: phases/25
+  25.41, 25.57; `docs/style.md` `rule-function-names`;
+  `docs/rules/index-style.md`.
