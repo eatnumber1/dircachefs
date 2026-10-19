@@ -111,7 +111,7 @@ echo "PASS: --modules appends the module archive to the initramfs"
 
 # Step 5.18: a disk-spec named sd<letter> is a disk behind the one virtio-scsi
 # controller (one virtio-mmio device however many disks: the microvm's
-# eighth device would share the RTC's interrupt), a vd<letter> spec stays a
+# fifth device would share the RTC's interrupt), a vd<letter> spec stays a
 # virtio-blk disk, and the disks after the specs (the Debian root, the systemd
 # image, the coverage disk) are numbered by the virtio-blk specs alone.
 # layout <options...> -- <disk-spec...>: an e2e boot, RC its exit status (a
@@ -151,11 +151,35 @@ layout -- sda:ext4:8M sdb:xfs:16M sdc:btrfs:32M
 grep -q 'virtio-blk-device' "$WORK/qemu-args" &&
 	fail "a SCSI-only run attached a virtio-blk device: $(cat "$WORK/qemu-args")"
 [ "$(stat -c %s "$WORK/t/sda.img")" -eq 8388608 ] || fail "sda.img is not 8M"
+[ "$(stat -c %s "$WORK/t/sdb.img")" -eq 16777216 ] || fail "sdb.img is not 16M"
 [ "$(stat -c %s "$WORK/t/sdc.img")" -eq 33554432 ] || fail "sdc.img is not 32M"
-grep -q '^mke2fs ' "$WORK/mkfs-calls" || fail "sda was not formatted ext4"
-grep -q '^mkfs-xfs ' "$WORK/mkfs-calls" || fail "sdb was not formatted xfs"
-grep -q '^mkfs-btrfs ' "$WORK/mkfs-calls" || fail "sdc was not formatted btrfs"
+# Each image got its own filesystem: the fake tools log the image they were
+# given last.
+grep -q "^mke2fs .* $WORK/t/sda.img\$" "$WORK/mkfs-calls" ||
+	fail "sda.img was not formatted ext4: $(cat "$WORK/mkfs-calls")"
+grep -q "^mkfs-xfs .* $WORK/t/sdb.img\$" "$WORK/mkfs-calls" ||
+	fail "sdb.img was not formatted xfs: $(cat "$WORK/mkfs-calls")"
+grep -q "^mkfs-btrfs .* $WORK/t/sdc.img\$" "$WORK/mkfs-calls" ||
+	fail "sdc.img was not formatted btrfs: $(cat "$WORK/mkfs-calls")"
 echo "PASS: SCSI disks share one virtio-scsi controller, a LUN each, formatted"
+
+# --keep-disks (a second boot): the images of the first are used as they are,
+# SCSI ones included -- not made again, not formatted again.
+rm -rf "$WORK/keep"
+layout --keep-disks "$WORK/keep" -- sda:ext4:8M sdb:xfs:16M
+printf 'FIRSTBOOT' | dd of="$WORK/keep/sdb.img" conv=notrunc 2>/dev/null
+layout --keep-disks "$WORK/keep" -- sda:ext4:8M sdb:xfs:16M
+[ -e "$WORK/qemu-args" ] ||
+	fail "kept SCSI disks: qemu did not run: $(cat "$WORK/stdout")"
+[ ! -e "$WORK/mkfs-calls" ] ||
+	fail "a kept SCSI image was formatted again: $(cat "$WORK/mkfs-calls")"
+grep -q "^run-qemu.sh: keeping $WORK/keep/sdb.img\$" "$WORK/stdout" ||
+	fail "no 'keeping' line for sdb.img: $(cat "$WORK/stdout")"
+[ "$(head -c 9 "$WORK/keep/sdb.img")" = FIRSTBOOT ] ||
+	fail "a kept SCSI image was rewritten"
+[ "$(count scsi-hd,drive=sdb,bus=scsi0.0,scsi-id=0,lun=1)" -eq 1 ] ||
+	fail "the kept sdb is not LUN 1: $(cat "$WORK/qemu-args")"
+echo "PASS: --keep-disks keeps the SCSI images of an earlier boot"
 
 # With a systemd image and a coverage disk: the image is the first virtio-blk
 # disk (vda) and the coverage disk the next, as nothing else is virtio-blk.

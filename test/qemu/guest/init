@@ -121,6 +121,10 @@ EOF_MODPROBE
 chmod +x /sbin/dcfs-modprobe
 echo /sbin/dcfs-modprobe >/proc/sys/kernel/modprobe
 
+# The disks behind virtio_scsi have their nodes by the time its insmod returns,
+# though the kernel scans the controller asynchronously: do_init_module waits
+# for all async work (async_synchronize_full) unless the module asked for an
+# async probe, and sd_probe is synchronous in it.
 if [ -f /etc/dcfs-modules ]; then
   for module in $(cat /etc/dcfs-modules); do
     insmod "$module" || echo "init: insmod $module failed"

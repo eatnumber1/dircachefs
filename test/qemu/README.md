@@ -1726,9 +1726,10 @@ image `vdd`).
 
 ### SCSI disks
 
-A microvm has only five usable virtio-mmio devices: the sixth takes
+A microvm has only four usable virtio-mmio devices: the fifth takes
 interrupt 8, which the RTC holds (`rtc=on` is deliberate), and its probe
-fails with `genirq: Flags mismatch irq 8`. A test that needs more disks
+fails with `genirq: Flags mismatch irq 8` (see "At most four virtio disks"
+above). A test that needs more disks
 names its backing disks `sd<letter>` instead of `vd<letter>`
 (`("sda", "ext4", "128M")`): `run-qemu.sh` attaches all of them behind one
 `virtio-scsi-device`, a LUN each in the letters' order, so the controller is

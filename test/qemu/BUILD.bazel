@@ -236,6 +236,10 @@ qemu_cc_test(
     deps = [
         "//dcfs/testonly:assert_ok_and_assign",
         "//dcfs/testonly:files",
+        "@absl//absl/status",
+        "@absl//absl/status:status_macros",
+        "@absl//absl/status:status_matchers",
+        "@absl//absl/status:statusor",
         "@absl//absl/strings",
         "@googletest//:gtest_main",
     ],

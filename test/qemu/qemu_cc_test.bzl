@@ -101,8 +101,8 @@ def qemu_cc_test(
         asan_mem: guest RAM in MiB for --config=asan/ubsan builds (default
             UNIT_ASAN_MEM, or mem if that is larger).
         modules: kernel modules the test needs beyond the defaults (fuse,
-            and virtio_blk plus the filesystem modules of `disks`); see
-            qemu_test.bzl.
+            and virtio_blk plus the filesystem modules of `disks`, and
+            virtio_scsi and sd_mod for an sd<letter> disk); see qemu_test.bzl.
         dcfs: put the dcfs binary in the guest at /test/data/dcfs (the
             checking build for the small and medium tiers, the plain one
             for the others, as qemu_test does), for a test that mounts it

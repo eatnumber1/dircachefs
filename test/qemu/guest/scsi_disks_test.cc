@@ -8,6 +8,9 @@
 #include <string>
 #include <string_view>
 
+#include "absl/status/status.h"
+#include "absl/status/status_macros.h"
+#include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/numbers.h"
@@ -20,25 +23,26 @@
 namespace dcfs {
 namespace {
 
+using ::absl_testing::IsOkAndHolds;
 using ::testing::Eq;
 using ::testing::HasSubstr;
 
 // The size in bytes the kernel reports for the disk `name` (sysfs counts
 // 512-byte sectors whatever the disk's block size).
-uint64_t SizeOfDisk(std::string_view name) {
-  absl::StatusOr<std::string> sectors =
-      testonly::ReadFileToString(absl::StrCat("/sys/block/", name, "/size"));
+absl::StatusOr<uint64_t> SizeOfDisk(std::string_view name) {
+  ASSIGN_OR_RETURN(std::string sectors, testonly::ReadFileToString(absl::StrCat(
+                                            "/sys/block/", name, "/size")));
   uint64_t n = 0;
-  if (!sectors.ok() ||
-      !absl::SimpleAtoi(absl::StripAsciiWhitespace(*sectors), &n)) {
-    return 0;
+  if (!absl::SimpleAtoi(absl::StripAsciiWhitespace(sectors), &n)) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("the size of ", name, " is '", sectors, "'"));
   }
   return n * 512;
 }
 
 TEST(ScsiDisksTest, EachDiskHasItsSpecsSize) {
-  EXPECT_THAT(SizeOfDisk("sda"), Eq(64u << 20));
-  EXPECT_THAT(SizeOfDisk("sdb"), Eq(96u << 20));
+  EXPECT_THAT(SizeOfDisk("sda"), IsOkAndHolds(Eq(64u << 20)));
+  EXPECT_THAT(SizeOfDisk("sdb"), IsOkAndHolds(Eq(96u << 20)));
 }
 
 TEST(ScsiDisksTest, TheFirstDiskIsTheTestsDirectory) {
