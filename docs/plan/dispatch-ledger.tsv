@@ -266,3 +266,4 @@ a9da35bbf42a3faba	2026-10-19T18:13:14Z	Plan rewrite: door step and 25.41	impleme
 a8db9c4beeca4e63a	2026-10-19T18:16:02Z	Clerk batch 48	mechanical	dcfs-mechanical	claude-haiku-5-5	low	188930	30								14	84	165414	23418
 acee0343d8fe29f8e	2026-10-19T18:34:01Z	Plan: thin syscalls, interface seam	implementation	dcfs-implementer	claude-sonnet-5-5	medium	653244	133								30	6149	591551	55514
 ae759e698e7591c62	2026-10-19T18:36:45Z	Rewrite style rule-function-names	implementation	dcfs-implementer	claude-sonnet-5-5	medium	203146	44								14	95	176824	26213
+af46699e8aaf4987b	2026-10-19T19:12:29Z	Plan: RAII types born in Syscalls	implementation	dcfs-implementer	claude-sonnet-5-5	medium	164260	41								12	130	133659	30459
