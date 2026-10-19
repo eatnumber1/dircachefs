@@ -4289,3 +4289,39 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   - Item 5 (24.2): phases/24-alpine-series-pins.md gains "24.2 Minimum kernel 6.12: Alpine v3.22", queued for Thursday 2026-10-22's ramp, not before, with the facts (v3.22 linux-virt 6.12.113-r0, supported to 2027-05-01; v3.21 ends 2026-11-01), the work list as given, and owner dcfs-investigator then dcfs-implementer. The 24 status row in docs/plan/README.md carries it.
   - Not applied or flagged: none of the items was dropped. Flagged for a later batch, not edited because they are not named: phases/05-ci.md 5.5 still says "minimum-kernel (Linux 6.9)"; phases/15-mount-dcfs-wrapper.md, phases/21-real-hardware-checks.md and phases/13-connected-backing-fds.md quote the 6.9 floor as a fact of the time; the 6.9 badge in README.md stays until 24.2.
   - dispatch-ledger.tsv: committed unchanged with this batch, as the batch named it.
+- 2026-10-19, clerk batch 31 (6.12 floor list, 5.13 merged, ledger
+    restore-missing, merge records, dead-code check; orchestrator's queue):
+  - Item 1 (24.2 work list): phases/24-alpine-series-pins.md gains the
+    bullet "When 6.12 lands, update every remaining 6.9 floor", naming the
+    README badge, 05-ci 5.5, 13, 15 and 21, with the grep. The README badge
+    itself is root README.md, off-limits here, and is left to 24.2.
+  - Item 2 (5.13 merged 288385e7): phases/05-ci.md 5.13 gains a status line
+    (rebased onto b0193994; fast tier 45/45; Gemini 3.8 Flash high, "merge
+    after rebase", no findings; the orchestrator's accepted nit on one
+    80-column comment line in ci.yml). review-findings.tsv gains one
+    clean-review row (step 5.13, round 1, severity none). Row 5 of
+    docs/plan/README.md carries the merge.
+  - Item 3 (ledger restore-missing backlog): the subcommand is already
+    merged as 1358a6cd, and the six rows lost to the reset were restored in
+    04f7504d. Nothing is open, so no phase file was edited; this entry is
+    the record.
+  - Item 4 (merge records): 25.45 gains a status paragraph, and its header
+    says "in progress": items 2 and 3 merged as b1349d6e and e716d5dc, with
+    the follow-up acff136c. The 80-column rule landed before two commits
+    added long lines, so repo_shape_test failed briefly on main. 25.47
+    gains a status paragraph for the Stop hook, 5632b3ae (silent for
+    dashboard news, blocks only for the clerk queue, PostToolUse carries
+    both reminders, uploads don't mark lanes). 26.44 and 26.45 are marked
+    merged: 79358b7c, cf6a28ff and b79135fd (TCG boot test, CPUID check, TCG
+    smoke variants), and 0119ca40 (requires-kvm tag deleted). Rows 25 and 26
+    of docs/plan/README.md carry the same; row 5 is in item 2.
+  - Item 5 (dead-code check): 25.39 already held the "No production caller"
+    bullet, so the change went there and not into 25.45. The bullet now says
+    the allowlist only shrinks, a test-only caller does not count, and gives
+    the type guidance: a runtime-conditional path that a startup refusal
+    makes impossible becomes unrepresentable by type, such as a passthrough
+    handle type. No rule was added, so no anchor or index entry.
+  - Off-limits files untouched: docs/design.md, README.md (root),
+    test/qemu/README.md, docs/testing.md and the 23.16 as-built notes.
+  - dispatch-ledger.tsv: committed unchanged with this batch, as the batch
+    named it.

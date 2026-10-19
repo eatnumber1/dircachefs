@@ -1675,8 +1675,13 @@ Steps:
      the shipped tools) with `-ffunction-sections -Wl,--gc-sections
      -Wl,--print-gc-sections` for our code, collects the functions of ours
      that the linker discards (no shipped caller), and fails on any not in an
-     allowlist with a reason. `testonly` targets are excluded. It is a Bazel
-     test, so it runs before review.
+     allowlist with a reason. A test-only caller does not count, and
+     `testonly` targets are excluded. The allowlist only shrinks: a new entry
+     fails the test. It is a Bazel test, so it runs before review.
+     Guidance (orchestrator, 2026-10-19): where a startup refusal makes a
+     runtime-conditional path impossible, make the path unrepresentable by
+     type (for example, a passthrough handle type), so the compiler rejects
+     the dead branch instead of the check finding it.
 4. Items for this step, not done by the clerk:
    - `tools/agents/foreman.py`'s review prompt (`run_review`) takes the
      findings block format from the reviewer agents
@@ -1908,7 +1913,13 @@ survivors are findings and only exit 2 fails; and `AGENTS.md` and `docs/rules`
 still mention `formal/findings/`, which was removed with 12.6b (5dcbdca). Each
 becomes true or is reworded as planned, as above.
 
-## 25.45 Mechanize what reviewers keep finding (russ, 2026-10-18; queued, not started; after the 2026-10-23 reset unless russ says otherwise)
+## 25.45 Mechanize what reviewers keep finding (russ, 2026-10-18; in progress: items 2 and 3 merged 2026-10-19; the rest queued after the 2026-10-23 reset unless russ says otherwise)
+
+Status (2026-10-19): item 2 merged b1349d6e (the 80-column rule and the
+split-span rule in `repo_shape`), item 3 merged e716d5dc
+(`commit_subjects.sh` width and trailer checks), with the follow-up wrap
+acff136c. The 80-column rule landed before two commits that added long lines,
+so `repo_shape_test` failed briefly on main until acff136c.
 
 Russ, 2026-10-18: "are there things the reviewers are finding that we can
 automate mechanically?" The ledger analysis (311 review-findings rows, 106 of
@@ -1994,6 +2005,11 @@ Owner: not yet assigned (the orchestrator chooses). Dependencies: none.
 russ, 2026-10-18: "Do the dashboard-upload skill, and schedule the rest for
 after the Friday reset." The dashboard-upload skill is done separately and is
 not part of this step.
+
+Status (2026-10-19): the Stop hook merged 5632b3ae (2026-10-18). It is silent
+for dashboard news, blocks only for the clerk queue, and the PostToolUse hook
+carries both reminders; uploads do not mark lanes. The rest of the step is
+still queued.
 
 Skills under `.claude/skills/` link rule anchors and never restate rules (the
 attribution check covers them). Scripts under `tools/agents/` come with tests.

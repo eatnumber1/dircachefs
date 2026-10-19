@@ -1450,7 +1450,14 @@ and no budget line counts I/O that the guest kernel schedules by time.
 Test first for each change; never widen a budget or tolerance to pass, and
 never weaken a test (AGENTS.md).
 
-## 26.44 A TCG boot test: one guest under `DCFS_FORCE_TCG=1` (clerk batch 27, 2026-10-18; queued, not started)
+## 26.44 A TCG boot test: one guest under `DCFS_FORCE_TCG=1` (clerk batch 27, 2026-10-18; merged 2026-10-18)
+
+Status (2026-10-19): merged as 79358b7c (a test boots a guest under forced
+TCG), cf6a28ff (the TCG test reads the accelerator from CPUID, with the
+`kvm_boot_test` companion) and b79135fd (TCG smoke variants of a unit test and
+an end-to-end test: `//dcfs:syscalls_tcg_test` and
+`//test/qemu:removed_test_ext4_tcg`). Russ, 2026-10-18: "We should have TCG
+smoke tests too."
 
 Every guest test falls back to TCG when `/dev/kvm` is unusable or
 `DCFS_FORCE_TCG` is set (`test/qemu/scripts/run-qemu.sh:736-757`, since 5.1,
@@ -1460,7 +1467,11 @@ asserts that it passes, and asserts that its log says `using tcg`
 (`run-qemu.sh:743`), so the fallback stays real. Test first; a C++ guest
 test under `test/qemu/guest/` (no new shell). Owner: dcfs-mechanical.
 
-## 26.45 Delete or use the `requires-kvm` tag (clerk batch 27, 2026-10-18; queued, not started)
+## 26.45 Delete or use the `requires-kvm` tag (clerk batch 27, 2026-10-18; merged 2026-10-18)
+
+Status (2026-10-19): the tag is deleted by 0119ca40 (Gemini 3.8 Flash via
+foreman); the deletion is the option the step's first sentence names, the
+other option (CI selecting on the tag) was not taken.
 
 The tag is added at `test/qemu/qemu_test.bzl:330` and
 `test/qemu/qemu_cc_test.bzl:218`, and nothing reads it. KVM is optional for

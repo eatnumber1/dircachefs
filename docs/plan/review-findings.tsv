@@ -1,5 +1,6 @@
 date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcome
 2026-10-17	25.34	1	Argon/gemini-4-argon/high	blocker	test-gap	docs/style.md 1.6 & 2	test/qemu/guest/removed_test.cc:262-265	InodeOf drops stat status returning 0 causing ClosedTmpfileLink to pass on failure	no	fixed/merged
+2026-10-18	5.13	1	Gemini/gemini-3.8-flash-high	none	clean-review	-	.github/workflows/ci.yml	clean review; verdict merge after rebase	no	merged 288385e7
 2026-10-17	25.34	1	Argon/gemini-4-argon/high	blocker	test-gap	docs/style.md 1.6, 1.6b & 2	test/qemu/guest/removed_test.cc:55-62	InChild string callback flattens setup errors causing identical error comparison to pass	no	fixed/merged
 2026-10-17	25.34	1	Argon/gemini-4-argon/high	blocker	test-gap	docs/style.md 2	test/qemu/guest/removed_test.cc:145-148	RemovedCwdListing returns ToString discarding names so unexpected cached entries pass	no	fixed/merged
 2026-10-17	25.34	1	Argon/gemini-4-argon/high	should	status-handling	docs/style.md 1.6	test/qemu/guest/removed_test.cc:111-115	ReadBack silently drops pread status turning error into zero bytes read	could	fixed/merged

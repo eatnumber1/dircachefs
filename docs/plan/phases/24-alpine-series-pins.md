@@ -122,6 +122,10 @@ Work:
 - README: the minimum 6.9 -> 6.12 (the requirements bullet and the badge);
   the "Kernel matrix" bullet, which describes testing the minimum as not yet
   done, is re-checked for the new minimum.
+- When 6.12 lands, update every remaining 6.9 floor: the README badge (Kernel
+  6.9+), phases/05-ci.md 5.5, phases/13-connected-backing-fds.md,
+  phases/15-mount-dcfs-wrapper.md and phases/21-real-hardware-checks.md (grep
+  `6\.9` for others).
 - Then re-run every tier, and re-baseline what the kernel and tool change
   moves: io and cpu budgets, the xfstests and pjdfstest expected-failure
   lists, `kernel_facts`, and state counts if any. Each re-baseline commit says
