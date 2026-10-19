@@ -510,6 +510,8 @@ qemu_cc_test(
 # namespace, from /proc (FuseRequest::Caller, CallerHasCapFsetid).
 cc_library(
     name = "proc_status",
+    # //test/qemu: kernel_facts_test pins the namespace check's kernel fact.
+    visibility = ["//test/qemu:__pkg__"],
     hdrs = ["proc_status.h"],
     srcs = ["proc_status.cc"],
     deps = [

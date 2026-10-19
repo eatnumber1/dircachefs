@@ -28,7 +28,10 @@ cc_library(
 cc_library(
     name = "capabilities",
     hdrs = ["capabilities.h"],
-    visibility = ["//dcfs:__pkg__"],
+    visibility = [
+        "//dcfs:__pkg__",
+        "//test/qemu:__pkg__",
+    ],
     deps = ["//dcfs:capability_set"],
 )
 

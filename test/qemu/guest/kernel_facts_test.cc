@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
-// What the kernel and dcfs do for O_DIRECT and inotify, pinned.
+// What the kernel and dcfs do for O_DIRECT and inotify, and the kernel's rules
+// for setuid, setgid, file capabilities and the user namespace that dcfs
+// relies on, pinned.
 //
 // Each test states a fact about the kernel that dcfs relies on, or that its
 // users meet, and fails when the fact stops being true, so that a kernel
@@ -22,9 +24,15 @@
 // cache without faulting a page in (mm/mincore.c:162 mincore_pte_range).
 
 #include <fcntl.h>
+#include <linux/capability.h>
 #include <linux/magic.h>
+#include <linux/nsfs.h>
+#include <linux/posix_acl.h>
+#include <linux/posix_acl_xattr.h>
+#include <sched.h>
 #include <sys/inotify.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/types.h>
 
@@ -33,6 +41,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -41,6 +51,7 @@
 #include "absl/base/no_destructor.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/fixed_array.h"
+#include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/status_matchers.h"
@@ -49,11 +60,14 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_split.h"
+#include "absl/types/optional_ref.h"
 #include "dcfs/fd.h"
+#include "dcfs/proc_status.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
+#include "dcfs/testonly/capabilities.h"
 #include "dcfs/testonly/files.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -570,6 +584,341 @@ TEST(InotifyTest, ABackingChangeRaisesNoEventOnTheMount) {
   EXPECT_THAT(backing, Contains("create oob_created"));
   EXPECT_THAT(backing, Contains("delete oob_created"));
   EXPECT_THAT(backing, Contains("create oob_marker"));
+}
+
+// ---------------------------------------------------------------------------
+// Setuid, setgid and file capabilities, natively
+//
+// dcfs clears setuid and setgid itself where the backing filesystem's own
+// call would (docs/design.md, "Caller credentials"), so it relies on the
+// kernel's rules for them. Each case runs on Native(), dcfs out of the loop.
+//   fs/attr.c:63-77        setattr_should_drop_suidgid: setuid always, setgid
+//                          by setattr_should_drop_sgid (:33-45: with group
+//                          execute, or for a caller neither in the group nor
+//                          capable_wrt_inode_uidgid), and only for a caller
+//                          without capable(CAP_FSETID)
+//   fs/inode.c:2339-2356   dentry_needs_remove_privs: that, and
+//                          ATTR_KILL_PRIV (security.capability) for anyone
+//   fs/inode.c:2547        file_modified, which a write, a fallocate and a
+//                          copy_file_range's remap call (mm/filemap.c:4468,
+//                          fs/ext4/extents.c:4986, fs/remap_range.c:362; the
+//                          splice fallback, fs/read_write.c:1598-1606, writes)
+//   fs/open.c:57           do_truncate asks dentry_needs_remove_privs too
+//   fs/open.c:816-818      chown_common: ATTR_KILL_SUID always, setgid by
+//                          setattr_should_drop_sgid, and ATTR_KILL_PRIV
+//   fs/attr.c:499-512      notify_change makes the kills an ATTR_MODE, which
+//                          setattr_prepare allows the owner only (:205)
+//   fs/posix_acl.c:516-559 __posix_acl_chmod_masq: a chmod rewrites the
+//                          access ACL from the owner, group and other bits
+// ---------------------------------------------------------------------------
+
+// The users credentials.sh names: alice in group 2000, bob outside it.
+Identity Alice() { return {.uid = 1000, .gid = 1000, .groups = {1000, 2000}}; }
+Identity Bob() { return {.uid = 1001, .gid = 1001, .groups = {1001}}; }
+
+// "ok", or the errno's name.
+std::string Result(const absl::Status &status) {
+  if (status.ok()) return "ok";
+  return ErrnoToErrorName(StatusToErrno(status));
+}
+
+// `path`'s mode in octal, setuid and setgid included ("6666").
+std::string Mode(std::string_view path) {
+  absl::StatusOr<struct stat> st = syscalls::stat(path);
+  if (!st.ok()) return Result(st.status());
+  return absl::StrFormat("%o", st->st_mode & 07777);
+}
+
+// A file at `path` with contents, owned by `uid`:`gid`, of mode `mode`.
+absl::Status MakeFile(std::string_view path, uid_t uid, gid_t gid,
+                      mode_t mode) {
+  RETURN_IF_ERROR(WriteFile(path, "test-data\n"));
+  RETURN_IF_ERROR(syscalls::fchownat(AT_FDCWD, path, uid, gid, 0));
+  return syscalls::chmod(path, mode);
+}
+
+// `fn`'s Result, run in a child as `as`, or as root with every capability.
+std::string ResultAs(absl::FunctionRef<absl::Status()> fn,
+                     absl::optional_ref<const Identity> as) {
+  absl::StatusOr<std::string> result = InChild(
+      [&]() -> absl::StatusOr<std::string> { return Result(fn()); }, as);
+  return result.ok() ? *result : Result(result.status());
+}
+
+// `fn`'s Result, run in a child that is root without `cap` in its effective
+// and permitted sets.
+std::string ResultWithout(int cap, absl::FunctionRef<absl::Status()> fn) {
+  return ResultAs(
+      [&]() -> absl::Status {
+        ASSIGN_OR_RETURN(syscalls::CapabilitySets sets, syscalls::capget());
+        sets.effective = testonly::Without(sets.effective, cap);
+        sets.permitted = testonly::Without(sets.permitted, cap);
+        RETURN_IF_ERROR(syscalls::capset(sets));
+        return fn();
+      },
+      std::nullopt);
+}
+
+// A version 2 file capability granting CAP_NET_RAW (struct vfs_cap_data,
+// include/uapi/linux/capability.h:63-69).
+vfs_cap_data FileCapability() {
+  vfs_cap_data capability{};
+  capability.magic_etc = VFS_CAP_REVISION_2;
+  capability.data[0].permitted = 1U << CAP_NET_RAW;
+  return capability;
+}
+
+absl::Status SetFileCapability(std::string_view path) {
+  vfs_cap_data capability = FileCapability();
+  return syscalls::setxattr(
+      path, "security.capability",
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&capability),
+                               sizeof(capability)),
+      0);
+}
+
+// "cap" if `path` carries FileCapability(), else the errno of reading it.
+std::string Capability(std::string_view path) {
+  vfs_cap_data want = FileCapability();
+  vfs_cap_data got{};
+  absl::StatusOr<size_t> n =
+      syscalls::getxattr(path, "security.capability", &got, sizeof(got));
+  if (!n.ok()) return Result(n.status());
+  if (*n == sizeof(want) && std::memcmp(&got, &want, *n) == 0) return "cap";
+  return "another capability";
+}
+
+enum class Change { kWrite, kTruncate, kFallocate, kCopyFileRange };
+
+// `change` made to `path` by the calling process: a write of two bytes, a
+// truncate to 4, a fallocate of 8 KiB, or a copy_file_range of 4 bytes from
+// Native()/src.
+absl::Status Make(Change change, std::string_view path) {
+  if (change == Change::kTruncate) return syscalls::truncate(path, 4);
+  ASSIGN_OR_RETURN(FileDescriptor fd, syscalls::open(path, O_WRONLY));
+  if (change == Change::kWrite) {
+    return syscalls::pwrite(*fd, "x\n", 2, 0).status();
+  }
+  if (change == Change::kFallocate) return syscalls::fallocate(*fd, 0, 0, 8192);
+  ASSIGN_OR_RETURN(FileDescriptor src,
+                   syscalls::open(Path(Native(), "src"), O_RDONLY));
+  return syscalls::copy_file_range(*src, 0, *fd, 0, 4, 0).status();
+}
+
+// A write, a truncate, a fallocate and a copy_file_range clear by one rule:
+// setuid and, with group execute or outside the group, setgid, for a caller
+// without CAP_FSETID (bob, outside group 2000; alice, in it); nothing for one
+// with it (root). dcfs's SuidgidClearedByWrite is this rule, and its backing
+// calls keep CAP_FSETID because the backing's own would apply it again.
+TEST(SetidFactsTest, AChangeClearsSetidBitsByTheCallersCapFsetid) {
+  ASSERT_THAT(MakeFile(Path(Native(), "src"), 0, 0, 0644), IsOk());
+  struct Caller {
+    std::string name;
+    std::optional<Identity> as;
+    std::string from_6666;  // what a change leaves of 6666
+    std::string from_6676;  // and of 6676, with group execute
+  };
+  Caller callers[] = {
+      {.name = "bob", .as = Bob(), .from_6666 = "666", .from_6676 = "676"},
+      {.name = "alice", .as = Alice(), .from_6666 = "2666", .from_6676 = "676"},
+      {.name = "root",
+       .as = std::nullopt,
+       .from_6666 = "6666",
+       .from_6676 = "6676"}};
+  std::pair<std::string_view, Change> changes[] = {
+      {"write", Change::kWrite},
+      {"truncate", Change::kTruncate},
+      {"fallocate", Change::kFallocate},
+      {"copy", Change::kCopyFileRange}};
+  for (const Caller &caller : callers) {
+    for (auto [name, change] : changes) {
+      for (mode_t mode : {06666, 06676}) {
+        std::string path =
+            Path(Native(),
+                 absl::StrFormat("setid-%s-%s-%o", caller.name, name, mode));
+        ASSERT_THAT(MakeFile(path, 0, 2000, mode), IsOk());
+        EXPECT_EQ(ResultAs([&] { return Make(change, path); }, caller.as), "ok")
+            << path;
+        EXPECT_EQ(Mode(path),
+                  mode == 06666 ? caller.from_6666 : caller.from_6676)
+            << path;
+      }
+    }
+  }
+}
+
+// security.capability goes on a write by anyone, root included, whose
+// CAP_FSETID keeps setuid (dentry_needs_remove_privs's ATTR_KILL_PRIV).
+TEST(SetidFactsTest, AWriteRemovesAFileCapabilityWhoeverWrites) {
+  std::pair<std::string, std::optional<Identity>> writers[] = {
+      {"bob", Bob()}, {"root", std::nullopt}};
+  for (const auto &[name, as] : writers) {
+    std::string path = Path(Native(), absl::StrCat("capwrite-", name));
+    ASSERT_THAT(MakeFile(path, 0, 2000, 04666), IsOk());
+    ASSERT_THAT(SetFileCapability(path), IsOk());
+    EXPECT_EQ(ResultAs([&] { return Make(Change::kWrite, path); }, as), "ok");
+    EXPECT_EQ(Capability(path), "ENODATA") << name;
+    EXPECT_EQ(Mode(path), as.has_value() ? "666" : "4666") << name;
+  }
+}
+
+// chown(path, -1, -1) clears setuid whoever makes it, root with CAP_FSETID
+// included, and setgid by setattr_should_drop_sgid: with group execute, or for
+// a caller outside the group without CAP_FSETID.
+TEST(SetidFactsTest, ARootChownOfNothingClearsSetuidAndSetgidByTheGroupRule) {
+  auto chown_nothing = [](const std::string &path) {
+    return [path] {
+      return syscalls::fchownat(AT_FDCWD, path, static_cast<uid_t>(-1),
+                                static_cast<gid_t>(-1), 0);
+    };
+  };
+  std::string suid_sgid = Path(Native(), "chown-root-6666");
+  std::string sgid_gx = Path(Native(), "chown-root-2676");
+  std::string sgid_nofsetid = Path(Native(), "chown-nofsetid-2666");
+  ASSERT_THAT(MakeFile(suid_sgid, 0, 2000, 06666), IsOk());
+  ASSERT_THAT(MakeFile(sgid_gx, 0, 2000, 02676), IsOk());
+  ASSERT_THAT(MakeFile(sgid_nofsetid, 0, 2000, 02666), IsOk());
+  EXPECT_EQ(ResultAs(chown_nothing(suid_sgid), std::nullopt), "ok");
+  EXPECT_EQ(ResultAs(chown_nothing(sgid_gx), std::nullopt), "ok");
+  EXPECT_EQ(ResultWithout(CAP_FSETID, chown_nothing(sgid_nofsetid)), "ok");
+  EXPECT_EQ(Mode(suid_sgid), "2666");
+  EXPECT_EQ(Mode(sgid_gx), "676");
+  EXPECT_EQ(Mode(sgid_nofsetid), "666");
+}
+
+// A non-owner's chown(path, -1, -1) of a setuid file, or of a setgid one
+// outside its group, fails with EPERM and changes nothing: the setid removal
+// is a mode change, which only the owner may make.
+TEST(SetidFactsTest, ANonOwnersChownOfNothingOfASetidFileFails) {
+  for (mode_t mode : {04666, 02666}) {
+    std::string path = Path(Native(), absl::StrFormat("chown-bob-%o", mode));
+    ASSERT_THAT(MakeFile(path, 0, 2000, mode), IsOk());
+    EXPECT_EQ(ResultAs(
+                  [&] {
+                    return syscalls::fchownat(AT_FDCWD, path,
+                                              static_cast<uid_t>(-1),
+                                              static_cast<gid_t>(-1), 0);
+                  },
+                  Bob()),
+              "EPERM")
+        << path;
+    EXPECT_EQ(Mode(path), absl::StrFormat("%o", mode)) << path;
+  }
+}
+
+// A chmod that changes setuid and setgid alone leaves the access ACL as it
+// was, byte for byte: dcfs's KILL_PRIV chmod does not mark it unknown.
+TEST(SetidFactsTest, AChmodOfTheSetidBitsAloneLeavesTheAccessAclAsItWas) {
+  std::string path = Path(Native(), "acl");
+  ASSERT_THAT(MakeFile(path, 0, 2000, 0664), IsOk());
+  // user::rw- user:1000:r-- group::r-- mask::rw- other::r--
+  // (include/uapi/linux/posix_acl_xattr.h, posix_acl.h).
+  struct {
+    posix_acl_xattr_header header;
+    posix_acl_xattr_entry entries[5];
+  } acl = {.header = {.a_version = POSIX_ACL_XATTR_VERSION},
+           .entries = {{.e_tag = ACL_USER_OBJ,
+                        .e_perm = ACL_READ | ACL_WRITE,
+                        .e_id = static_cast<uint32_t>(ACL_UNDEFINED_ID)},
+                       {.e_tag = ACL_USER, .e_perm = ACL_READ, .e_id = 1000},
+                       {.e_tag = ACL_GROUP_OBJ,
+                        .e_perm = ACL_READ,
+                        .e_id = static_cast<uint32_t>(ACL_UNDEFINED_ID)},
+                       {.e_tag = ACL_MASK,
+                        .e_perm = ACL_READ | ACL_WRITE,
+                        .e_id = static_cast<uint32_t>(ACL_UNDEFINED_ID)},
+                       {.e_tag = ACL_OTHER,
+                        .e_perm = ACL_READ,
+                        .e_id = static_cast<uint32_t>(ACL_UNDEFINED_ID)}}};
+  ASSERT_THAT(syscalls::setxattr(
+                  path, "system.posix_acl_access",
+                  std::span<const uint8_t>(
+                      reinterpret_cast<const uint8_t *>(&acl), sizeof(acl)),
+                  0),
+              IsOk());
+  auto read_acl = [&]() -> absl::StatusOr<std::string> {
+    std::string value(256, '\0');
+    ASSIGN_OR_RETURN(size_t n,
+                     syscalls::getxattr(path, "system.posix_acl_access",
+                                        value.data(), value.size()));
+    value.resize(n);
+    return value;
+  };
+  ASSERT_OK_AND_ASSIGN(std::string before, read_acl());
+  ASSERT_OK_AND_ASSIGN(struct stat st, syscalls::stat(path));
+  ASSERT_THAT(syscalls::chmod(path, (st.st_mode & 07777) | S_ISUID | S_ISGID),
+              IsOk());
+  EXPECT_THAT(read_acl(), IsOkAndHolds(before));
+  EXPECT_EQ(Mode(path), "6664");
+}
+
+// ---------------------------------------------------------------------------
+// The user namespace and /proc
+//
+// mount.dcfs refuses a child user namespace by /proc/self/ns/user's inode
+// (dcfs/proc_status.h's InInitUserNamespace, USER_NS_INIT_INO,
+// include/uapi/linux/nsfs.h:50); NS_GET_PARENT cannot tell, since it fails
+// with EPERM in every user namespace (fs/nsfs.c:235-238 calls ns_get_owner,
+// kernel/user_namespace.c:1377-1393, which refuses any owner outside the
+// caller's namespace, the init namespace's absent one included). dcfs reads a
+// caller's groups from /proc/<tid>/task/<tid>/status, mode 0444 with no ptrace
+// check (fs/proc/base.c:3650), and vouches for its CAP_FSETID only through
+// /proc/<tid>/task/<tid>/ns/user, which proc_ns_get_link opens only with
+// ptrace read access (fs/proc/namespaces.c:63-64; cap_ptrace_access_check,
+// security/commoncap.c:164).
+// ---------------------------------------------------------------------------
+
+// `fn`'s Result, run in a child that has moved into a user namespace of its
+// own (no ids mapped: none of these needs one).
+std::string ResultInChildUserNamespace(absl::FunctionRef<absl::Status()> fn) {
+  return ResultAs(
+      [&]() -> absl::Status {
+        RETURN_IF_ERROR(syscalls::unshare(CLONE_NEWUSER));
+        return fn();
+      },
+      std::nullopt);
+}
+
+absl::Status NsGetParentOfMine() {
+  ASSIGN_OR_RETURN(FileDescriptor user,
+                   syscalls::open("/proc/self/ns/user", O_RDONLY));
+  return syscalls::ioctl(*user, NS_GET_PARENT).status();
+}
+
+TEST(UserNamespaceFactsTest, NsGetParentFailsWithEpermInEveryUserNamespace) {
+  EXPECT_EQ(Result(NsGetParentOfMine()), "EPERM");
+  EXPECT_EQ(ResultInChildUserNamespace([] { return NsGetParentOfMine(); }),
+            "EPERM");
+}
+
+TEST(UserNamespaceFactsTest, OnlyTheInitUserNamespaceHasUserNsInitIno) {
+  EXPECT_THAT(InInitUserNamespace(), IsOkAndHolds(true));
+  EXPECT_EQ(ResultInChildUserNamespace([]() -> absl::Status {
+              ASSIGN_OR_RETURN(bool init, InInitUserNamespace());
+              if (!init) return absl::OkStatus();
+              return InternalErrorBuilder()
+                     << "A child user namespace has USER_NS_INIT_INO";
+            }),
+            "ok");
+}
+
+// bob reads root's status file, but follows neither root's ns/user link nor
+// that of this process, root with every capability, from a root without
+// CAP_SYS_PTRACE.
+TEST(ProcFactsTest, AStatusFileIsAnyonesButANamespaceLinkNeedsPtrace) {
+  std::string status = absl::StrCat("/proc/", syscalls::getpid(), "/task/",
+                                    syscalls::getpid(), "/status");
+  std::string ns = absl::StrCat("/proc/", syscalls::getpid(), "/task/",
+                                syscalls::getpid(), "/ns/user");
+  EXPECT_EQ(
+      ResultAs([&] { return testonly::ReadFileToString(status).status(); },
+               Bob()),
+      "ok");
+  EXPECT_EQ(ResultAs([&] { return syscalls::stat(ns).status(); }, Bob()),
+            "EACCES");
+  EXPECT_EQ(ResultWithout(CAP_SYS_PTRACE,
+                          [&] { return syscalls::stat(ns).status(); }),
+            "EACCES");
 }
 
 // The mount, and the check that the guest never ran short of memory: the
