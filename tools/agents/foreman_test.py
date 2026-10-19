@@ -794,6 +794,17 @@ class ForemanTest(unittest.TestCase):
     self.assertEqual(ret, 2)
     self.assertIn("cannot read", stderr.getvalue())
 
+  def test_default_threshold_runs_on_a_nearly_empty_pool(self):
+    self.assertEqual(
+        self._run(single=True, env={"FAKE_AGY_WEEKLY_PCT": "2%"}), 0
+    )
+
+  def test_default_threshold_refuses_an_empty_pool(self):
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+      ret = self._run(single=True, env={"FAKE_AGY_WEEKLY_PCT": "0%"})
+    self.assertEqual(ret, 2)
+
   def test_zero_threshold_skips_the_check(self):
     self.assertEqual(
         self._run(

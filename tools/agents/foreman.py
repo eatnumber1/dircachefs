@@ -22,9 +22,10 @@ import tempfile
 import time
 
 DEFAULT_MODEL = "gemini-3.8-flash-medium"
-# Refuse to start when less of the Gemini weekly pool than this remains:
-# work started on a nearly empty pool dies half done.
-DEFAULT_MIN_WEEKLY_PCT = 10
+# Refuse to start only when the Gemini weekly pool is effectively empty (a
+# 429 mid-run hangs foreman). The pools are meant to be spent down, so
+# callers size a stricter threshold to the job with --min-weekly-pct.
+DEFAULT_MIN_WEEKLY_PCT = 1
 DEFAULT_FOREMAN_BASE = (
     "/tmp/claude-1000/-home-russ-Sources-dircachefs/"
     "4cb5bd53-9fd3-4845-aa05-5c5668254104/scratchpad/foreman"
