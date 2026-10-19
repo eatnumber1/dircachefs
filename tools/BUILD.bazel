@@ -303,7 +303,8 @@ py_library(
 
 # Every check in repo_shape.CHECKS is clean over the real source tree (the
 # list `python3 -I tools/repo_shape.py` prints the problems of). It walks the
-# tree (found through MODULE.bazel's symlink): Bazel cannot declare "every directory of third_party" as inputs, so the target is
+# tree (found through MODULE.bazel's symlink): Bazel cannot declare "every
+# directory of third_party" as inputs, so the target is
 # `external` (never cached) and is cheap.
 py_test(
     name = "repo_shape_test",
