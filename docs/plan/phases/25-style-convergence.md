@@ -2260,7 +2260,11 @@ Process note (2026-10-19, from the slice 2 review): the implementer wrote
 slice 2's tests and code in one pass, so the failing-first evidence had to be
 recovered by running the tests against slice 1's code. Queued as 25.52.
 
-## 25.50 `clerk-queue add` rejects flags (batch 35, 2026-10-19; queued)
+## 25.50 `clerk-queue add` rejects flags (done 2026-10-19, cef83075..626595ad)
+
+Done 2026-10-19 by Gemini 3.8 Flash through foreman orchestrator mode, the
+first step done on Gemini under rule 12; review by Sonnet, two nits fixed in
+75addafd before merge (cef83075, 626595ad on main).
 
 `clerk-queue add --help` queued the literal item `--help`, which reached
 clerk batch 34 (orchestrator's queue, 2026-10-19).
@@ -2417,4 +2421,23 @@ merged (da80d74e).
 
 *Test:* the tool fails a slice whose test targets pass at its first commit, and
 accepts a slice whose targets fail there and pass at its last commit.
+
+## 25.53 One run-a-program helper (orchestrator's proposal, 2026-10-19; queued)
+
+Orchestrator's proposal, not russ's words. Source: 25.52's review of
+2026-10-19 (`review-findings.tsv`, slice 2), which found `tools/process_runner`
+reinventing `RunProgram` and `ReadAll` from `dcfs/fsck.cc`. This is the
+reinvented-helper class the backlog analysis named as the main leak.
+
+1. One shared helper runs a program (fork, socketpair, dup2, execv, wait) and
+   reads its output with a Status, used by `dcfs/fsck.cc` and
+   `tools/process_runner`.
+2. The duplicate is removed from both callers; no behaviour changes.
+
+Placed in M0 after 25.52 (`README.md`, Queue item 2b). Owner: not yet
+assigned (the orchestrator chooses). Dependencies: 25.52 merged.
+
+*Test:* the existing `dcfs/fsck` and `process_runner` tests pass unchanged
+on the shared helper, and `process_runner_test.cc` covers the helper's error
+paths.
 

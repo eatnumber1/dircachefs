@@ -4450,3 +4450,31 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   - Item 2d: README row 25, Queue and M0 show 25.48 and 25.49 done
     2026-10-19; 25.52 then 25.50 are next.
   - Not committed: docs/plan/dispatch-ledger.tsv, left alone as asked.
+- 2026-10-19, clerk batch 41 (25.50 merged; 25.52 review rounds recorded):
+  - Item 1: 25.50 merged cef83075 and 626595ad, done in phases/25, README
+    Queue, M0 row and row 25. Written by Gemini 3.8 Flash through foreman
+    orchestrator mode, the first step done on Gemini under rule 12; review by
+    Sonnet, merge, two nits (comment accuracy at dashboard_lanes.py:1549, test
+    shape at dashboard_lanes_test.py:2008), both fixed in 75addafd before
+    merge. Foreman cost: 306k Gemini tokens (worker 186k, review 120k); weekly
+    pool 1% before and after.
+  - Items 2 to 5: the four 25.52 review rounds and the final review are in
+    review-findings.tsv (rounds 1 to 4; the final review is round 4, numbered
+    by the clerk), outcomes "fixed on step-25.52, merge pending". The
+    round-3 orchestrator ruling is a row with severity none. The 25.52
+    file names are as the reviews gave them; the 25.52 branch is not in this
+    checkout.
+  - Orchestrator's policy rulings from the 25.52 slice 1 review (orchestrator
+    proposals, recorded as rulings): a build failure at the tests-only commit
+    counts as failing first, labelled with quoted ERROR lines for the
+    reviewer, and is refused when no ERROR names a test file or owning target;
+    BUILD.bazel changes in a tests-only commit are allowed only for *_test or
+    testonly rules (no visibility or production target change), done as slice
+    1b.
+  - Process note from the 25.52 slice 1b review (orchestrator lesson): a fix
+    brief must carry every finding's text, not a summary. Round 1's item 9
+    was not done because the brief summarised it as "test-file nits".
+  - Item 4: queued 25.53 one run-a-program helper in phases/25 and the README
+    Queue (item 2b) and M0 row, as the orchestrator's proposal. Not russ's
+    words.
+  - README row 25 and the Queue show 25.50 done and 25.52 next.

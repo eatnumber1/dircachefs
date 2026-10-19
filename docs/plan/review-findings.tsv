@@ -385,3 +385,36 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-19	25.49	3	Sonnet	nit	docs	-	.claude/skills/dcfs-foreman/SKILL.md:51	STEP vs PARENT_STEP	could	fixed/merged fe4f9953
 2026-10-19	25.49	3	Sonnet	nit	style-other	-	tools/agents/dashboard_lanes_test.py:1238	test name	could	fixed/merged fe4f9953
 2026-10-19	25.49	3	orchestrator	should	contract-claim	-	tools/agents/foreman.py	refusal message suggested rerunning with --min-weekly-pct 0, contradicting 'a refusal is final'	no	fixed/merged fe4f9953
+2026-10-19	25.50	1	Sonnet	nit	comment-accuracy	-	tools/agents/dashboard_lanes.py:1549	comment accuracy (fixed in 75addafd before merge)	could	fixed/merged 626595ad
+2026-10-19	25.50	1	Sonnet	nit	test-shape	-	tools/agents/dashboard_lanes_test.py:2008	test shape (fixed in 75addafd before merge)	could	fixed/merged 626595ad
+2026-10-19	25.52	1	Sonnet	should	correctness	-	test_first.cc:160	bazel query without --keep_going: a dangling dep errors instead of build-failed	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	1	Sonnet	should	style-other	docs/style.md 1.2	test_first.cc:46	std::ranges instead of absl::c_	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	1	Sonnet	should	comment-accuracy	-	test_first.h:64	unread test_files field	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	1	Sonnet	should	test-gap	-	test_first_test.cc	six error paths untested	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	1	Sonnet	should	correctness	-	test_first.cc:~226	targets passing at first unreported	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	1	Sonnet	nit	dead-code	-	test_first.cc:41	dead code	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	1	Sonnet	nit	style-other	docs/style.md 1.4	test_first.h:60	style 1.4	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	1	Sonnet	nit	comment-accuracy	-	test_first.cc:27	comment accuracy	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	1	Sonnet	nit	test-shape	-	test_first_test.cc:77	test shape	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	2	Sonnet	should	test-gap	-	-	labels.empty rejection untested	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	2	Sonnet	should	test-gap	-	-	D skip untested	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	2	Sonnet	should	style-other	docs/style.md 1.2	test_first_test.cc:104-110	std::map and std::set instead of absl containers	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	2	Sonnet	nit	test-shape	-	-	EXPECT_THAT on strings	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	2	Sonnet	nit	style-other	-	-	testing:: qualification	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	2	Sonnet	should	correctness	-	BuildRuleViolations	non-testonly rule turning testonly passed	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	2	Sonnet	should	model-gap	-	ReadAttribute	multi-line visibility list not compared	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	2	Sonnet	nit	style-other	docs/style.md 1.6a	Query	bool& out-param	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	3	Sonnet	should	style-other	docs/style.md rule-no-exceptions	test_first_main.cc:95	try/catch in main	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	3	Sonnet	should	style-other	docs/style.md 1.10	process_runner.cc:50	hand-decoded wait status	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	3	Sonnet	should	status-handling	docs/style.md 1.6	process_runner.cc:56	ReadAll drops read errors	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	3	Sonnet	should	style-other	docs/style.md rule-program-output	test_first_main.cc:30	hand-written write loop	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	3	Sonnet	should	style-other	docs/style.md 1.10	test_first_main.cc:46	hand-parsed flags	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	3	Sonnet	should	test-gap	-	process_runner_test.cc:31	Resolve branches and main exit codes untested	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	3	Sonnet	nit	test-shape	-	process_runner_test.cc:44	test shape	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	3	Sonnet	nit	dead-code	-	process_runner.cc:56	duplicates dcfs/fsck.cc RunProgram and ReadAll	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	3	Sonnet	nit	style-other	-	-	include <utility> missing	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	3	Sonnet	nit	comment-accuracy	-	-	comment accuracy	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	4	Sonnet	nit	comment-accuracy	docs/style.md 1.2	test_first_main.cc:54	cites style 1.6 for no-exceptions; it is 1.2	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	4	Sonnet	should	test-gap	docs/style.md 1.13	test_first_main.cc:56	main untested: usage exit 2, Abseil unknown-flag exit 1, comma-split --bazel_flag, env fallback	no	fixed on step-25.52, merge pending
+2026-10-19	25.52	4	Sonnet	nit	docs	-	tools/agents/README.md:493	two blank lines	could	fixed on step-25.52, merge pending
+2026-10-19	25.52	4	orchestrator	none	none	-	-	round-3 ruling: REJECTED exits 3 so exit 1 (Abseil's unknown flag) cannot read as a rejection		ruling
