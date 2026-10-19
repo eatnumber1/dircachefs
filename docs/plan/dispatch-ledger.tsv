@@ -208,8 +208,10 @@ a612d480004086e59	2026-10-19T03:55:02Z	Retry dashboard lanes upload	mechanical	d
 afa6adf37387b2a09	2026-10-19T03:58:53Z	Dashboard upload lanes quota budget	mechanical	dcfs-mechanical	haiku	low	375787	32								18	213	331633	43923
 a32c043e02e801a46	2026-10-19T03:59:10Z	25.49a	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	284681	62								16	2031	238821	43813
 ae7932d806ddfdb29	2026-10-19T04:02:51Z	25.49a	implementation	dcfs-implementer	claude-sonnet-5-5	medium	2439224	1000								68	361	2258876	179919
-ae860fc29eb632483	2026-10-19T04:13:06Z	Backlog dependency and tooling analysis	investigation	dcfs-investigator	claude-sonnet-5-5	high													
+ae860fc29eb632483	2026-10-19T04:13:06Z	Backlog dependency and tooling analysis	investigation	dcfs-investigator	claude-sonnet-5-5	high	15797576	5354								200	828	15225982	570566
 a83aadc8fef41483c	2026-10-19T04:13:11Z	Dashboard upload lanes	mechanical	dcfs-mechanical	haiku	low	171503	20								10	230	129033	42230
 aa20984bb1a56cac2	2026-10-19T04:13:35Z	Clerk batch 35	mechanical	dcfs-mechanical	claude-haiku-5-5	low	669154	94								28	7993	603613	57520
 8604a633	2026-10-19T04:16:02Z	probe-25.49d		agy	gemini-3.8-flash	low	72227		1						foreman mode=orchestrator; worker=27275; review1=44952	71186	1041	0	
 a4837b7fe3babb20a	2026-10-19T04:16:22Z	25.49d	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	442525	97								18	75	381733	60699
+a0880cbafe98ee572	2026-10-19T04:19:48Z	25.49d	mechanical	dcfs-mechanical	claude-haiku-5-5	low	92554	11								8	55	74783	17708
+a628d3724a0846ef0	2026-10-19T05:52:12Z	Clerk batch 36	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1680417	127								66	7843	1604642	67866
