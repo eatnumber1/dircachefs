@@ -4409,3 +4409,27 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
     clear what it asked for.
   - Not committed: docs/plan/dispatch-ledger.tsv had two uncommitted rows
     from another batch, left alone.
+- 2026-10-19, backlog reorder (proposal 2 applied; plan files only):
+  - russ: "prioritize the tooling, and the tests ... 12.16 should come before
+    25.10 ... making the review rounds smaller will improve their quality";
+    then "Yes I approve proposal 2 as a whole."
+  - README: new M0 "gates"; M1 is "gaps proved, then closed" (25.28f and
+    25.28e join it, 25.28e after 25.28d; "Yes, and yes."); 23.13 and 26.38
+    move from M2 to M3; 14.10b stays in M4; the Queue section is the approved
+    ordered list (the 2026-10-11 queue is superseded).
+  - russ's changes: "Foreman single mode and delegating down comes first, I
+    think, since we'll want to use that to save tokens thereafter." (25.48,
+    25.49 first in M0); 25.27 is maximalist and C++ only (25.27-0, then a to
+    d, after 25.48 and 25.49); the kernel-citation checker is pinned to the
+    exact test kernel's tarball ("Pinned tarball sounds fine. We can even pin
+    it to the exact kernel we're using for the tests.") and needs 24.2 first;
+    25.41 approved, unblocking 25.35, 25.36 and 25.38.
+  - Rule ratified: `process.md` `rule-reviewed-slices` (about 800 lines or
+    one subsystem per review round, three-pass review; russ: "I agree,
+    however this means we need to allow a coding agent to make multiple
+    commits, with a review for each commit, before eventually asking for a PR
+    into main."). `docs/design.md` `rule-test-minimum-kernel` keeps the
+    Debian 6.12 headers (russ: "Yes. Keep the Debian 6.12 headers.").
+  - Splits added as notes under their parents with prerequisites: 12.16a/b,
+    12.20a/b/c, 25.10a/b/c, 26.40a/b/c, 22.7a-e, 23.13a/b/c, 25.39a-d,
+    25.46a/b/c, 26.41 and 26.43 by item, 25.28c/d/f model-then-code.

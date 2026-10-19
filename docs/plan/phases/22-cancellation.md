@@ -591,3 +591,18 @@ notes), `docs/style.md` 1.12 (the readdir sentence), README's limitations
 completes the listing, item 4a). One way to do each thing: the
 whole-directory read for a readdir, `ListCached`'s retry loop, and
 `kProbesPerCheckpoint` all go; report any that stays and why.
+
+**Split into reviewed slices (backlog order, russ, 2026-10-19: "Yes I approve
+proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
+- **22.7a** the model and the red tests: `PDRead` as many steps, the `listed`
+  state, `ListingContract`, the known-bug and the pinned non-guarantee.
+  Prerequisites: 12.20a, 12.21, 12.19, 26.41's readdir slope tests (red for
+  this step), 12.27 items 1-3; 22.5 and 25.28b done.
+- **22.7b** the stream handle and plain READDIR (items 1, 2 and 6).
+  Prerequisite: 22.7a.
+- **22.7c** READDIRPLUS paging, the completion guard and the prune (items 3-5
+  and 7). Prerequisite: 22.7b.
+- **22.7d** lookups resolve one name (items 4a and 8) with the `listed` schema
+  change. Prerequisite: 22.7b.
+- **22.7e** budgets, docs and the style 1.12 edit. Prerequisite: 22.7c and
+  22.7d. Also needs 25.10a and 25.10c.

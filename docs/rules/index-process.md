@@ -20,6 +20,12 @@ reasoning. `AGENTS.md` says which indexes to read for which task.
   [process](/docs/plan/process.md#rule-agent-report),
   [process](/docs/plan/process.md#rule-step-review),
   [process](/docs/plan/process.md#rule-merge-procedure)
+- A step is a series of reviewed slices (about 800 changed lines or one
+  subsystem each, three review passes per slice), merged once (russ,
+  2026-10-19: "I agree, however this means we need to allow a coding agent
+  to make multiple commits, with a review for each commit, before eventually
+  asking for a PR into main.").
+  [process](/docs/plan/process.md#rule-reviewed-slices)
 - Rules for every agent: stop after two failures, report only what you observed,
   stay in your lane, report design decisions with their alternative, leave the
   lane's Bazel server running, run commands in the foreground.

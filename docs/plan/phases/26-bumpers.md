@@ -1297,6 +1297,14 @@ synchronous invalidation before the reply to a deferred one (racy).
 
 Owner: dcfs-protocol (kernel cache coherence), after 12.20 or with it.
 
+**Split into reviewed slices (backlog order, russ, 2026-10-19: "Yes I approve
+proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
+- **26.40a** chattr sync invalidation. Prerequisite: 12.20a (its red cases
+  are the failing tests).
+- **26.40b** MAP_SHARED after close. Prerequisite: 12.20a; 12.20b first.
+- **26.40c** infinite timeouts and the flag removal. Prerequisite: 26.40a and
+  26.40b. Revisit 23.13's dead-daemon case when timeouts become infinite.
+
 ## 26.41 Performance bumpers that do not move with load (russ, 2026-10-17)
 
 russ: "The whole point of both the CPU and disk I/O budgets are to try to
@@ -1410,6 +1418,14 @@ budget. Eight budget failures were noise (load, block-layer merging, the
 journal timer, timed tests, a missing sanitizer flag), all from CPU-time,
 wall-time or block-layer budgets. So the proposal proceeds as russ agreed.
 
+**Split into reviewed slices (backlog order, russ, 2026-10-19: "Yes I approve
+proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
+By item, one review round each, in this order: 6 with 1c, then 1, 2, 1b (the
+query plan), 2a (worst cases), 3a and 3b (internal work and allocations), 4
+(the A/B). Prerequisites: the investigation (done), 24.2 first (so less is
+re-baselined); item 5 shrinks 5.16. The readdir slope test is red until
+22.7 and is 22.7a's prerequisite. Milestone M2.
+
 ## 26.43 Load-agnostic to zero (russ, 2026-10-18; queued, not started, M2)
 
 Gathers the load-sensitivity work that was scattered as un-numbered
@@ -1449,6 +1465,11 @@ Done when `tools/repo_shape_sleeps.txt` and 26.17c's headroom list are empty
 and no budget line counts I/O that the guest kernel schedules by time.
 Test first for each change; never widen a budget or tolerance to pass, and
 never weaken a test (AGENTS.md).
+
+**Split into reviewed slices (backlog order, russ, 2026-10-19: "Yes I approve
+proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
+An investigation first, then items 2, 3 (split by the A to H list) and 4, one
+round each. Prerequisites: 26.41 item 6, 25.28c and 25.28f. Milestone M2.
 
 ## 26.44 A TCG boot test: one guest under `DCFS_FORCE_TCG=1` (clerk batch 27, 2026-10-18; merged 2026-10-18)
 

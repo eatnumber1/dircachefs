@@ -134,7 +134,37 @@ process (its waves and file ownership table) is in `history.md`.
      (Phase 26.1; `test/qemu/README.md` "Gates and their self-checks");
      a gate without one is a review finding.
    Fixes go back to the same agent with `SendMessage` (it keeps its
-   context, which is cheaper than a new agent).
+   context, which is cheaper than a new agent). Steps 5 and 6 describe one
+   review and one merge per step; for any step larger than a slice,
+   [`rule-reviewed-slices`](#rule-reviewed-slices) below governs both.
+5a. <a id="rule-reviewed-slices"></a>
+   **A step is a series of reviewed slices, merged once** (russ,
+   2026-10-19: ratified "about 800 lines or one subsystem per review round,
+   plus the three-pass review", with: "I agree, however this means we need
+   to allow a coding agent to make multiple commits, with a review for each
+   commit, before eventually asking for a PR into main."; basis: the
+   backlog analysis of 2026-10-19, where four steps over 3,400 added lines
+   held 170 of 342 findings).
+   1. The implementer works on its step branch in slices of about 800
+      changed lines or one subsystem, one or a few commits each. A step's
+      failing test or model property is its first slice (test first).
+   2. After each slice the implementer reports. The orchestrator dispatches
+      that slice's review over its diff only, in three passes: mechanical
+      gates (no model); a fact pass on a cheaper model (citations, doc
+      claims, comments, naming); Opus correctness only for protocol and
+      model diffs.
+   3. Fixes are follow-up commits in the slice, re-reviewed only where they
+      touch. The same implementer is resumed with `SendMessage` for the
+      next slice.
+   4. One merge to main at the end, after a cheap whole-branch check: all
+      gates, the full test tier and a short integration read for
+      cross-slice issues, not a second full review. Main is updated by
+      cherry-pick or fast-forward (no GitHub PRs; never push).
+   5. Findings are recorded per slice in `review-findings.tsv`
+      ([`rule-track-review-findings`](#rule-track-review-findings)).
+
+   Until 25.47's focused review passes land, the orchestrator runs the
+   three passes as separate dispatches.
 6. <a id="rule-merge-procedure"></a>
    **Merge.** In the lane: rebase the step branch on `origin/main` and
    rerun the tests. Run `.github/ci/commit_subjects.sh origin/main..<branch>`

@@ -267,8 +267,10 @@ the slope at zero.
   against the minimum should make it safe to use dcfs with more recent
   kernels than we test with (russ, 2026-10-18). Planned for step 24.2
   (Thursday 2026-10-22): the test kernel is Alpine v3.22's `linux-virt`
-  6.12.x, patch version floating, and the kernel headers come from the same
-  branch's `linux-virt-dev` (`docs/style.md`,
+  6.12.x, patch version floating. The kernel headers stay the sysroot's
+  Debian trixie `linux-libc-dev` 6.12: they match the 6.12 minimum by
+  major.minor, and the UAPI is stable within a series (russ, 2026-10-19:
+  "Yes. Keep the Debian 6.12 headers."; `docs/style.md`,
   `rule-kernel-headers-match-test-kernel`). Until 24.2 lands, the test kernel
   is 6.18 (v3.24) and 6.12 is not tested yet. The one exception to the
   headers rule is the `USER_NS_INIT_INO` `#ifndef` block (russ, 2026-10-18).

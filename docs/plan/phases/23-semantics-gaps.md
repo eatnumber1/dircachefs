@@ -1112,6 +1112,17 @@ dcfs restarted or dead with a bind mounted on a stub: works as natively
 refuses to mount over a directory with mounts beneath it (acceptance
 criterion).
 
+**Split into reviewed slices (backlog order, russ, 2026-10-19: "Yes I approve
+proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
+- **23.13a** the acceptance `deployment_test` (red at `mount.dcfs`), the
+  reconcile model and the known-bug "warm cache served stale". Prerequisite:
+  25.34 helpers (done). The model files differ from `dcfs.tla`, so it runs
+  beside 22.7a.
+- **23.13b** reconcile and the refusal removal (code). Prerequisite: 23.13a;
+  no dependency on the other model steps.
+- **23.13c** README and docs. Prerequisite: 23.13b. Items 7 and 9 may move to
+  23.14 (already allowed).
+
 ## 23.15 Per-open flags on the declined (non-passthrough) path (2026-10-18, from the Explore research on O_DIRECT and inotify; widened 2026-10-18; queued)
 
 - **Audit first (widened 2026-10-18):** the step starts with an audit

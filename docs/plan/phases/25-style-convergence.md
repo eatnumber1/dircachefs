@@ -412,6 +412,17 @@ shutdown. Style 1.12 gains: "dcfs's own
 signals never interrupt a backing syscall; they are read in the session
 loop."
 
+**Split into reviewed slices (backlog order, russ, 2026-10-19: "Yes I approve
+proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
+- **25.10a** the retry loops out of unlink, rename and readdir, the liveness
+  property and the `repo_shape` ban. The green half of 12.16a; prerequisite
+  12.16a. It retires `atomicity_eagain.cfg` into the model.
+- **25.10b** xattr size queried once (ERANGE), tests first. No prerequisite;
+  may run in parallel with 25.10a.
+- **25.10c** signalfd, before 25.28c's code (they share `SessionLoop`). It
+  turns 12.21's "shutdown only idle" row from unenforced to enforced.
+  Prerequisite: 25.10a.
+
 ## 25.12 `absl::FixedArray` for buffers of known size (russ, 2026-10-10; dispatched)
 
 Style 1.2: a buffer sized once from a syscall's answer, a header field
@@ -962,6 +973,9 @@ go on a shrink-only allowlist. Fuzzy detectors are advisory until they are
 precise enough to gate. The threshold and the allowlist come back to russ
 before commit.
 
+Backlog slot (2026-10-19): M0, after 25.48 and 25.49, in the order 25.27-0,
+25.27a, 25.27b, 25.27c, 25.27d; the pool resets 2026-10-23 20:07 PDT.
+
 - **25.27-0 Prior art (read-only, first).** russ, 2026-10-19: "is there prior
   art we can reuse?" Run on Gemini via foreman `--single --read-only` once
   25.48 lands. Already enabled in `.clang-tidy`: `abseil-*`, `modernize-*`,
@@ -1169,7 +1183,18 @@ kernel holds inode numbers that live in the database).
 
 Owner: dcfs-protocol, small.
 
+**Split into reviewed slices (backlog order, russ, 2026-10-19: "Yes I approve
+proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
+25.28d, 25.28f and 25.28c each split into model and tests (red) first, then
+the code: the model halves in M1's gap-proving order (25.28d, then 25.28f.1's
+measurement as its own investigation, 25.28f, 25.28c with `ClockTest`), the
+code in the same order, with 25.10c before 25.28c's code. 25.28e follows
+25.28d. `limitations/durability_idle.cfg` is violated today and is retired
+by 25.28c.
+
 ## 25.28e Durable cache for O_SYNC and O_DSYNC opens (review S5 on 25.28b, 2026-10-18; after 25.28d)
+
+Milestone M1, after 25.28d (russ, 2026-10-19: "Yes, and yes.").
 
 Passthrough O_SYNC, O_DSYNC and RWF_SYNC writes are durable on the backing
 without a FUSE_FSYNC (fs/backing-file.c:95, 227; fs/fuse/passthrough.c:74,
@@ -1189,6 +1214,9 @@ while dcfs's cache has not yet reached its durable point.
 Owner: dcfs-protocol.
 
 ## 25.28f The periodic sync point fsyncs its dirty directories, not the backing's syncfs (russ, 2026-10-18; queued after 25.28b merges, not started; owner dcfs-protocol)
+
+Milestone M1 (russ, 2026-10-19: "Yes, and yes."). Its model and tests
+come before its code; 25.28f.1's measurement is its own investigation.
 
 russ, 2026-10-18: "our periodic writeback should sync the database, not the
 filesystem the database is on ... I'm expecting us to run syncfs only one
@@ -1762,6 +1790,16 @@ Steps:
    `docs/plan/review-findings.tsv`, where test-gap is the largest
    substantive category (8 of 54 on 2026-10-17).
 
+**Split into reviewed slices (backlog order, russ, 2026-10-19: "Yes I approve
+proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
+- **25.39a** diff coverage on changed code (item 5). No prerequisite.
+- **25.39b** the mutation gate on changed code (item 6). Prerequisite: the
+  Bazel pattern of 25.39a.
+- **25.39c** the style-rule inventory and the first checks, one rule per
+  commit. Prerequisite: 25.38 (the DI interfaces exist).
+- **25.39d** the "no production caller" check. Prerequisite: 25.38.
+  Kernel citations live in 25.45 item 1.
+
 ## 25.40 Support FUSE_STATX (russ, 2026-10-17; queued, M2)
 
 Dependencies: none among the style steps; the M2 row lists it after
@@ -1788,7 +1826,17 @@ Steps:
    7.0, his Ubuntu 24.04 LTS HWE kernel. State the tested kernel floor in
    `README.md`.
 
-## 25.41 Replace link-time `-Wl,--wrap` fakes with dependency injection (drafted 2026-10-18 by Gemini 4 Argon, high; status: drafted, awaiting russ's review)
+## 25.41 Replace link-time `-Wl,--wrap` fakes with dependency injection
+
+Status: approved 2026-10-19 (drafted 2026-10-18 by Gemini 4 Argon, high).
+russ approved this step on 2026-10-19 ("Yes, and yes.", to the orchestrator's
+question), on the strength of his 2026-10-18 rulings quoted below. It unblocks
+25.35, 25.36 and 25.38, which go to M2 module by module, one library per
+commit and about 800 changed lines per review round (`process.md`
+`rule-reviewed-slices`). Order: `BackingSyscalls`, `LocalSyscalls`,
+`ProcessSyscalls`, then the fault tests. The chain rewrites call sites that
+protocol steps also edit in `dir_cache_fs.cc`; pause it during 22.7 if the
+conflicts bite.
 
 The full draft, with its inventories of the `-Wl,--wrap` uses and the
 `syscalls::` layer (Appendices A and B), is in
@@ -1980,10 +2028,19 @@ them marked "could" be mechanical) says yes. Build these in order, each a
 `tools/` check with its own failing-first test:
 
 1. Kernel-citation checker (about 34 findings, M). Every `path:line` citation of
-   the kernel carries "(Linux v7.3-rc7)" and exists at that tag
-   (`git -C ~/Sources/linux show`); the cited line is anchored to the named
-   symbol within +-N lines; a bare kernel function name next to a kernel path is
-   refused. This is 25.39 item 3, pulled forward.
+   the kernel carries the tested kernel's version and exists in it; the cited
+   line is anchored to the named symbol within +-N lines; a bare kernel
+   function name next to a kernel path is refused. This is 25.39 item 3,
+   pulled forward. Source decided (russ, 2026-10-19: "Pinned tarball sounds
+   fine. We can even pin it to the exact kernel we're using for the tests."):
+   a Bazel-pinned kernel.org stable tarball of exactly the test kernel's
+   version (after 24.2, Alpine v3.22's `linux-virt` 6.12.x); one version
+   setting drives both the test kernel and the citation source, so they bump
+   together. The checker runs when docs change. Doc kernel citations cite the
+   tested kernel's `file:line`; citations to upstream master (for example in
+   `notes/kernel-patches.md`) carry a skip marker (the orchestrator's
+   proposal; russ may ask for a second pinned source instead). Prerequisite:
+   24.2.
 2. `repo_shape` 80-column rule for `*.md`, `*.py`, `*.sh` and `BUILD` files,
    outside fences, tables and URLs, with a shrink-only allowlist; plus a rule
    refusing a backtick span split across lines (about 18 findings, S).
@@ -2084,6 +2141,14 @@ Test: each new case fails first on a deliberately wrong expectation, then passes
 on the pinned kernel; the step names the commands when it starts.
 
 Owner: not yet assigned (the orchestrator chooses). Dependencies: none.
+
+**Split into reviewed slices (backlog order, russ, 2026-10-19: "Yes I approve
+proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
+- **25.46a** steps 1-3: the reliances, the pins and the inventory. No
+  prerequisite.
+- **25.46b** the recording FUSE server. Prerequisite: 25.46a; feeds 12.27
+  items 11-12 and 23.19.
+- **25.46c** the entry-point table. Prerequisite: 25.46a.
 
 ## 25.47 Procedures as skills and scripts (russ, 2026-10-18; queued, not started; scheduled after the Friday 2026-10-23 01:00 PT quota reset)
 

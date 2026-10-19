@@ -611,6 +611,33 @@ proven our model covers everything SibylFS does." So 12.16 ends with:
    scripts may stay as a pinned corpus if they still feed the guest test,
    without the checker.
 
+**Split into reviewed slices (backlog order, russ, 2026-10-19: "Yes I approve
+proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
+- **12.16a** `formal/Ideal.tla` and the refinement mapping, before 25.10a and
+  without the FUSE-client model (12.18b is merged and is needed only by
+  12.16b; the kernel's caches are 12.20, which follows this step). Slices:
+  - a1: rename, the hardest guard, plus the expected-red config
+    `formal/limitations/atomicity_eagain.cfg` and a TLC test that expects its
+    counterexample (with its length). Red today because `dcfs.tla` lets
+    unlink, rename and readdir reply EAGAIN after bounded retries and the
+    ideal outcomes have no EAGAIN; 25.10a removes the branches, retires the
+    config into the model and turns the property green. First action: show the
+    red config reachable under the current `Procs` and `MC_*` bounds, adding
+    the smallest config that reaches it. If russ declines expected-red
+    configs on main, a1 lands on a branch with 25.10a as red then green
+    commits.
+  - a2: unlink, create, mkdir, link, setattr. Prerequisite: a1.
+  - a3: lookup, getattr, readdir (weak: entries added or removed during a
+    readdir may appear or not, so 22.7 needs no amendment), open flags, sync
+    kinds. Prerequisite: a1.
+  Prerequisite: the reading-reference pin of SibylFS's Lem definitions.
+  Out of scope: atomicity of a composite syscall (LOOKUP then UNLINK under the
+  inode lock), which 12.16b and 12.20 cover. Milestone M1.
+- **12.16b** the syscall-trace checker from `Ideal.tla`, agreement with
+  SibylFS in both directions, retirement of the pins. Prerequisites: 12.16a,
+  12.18b (done), 12.20a, 22.7 (so the readdir semantics and the kernel layer
+  are final). Milestone M2.
+
 ## 12.19 No stronger than the backing: pinned non-guarantees (russ, 2026-10-17; queued)
 
 russ: "Maybe we should make the formal model include guarantees around
@@ -696,6 +723,17 @@ expires or dcfs invalidates them.
   symlink check).
 
 Owner: dcfs-protocol, after 25.28b and 22.5 (all three touch dcfs.tla).
+
+**Split into reviewed slices (backlog order, russ, 2026-10-19: "Yes I approve
+proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
+- **12.20a** state, actions, property and known-bug; two red cases; the
+  native `open_by_handle_at` differential test first. Prerequisites: 12.16a
+  (the property is stated against the ideal), 12.27 items 1-3, 25.28b and
+  22.5 (done), 24.2 (so the tests are first written on the 6.12 floor).
+  Milestone M1.
+- **12.20b** adopt `FUSE_EXPIRE_ONLY` and the handle-open test (code).
+  Prerequisite: 12.20a.
+- **12.20c** the cost invariants. Prerequisite: 12.20a.
 
 ## 12.21 The model's environment assumptions, registered and enforced (russ, 2026-10-17: "I agree with your proposals"; queued)
 
