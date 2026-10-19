@@ -26,15 +26,16 @@ cost_cpu_us() {
 }
 
 # cost_disks: the sysfs directories of the disks of the test: the virtio disks
-# (all but the coverage disk, which the profiles are written to after the test,
-# and the disk of a Debian root file system, which is read for the programs the
-# test runs: $COV and $ROOTFS, guest/init's) and the loop devices, which are the
-# RAM disks (a loop device that is not attached counts nothing). Device-mapper devices are not here: they sit on
-# these, and their I/O is these disks' I/O.
+# and the SCSI disks behind the virtio-scsi controller (all but the coverage
+# disk, which the profiles are written to after the test, and the disk of a
+# Debian root file system, which is read for the programs the test runs: $COV
+# and $ROOTFS, guest/init's) and the loop devices, which are the RAM disks (a
+# loop device that is not attached counts nothing). Device-mapper devices are
+# not here: they sit on these, and their I/O is these disks' I/O.
 cost_disks() {
-	for cd_dir in /sys/block/vd* /sys/block/loop*; do
-		# A guest with no virtio disk and no loop device (a unit test without
-		# disks): the pattern is left as it is.
+	for cd_dir in /sys/block/vd* /sys/block/sd* /sys/block/loop*; do
+		# A guest with no virtio or SCSI disk and no loop device (a unit test
+		# without disks): the pattern is left as it is.
 		[ -e "$cd_dir/stat" ] || continue
 		[ "/dev/${cd_dir##*/}" = "${COV:-}" ] && continue
 		[ "/dev/${cd_dir##*/}" = "${ROOTFS:-}" ] && continue

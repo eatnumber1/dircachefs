@@ -221,6 +221,26 @@ qemu_cc_test(
     ],
 )
 
+# Step 5.18: disks behind the one virtio-scsi controller (a disk-spec named
+# sd<letter>) appear in the guest with the sizes the spec gave, and the first
+# is the test's directory; run_qemu_mkfs_test has the command line.
+qemu_cc_test(
+    name = "scsi_disks_test",
+    size = "small",
+    timeout = "moderate",
+    srcs = ["guest/scsi_disks_test.cc"],
+    disks = [
+        ("sda", "ext4", "64M"),
+        ("sdb", "ext4", "96M"),
+    ],
+    deps = [
+        "//dcfs/testonly:assert_ok_and_assign",
+        "//dcfs/testonly:files",
+        "@absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # Step 25.33b: waitexit tested exactly with pidfd_open and poll fakes.
 qemu_cc_test(
     name = "waitexit_test",

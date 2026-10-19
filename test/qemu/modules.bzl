@@ -23,7 +23,9 @@ def test_modules(disks, extra = [], rootfs = False):
 
     Returns:
         fuse (dcfs mounts a FUSE filesystem in every test), virtio_blk (the
-        coverage profile disk), the filesystem modules of the disks, and extra.
+        coverage profile disk), the filesystem modules of the disks, virtio_scsi
+        and sd_mod when a disk is named sd<letter> (a SCSI disk behind the
+        virtio-scsi controller, step 5.18), and extra.
     """
     modules = {"fuse": True}
     for module in extra:
@@ -34,6 +36,9 @@ def test_modules(disks, extra = [], rootfs = False):
     modules["virtio_blk"] = True
     for disk in disks:
         modules[_FS_MODULES[disk[1]]] = True
+        if disk[0].startswith("sd"):
+            modules["virtio_scsi"] = True
+            modules["sd_mod"] = True
     if rootfs:
         modules["ext4"] = True
     return sorted(modules.keys())

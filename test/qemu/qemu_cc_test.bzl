@@ -91,7 +91,7 @@ def qemu_cc_test(
             [("vdb", "ext4", "64M")]; the first one is mounted at
             /tmp/test_tmpdir (so TEST_TMPDIR is a real disk instead of
             tmpfs) by guest/init. See run-qemu.sh for the device-letter
-            convention.
+            convention (sd<letter> names a SCSI disk).
         size: required sh_test size, the test's tier (small, medium,
             large, enormous; see test/qemu/README.md "Test tiers").
         timeout: required sh_test timeout.

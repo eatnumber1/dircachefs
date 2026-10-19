@@ -112,7 +112,7 @@ test/qemu/guest/cancel_inventory.sh 1
 test/qemu/guest/cancel.sh 2
 test/qemu/guest/casefold_tune_oops.sh 2
 test/qemu/guest/copy.sh 2
-test/qemu/guest/cost_lib.sh 10
+test/qemu/guest/cost_lib.sh 9
 test/qemu/guest/crash.sh 1
 test/qemu/guest/create.sh 3
 test/qemu/guest/credentials.sh 1

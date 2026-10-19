@@ -1724,6 +1724,23 @@ come after the last spec: a test that needs the most starts its specs at
 `vda` (`mount_dcfs_systemd_test`: ext4 `vda`, xfs `vdb`, btrfs `vdc`, the
 image `vdd`).
 
+### SCSI disks
+
+A microvm has only five usable virtio-mmio devices: the sixth takes
+interrupt 8, which the RTC holds (`rtc=on` is deliberate), and its probe
+fails with `genirq: Flags mismatch irq 8`. A test that needs more disks
+names its backing disks `sd<letter>` instead of `vd<letter>`
+(`("sda", "ext4", "128M")`): `run-qemu.sh` attaches all of them behind one
+`virtio-scsi-device`, a LUN each in the letters' order, so the controller is
+the only slot they take. The letters start at `sda` and have no gap, because
+the guest names SCSI disks in LUN order; the Debian root, the systemd image
+and the coverage disk stay `virtio-blk`, lettered after the `vd<letter>`
+specs alone. `qemu_test` and `qemu_cc_test` add the `virtio_scsi` and
+`sd_mod` modules to a test that has such a disk (`modules.bzl`).
+`scsi_disks_test` shows two disks of the sizes asked for and the first as
+`TEST_TMPDIR`; the command line is checked by `run_qemu_mkfs_test`. The cost
+counters (`cost_disks`) sum SCSI disks with the virtio ones.
+
 ### Sanitizers
 
 ```

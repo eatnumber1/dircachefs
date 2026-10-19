@@ -135,7 +135,10 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             guest (must already be baked into :initramfs, i.e. matched by
             the guest/*.sh glob in this package's initramfs genrule).
         disks: list of (device, fstype, size) tuples, e.g.
-            ("vdb", "ext4", "256M"). device is a /dev/vd<letter> name;
+            ("vdb", "ext4", "256M"). device is a /dev/vd<letter> name
+            (a virtio-blk disk) or a /dev/sd<letter> one (a SCSI disk
+            behind the guest's one virtio-scsi controller, which takes one
+            virtio-mmio slot for all of them: README.md, "SCSI disks");
             an ext4 tuple may have a fourth element, mke2fs options
             (e.g. "-O casefold -E encoding=utf8", no colons);
             see run-qemu.sh for how the letter maps to QEMU drive order.

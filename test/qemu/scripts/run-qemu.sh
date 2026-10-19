@@ -114,6 +114,14 @@
 # unformatted filler drive, so the guest kernel enumerates the requested
 # disk at exactly /dev/vd<letter>.
 #
+# A disk-spec whose <device> is sd<letter> (step 5.18) is a SCSI disk: all of
+# them sit behind one virtio-scsi controller, which takes one virtio-mmio slot
+# however many disks there are. The letters are the LUNs and must start at sda
+# with no gap (the guest names the disks in LUN order); the virtio-blk disks
+# that follow the specs (the Debian root, the systemd image, the coverage disk)
+# are lettered after the vd<letter> specs alone. The guest needs the virtio_scsi
+# and sd_mod modules (test/qemu/modules.bzl adds them for such a spec).
+#
 # Fast boot (step 5.1b): QEMU's microvm machine, direct kernel boot, no
 # PC/ISA legacy devices we don't need (PIT/PIC/option ROMs), virtio-mmio
 # disks (microvm has no PCI). Firmware is qboot (QBOOT below): qboot uses
@@ -552,7 +560,9 @@ fi
 
 # --- lay out the disks in letter order, one -drive/-device pair per index -
 specs_file="$WORKDIR/disk-specs"
+scsi_specs_file="$WORKDIR/scsi-disk-specs"
 : >"$specs_file"
+: >"$scsi_specs_file"
 for spec in "$@"; do
 	dev=${spec%%:*}
 	rest=${spec#*:}
@@ -569,16 +579,39 @@ for spec in "$@"; do
 		echo "run-qemu.sh: mkfs options are only supported for ext4 ('$spec')" >&2
 		exit 1
 	fi
-	letter=${dev#vd}
+	# vd<letter> is a virtio-blk disk; sd<letter> is a SCSI disk behind the
+	# one virtio-scsi controller (kept apart: they are numbered separately).
+	case "$dev" in
+	vd?) kind=$specs_file ;;
+	sd?) kind=$scsi_specs_file ;;
+	*)
+		echo "run-qemu.sh: '$dev' is not a disk name (vd<letter> or sd<letter>)" >&2
+		exit 1
+		;;
+	esac
+	letter=${dev#??}
 	index=$(($(printf '%d' "'$letter") - $(printf '%d' "'a")))
-	echo "$index:$dev:$fstype:$size:$opts" >>"$specs_file"
+	echo "$index:$dev:$fstype:$size:$opts" >>"$kind"
 done
+
+# The guest names SCSI disks in LUN order, so the letters must be the LUNs:
+# a gap would make the guest's sdb the spec's sdc.
+if [ -s "$scsi_specs_file" ] &&
+	[ "$(cut -d: -f1 "$scsi_specs_file" | sort -n | paste -sd, -)" != \
+		"$(seq -s, 0 $(($(wc -l <"$scsi_specs_file") - 1)))" ]; then
+	echo "run-qemu.sh: SCSI disk-specs start at sda and have no gap" >&2
+	exit 1
+fi
 
 # --ram-disks: the specs become one kernel command-line word for guest/init
 # (comma-separated <device>:<fstype>:<size>), and no drive is attached for any
 # of them, so no filler either and a coverage disk is the first virtio disk.
 RAMDISKS_APPEND=""
 if [ -n "$RAM_DISKS" ]; then
+	if [ -s "$scsi_specs_file" ]; then
+		echo "run-qemu.sh: SCSI disks cannot be RAM disks (--ram-disks)" >&2
+		exit 1
+	fi
 	if [ -s "$specs_file" ]; then
 		if awk -F: '$5 != "" { bad = 1 } END { exit !bad }' "$specs_file"; then
 			echo "run-qemu.sh: mkfs options are not supported for --ram-disks disks" >&2
@@ -612,6 +645,32 @@ fi
 
 IMGDIR="${KEEP_DISKS:-$WORKDIR}"
 mkdir -p "$IMGDIR"
+
+# make_image IMAGE FSTYPE SIZE MKFS-OPTIONS: a sparse file of SIZE, formatted,
+# unless --keep-disks has the image of an earlier boot (used as it is).
+make_image() {
+	img=$1
+	fstype=$2
+	size=$3
+	opts=$4
+	# --keep-disks: the images of an earlier boot are used as they are.
+	if [ -n "$KEEP_DISKS" ] && [ -f "$img" ]; then
+		echo "run-qemu.sh: keeping $img"
+		return
+	fi
+	truncate -s "$size" "$img"
+	case "$fstype" in
+	# shellcheck disable=SC2086 # opts is a deliberate list of words
+	ext4) MKE2FS_CONFIG="$MKE2FS_CONF" "$MKE2FS_BIN" -q -F -t ext4 $opts "$img" ;;
+	btrfs) "$MKFS_BTRFS_BIN" -q -f "$img" ;;
+	xfs) "$MKFS_XFS_BIN" -q -f "$img" ;;
+	*)
+		echo "run-qemu.sh: unknown fstype '$fstype'" >&2
+		exit 1
+		;;
+	esac
+}
+
 drive_args=""
 idx=0
 while [ "$idx" -le "$max_index" ]; do
@@ -622,22 +681,7 @@ while [ "$idx" -le "$max_index" ]; do
 		size=$(echo "$line" | cut -d: -f4)
 		opts=$(echo "$line" | cut -d: -f5-)
 		img="$IMGDIR/$dev.img"
-		# --keep-disks: the images of an earlier boot are used as they are.
-		if [ -n "$KEEP_DISKS" ] && [ -f "$img" ]; then
-			echo "run-qemu.sh: keeping $img"
-		else
-			truncate -s "$size" "$img"
-			case "$fstype" in
-			# shellcheck disable=SC2086 # opts is a deliberate list of words
-			ext4) MKE2FS_CONFIG="$MKE2FS_CONF" "$MKE2FS_BIN" -q -F -t ext4 $opts "$img" ;;
-			btrfs) "$MKFS_BTRFS_BIN" -q -f "$img" ;;
-			xfs) "$MKFS_XFS_BIN" -q -f "$img" ;;
-			*)
-				echo "run-qemu.sh: unknown fstype '$fstype'" >&2
-				exit 1
-				;;
-			esac
-		fi
+		make_image "$img" "$fstype" "$size" "$opts"
 	else
 		dev="filler$idx"
 		img="$IMGDIR/filler-$idx.img"
@@ -646,6 +690,23 @@ while [ "$idx" -le "$max_index" ]; do
 	drive_args="$drive_args -drive id=$dev,file=$img,format=raw,if=none -device virtio-blk-device,drive=$dev"
 	idx=$((idx + 1))
 done
+
+# --- SCSI disks: one virtio-scsi controller (one virtio-mmio device, whatever
+# the number of disks) with a LUN per disk, in the letters' order. The guest
+# names them sda, sdb, ... in that order. Only the controller takes a
+# virtio-mmio slot: the microvm has five usable, the fifth device's interrupt
+# is the RTC's (test/qemu/README.md, "SCSI disks"). ------------------------
+if [ -s "$scsi_specs_file" ]; then
+	drive_args="$drive_args -device virtio-scsi-device,id=scsi0"
+	for lun in $(cut -d: -f1 "$scsi_specs_file" | sort -n); do
+		line=$(grep "^$lun:" "$scsi_specs_file")
+		dev=$(echo "$line" | cut -d: -f2)
+		img="$IMGDIR/$dev.img"
+		make_image "$img" "$(echo "$line" | cut -d: -f3)" \
+			"$(echo "$line" | cut -d: -f4)" "$(echo "$line" | cut -d: -f5-)"
+		drive_args="$drive_args -drive id=$dev,file=$img,format=raw,if=none -device scsi-hd,drive=$dev,bus=scsi0.0,scsi-id=0,lun=$lun"
+	done
+fi
 
 # --- optional Debian rootfs disk, always the next letter after the last
 # requested disk-spec (so e.g. disks vdb,vdc + a rootfs gives vdd) --------

@@ -5,7 +5,8 @@
 # --mke2fs-conf / --mkfs-xfs / --mkfs-btrfs, never by a host mkfs.* found on
 # PATH; the paths used are logged to serial.log; a path under /usr, /bin,
 # /sbin is refused. A fake qemu stands in for the emulator (nothing here
-# needs root or a kernel), and fake mkfs tools record how they were run.
+# needs root or a kernel), and fake mkfs tools record how they were run. The
+# same fake qemu records the disk layout it was given (SCSI disks, step 5.18).
 #
 # Usage: run_qemu_mkfs_test.sh <run-qemu.sh>
 set -eu
@@ -23,8 +24,10 @@ mkdir "$WORK/bin" "$WORK/host"
 cat >"$WORK/bin/qemu" <<'E'
 #!/bin/sh
 [ "${1:-}" = --version ] && echo "fake qemu 0"
-# Keep what the guest would be given as its initramfs.
+# Keep what the guest would be given as its initramfs, and every argument.
+: >"$(dirname "$0")/../qemu-args"
 while [ $# -gt 0 ]; do
+	echo "$1" >>"$(dirname "$0")/../qemu-args"
 	[ "$1" = -initrd ] && cat "$2" >"$(dirname "$0")/../initrd.seen"
 	shift
 done
@@ -105,6 +108,113 @@ run $good
 [ "$(cat "$WORK/initrd.seen")" = BASE ] ||
 	fail "without --modules the initramfs is not the base alone"
 echo "PASS: --modules appends the module archive to the initramfs"
+
+# Step 5.18: a disk-spec named sd<letter> is a disk behind the one virtio-scsi
+# controller (one virtio-mmio device however many disks: the microvm's
+# eighth device would share the RTC's interrupt), a vd<letter> spec stays a
+# virtio-blk disk, and the disks after the specs (the Debian root, the systemd
+# image, the coverage disk) are numbered by the virtio-blk specs alone.
+# layout <options...> -- <disk-spec...>: an e2e boot, RC its exit status (a
+# fake qemu boots no guest, so a run that got as far as QEMU still fails).
+layout() {
+	rm -rf "$WORK/t" "$WORK/out" "$WORK/mkfs-calls" "$WORK/qemu-args"
+	mkdir -p "$WORK/t" "$WORK/out"
+	opts=""
+	while [ "$1" != -- ]; do
+		opts="$opts $1"
+		shift
+	done
+	shift
+	RC=0
+	# shellcheck disable=SC2086 # opts is a list of words
+	TEST_TMPDIR="$WORK/t" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
+		sh "$RUN_QEMU" --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" $good $opts \
+		"$WORK/kernel" "$WORK/initrd" test.sh "$@" >"$WORK/stdout" 2>&1 || RC=$?
+}
+
+# count <fixed string>: how many lines of the QEMU command line are it.
+count() { grep -c -x -F -e "$1" "$WORK/qemu-args" || true; }
+
+# Three SCSI disks: one controller, a LUN each in the letters' order, each
+# formatted as its spec says, and no virtio-blk device at all.
+layout -- sda:ext4:8M sdb:xfs:16M sdc:btrfs:32M
+[ -e "$WORK/qemu-args" ] ||
+	fail "three SCSI disks: qemu did not run: $(cat "$WORK/stdout")"
+[ "$(count virtio-scsi-device,id=scsi0)" -eq 1 ] ||
+	fail "want one virtio-scsi-device: $(cat "$WORK/qemu-args")"
+[ "$(count scsi-hd,drive=sda,bus=scsi0.0,scsi-id=0,lun=0)" -eq 1 ] ||
+	fail "sda is not LUN 0: $(cat "$WORK/qemu-args")"
+[ "$(count scsi-hd,drive=sdb,bus=scsi0.0,scsi-id=0,lun=1)" -eq 1 ] ||
+	fail "sdb is not LUN 1: $(cat "$WORK/qemu-args")"
+[ "$(count scsi-hd,drive=sdc,bus=scsi0.0,scsi-id=0,lun=2)" -eq 1 ] ||
+	fail "sdc is not LUN 2: $(cat "$WORK/qemu-args")"
+grep -q 'virtio-blk-device' "$WORK/qemu-args" &&
+	fail "a SCSI-only run attached a virtio-blk device: $(cat "$WORK/qemu-args")"
+[ "$(stat -c %s "$WORK/t/sda.img")" -eq 8388608 ] || fail "sda.img is not 8M"
+[ "$(stat -c %s "$WORK/t/sdc.img")" -eq 33554432 ] || fail "sdc.img is not 32M"
+grep -q '^mke2fs ' "$WORK/mkfs-calls" || fail "sda was not formatted ext4"
+grep -q '^mkfs-xfs ' "$WORK/mkfs-calls" || fail "sdb was not formatted xfs"
+grep -q '^mkfs-btrfs ' "$WORK/mkfs-calls" || fail "sdc was not formatted btrfs"
+echo "PASS: SCSI disks share one virtio-scsi controller, a LUN each, formatted"
+
+# With a systemd image and a coverage disk: the image is the first virtio-blk
+# disk (vda) and the coverage disk the next, as nothing else is virtio-blk.
+: >"$WORK/image"
+: >"$WORK/qemu-img"
+printf '#!/bin/sh\nfor a; do last=$a; done\n: >"$last"\n' >"$WORK/bin/qemu-img"
+chmod +x "$WORK/bin/qemu-img"
+mkdir "$WORK/cov"
+COVERAGE_DIR="$WORK/cov"
+export COVERAGE_DIR
+layout --systemd-image "$WORK/image" --qemu-img "$WORK/bin/qemu-img" \
+	--cov-script x --cov-llvm-profdata x --cov-llvm-cov x --cov-object x -- \
+	sda:ext4:8M sdb:xfs:16M
+unset COVERAGE_DIR
+[ -e "$WORK/qemu-args" ] ||
+	fail "systemd image with SCSI disks: qemu did not run: $(cat "$WORK/stdout")"
+grep -q 'dcfs_systemd=/dev/vda1' "$WORK/qemu-args" ||
+	fail "the systemd image is not vda: $(cat "$WORK/qemu-args")"
+grep -q 'dcfs_cov=/dev/vdb' "$WORK/qemu-args" ||
+	fail "the coverage disk is not vdb: $(cat "$WORK/qemu-args")"
+[ "$(count virtio-scsi-device,id=scsi0)" -eq 1 ] || fail "want one controller"
+echo "PASS: the systemd image and the coverage disk after SCSI disks" \
+	"are vda and vdb"
+
+# SCSI and virtio-blk disks together: a vdb with a vda filler beside the
+# controller.
+layout -- vdb:ext4:8M sda:ext4:8M
+[ -e "$WORK/qemu-args" ] ||
+	fail "mixed disks: qemu did not run: $(cat "$WORK/stdout")"
+[ "$(count scsi-hd,drive=sda,bus=scsi0.0,scsi-id=0,lun=0)" -eq 1 ] ||
+	fail "mixed: sda is not LUN 0"
+[ "$(grep -c 'virtio-blk-device' "$WORK/qemu-args")" -eq 2 ] ||
+	fail "mixed: want a filler and vdb on virtio-blk: $(cat "$WORK/qemu-args")"
+echo "PASS: SCSI and virtio-blk disks can be given together"
+
+# No SCSI disk, no controller: the other tests' device count is unchanged.
+layout -- vdb:ext4:8M
+grep -q scsi "$WORK/qemu-args" &&
+	fail "a run with no SCSI disk has a SCSI device"
+echo "PASS: a run with no SCSI disk has no controller"
+
+refused() { # <expected words> <options...> -- <disk-spec...>
+	want=$1
+	shift
+	layout "$@"
+	[ "$RC" -ne 0 ] || fail "'$*' was accepted"
+	grep -q "$want" "$WORK/stdout" ||
+		fail "'$*': no '$want' in: $(cat "$WORK/stdout")"
+	[ ! -e "$WORK/qemu-args" ] || fail "'$*': qemu ran"
+}
+# The LUNs are the letters, and the guest names the disks in LUN order: a gap
+# would make the guest's sdb the spec's sdc.
+refused "start at sda and have no gap" -- sdb:ext4:8M
+refused "start at sda and have no gap" -- sda:ext4:8M sdc:ext4:8M
+refused "not a disk name" -- hda:ext4:8M
+printf 'FSTOOLS' >"$WORK/fstools.cpio.gz"
+refused "SCSI disks cannot be RAM disks" \
+	--ram-disks "$WORK/fstools.cpio.gz" -- sda:ext4:8M
+echo "PASS: gaps, unknown names and RAM-backed SCSI disks are refused"
 
 # A host path is refused, before any image is made.
 rm -f "$WORK/mkfs-calls"
