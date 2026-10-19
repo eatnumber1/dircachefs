@@ -4595,3 +4595,20 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   bind to themselves and see every close. 25.41 gains a check that no
   `syscalls::` return type has a non-trivial destructor. Edited: phases/25
   25.41; `docs/style.md` `rule-function-names`.
+- 2026-10-19, the thin layer is `RealSyscalls`; RAII at creation (plan edit
+  by Sonnet 5.5): russ, rejecting the `RawFd` design: "No, RAII-at-create
+  avoids leaks. I want other options."; of five options offered, "Ok to
+  Option 1." Decided: the thin layer folds into `RealSyscalls` (its
+  CamelCase members call libc; `RealSyscalls::Openat` calls `::openat` and
+  wraps the result at once in a `FileDescriptor` bound to `*this`). No
+  `syscalls::` free functions, no `RawFd`. `FileDescriptor` closes through
+  its `Syscalls`; its constructor is passkey-only for `Syscalls`
+  implementations. Only `RealSyscalls`'s library may call libc
+  (`banned_symbols`, `rule-no-raw-syscalls` narrowed), no exceptions; its
+  members are tested against the real kernel in the guest, and tests
+  elsewhere fake `Syscalls`. The lowercase man-page-name exception ends;
+  `ioctl<OP>`/`fcntl<OP>` become per-op virtual members with a non-virtual
+  typed front end (25.41 settles where it sits). This supersedes 7aeede4b's
+  `RawFd` design and 89b25694's thin-free-function layer. Edited: phases/25
+  25.41, 25.57; `docs/style.md` `rule-function-names` and
+  `rule-no-raw-syscalls`; `docs/rules/index-style.md`; the notes file header.

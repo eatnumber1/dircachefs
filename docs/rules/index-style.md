@@ -25,7 +25,7 @@ that holds its reasoning. `AGENTS.md` says which indexes to read for which task.
   [style 1.1](/docs/style.md#rule-warnings-are-errors)
 - Narrowing Google's C++ rules:
   [optional and string_view](/docs/style.md#rule-std-optional-string-view),
-  [function names: `syscalls::` are thin libc-named wrappers with no `Context`; everything else is CamelCase; the `Syscalls` interface is the only seam, enforced by BUILD visibility (russ, 2026-10-19)](/docs/style.md#rule-function-names),
+  [function names: all CamelCase; the thin layer is `RealSyscalls`'s members, the `Syscalls` interface is the only seam, owning types are RAII at creation (russ, 2026-10-19)](/docs/style.md#rule-function-names),
   [non-const locals (russ, 2026-10-11)](/docs/style.md#rule-locals-non-const),
   [flags only in main (russ, 2026-10-11)](/docs/style.md#rule-flags-in-main-only),
   [no function pointers (russ, 2026-10-11)](/docs/style.md#rule-no-function-pointers),

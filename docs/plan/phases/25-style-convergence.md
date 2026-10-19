@@ -1859,58 +1859,55 @@ door-guarded library, which 25.57 dissolves, so it is dropped. The design is:
 
 - One pure virtual `Syscalls` interface, with one CamelCase member per
   syscall (`Read`, `Openat`, ...).
-- `RealSyscalls`, the one production implementation, whose members make the
-  libc call (`::read`).
+- `RealSyscalls`, the one production implementation, whose members are the
+  thin layer: each makes the libc call itself (`RealSyscalls::Read` calls
+  `::read`; `RealSyscalls::Openat` calls `::openat` and wraps the result at
+  once in a `FileDescriptor` bound to `*this`). There are no separate
+  `syscalls::` free functions and no `RawFd` type.
 - Test fakes derive from a `DelegatingSyscalls` base in `testonly/` that holds
   the inner `Syscalls` by reference and forwards every member (single
   inheritance; no virtual inheritance; never derived from `RealSyscalls`).
   One or more fakes override what a test needs.
 - `Context` carries a `Syscalls &` (constructed in `main` and in the test
-  harnesses; no global `Default()` accessor). The `syscalls::` free
-  functions of 25.57 stay true thin wrappers: no `Context` parameter, typed
-  arguments, `Status`, nothing else. They are tested against the real kernel
-  in the guest and never faked. The `Syscalls` interface is the only seam.
+  harnesses; no global `Default()` accessor). Typed signatures, `Status`
+  and nothing else is the rule for every member. `RealSyscalls`'s members
+  are tested directly against the real kernel in the guest; tests elsewhere
+  fake `Syscalls`. The `Syscalls` interface is the only seam.
   The layering (russ, 2026-10-19; see the superseded note below):
 
   ```
   backing::ReadFile(ctx, ...)
     -> backing::Read(ctx, ...)         door check, then:
     -> ctx.syscalls().Read(...)        the seam: RealSyscalls or a test fake
-    -> RealSyscalls::Read(...)         one line:
-    -> syscalls::read(fd, buf)         thin: typed args, Status, nothing else
+    -> RealSyscalls::Read(...)         the thin layer: one libc call
     -> ::read
   ```
 
-- One way to reach the kernel, by BUILD visibility. The `syscalls::` library
-  is visible only to `RealSyscalls`'s library and its own kernel tests, with
-  no exceptions (russ, 2026-10-19: "I don't like having
-  FileDescriptor::close having an exemption (nor any other exceptions). How
-  would you recommend removing those exceptions?"). A genquery golden test
-  pins exactly that, like `dcfs/syscalls_backing_users.txt` today. Daemon
-  and backing code reach the kernel only through the `Syscalls &` they are
-  given; `banned_symbols` and `rule-no-raw-syscalls` still stop direct libc
-  calls. This rule and the golden are part of this step (sub-steps 1 and 8).
+- One way to reach the kernel, by library. Only `RealSyscalls`'s library may
+  include libc syscall headers or call libc syscall functions;
+  `banned_symbols` and `rule-no-raw-syscalls` are narrowed to that library,
+  with no exceptions (russ, 2026-10-19: "I don't like having
+  FileDescriptor::close having an exemption (nor any other exceptions)").
+  A genquery golden test pins that the library is visible only to the
+  binaries' `main` and the testonly harnesses that construct a
+  `RealSyscalls`, like `dcfs/syscalls_backing_users.txt` today. Daemon and
+  backing code reach the kernel only through the `Syscalls &` they are
+  given. This rule and the golden are part of this step (sub-steps 1 and 8).
   How each former exception goes:
-  1. Ownership is a feature, so it lives above the thin layer (russ,
-     2026-10-19: "The problem with FileDescriptor::close is that
-     FileDescriptor is created in the thin wrappers where no Syscalls
-     object exists. Same goes for any other types originating inside the
-     Syscalls wrapper"). Thin `syscalls::` wrappers return plain values
-     (`Stat`, `Statfs`, bytes, names) and strong-typed non-owning handles
-     for kernel resources: `syscalls::RawFd` (no destructor, no close)
-     from `openat`, and likewise pidfds, both ends of a socketpair,
-     eventfd and signalfd. The owning types are born in the `Syscalls`
-     layer: `RealSyscalls::Openat(...)` calls `syscalls::openat` and wraps
-     the `RawFd` in a `FileDescriptor` bound to `*this`, whose destructor
-     calls `syscalls_->Close(raw)`. The constructor is private, reachable
-     only by `Syscalls` implementations through a passkey type, so nothing
-     outside the interface can make an owning descriptor that closes
-     behind the seam. Fakes construct `FileDescriptor`s bound to
-     themselves and see every close. Only `RealSyscalls` (error paths
-     before wrapping) and the thin wrappers' own kernel tests close a
-     `RawFd` directly; the thin library's visibility limits who can obtain
-     one. `FileDescriptor` grows from 4 to 16 bytes, which is negligible,
-     and fakes can count opens and closes (fd-leak tests).
+  1. Ownership is RAII at creation (russ, 2026-10-19: "No, RAII-at-create
+     avoids leaks. I want other options.", then "Ok to Option 1."). Every
+     member that obtains a kernel resource (`Openat`, `PidfdOpen`,
+     `Socketpair`, `Eventfd`, `Signalfd`, ...) returns an owning type
+     bound to the `Syscalls` that made it: `RealSyscalls::Openat` calls
+     `::openat` and wraps the result at once in a `FileDescriptor` bound
+     to `*this`, whose destructor calls `syscalls_->Close(...)`. The
+     constructor is reachable only by `Syscalls` implementations, through
+     a passkey type, so nothing else can make an owning descriptor that
+     closes behind the seam. Fakes construct `FileDescriptor`s bound to
+     themselves and see every close, so they can count opens and closes
+     (fd-leak tests). `FileDescriptor` grows from 4 to 16 bytes, which is
+     negligible. `RealSyscalls::Close` is the one place that calls
+     `::close`.
   2. The daemon's lock file uses `ctx.syscalls()` like everything else; its
      old exemption existed only to skip the door, which now lives in
      `backing::`.
@@ -1920,14 +1917,18 @@ door-guarded library, which 25.57 dissolves, so it is dropped. The design is:
      covers the host tools.
   4. The subprocess child after `fork` (`dup2`, `execv`, `_exit`) calls
      through the same `Syscalls &` (a virtual call does not allocate).
-- Mechanical check (an item of this step): no type with a non-trivial
-  destructor appears in a `syscalls::` function's return type. A
-  clang-query or a `static_assert` on the wrapper signatures; the step
-  decides.
 - Restrictions the three libraries carried (only startup forks, only
   `bench/` and the tools reach `execv`) are call-site checks if they are kept
   at all (`tools/banned_symbols.txt`, a `repo_shape` rule), not interface
   boundaries. Which to keep is decided when the step starts.
+
+**Superseded again (russ, 2026-10-19; the [log entry](/docs/plan/log.md),
+"the thin layer is `RealSyscalls`").** The thin `syscalls::` free functions
+and the `syscalls::RawFd` type recorded earlier the same day are gone. russ
+rejected the `RawFd` design ("No, RAII-at-create avoids leaks. I want other
+options.") and chose the option that folds the thin layer into `RealSyscalls`:
+"Ok to Option 1." Read "the thin `syscalls::` wrappers" below as "the
+members of `RealSyscalls`".
 
 **Superseded (russ, 2026-10-19; the [log entry](/docs/plan/log.md), "thin
 `syscalls::` wrappers").**
@@ -1950,8 +1951,8 @@ reached only by BUILD visibility and a genquery test, not the compiler
 (`docs/style.md`, rule-function-names; russ, 2026-10-18: "maybe we keep the
 Syscalls functions public, but control access via BUILD visibility?", then
 "Yes"). Now the members' only callers are `backing::` (and other code
-holding a `Syscalls &`) and the testonly fakes, and the only caller of the
-`syscalls::` functions is `RealSyscalls` (no exceptions, above).
+holding a `Syscalls &`) and the testonly fakes, and the only code that calls
+libc is `RealSyscalls` (no exceptions, above).
 libfuse gets its own small seam (`FuseLowlevelOps`), separate from
 `Syscalls`.
 
@@ -1961,13 +1962,11 @@ libfuse gets its own small seam (`FuseLowlevelOps`), separate from
 libraries into one, weakening `//tools:syscalls_backing_users_test`; (2) left
 two ways to call a syscall (`RealSyscalls::Default()` and free functions);
 and (3) used virtual-inheritance mixins. This step answers (2) and (3)
-directly: one way to call (`ctx.syscalls()`; the thin `syscalls::` functions
-are reachable only from `RealSyscalls`, with no exceptions) and
-single inheritance. For (1), 25.57 has already moved the door's enforcement
-to the `backing::` layer and the check that the backing layers do not call a
-thin
-`syscalls::` function that has a `backing::` twin, so one interface no longer
-weakens the invariant.
+directly: one way to call (`ctx.syscalls()`; libc is called only by
+`RealSyscalls`, with no exceptions) and single inheritance. For (1), 25.57
+has already moved the door's enforcement to the `backing::` layer and the
+check that the backing layers do not call a `Syscalls` member that has a
+`backing::` twin, so one interface no longer weakens the invariant.
 
 **Why.** Link-time wrapping relies on glibc symbol names (`openat64`,
 `fstatfs64`), fragile IA-64 C++ mangled names, inlining avoidance across
@@ -1982,13 +1981,16 @@ second is a test-only knob in production code, `docs/style.md` 2).
 - **Nth-call faults:** a `CountdownFault` helper in `testonly/` decrements a
   counter on matching calls and returns `ErrnoToStatus(err, op)` when
   `++calls == fail_at` or while `times-- > 0` (for the existing wrap tests).
-- **Typed ioctl and fcntl:** `syscalls::ioctl<OP>` and `syscalls::fcntl<OP>`
-  stay free function templates (thin, no `Context`); the `Syscalls`
-  interface has the per-op CamelCase members (`IoctlGetVersion`,
-  `IoctlGetFsUuid`, `IoctlBtrfsFsInfo`, `IoctlBtrfsSubvolInfo`, `IoctlFlags`,
-  `IoctlRaw`), each of which `RealSyscalls` implements with one call to the
-  matching template, as in 25.38 (russ, 2026-10-18: "Yes, ioctl and fcntl
-  become free function templates.").
+- **Typed ioctl and fcntl:** member templates cannot be virtual, so the
+  `Syscalls` interface has the per-op virtual CamelCase members
+  (`IoctlGetVersion`, `IoctlGetFsUuid`, `IoctlBtrfsFsInfo`,
+  `IoctlBtrfsSubvolInfo`, `IoctlFlags`, `IoctlRaw`, and the `fcntl`
+  equivalents), each of which `RealSyscalls` implements with one `::ioctl`
+  or `::fcntl` call. The typed `ioctl<OP>(...)` and `fcntl<OP>(...)` front
+  ends (russ, 2026-10-18: "Yes, ioctl and fcntl become free function
+  templates.") are non-virtual templates, on `Syscalls` or free templates
+  taking a `Syscalls &`, that pick the member for `OP`, as in 25.38. The
+  step settles which of the two reads simplest and uses it everywhere.
 - **Libfuse seam:** a `FuseLowlevelOps` interface on `FuseSession` and
   `FuseRequest` for `fuse_passthrough_open`, `fuse_passthrough_close` and
   `fuse_reply_none`, replacing three wraps.
@@ -2008,12 +2010,13 @@ second is a test-only knob in production code, `docs/style.md` 2).
 
 **Migration order (small mergeable commits, each tested).**
 1. **Define `Syscalls`, `RealSyscalls` and `DelegatingSyscalls`;** make
-   `Context` carry it, `backing::` call `ctx.syscalls()`, and restrict the
-   `syscalls::` library's BUILD visibility to `RealSyscalls`'s library and
-   its kernel tests with no exceptions, with the genquery golden;
-   `FileDescriptor` is born in `Syscalls` (thin wrappers return `RawFd`);
-   every `main` builds a
-   `RealSyscalls`. Measure `dcfs_bench` before
+   `Context` carry it, `backing::` call `ctx.syscalls()`, and confine
+   libc syscall calls and headers to `RealSyscalls`'s library with no
+   exceptions (`banned_symbols`, `rule-no-raw-syscalls`, the genquery
+   golden); `FileDescriptor` is born in `Syscalls` (RAII at creation, passkey
+   constructor, closes through its `Syscalls`); today's `syscalls::` call
+   sites are renamed to `ctx.syscalls()` or a passed `Syscalls &`; every
+   `main` builds a `RealSyscalls`. Measure `dcfs_bench` before
    and after (miss-heavy and mutation-heavy). The
    step stops for russ if the cost is not negligible. *Test:* unit tests of
    `RealSyscalls` and `DelegatingSyscalls` plus
@@ -2039,11 +2042,11 @@ second is a test-only knob in production code, `docs/style.md` 2).
    `dir_cache_fs_crash_during_recovery_test`;** replace the eight
    `dcfs/testonly/` `--wrap` libraries with fakes or the authorizer.
 8. **Delete the `--wrap` allow-lists, ban `-Wl,--wrap`, update docs.** Shrink
-   any remaining direct `syscalls::` caller and pin the empty exception set
-   with the genquery golden (BUILD visibility, russ 2026-10-18 and
-   2026-10-19); remove `__wrap_` and `__real_` exceptions from
-   `.clang-tidy` and `tools/raw_syscalls_test.py`; add a `style_checks_test`
-   check banning `--wrap` in `BUILD.bazel` and `*.bzl`; update `AGENTS.md`,
+   any remaining direct libc or `syscalls::` caller and pin the empty
+   exception set with the genquery golden (russ 2026-10-18 and 2026-10-19);
+   remove `__wrap_` and `__real_` exceptions from `.clang-tidy` and
+   `tools/raw_syscalls_test.py`; add a `style_checks_test` check banning
+   `--wrap` in `BUILD.bazel` and `*.bzl`; update `AGENTS.md`,
    `docs/style.md` and `docs/design.md:3292-3312`. *Test:*
    `bazel test --config=presubmit //...`.
 9. **Migrate the `InChild` reap test (25.34 follow-up).** `InChild` takes
@@ -2053,12 +2056,12 @@ second is a test-only knob in production code, `docs/style.md` 2).
 
 **Risks.**
 - *Bypassing the injected interface:* a caller invoking a member directly
-  would skip `NoTransactionAt` and `FaultSitesTest`. Mitigation: BUILD
-  visibility and the genquery test in sub-step 8, with no exceptions
-  (`FileDescriptor` closes through the `Syscalls` that made it).
+  would skip `NoTransactionAt` and `FaultSitesTest`. Mitigation: the
+  library confinement and the genquery test in sub-step 8, with no
+  exceptions (`FileDescriptor` closes through the `Syscalls` that made it).
 - *Variadic `openat`/`ioctl`/`fcntl`:* virtual members cannot be variadic or
   templates. Mitigation: split `Openat` with and without a mode, and the
-  `ioctl<OP>`/`fcntl<OP>` templates over per-op members (25.38).
+  `ioctl<OP>`/`fcntl<OP>` front ends over per-op virtual members (25.38).
 - *Coverage baseline:* every `RealSyscalls` member and error branch stays
   covered, so total coverage never drops.
 
@@ -2076,6 +2079,24 @@ there is one interface: 25.41a the interface, `RealSyscalls`, the delegating
 base and `Context` (sub-step 1), 25.41b the startup and process tests
 (sub-steps 2 and 4), 25.41c the backing and device-id tests (sub-step 3),
 then the fault tests per the six-test list in this section.
+
+**docs/style.md to update when this lands** (beyond the 25.57 list)
+
+- `rule-function-names`: the "Not yet true of the code" note, once 25.41 has
+  landed.
+- `rule-no-raw-syscalls` (about line 599): "Syscalls go through
+  `dcfs/syscalls.h`", "a missing wrapper is added to `syscalls.h`" and "A
+  test calls the `syscalls::` wrappers" become the `Syscalls` interface and
+  `ctx.syscalls()`; the allowed place is `RealSyscalls`'s library only.
+- 1.5 (`syscalls.h`, about lines 534 to 575): the section describes one thin
+  wrapper per syscall in free functions named for the manpage; it becomes the
+  `Syscalls` interface and `RealSyscalls`. `rule-syscall-wrappers` and "A
+  helper that composes wrappers ... never in `dcfs::syscalls`" follow.
+- The `syscalls::open(...)` namespace example (about line 446) and 1.6's
+  examples (about lines 1014 to 1025 and 1101 to 1104) calling
+  `syscalls::setfsgid` and the like.
+- 1.8 (about lines 1260 to 1268): "may call the `syscalls::` wrappers
+  directly from any file".
 
 ## 25.42 Pidfds over pids (russ, 2026-10-18; queued after the 2026-10-23 quota reset)
 
@@ -2757,26 +2778,25 @@ more fake syscalls implementations for tests?" He confirmed the plan with
    `dcfs::backing`) as CamelCase functions: `backing::Read`,
    `backing::Openat`, `backing::Fstatat`, and so on. Each is
    `RETURN_IF_ERROR(BackingDoor())` and then the thin call.
-2. The thin wrappers in `dcfs/syscalls.h` own the man-page names
-   (`syscalls::read`, ...); today's `syscalls::read_own` becomes
+2. Until 25.41, the thin wrappers in `dcfs/syscalls.h` keep the man-page
+   names (`syscalls::read`, ...); today's `syscalls::read_own` becomes
    `syscalls::read`. `//dcfs:syscalls_backing`'s thin layer goes away, and
    with it the second set of by-name wrappers. The layering (russ,
-   2026-10-19, reversing his 2026-10-18 ruling that the `syscalls::` free
-   functions take `Context`; see the
-   [log entry](/docs/plan/log.md), "thin `syscalls::` wrappers") is:
+   2026-10-19; 25.41 then folds the thin layer into `RealSyscalls`, see the
+   [log entry](/docs/plan/log.md), "the thin layer is `RealSyscalls`") is:
 
    ```
    backing::ReadFile(ctx, ...)
      -> backing::Read(ctx, ...)         door check, then:
      -> ctx.syscalls().Read(...)        the seam: RealSyscalls or a test fake
-     -> RealSyscalls::Read(...)         one line:
-     -> syscalls::read(fd, buf)         thin: typed args, Status, nothing else
+     -> RealSyscalls::Read(...)         the thin layer: one libc call
      -> ::read
    ```
 
-   `syscalls::read` takes no `Context`. The two middle arrows arrive with
-   25.41; until then `backing::Read` calls `syscalls::read(fd, buf)`
-   directly.
+   The `backing::` door functions call `ctx.syscalls()`. The two middle
+   arrows arrive with 25.41; until then `backing::Read` calls
+   `syscalls::read(fd, buf)` directly, which 25.41 renames to the
+   `ctx.syscalls()` call.
 3. The enforcement is retargeted. `backing_door_guard.query` checks the
    `backing::` CamelCase functions, the poisoned-door test
    (`EveryWrapperRefusesOnceTheDoorIsPoisoned`) walks them, and a new check

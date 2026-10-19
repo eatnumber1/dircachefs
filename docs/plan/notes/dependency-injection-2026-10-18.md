@@ -1,13 +1,22 @@
 Draft by Gemini 4 Argon (high), 2026-10-18; orchestrator review notes in the
 plan step (25.41 in `phases/25-style-convergence.md`).
 
-**Superseded again 2026-10-19 (russ): thin wrappers.** The `syscalls::` free
+**Superseded a third time 2026-10-19 (russ): the thin layer is
+`RealSyscalls`.** There are no `syscalls::` free functions and no `RawFd`;
+`RealSyscalls`'s members make the libc calls and wrap each resource at once
+in an owning type ("No, RAII-at-create avoids leaks. I want other options.",
+then "Ok to Option 1."). The layering is `backing::ReadFile` ->
+`backing::Read` (door check) -> `ctx.syscalls().Read(...)` ->
+`RealSyscalls::Read` -> `::read`. See 25.41 and the 2026-10-19 "the thin
+layer is `RealSyscalls`" entry in `docs/plan/log.md`. Read
+"`syscalls::x(ctx, ...)`" anywhere below as "`ctx.syscalls().X(...)`".
+
+*Earlier, 2026-10-19: thin wrappers (also superseded).* The `syscalls::` free
 functions do not take `Context`; they are true thin wrappers, and the
 `Syscalls` interface is the only seam. The layering is `backing::ReadFile` ->
 `backing::Read` (door check) -> `ctx.syscalls().Read(...)` ->
 `RealSyscalls::Read` -> `syscalls::read(fd, buf)` -> `::read`. See 25.41 and
 the 2026-10-19 "thin `syscalls::` wrappers" entry in `docs/plan/log.md`.
-Read "`syscalls::x(ctx, ...)`" anywhere below as "`ctx.syscalls().X(...)`".
 
 **Rewritten 2026-10-19 (clerk batch 47).** The draft step that stood here
 proposed three interfaces mirroring the three syscall libraries

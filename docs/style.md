@@ -154,51 +154,67 @@ use it as design guidance rather than firm rules."
   **`std::string_view`, `std::optional`**, not the `absl::` aliases (none
   left in production code).
 - <a id="rule-function-names"></a>
-  **Function names**: `syscalls::` functions are true thin wrappers named
-  for their libc/manpage name in lower case (`syscalls::read`,
-  `syscalls::setxattr`), with typed signatures and no `Context` parameter.
-  Every other function is CamelCase (`SetXattr`), including the door-guarded
-  `backing::Read`, `backing::Openat` and the rest (step 25.57) and the
-  members of the one `Syscalls` interface (`Read`, `Write`, ...). The two
-  layers never clash by construction.
-  - The typed signatures stay: a call looks like `syscalls::write(fd, buf)`
-    with `buf` a `std::span<const std::byte>`, not `(fd, buf, n)`; names
-    are `std::string_view`, not `char *`; errors come back as `Status` or
+  **Function names**: every function is CamelCase (`SetXattr`), with no
+  lowercase man-page-name exception. The thin layer over libc is the
+  members of the one `Syscalls` interface, which `RealSyscalls`
+  implements: `Read`, `Write`, `Openat`, `Setxattr`, ... Each
+  `RealSyscalls` member makes one libc call (`RealSyscalls::Read` calls
+  `::read`), with a typed signature, and nothing else. Door-guarded
+  `backing::Read`, `backing::Openat` and the rest (step 25.57) are
+  higher-level CamelCase functions in `backing::`.
+  - The typed signatures stay: a call looks like
+    `ctx.syscalls().Write(fd, buf)` with `buf` a
+    `std::span<const std::byte>`, not `(fd, buf, n)`; names are
+    `std::string_view`, not `char *`; errors come back as `Status` or
     `StatusOr` ([`rule-status-only-error-channel`](#rule-status-only-error-channel)).
     These are the libc deviations (the `char *` rule in section 1.2, step
     25.24; buffers as spans, step 25.37; typed signatures, step 25.38) and
     nothing here changes them (russ, 2026-10-18: "Be sure not to let that
     invalidate the other libc deviations we've already done (such as
     changing pointer+len to std::span, or changing char* to string_view).").
-  - `syscalls::ioctl<OP>(...)` and `syscalls::fcntl<OP>(...)` stay free
-    function templates (russ, 2026-10-18: "Yes, ioctl and fcntl become free
-    function templates."), now without `Context`. They dispatch to the
-    per-op CamelCase members of `Syscalls` (`IoctlGetFsUuid`) only through
-    `RealSyscalls`.
-  - The `Syscalls` interface is the only seam. `Context` carries it; daemon
-    and backing code reach the kernel only through `ctx.syscalls()` (or a
-    `Syscalls &` passed down). `RealSyscalls`'s members are one line each,
-    calling the thin `syscalls::` wrapper. Tests fake `Syscalls` (a
-    `DelegatingSyscalls` base), never the thin wrappers, which are tested
-    against the real kernel in the guest.
-  - Enforcement, no exceptions: the `syscalls::` library's BUILD visibility
-    admits only `RealSyscalls`'s library and its own kernel tests, and a
-    genquery golden pins that. Thin wrappers return plain values and
-    non-owning handles (`syscalls::RawFd`); owning types such as
-    `FileDescriptor` are created by `Syscalls` implementations only, via
-    a passkey, and close through the `Syscalls` that made them.
-    Each binary's `main` constructs one `RealSyscalls` and passes it
+  - `ioctl` and `fcntl`: member templates cannot be virtual, so `Syscalls`
+    has per-op virtual members (`IoctlGetFsUuid`), each implemented by
+    `RealSyscalls` with one libc call, and the typed `ioctl<OP>(...)` and
+    `fcntl<OP>(...)` front ends are non-virtual templates that pick the
+    member (russ, 2026-10-18: "Yes, ioctl and fcntl become free function
+    templates."). Whether the front ends sit on `Syscalls` or are free
+    templates taking a `Syscalls &` is settled by step 25.41.
+  - The layering is `backing::ReadFile(ctx, ...)`, then
+    `backing::Read(ctx, ...)` (the door check), then
+    `ctx.syscalls().Read(...)` (the seam), then `RealSyscalls::Read`, then
+    `::read`. The `Syscalls` interface is the only seam. `Context` carries
+    it; daemon and backing code reach the kernel only through
+    `ctx.syscalls()` (or a `Syscalls &` passed down). Tests elsewhere fake
+    `Syscalls` (a `DelegatingSyscalls` base); `RealSyscalls`'s members are
+    tested directly against the real kernel in the guest.
+  - Enforcement, no exceptions (russ, 2026-10-19: "I don't like having
+    FileDescriptor::close having an exemption (nor any other
+    exceptions)"): only `RealSyscalls`'s library may include libc syscall
+    headers or call libc syscall functions, and `banned_symbols` and
+    [`rule-no-raw-syscalls`](#rule-no-raw-syscalls) are narrowed to that
+    library.
+  - Ownership is RAII at creation (russ, 2026-10-19: "No, RAII-at-create
+    avoids leaks. I want other options.", then "Ok to Option 1."): every
+    member that obtains a kernel resource returns an owning type bound to
+    the `Syscalls` that made it, and `FileDescriptor`'s destructor closes
+    through that `Syscalls`. `FileDescriptor`'s constructor is reachable
+    only by `Syscalls` implementations, through a passkey; a fake
+    constructs descriptors bound to itself and sees every close.
+  - Each binary's `main` constructs one `RealSyscalls` and passes it
     down; there are no globals and no default instance.
   - Not yet true of the code: until steps 25.57 and 25.41 land, today's
-    code still has the old shape (door wrappers in `syscalls_backing.h`,
-    `-Wl,--wrap` fakes), and those steps move it.
+    code still has the old shape (lowercase `syscalls::` wrappers, door
+    wrappers in `syscalls_backing.h`, `-Wl,--wrap` fakes), and those steps
+    move it.
   - History: russ, 2026-10-19: "The root of the problem is that we've added
     too many features to what are supposed to be \"thin\" syscall
     wrappers."; on the layering, "I like your recommendation. Make it so",
     then "... but also I don't like having FileDescriptor::close having an
-    exemption (nor any other exceptions)." This reverses the 2026-10-18
-    rulings (free functions take `Context`; three interfaces); see the
-    2026-10-19 entries in [the plan log](/docs/plan/log.md).
+    exemption (nor any other exceptions)." That reversed the 2026-10-18
+    rulings (free functions take `Context`; three interfaces), and the
+    thin `syscalls::` free functions and `RawFd` it then recorded gave way
+    to folding the thin layer into `RealSyscalls` ("Ok to Option 1."); see
+    the 2026-10-19 entries in [the plan log](/docs/plan/log.md).
 - **Every pointer says whether it may be null; a pointer that may not be
   null is usually a reference** (russ, 2026-10-10: "all pointers need
   either `absl_nullable` or `absl_nonnull`, including both raw pointers
@@ -599,7 +615,8 @@ fd is for signalling only: wait on a `clone3` or `pidfd_open` fd.
 through `dcfs/syscalls.h` and `dcfs/syscalls_backing.h`, where the failure
 is handled and converted into a `Status`: no call of a libc syscall wrapper
 outside `dcfs/syscalls.cc`, `dcfs/syscalls_backing.cc` and
-`dcfs/syscalls_process.cc`, in production code, tests, `dcfs/testonly/`,
+`dcfs/syscalls_process.cc` (after step 25.41, outside `RealSyscalls`'s
+library, with no exceptions), in production code, tests, `dcfs/testonly/`,
 `bench/`, any C++ in `tools/` and any C++ under `test/qemu/` (orchestrator
 ruling, 2026-10-18, from the 17.6 style review); and no `std::filesystem` or
 file stream (`std::ifstream`, `std::ofstream`, `std::fstream`), which open and
