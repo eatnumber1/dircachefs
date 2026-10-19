@@ -124,7 +124,7 @@ echo /sbin/dcfs-modprobe >/proc/sys/kernel/modprobe
 # The disks behind virtio_scsi have their nodes by the time its insmod returns,
 # though the kernel scans the controller asynchronously: do_init_module waits
 # for all async work (async_synchronize_full) unless the module asked for an
-# async probe, and sd_probe is synchronous in it.
+# async probe.
 if [ -f /etc/dcfs-modules ]; then
   for module in $(cat /etc/dcfs-modules); do
     insmod "$module" || echo "init: insmod $module failed"
@@ -133,6 +133,21 @@ fi
 
 # Populate any device nodes devtmpfs didn't create on its own.
 mdev -s
+
+# The kernel names SCSI disks in the order their asynchronous probes finish, not
+# in LUN order (measured: sdb was LUN 2 in the second boot of a guest whose
+# first had it as LUN 1). run-qemu.sh's sd<letter> disk-spec is the LUN
+# ('a' is 0), so /dev/dcfs-scsi/sd<letter> is a link to the node of that LUN's
+# disk (the LUN is the last field of the "host:channel:target:lun" its sysfs
+# device link ends in). The links stay in /dev when the systemd guest moves it.
+for scsi_disk in /sys/block/sd*; do
+  [ -e "$scsi_disk" ] || continue
+  scsi_lun=$(readlink "$scsi_disk/device")
+  scsi_lun=${scsi_lun##*:}
+  mkdir -p /dev/dcfs-scsi
+  # shellcheck disable=SC2059 # the octal escape is the letter
+  ln -s "/dev/${scsi_disk##*/}" "/dev/dcfs-scsi/sd$(printf "\\$(printf %03o $((97 + scsi_lun)))")"
+done
 
 echo "boot: kernel $(uname -r)"
 
@@ -416,6 +431,8 @@ if [ -f /test/run ]; then
   if [ -s /test/disk0 ]; then
     disk_spec=$(cat /test/disk0)
     disk_dev="/dev/${disk_spec%%:*}"
+    # A SCSI disk is found by LUN (see /dev/dcfs-scsi above).
+    case "$disk_dev" in /dev/sd?) disk_dev="/dev/dcfs-scsi/${disk_dev#/dev/}" ;; esac
     if ! mount -t "${disk_spec#*:}" "$disk_dev" /tmp/test_tmpdir; then
       echo "init: failed to mount $disk_dev on /tmp/test_tmpdir"
       echo "DCFS-TEST-EXIT=1"

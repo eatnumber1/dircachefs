@@ -163,6 +163,13 @@ grep -q "^mkfs-btrfs .* $WORK/t/sdc.img\$" "$WORK/mkfs-calls" ||
 	fail "sdc.img was not formatted btrfs: $(cat "$WORK/mkfs-calls")"
 echo "PASS: SCSI disks share one virtio-scsi controller, a LUN each, formatted"
 
+# The letter is the LUN, gaps included: the guest finds a disk by its LUN.
+layout -- sdb:ext4:8M sdd:ext4:8M
+[ "$(count scsi-hd,drive=sdb,bus=scsi0.0,scsi-id=0,lun=1)" -eq 1 ] &&
+	[ "$(count scsi-hd,drive=sdd,bus=scsi0.0,scsi-id=0,lun=3)" -eq 1 ] ||
+	fail "the LUNs are not the letters: $(cat "$WORK/qemu-args")"
+echo "PASS: a SCSI disk's LUN is its letter"
+
 # --keep-disks (a second boot): the images of the first are used as they are,
 # SCSI ones included -- not made again, not formatted again.
 rm -rf "$WORK/keep"
@@ -230,15 +237,11 @@ refused() { # <expected words> <options...> -- <disk-spec...>
 		fail "'$*': no '$want' in: $(cat "$WORK/stdout")"
 	[ ! -e "$WORK/qemu-args" ] || fail "'$*': qemu ran"
 }
-# The LUNs are the letters, and the guest names the disks in LUN order: a gap
-# would make the guest's sdb the spec's sdc.
-refused "start at sda and have no gap" -- sdb:ext4:8M
-refused "start at sda and have no gap" -- sda:ext4:8M sdc:ext4:8M
 refused "not a disk name" -- hda:ext4:8M
 printf 'FSTOOLS' >"$WORK/fstools.cpio.gz"
 refused "SCSI disks cannot be RAM disks" \
 	--ram-disks "$WORK/fstools.cpio.gz" -- sda:ext4:8M
-echo "PASS: gaps, unknown names and RAM-backed SCSI disks are refused"
+echo "PASS: unknown names and RAM-backed SCSI disks are refused"
 
 # A host path is refused, before any image is made.
 rm -f "$WORK/mkfs-calls"

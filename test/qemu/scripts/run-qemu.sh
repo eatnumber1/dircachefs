@@ -116,11 +116,13 @@
 #
 # A disk-spec whose <device> is sd<letter> (step 5.18) is a SCSI disk: all of
 # them sit behind one virtio-scsi controller, which takes one virtio-mmio slot
-# however many disks there are. The letters are the LUNs and must start at sda
-# with no gap (the guest names the disks in LUN order); the virtio-blk disks
-# that follow the specs (the Debian root, the systemd image, the coverage disk)
-# are lettered after the vd<letter> specs alone. The guest needs the virtio_scsi
-# and sd_mod modules (test/qemu/modules.bzl adds them for such a spec).
+# however many disks there are. The letter is the LUN ('a' is 0), and the
+# guest finds the disk as /dev/dcfs-scsi/sd<letter> (guest/init), not as
+# /dev/sd<letter>: the kernel's names follow the order of its asynchronous
+# probes. The virtio-blk disks that follow the specs (the Debian root, the
+# systemd image, the coverage disk) are lettered after the vd<letter> specs
+# alone. The guest needs the virtio_scsi and sd_mod modules
+# (test/qemu/modules.bzl adds them for such a spec).
 #
 # Fast boot (step 5.1b): QEMU's microvm machine, direct kernel boot, no
 # PC/ISA legacy devices we don't need (PIT/PIC/option ROMs), virtio-mmio
@@ -594,15 +596,6 @@ for spec in "$@"; do
 	echo "$index:$dev:$fstype:$size:$opts" >>"$kind"
 done
 
-# The guest names SCSI disks in LUN order, so the letters must be the LUNs:
-# a gap would make the guest's sdb the spec's sdc.
-if [ -s "$scsi_specs_file" ] &&
-	[ "$(cut -d: -f1 "$scsi_specs_file" | sort -n | paste -sd, -)" != \
-		"$(seq -s, 0 $(($(wc -l <"$scsi_specs_file") - 1)))" ]; then
-	echo "run-qemu.sh: SCSI disk-specs start at sda and have no gap" >&2
-	exit 1
-fi
-
 # --ram-disks: the specs become one kernel command-line word for guest/init
 # (comma-separated <device>:<fstype>:<size>), and no drive is attached for any
 # of them, so no filler either and a coverage disk is the first virtio disk.
@@ -692,8 +685,8 @@ while [ "$idx" -le "$max_index" ]; do
 done
 
 # --- SCSI disks: one virtio-scsi controller (one virtio-mmio device, whatever
-# the number of disks) with a LUN per disk, in the letters' order. The guest
-# names them sda, sdb, ... in that order. Only the controller takes a
+# the number of disks) with a LUN per disk, the letter's ('a' is 0). Only the
+# controller takes a
 # virtio-mmio slot: the microvm has four usable, the fifth device's interrupt
 # is the RTC's (test/qemu/README.md, "SCSI disks"). ------------------------
 if [ -s "$scsi_specs_file" ]; then

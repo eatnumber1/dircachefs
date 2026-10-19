@@ -140,6 +140,26 @@ else
 	fail vdb-mount "mount failed"
 fi
 
+# The same for a SCSI disk behind the virtio-scsi controller (step 5.18): the
+# cost accounting would otherwise count the I/O of the systemd test's backing
+# disks as nothing.
+if [ -b /dev/dcfs-scsi/sda ]; then
+	pass sda-present
+else
+	fail sda-present "/dev/dcfs-scsi/sda missing"
+fi
+mkdir -p /scsi_src
+if mount -t ext4 /dev/dcfs-scsi/sda /scsi_src; then
+	if out=$(cost_selfcheck /scsi_src "$(cat "$(block_sysfs /dev/dcfs-scsi/sda)/dev")"); then
+		pass cost-accounting-scsi-disk
+	else
+		fail cost-accounting-scsi-disk "$out"
+	fi
+	umount /scsi_src
+else
+	fail sda-mount "mount failed"
+fi
+
 # testutil's event waits (lib.sh's start_daemon and the holders' lines): no
 # timeout and no polling interval, so each check is run in whichever order
 # the waiter and the event happen to come; a hang is the failure.

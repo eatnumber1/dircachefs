@@ -165,7 +165,10 @@ cc_binary(
 
 qemu_test(
     name = "boot_test",
-    disks = [("vdb", "ext4", "64M")],
+    disks = [
+        ("vdb", "ext4", "64M"),
+        ("sda", "ext4", "64M"),
+    ],
     guest_script = "guest/boot.sh",
     size = "small",
     timeout = "moderate",
@@ -222,8 +225,9 @@ qemu_cc_test(
 )
 
 # Step 5.18: disks behind the one virtio-scsi controller (a disk-spec named
-# sd<letter>) appear in the guest with the sizes the spec gave, and the first
-# is the test's directory; run_qemu_mkfs_test has the command line.
+# sd<letter>) are found by LUN (/dev/dcfs-scsi/sd<letter>: the kernel's own
+# names are in probe order) with the sizes the spec gave, and the first is the
+# test's directory; run_qemu_mkfs_test has the command line.
 qemu_cc_test(
     name = "scsi_disks_test",
     size = "small",
@@ -234,13 +238,11 @@ qemu_cc_test(
         ("sdb", "ext4", "96M"),
     ],
     deps = [
-        "//dcfs/testonly:assert_ok_and_assign",
-        "//dcfs/testonly:files",
-        "@absl//absl/status",
+        "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
         "@absl//absl/status:status_macros",
         "@absl//absl/status:status_matchers",
         "@absl//absl/status:statusor",
-        "@absl//absl/strings",
         "@googletest//:gtest_main",
     ],
 )

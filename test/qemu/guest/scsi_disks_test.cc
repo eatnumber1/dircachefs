@@ -1,54 +1,55 @@
 // SPDX-License-Identifier: MIT
 // Disks behind the guest's one virtio-scsi controller (run-qemu.sh, a disk-spec
-// named sd<letter>) appear in the guest as /dev/sd<letter> in the order of the
-// letters, with the sizes the spec gave, and the first is usable as a
-// filesystem (guest/init mounted it as the test's directory).
+// named sd<letter>) are found by their LUN, not by the kernel's name: the
+// kernel names SCSI disks in the order their asynchronous probes finish, so
+// /dev/sdb may be LUN 2. guest/init links /dev/dcfs-scsi/sd<letter> to the
+// disk of LUN <letter> - 'a'. Each such disk has the size its spec gave, and
+// the first is usable as a filesystem (guest/init mounted it as the test's
+// directory).
+
+#include <fcntl.h>
+// include-cleaner looks for SEEK_END in <stdio.h>, not <cstdio>.
+// NOLINTNEXTLINE(modernize-deprecated-headers): the macro's header
+#include <stdio.h>
 
 #include <cstdint>
-#include <string>
 #include <string_view>
 
-#include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/ascii.h"
-#include "absl/strings/numbers.h"
-#include "absl/strings/str_cat.h"
-#include "dcfs/testonly/assert_ok_and_assign.h"
-#include "dcfs/testonly/files.h"
+#include "dcfs/fd.h"
+#include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 namespace dcfs {
 namespace {
 
+using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
 using ::testing::Eq;
-using ::testing::HasSubstr;
 
-// The size in bytes the kernel reports for the disk `name` (sysfs counts
-// 512-byte sectors whatever the disk's block size).
-absl::StatusOr<uint64_t> SizeOfDisk(std::string_view name) {
-  ASSIGN_OR_RETURN(std::string sectors, testonly::ReadFileToString(absl::StrCat(
-                                            "/sys/block/", name, "/size")));
-  uint64_t n = 0;
-  if (!absl::SimpleAtoi(absl::StripAsciiWhitespace(sectors), &n)) {
-    return absl::InvalidArgumentError(
-        absl::StrCat("the size of ", name, " is '", sectors, "'"));
-  }
-  return n * 512;
+// The size in bytes of the block device at `path`.
+absl::StatusOr<uint64_t> SizeOfDevice(std::string_view path) {
+  ASSIGN_OR_RETURN(FileDescriptor fd,
+                   syscalls::openat(AT_FDCWD, path, O_RDONLY));
+  ASSIGN_OR_RETURN(off_t size, syscalls::lseek(*fd, 0, SEEK_END));
+  return static_cast<uint64_t>(size);
 }
 
 TEST(ScsiDisksTest, EachDiskHasItsSpecsSize) {
-  EXPECT_THAT(SizeOfDisk("sda"), IsOkAndHolds(Eq(64u << 20)));
-  EXPECT_THAT(SizeOfDisk("sdb"), IsOkAndHolds(Eq(96u << 20)));
+  EXPECT_THAT(SizeOfDevice("/dev/dcfs-scsi/sda"), IsOkAndHolds(Eq(64u << 20)));
+  EXPECT_THAT(SizeOfDevice("/dev/dcfs-scsi/sdb"), IsOkAndHolds(Eq(96u << 20)));
 }
 
 TEST(ScsiDisksTest, TheFirstDiskIsTheTestsDirectory) {
-  ASSERT_OK_AND_ASSIGN(std::string mounts,
-                       testonly::ReadFileToString("/proc/mounts"));
-  EXPECT_THAT(mounts, HasSubstr("/dev/sda /tmp/test_tmpdir ext4 "));
+  absl::StatusOr<struct stat> directory = syscalls::stat("/tmp/test_tmpdir");
+  absl::StatusOr<struct stat> disk = syscalls::stat("/dev/dcfs-scsi/sda");
+  ASSERT_THAT(directory, IsOk());
+  ASSERT_THAT(disk, IsOk());
+  EXPECT_THAT(directory->st_dev, Eq(disk->st_rdev));
 }
 
 }  // namespace

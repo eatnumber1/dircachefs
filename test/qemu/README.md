@@ -765,7 +765,7 @@ gate is disabled.
 | the load-starvation flag (26.17: the host's CPU pressure over the run's wall time, 20%) | `//test/qemu:run_qemu_cost_test` (a fake `date` and a pressure file moved by the fake qemu: 30% and 20% flag a run in the time line and the verdict, 19% does not, a failing run and one without a MEM line carry it, a host without the file has none and says so) and `//test/qemu:run_qemu_verdict_test` (the first boot of a power cut carries it) |
 | the wall allowance covers the work the budgets allow (26.17: `cost_wall_allowance`; the refusal before the guest boots) | `//test/qemu:run_qemu_cost_test` (an allowance one second short of the floor is refused with the numbers and the guest is not booted, the floor itself is accepted, flushes count 20 ms each, a target without budgets has no floor) and `//test/qemu:strace_lib_test` (the arithmetic and its rounding) |
 | the xfstests cost lines (26.17: the daemon's CPU and the disks' I/O per test; the comparison with the native run; the notrun list read from them) | `//test/qemu:xfstests_costs_test` (canned dcfs and native logs: the numbers of a line, the order, extra time and how much of it is CPU, a test native did not run, a log from before the lines refused; the command line) and `//test/qemu:xfstests_notrun_test` (a log of the new form gives the list, the old form gives nothing); the guest script itself is run by the `xfstests` job, and by `xfstests_dev_test_<fstype>` (`manual`) |
-| the disks' I/O is counted (26.17: `cost_disk_counts` and `cost_cgroup_io`, which no budget could notice failing, since a count below its budget passes) | `//test/qemu:boot_test` and `//test/qemu:ram_disks_test` (`cost_selfcheck`: a direct write of 1 MiB must show in the counters of a virtio disk and of a RAM disk and in the cgroup's `io.stat`; with the disks' glob pointing at nothing both fail, saying `disks reads=0 writes=0 ...`), `//test/qemu:cost_report_test` (the sums, the difference of two readings and the cgroup's counts over canned files, other devices left out) and `//test/qemu:run_qemu_cost_test` (a target with a budget for reads whose guest counted none fails) |
+| the disks' I/O is counted (26.17: `cost_disk_counts` and `cost_cgroup_io`, which no budget could notice failing, since a count below its budget passes) | `//test/qemu:boot_test` and `//test/qemu:ram_disks_test` (`cost_selfcheck`: a direct write of 1 MiB must show in the counters of a virtio disk, a SCSI disk (`boot_test`'s) and a RAM disk and in the cgroup's `io.stat`; with the disks' glob pointing at nothing both fail, saying `disks reads=0 writes=0 ...`), `//test/qemu:cost_report_test` (the sums, the difference of two readings and the cgroup's counts over canned files, other devices left out) and `//test/qemu:run_qemu_cost_test` (a target with a budget for reads whose guest counted none fails) |
 | a run is held to its CPU and I/O budgets (26.17: `guest/cpu_budgets.txt`, `guest/io_budgets.txt`, the tolerance, the runs that are not held, a budgeted target with no COST line) | `//test/qemu:run_qemu_cost_test` (fake qemu and canned serial logs through the real `run-qemu.sh` and the real comparison: at the budget and at budget plus tolerance pass, one microsecond past fails, a zero budget allows nothing, a target with no line is reported, a COST line lacking the count and a missing COST line fail a budgeted target, and noisy, TCG, ASan, UBSan, coverage and load-starved runs are not held to the CPU budget, and a load-starved run is held to its I/O budgets) and `//test/qemu:strace_lib_test` (the tolerance arithmetic and `budget_unheld_reason`) |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
 
@@ -1718,29 +1718,38 @@ Currently used by `backing_test`, `syscalls_test`,
 and no more: with five `-device virtio-blk-device` drives (a `vda` filler, the
 test's `vdb`, `vdc`, `vdd` and a fifth) the kernel's command line has five
 `virtio_mmio.device=` entries and `/proc/partitions` four disks (measured
-2026-10-09, step 15.6). A disk-spec that starts at `vdb` makes `vda` a filler
-that takes a slot, the Debian rootfs, the systemd image and the coverage disk
-come after the last spec: a test that needs the most starts its specs at
-`vda` (`mount_dcfs_systemd_test`: ext4 `vda`, xfs `vdb`, btrfs `vdc`, the
-image `vdd`).
+2026-10-09, step 15.6; under `bazel coverage` the fifth is the coverage disk,
+and the probe fails with `genirq: Flags mismatch irq 8` and a call trace that
+the oops check rightly fails on). A disk-spec that starts at `vdb` makes `vda`
+a filler that takes a slot; the Debian rootfs, the systemd image and the
+coverage disk come after the last `vd` spec. A test with more backing disks
+than that leaves room for them by naming the backing disks `sd<letter>` (see
+"SCSI disks" below): `mount_dcfs_systemd_test` has ext4 `sda`, xfs `sdb` and
+btrfs `sdc` behind one controller, the image `vda`, and under `bazel coverage`
+the coverage disk `vdb`: three devices of the four.
 
 ### SCSI disks
 
 A microvm has only four usable virtio-mmio devices: the fifth takes
 interrupt 8, which the RTC holds (`rtc=on` is deliberate), and its probe
 fails with `genirq: Flags mismatch irq 8` (see "At most four virtio disks"
-above). A test that needs more disks
-names its backing disks `sd<letter>` instead of `vd<letter>`
-(`("sda", "ext4", "128M")`): `run-qemu.sh` attaches all of them behind one
-`virtio-scsi-device`, a LUN each in the letters' order, so the controller is
-the only slot they take. The letters start at `sda` and have no gap, because
-the guest names SCSI disks in LUN order; the Debian root, the systemd image
-and the coverage disk stay `virtio-blk`, lettered after the `vd<letter>`
+above). A test that needs more disks names its backing disks `sd<letter>`
+instead of `vd<letter>` (`("sda", "ext4", "128M")`): `run-qemu.sh` attaches
+all of them behind one `virtio-scsi-device`, a LUN each (the letter: `a` is
+0), so the controller is the only slot they take. The guest finds a disk as
+`/dev/dcfs-scsi/sd<letter>` (`guest/init` links it after the modules are
+loaded), **not** as `/dev/sd<letter>`: the kernel names SCSI disks in the
+order its asynchronous probes finish, and measured it gave LUN 2 the name
+`sdb` in one boot of a guest and `sdc` in the next (the systemd test failed
+on its second boot until it used the links). The Debian root, the systemd
+image and the coverage disk stay `virtio-blk`, lettered after the `vd<letter>`
 specs alone. `qemu_test` and `qemu_cc_test` add the `virtio_scsi` and
 `sd_mod` modules to a test that has such a disk (`modules.bzl`).
-`scsi_disks_test` shows two disks of the sizes asked for and the first as
-`TEST_TMPDIR`; the command line is checked by `run_qemu_mkfs_test`. The cost
-counters (`cost_disks`) sum SCSI disks with the virtio ones.
+`scsi_disks_test` shows two disks of the sizes asked for, found by LUN, and
+the first as `TEST_TMPDIR`; the command line is checked by
+`run_qemu_mkfs_test`. The cost counters (`cost_disks`) sum SCSI disks with the
+virtio ones, which `boot_test` checks with a write to its SCSI disk (the
+systemd test has no budget of its own to show it).
 
 ### Sanitizers
 
@@ -2177,11 +2186,12 @@ How it boots, in `qemu_test(systemd_image = ..., boots = 2)`:
 
 1. `run-qemu.sh --systemd-image IMAGE --qemu-img QEMU_IMG` makes a qcow2
    overlay on the pinned image (the image itself is never written) and
-   attaches it as the next virtio disk after the test's `disks` (`vdc` when
-   the test has `vdb`). The kernel is the project's test kernel, the
-   initramfs the usual one with the modules for `ext4`, `fuse` and
-   `virtio_blk`; `dcfs_systemd=/dev/vdc1` (the image's root partition) is on
-   the command line.
+   attaches it as the next virtio-blk disk after the test's `vd` disks
+   (`vda` for the SCSI disks of `mount_dcfs_systemd_test`, which are not
+   virtio-blk). The kernel is the project's test kernel, the initramfs the
+   usual one with the modules for `ext4`, `xfs`, `btrfs`, `fuse`, `virtio_blk`,
+   `virtio_scsi` and `sd_mod`; `dcfs_systemd=/dev/vda1` (the image's root
+   partition) is on the command line.
 2. `guest/init` mounts that partition, installs dcfs, `testutil`, `fhtest`
    and `/tests` in it (`install_dcfs_into`, the same function the NFS test's
    chroot uses), runs `guest/systemd_install.sh` (the oneshot unit, the
