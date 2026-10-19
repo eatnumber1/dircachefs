@@ -132,6 +132,12 @@ Each builds a variant of `:dir_cache_fs_test_bin` and asserts in [`dcfs/testonly
 | `pidfd_open` | [`test/qemu/BUILD.bazel:180`] | [`test/qemu/waitexit_test.cc:56-71`] | `EsrchExitsZeroImmediately` ([`lines 123-128`]): fails with `ESRCH`. Other fake-poll tests ([`lines 130-173`]): returns `open("/dev/null", O_RDONLY | O_CLOEXEC)` ([`line 69`]). |
 | `poll` | [`test/qemu/BUILD.bazel:181`] | [`test/qemu/waitexit_test.cc:73-96`] | `TimeoutExits124` ([`lines 130-137`]), `EintrIsRetriedThenExitsZero` ([`lines 140-149`]), `PollErrorExitsOne` ([`lines 152-160`]): steps through `g_poll_steps` ([`lines 21-25, 78-95`]) to return `0` (timeout), `-1` (`EINTR`/`EFAULT`), or `1` (`POLLIN`). |
 
+### A.10 [`//dcfs:subprocess_test`] (added 2026-10-19, after the 48 counted above)
+
+| Wrapped Symbol | `BUILD.bazel` Line | `__wrap_*` Definition | Test(s) & Injected Fault (`file:line`) |
+| :--- | :--- | :--- | :--- |
+| `read` | on branch `step-25.53` (not on main) | on branch `step-25.53` | One `read` fails with `EIO` (added by 25.53 slice 1 to fail one read). Migrate to a `LocalSyscalls` fake in 25.41b. |
+
 ---
 
 ## Appendix B: Inventory of the `syscalls::` Layer and Production Callers

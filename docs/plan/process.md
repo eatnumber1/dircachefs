@@ -184,6 +184,20 @@ process (its waves and file ownership table) is in `history.md`.
       and the `at first`/`at last` lines) in the squashed commit's body. The
       step branch keeps the individual commits as the evidence; the tool is run
       on the branch before squashing.
+   4b. <a id="rule-review-continuity"></a>
+      (russ, 2026-10-19: "Agreed, but let's write this down into the
+      documentation on how reviews work so you don't forget.")
+      One reviewer per step. The orchestrator keeps the same reviewer for all
+      of a step's slice reviews and fix re-reviews (resumed with
+      `SendMessage`, which keeps its context and its own earlier findings), so
+      it can check its findings were fixed as meant and does not contradict an
+      earlier round. The last whole-branch check before merge goes to a fresh
+      reviewer, for an unanchored read. If a step runs long enough that the
+      reviewer's context grows large, the orchestrator starts a fresh reviewer
+      and hands it the open findings verbatim. Every fix brief carries each
+      finding's file:line and concrete fix, never a summary label. The dispatch
+      ledger compares review tokens per step before and after this rule
+      (2026-10-19).
    5. Findings are recorded per slice in `review-findings.tsv`
       ([`rule-track-review-findings`](#rule-track-review-findings)).
 

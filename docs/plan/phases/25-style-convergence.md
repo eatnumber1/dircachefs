@@ -1021,6 +1021,12 @@ after 25.32b and the dashboard's SLOC tool, under process.md rule 4
 (write work, reviewed by the orchestrator); the gate's threshold and any
 allowlist come back for review before they are committed.
 
+Further copies recorded 2026-10-19 (orchestrator's proposal, clerk batch 43,
+from the Gemini survey and the 25.53 review), for this step to fold in:
+`dcfs/testonly/process.cc` (`RunCommand`), `dcfs/umount_helper.cc`,
+`dcfs/testonly/files.h` (a third `ReadAll`), `bench/process.cc`,
+`test/qemu/guest/guest.cc` and `fork_split.h`.
+
 ## 25.28 Periodic SQLite WAL checkpoints tied to sync_interval (russ, 2026-10-12)
 
 Under continuous read loads, WAL checkpoint starvation can occur because
@@ -2487,4 +2493,43 @@ assigned (the orchestrator chooses). Dependencies: 25.52 merged.
 *Test:* the existing `dcfs/fsck` and `process_runner` tests pass unchanged
 on the shared helper, and `process_runner_test.cc` covers the helper's error
 paths.
+
+## 25.54 Denied dashboard asset (orchestrator's proposal, 2026-10-19; queued)
+
+Orchestrator's proposal, not russ's words. Source: the 2026-10-19 dashboard
+upload. The auto-mode classifier denied some asset uploads intermittently
+(`[Public Data-Sharing Upload]`, `[Data Exfiltration]`, even with russ's
+Artifact allow rule). The `dcfs-dashboard-upload` skill uploads every asset
+before one ArtifactData batch, so a denied upload left the assets already
+uploaded unwritten and nothing updated (lanes, quota, sloc and plan became
+orphans; budget and ci were denied).
+
+1. A denied upload stops further uploads but does not stop the batch write.
+2. The batch writes, and marks uploaded, the datasets whose assets succeeded,
+   and reports the denied ones.
+
+Placed in M0 (`README.md`, Queue item 2c). Owner: not yet assigned (the
+orchestrator chooses). Dependencies: none.
+
+*Test:* a run with one injected denial writes and marks the other datasets
+and names the denied one.
+
+## 25.55 Own fds read door-free (orchestrator's proposal, 2026-10-19; queued)
+
+Orchestrator's proposal, not russ's words. Source: the 25.53 slice 1 review
+(`review-findings.tsv`, question on the pipe read in `dcfs/subprocess.cc`).
+Style 1.6's door paragraph says the BackingDoor guards backing syscalls and
+dcfs's own fds use the door-free `syscalls.h` calls, so a poisoned daemon
+still works. But `dcfs/startup_channel.cc` and the proc_file reader read their
+own fds through `syscalls_backing`'s `read`.
+
+1. `dcfs/startup_channel.cc` and the proc_file reader read through the
+   door-free read that 25.53 adds.
+2. `dcfs/syscalls_backing_users.txt` shrinks to match; no behaviour changes.
+
+Placed in M0 (`README.md`, Queue item 2d). Owner: not yet assigned.
+Dependencies: 25.53 merged.
+
+*Test:* `//tools:syscalls_backing_users_test` passes with the shorter list,
+and the startup and proc_file tests pass unchanged.
 

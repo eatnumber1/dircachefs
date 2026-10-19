@@ -26,6 +26,11 @@ reasoning. `AGENTS.md` says which indexes to read for which task.
   to make multiple commits, with a review for each commit, before eventually
   asking for a PR into main.").
   [process](/docs/plan/process.md#rule-reviewed-slices)
+- One reviewer per step: the same reviewer for a step's slice reviews and fix
+  re-reviews, a fresh one for the last whole-branch check (russ, 2026-10-19:
+  "Agreed, but let's write this down into the documentation on how reviews
+  work so you don't forget.").
+  [process](/docs/plan/process.md#rule-review-continuity)
 - Rules for every agent: stop after two failures, report only what you observed,
   stay in your lane, report design decisions with their alternative, leave the
   lane's Bazel server running, run commands in the foreground.
