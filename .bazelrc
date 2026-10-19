@@ -18,7 +18,7 @@ build --copt -D_FILE_OFFSET_BITS=64
 build --disk_cache=~/.cache/bazel-disk-cache
 # Keep the shared disk cache bounded: Bazel garbage-collects it down to
 # this size while the server is idle.
-build --experimental_disk_cache_gc_max_size=50G
+build --experimental_disk_cache_gc_max_size=150G
 
 # Warnings: every warning in our code is an error, compile and link, and
 # external repositories (abseil, libfuse, liburing, numactl, SQLite, ...)
