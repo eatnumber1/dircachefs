@@ -1410,6 +1410,8 @@ def ledger_add(env, args):
         "verdict": kwargs.get("verdict", ""),
         "notes": kwargs.get("notes", ""),
     })
+    for col, _ in USAGE_KEYS:
+        row[col] = kwargs.get(col, "")
 
     ledger_path = env.ledger_path()
     rows = read_ledger(ledger_path)

@@ -87,6 +87,8 @@ py_test(
 py_library(
     name = "foreman_lib",
     srcs = ["foreman.py"],
+    # foreman runs dashboard_lanes.py to add its dispatch-ledger row.
+    data = ["dashboard_lanes.py"],
     imports = ["."],
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
@@ -104,6 +106,7 @@ py_test(
     size = "small",
     timeout = "short",
     srcs = ["foreman_test.py"],
+    data = glob(["testdata/*"]),
     target_compatible_with = HOST_ONLY_COMPATIBLE,
     deps = [":foreman_lib"],
 )

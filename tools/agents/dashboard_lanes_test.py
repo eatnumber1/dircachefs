@@ -1140,6 +1140,24 @@ class DispatchLedgerTest(Fixture):
         self.assertEqual(r["dispatched"], "2026-10-17T15:00:00Z")
         self.assertTrue(len(r["id"]) > 0)
 
+    def test_ledger_add_records_usage_columns(self):
+        self.run_cmd([
+            "ledger", "add",
+            "step=25.49d",
+            "agent=agy",
+            "tokens=3300",
+            "input_tokens=3000",
+            "output_tokens=300",
+            "cache_read_tokens=14000",
+            "cache_creation_tokens=7",
+        ])
+        r = self.ledger_rows()[0]
+        self.assertEqual(r["tokens"], "3300")
+        self.assertEqual(r["input_tokens"], "3000")
+        self.assertEqual(r["output_tokens"], "300")
+        self.assertEqual(r["cache_read_tokens"], "14000")
+        self.assertEqual(r["cache_creation_tokens"], "7")
+
     def test_ledger_add_with_explicit_id(self):
         self.run_cmd([
             "ledger", "add", "job-42",

@@ -350,15 +350,50 @@ bazel run //tools/agents:foreman -- STEP LANE BRANCH PROMPT_FILE [--model M] [--
    - If `agy` exits early (crash, quota, or an `ERROR` result), records the
      failure in `summary.md` and terminates the job immediately.
 4. Up to two review/fix rounds:
-   - Read-only review: runs plain `agy -p ... --mode plan` inspecting
-     `git diff base HEAD` and uncommitted files against style and agent rules.
-     Outputs to `review<round>.out`.
+   - Read-only review: runs `agy -p ... --mode plan --output-format json`
+     inspecting `git diff base HEAD` and uncommitted files against style and
+     agent rules. The review text goes to `review<round>.out` and agy's raw
+     JSON object (with `usage`) to `review<round>.json`.
    - If review outputs `NONE`, the step is clean and the loop breaks.
    - Otherwise, runs a fix round in `stream-json` mode with the review
      findings, saving events to `fix<round>.jsonl` and text to `fix<round>.out`.
 5. Measures quota after the run, and writes `summary.md` reporting the branch,
-   base commit, commits made, uncommitted changes, last review, and quota
-   delta.
+   base commit, commits made, uncommitted changes, last review, quota delta
+   and a token table (role, model, the five counts).
+6. Writes `tokens.json` and adds one dispatch-ledger row (below).
+
+### Token counts
+
+Every agy session (worker, each fix, each review) is recorded as one entry of
+`tokens.json` in `--out`: `role` (`worker`, `fix`, `review`; `single` is
+reserved for single mode, 25.48, which adds its session with
+`add_session(sessions, "single", ...)` and needs no schema change), `name`
+(`worker`, `fix1`, `review1`), `model`, `usage` (`input_tokens`,
+`output_tokens`, `thinking_tokens`, `cache_read_tokens`, `total_tokens`) and
+`subagent_calls`; plus `total` and `usage_scope`. Stream sessions take the
+counts from the `result` event's `usage` (the sum of the `step_update` usage
+fields if agy died before a result), review sessions from the JSON object's
+`usage`. The model is `init.model` for stream sessions and `--review-model`
+for reviews (the JSON object has no model). A failed run records the sessions
+that ran.
+
+Subagents inside a Gemini session are not attributed separately. Found in the
+12 worker and fix recordings of 2026-10-17/18: `init.tools` lists
+`invoke_subagent`, `define_subagent`, `browser_subagent` and
+`manage_subagents`, but no `step_update` has a `tool_name` of
+`invoke_subagent` or `browser_subagent`, every event carries the one
+`conversation_id`, and `result.usage` equals the sum of the `step_update.usage`
+fields exactly. So `result.usage` is the session total and would include any
+subagent steps that appeared as ordinary steps; `subagent_calls` counts such
+tool calls so a session that used subagents is visible. If a subagent ever
+shows as events with another `conversation_id`, attribute it then.
+
+The ledger row (`dashboard_lanes.py ledger add`, run by foreman against
+`$DCFS_MAIN_REPO`) has `agent=agy`, the worker model, `tokens` the total, the
+`input_tokens`, `output_tokens` and `cache_read_tokens` sums, `rounds` the
+review rounds run, and in `notes` `foreman mode=orchestrator;` then each
+session as `name=total_tokens` (`; failed` when the run failed). Thinking
+tokens have no ledger column: they are in `tokens.json`.
 
 Known issue (2026-10-18): foreman hangs on a non-JSON `AGY_ERROR` line, such as
 agy's 429 `RESOURCE_EXHAUSTED` ("undecodable agy event"), and can leave the lane

@@ -46,19 +46,20 @@ delegate and say so in your report.
        STEP LANE BRANCH PROMPT_FILE --out DIR
    ```
 5. **Read the result.** Under `--out`: `worker.out` (the report),
-   `review*.out`, `summary.md`, `usage.before` and `usage.after`. Verify
+   `review*.out`, `summary.md` (with a token table), `tokens.json` (per-session
+   Gemini token counts), `usage.before` and `usage.after`. Foreman adds the
+   run's dispatch-ledger row itself. Verify
    its claims before you use them: grep or read what it cites.
 6. **Check the lane** with `git status`: a non-JSON `AGY_ERROR` or 429
    makes foreman hang and can leave the lane mid-rebase (README, known
    issue); abort any rebase.
 7. **Bounded chunks cost extra until 25.48**: orchestrator mode only, so
    an empty-diff review round and a throwaway branch. Ignore the branch.
-8. **Record it**, from the main checkout, naming the parent step:
-
-   ```bash
-   python3 -I tools/agents/dashboard_lanes.py ledger add \
-       step=PARENT_STEP agent=agy model=MODEL notes=QUOTA_DELTA
-   ```
+8. **The ledger row is foreman's.** It adds one row for the run (step as
+   you passed it, `agent=agy`, tokens, per-session breakdown in `notes`);
+   pass the parent step as `STEP` so it is attributed. Add a second row
+   by hand only to record something foreman cannot know, such as the quota
+   delta (`ledger add` from the main checkout, `notes=QUOTA_DELTA`).
 9. **Report it.** Your step report gets a line
    `Delegated: WHAT, to Gemini, job output DIR, verified by HOW` (or
    `Delegated: none`).

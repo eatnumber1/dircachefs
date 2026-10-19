@@ -14,6 +14,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import foreman
 
+TESTDATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata")
 
 FAKE_AGY_SCRIPT = """#!/usr/bin/env python3
 import json
@@ -46,15 +47,42 @@ if "-p" in args and "/usage" in args:
   sys.exit(0)
 
 if "--mode" in args and "plan" in args:
-  # Review mode
+  # Review mode: one JSON object, as agy --output-format json prints it.
+  if "--output-format" not in args or (
+      args[args.index("--output-format") + 1] != "json"
+  ):
+    sys.stderr.write("fake_agy: review needs --output-format json\\n")
+    sys.exit(1)
   defects_file = os.environ.get("FAKE_AGY_DEFECTS_FILE")
   if defects_file and os.path.exists(defects_file):
     with open(defects_file, "r", encoding="utf-8") as f:
       content = f.read().strip()
     os.remove(defects_file)
-    sys.stdout.write(content + "\\n")
   else:
-    sys.stdout.write("NONE\\n")
+    content = "NONE"
+  if os.environ.get("FAKE_AGY_REVIEW_MODE") == "error":
+    sys.stderr.write("AGY_ERROR: {}\\n")
+    content = ""
+    status = "ERROR"
+  else:
+    status = "SUCCESS"
+  sys.stdout.write(
+      json.dumps({
+          "conversation_id": "review-conv",
+          "status": status,
+          "response": content,
+          "duration_seconds": 1.0,
+          "num_turns": 1,
+          "usage": {
+              "input_tokens": 1000,
+              "output_tokens": 100,
+              "thinking_tokens": 10,
+              "cache_read_tokens": 5000,
+              "total_tokens": 1100,
+          },
+      })
+      + "\\n"
+  )
   sys.stdout.flush()
   sys.exit(0)
 
@@ -123,6 +151,14 @@ if "--input-format" in args and "stream-json" in args:
     sys.exit(0)
 
   # Normal stream-json mode:
+  sys.stdout.write(
+      json.dumps({
+          "event": "init",
+          "conversation_id": "stream-conv",
+          "init": {"model": args[args.index("--model") + 1]},
+      })
+      + "\\n"
+  )
   if mode == "garbage":
     sys.stdout.write("this is not json\\n")
     sys.stdout.flush()
@@ -191,6 +227,13 @@ if "--input-format" in args and "stream-json" in args:
                   "Starting background job.\\nWork is done.\\nJOB-COMPLETE\\n"
               ),
               "num_turns": 1,
+              "usage": {
+                  "input_tokens": 2000,
+                  "output_tokens": 200,
+                  "thinking_tokens": 20,
+                  "cache_read_tokens": 9000,
+                  "total_tokens": 2200,
+              },
           },
       })
       + "\\n"
@@ -245,6 +288,7 @@ class ForemanTest(unittest.TestCase):
       f.write("Test task prompt\n")
 
     self.out_dir = os.path.join(self.root, "out")
+    self.dashboard = os.path.join(self.root, "dashboard")
 
   def _git(self, cwd, args):
     subprocess.run(["git"] + args, cwd=cwd, check=True, capture_output=True)
@@ -257,7 +301,10 @@ class ForemanTest(unittest.TestCase):
         prompt_file=self.prompt_file,
         out_dir=self.out_dir,
         agy_bin=self.fake_agy_path,
-        environ={"DCFS_MAIN_REPO": self.main_repo},
+        environ={
+            "DCFS_MAIN_REPO": self.main_repo,
+            "DCFS_DASHBOARD_DIR": self.dashboard,
+        },
     )
     self.assertEqual(ret, 0)
 
@@ -301,6 +348,7 @@ class ForemanTest(unittest.TestCase):
 
     env = {
         "DCFS_MAIN_REPO": self.main_repo,
+        "DCFS_DASHBOARD_DIR": self.dashboard,
         "FAKE_AGY_DEFECTS_FILE": defects_file,
     }
     ret = foreman.run_foreman(
@@ -333,6 +381,7 @@ class ForemanTest(unittest.TestCase):
   def test_early_exit_without_job_complete(self):
     env = {
         "DCFS_MAIN_REPO": self.main_repo,
+        "DCFS_DASHBOARD_DIR": self.dashboard,
         "FAKE_AGY_STREAM_MODE": "exit_early",
     }
     ret = foreman.run_foreman(
@@ -358,6 +407,7 @@ class ForemanTest(unittest.TestCase):
   def test_error_result_stops_job(self):
     env = {
         "DCFS_MAIN_REPO": self.main_repo,
+        "DCFS_DASHBOARD_DIR": self.dashboard,
         "FAKE_AGY_STREAM_MODE": "error_result",
     }
     ret = foreman.run_foreman(
@@ -381,6 +431,7 @@ class ForemanTest(unittest.TestCase):
   def test_job_complete_inside_a_sentence_does_not_end_session(self):
     env = {
         "DCFS_MAIN_REPO": self.main_repo,
+        "DCFS_DASHBOARD_DIR": self.dashboard,
         "FAKE_AGY_STREAM_MODE": "mention_first",
     }
     ret = foreman.run_foreman(
@@ -426,6 +477,7 @@ class ForemanTest(unittest.TestCase):
   def test_undecodable_agy_line_is_reported_and_skipped(self):
     env = {
         "DCFS_MAIN_REPO": self.main_repo,
+        "DCFS_DASHBOARD_DIR": self.dashboard,
         "FAKE_AGY_STREAM_MODE": "garbage",
     }
     stderr = io.StringIO()
@@ -470,10 +522,183 @@ class ForemanTest(unittest.TestCase):
         "/custom/25.33",
     )
 
+  def _run(self, step="tok-step", env=None, **kwargs):
+    environ = {
+        "DCFS_MAIN_REPO": self.main_repo,
+        "DCFS_DASHBOARD_DIR": self.dashboard,
+    }
+    environ.update(env or {})
+    return foreman.run_foreman(
+        step=step,
+        lane=self.lane,
+        branch="step-" + step,
+        prompt_file=self.prompt_file,
+        out_dir=self.out_dir,
+        agy_bin=self.fake_agy_path,
+        environ=environ,
+        **kwargs,
+    )
+
+  def _tokens(self):
+    with open(
+        os.path.join(self.out_dir, "tokens.json"), "r", encoding="utf-8"
+    ) as f:
+      return json.load(f)
+
+  def _ledger_rows(self):
+    path = os.path.join(self.main_repo, "docs", "plan", "dispatch-ledger.tsv")
+    with open(path, "r", encoding="utf-8") as f:
+      lines = f.read().splitlines()
+    header = lines[0].split("\t")
+    return [dict(zip(header, line.split("\t"))) for line in lines[1:]]
+
+  def test_tokens_json_records_each_session(self):
+    defects_file = os.path.join(self.root, "defects.txt")
+    with open(defects_file, "w", encoding="utf-8") as f:
+      f.write("foo.cc:10 \u2014 style \u2014 bad \u2014 fix it")
+    self.assertEqual(
+        self._run(
+            env={"FAKE_AGY_DEFECTS_FILE": defects_file}, model="m-work",
+            review_model="m-rev",
+        ),
+        0,
+    )
+    tokens = self._tokens()
+    roles = [(s["role"], s["name"], s["model"]) for s in tokens["sessions"]]
+    self.assertEqual(
+        roles,
+        [
+            ("worker", "worker", "m-work"),
+            ("review", "review1", "m-rev"),
+            ("fix", "fix1", "m-work"),
+            ("review", "review2", "m-rev"),
+        ],
+    )
+    worker = tokens["sessions"][0]["usage"]
+    self.assertEqual(worker["input_tokens"], 2000)
+    self.assertEqual(worker["output_tokens"], 200)
+    self.assertEqual(worker["thinking_tokens"], 20)
+    self.assertEqual(worker["cache_read_tokens"], 9000)
+    self.assertEqual(worker["total_tokens"], 2200)
+    self.assertEqual(tokens["sessions"][1]["usage"]["total_tokens"], 1100)
+    self.assertEqual(tokens["total"]["total_tokens"], 2 * 2200 + 2 * 1100)
+    self.assertEqual(tokens["total"]["input_tokens"], 2 * 2000 + 2 * 1000)
+    self.assertIn("session total", tokens["usage_scope"])
+
+  def test_summary_has_token_table(self):
+    self.assertEqual(self._run(), 0)
+    with open(
+        os.path.join(self.out_dir, "summary.md"), "r", encoding="utf-8"
+    ) as f:
+      summary = f.read()
+    self.assertIn("## tokens", summary)
+    model = "gemini-3.8-flash-medium"
+    self.assertIn(f"| worker | {model} | 2000 | 200 | 20 | 9000 | 2200 |",
+                  summary)
+    self.assertIn(f"| review | {model} | 1000 | 100 | 10 | 5000 | 1100 |",
+                  summary)
+
+  def test_failed_review_still_records_tokens(self):
+    self.assertEqual(self._run(env={"FAKE_AGY_REVIEW_MODE": "error"}), 1)
+    tokens = self._tokens()
+    self.assertEqual(
+        [s["role"] for s in tokens["sessions"]], ["worker", "review"]
+    )
+
+  def test_failed_worker_records_partial_usage(self):
+    self.assertEqual(self._run(env={"FAKE_AGY_STREAM_MODE": "exit_early"}), 1)
+    tokens = self._tokens()
+    self.assertEqual([s["role"] for s in tokens["sessions"]], ["worker"])
+    self.assertEqual(tokens["total"]["total_tokens"], 0)
+
+  def test_one_ledger_row_per_run(self):
+    self.assertEqual(self._run(step="25.99", model="gemini-3.8-flash-low"), 0)
+    rows = self._ledger_rows()
+    self.assertEqual(len(rows), 1)
+    row = rows[0]
+    self.assertEqual(row["step"], "25.99")
+    self.assertEqual(row["agent"], "agy")
+    self.assertEqual(row["model"], "gemini-3.8-flash")
+    self.assertEqual(row["effort"], "low")
+    self.assertEqual(row["tokens"], str(2200 + 1100))
+    self.assertEqual(row["input_tokens"], str(2000 + 1000))
+    self.assertEqual(row["output_tokens"], str(200 + 100))
+    self.assertEqual(row["cache_read_tokens"], str(9000 + 5000))
+    self.assertEqual(row["rounds"], "1")
+    self.assertIn("mode=orchestrator", row["notes"])
+    self.assertIn("worker=2200", row["notes"])
+    self.assertIn("review1=1100", row["notes"])
+
+  def test_ledger_row_written_when_run_fails(self):
+    self.assertEqual(self._run(env={"FAKE_AGY_STREAM_MODE": "exit_early"}), 1)
+    rows = self._ledger_rows()
+    self.assertEqual(len(rows), 1)
+    self.assertIn("failed", rows[0]["notes"])
+
+  def test_single_session_gets_its_own_role(self):
+    usage = foreman.parse_stream_usage(
+        os.path.join(TESTDATA, "gemini_worker_excerpt.jsonl")
+    )
+    sessions = []
+    foreman.add_session(sessions, "single", "single", "m", usage)
+    tokens = foreman.build_tokens(sessions)
+    self.assertEqual(tokens["sessions"][0]["role"], "single")
+    self.assertEqual(tokens["total"]["total_tokens"], 243278)
+
+  def test_parse_stream_usage_recorded_session(self):
+    usage = foreman.parse_stream_usage(
+        os.path.join(TESTDATA, "gemini_worker_excerpt.jsonl")
+    )
+    self.assertEqual(usage.model, "gemini-3.8-flash-medium")
+    self.assertEqual(usage.counts["input_tokens"], 221527)
+    self.assertEqual(usage.counts["output_tokens"], 21751)
+    self.assertEqual(usage.counts["thinking_tokens"], 13429)
+    self.assertEqual(usage.counts["cache_read_tokens"], 3319437)
+    self.assertEqual(usage.counts["total_tokens"], 243278)
+    self.assertEqual(usage.subagent_calls, 0)
+
+  def test_parse_stream_usage_without_result_sums_steps(self):
+    path = os.path.join(self.root, "partial.jsonl")
+    with open(
+        os.path.join(TESTDATA, "gemini_worker_excerpt.jsonl"), "r",
+        encoding="utf-8",
+    ) as src, open(path, "w", encoding="utf-8") as dst:
+      dst.writelines(
+          line for line in src if '"event": "result"' not in line
+      )
+    usage = foreman.parse_stream_usage(path)
+    self.assertEqual(usage.counts["total_tokens"], 14276 + 16051 + 18195)
+    self.assertEqual(usage.counts["thinking_tokens"], 575 + 28 + 16)
+
+  def test_parse_stream_usage_counts_subagent_calls(self):
+    path = os.path.join(self.root, "sub.jsonl")
+    with open(path, "w", encoding="utf-8") as f:
+      for name in ("invoke_subagent", "run_command", "browser_subagent"):
+        f.write(json.dumps({
+            "event": "step_update",
+            "step_update": {"step_type": "tool", "tool_name": name},
+        }) + "\n")
+    self.assertEqual(foreman.parse_stream_usage(path).subagent_calls, 2)
+
+  def test_parse_review_json_error_recording(self):
+    with open(
+        os.path.join(TESTDATA, "agy_review_error.json"), "r",
+        encoding="utf-8",
+    ) as f:
+      parsed = foreman.parse_review_json(f.read())
+    self.assertEqual(parsed["status"], "ERROR")
+    self.assertEqual(parsed["usage"]["total_tokens"], 0)
+
+  def test_parse_review_json_ignores_stderr_noise(self):
+    text = 'error: noise\n{"status":"SUCCESS","response":"NONE"}\n'
+    self.assertEqual(foreman.parse_review_json(text)["response"], "NONE")
+    self.assertIsNone(foreman.parse_review_json("not json\n"))
+
   def test_custom_models_passed(self):
     log_file = os.path.join(self.root, "agy_args.log")
     env = {
         "DCFS_MAIN_REPO": self.main_repo,
+        "DCFS_DASHBOARD_DIR": self.dashboard,
         "FAKE_AGY_LOG": log_file,
     }
     ret = foreman.run_foreman(

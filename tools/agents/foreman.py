@@ -7,6 +7,7 @@ JOB-COMPLETE is signaled.
 """
 
 import argparse
+import dataclasses
 import json
 import os
 import subprocess
@@ -24,6 +25,167 @@ COMPLETION_INSTRUCTION = (
     "\n\nWhen all work is finished and every background command has reported "
     "back, print the line JOB-COMPLETE as the last thing you say."
 )
+
+COUNT_KEYS = (
+    "input_tokens",
+    "output_tokens",
+    "thinking_tokens",
+    "cache_read_tokens",
+    "total_tokens",
+)
+
+# Tools through which a Gemini session can start a subagent (init.tools of
+# every recorded session lists them; none of the recorded sessions called
+# one).
+SUBAGENT_TOOLS = ("invoke_subagent", "browser_subagent")
+
+USAGE_SCOPE = (
+    "Each session's counts are agy's result.usage, the session total: in "
+    "every recorded session it equals the sum of the step_update.usage "
+    "fields and all events carry one conversation_id, so subagent work, if "
+    "any, is inside it and is not attributed separately. subagent_calls "
+    "counts invoke_subagent/browser_subagent tool calls."
+)
+
+
+@dataclasses.dataclass
+class SessionUsage:
+  """Token counts and model of one agy session."""
+
+  model: str = ""
+  counts: dict = dataclasses.field(
+      default_factory=lambda: {k: 0 for k in COUNT_KEYS}
+  )
+  subagent_calls: int = 0
+
+
+def parse_stream_usage(jsonl_path):
+  """Reads a stream-json recording and returns its SessionUsage.
+
+  Counts come from the result event's usage; without a result event (agy
+  died) they are the sum of the step_update usage fields.
+  """
+  usage = SessionUsage()
+  step_sum = {k: 0 for k in COUNT_KEYS}
+  result_usage = None
+  with open(jsonl_path, "r", encoding="utf-8") as f:
+    for line in f:
+      try:
+        data = json.loads(line)
+      except json.JSONDecodeError:
+        continue
+      event = data.get("event")
+      if event == "init":
+        usage.model = data.get("init", {}).get("model", "")
+      elif event == "result":
+        result_usage = data.get("result", {}).get("usage")
+      elif event == "step_update":
+        su = data.get("step_update", {})
+        if su.get("tool_name") in SUBAGENT_TOOLS:
+          usage.subagent_calls += 1
+        for k in COUNT_KEYS:
+          step_sum[k] += (su.get("usage") or {}).get(k, 0)
+  source = result_usage if result_usage is not None else step_sum
+  usage.counts = {k: int(source.get(k, 0)) for k in COUNT_KEYS}
+  return usage
+
+
+def parse_review_json(text):
+  """Returns the JSON object agy printed in text, or None.
+
+  agy -p --output-format json prints one object on one line; stderr noise
+  may precede it.
+  """
+  for line in reversed(text.splitlines()):
+    line = line.strip()
+    if line.startswith("{"):
+      try:
+        parsed = json.loads(line)
+      except json.JSONDecodeError:
+        return None
+      return parsed if isinstance(parsed, dict) else None
+  return None
+
+
+def add_session(sessions, role, name, model, usage):
+  """Appends one session record; role is worker, fix, review or single."""
+  sessions.append({
+      "role": role,
+      "name": name,
+      "model": usage.model or model,
+      "usage": dict(usage.counts),
+      "subagent_calls": usage.subagent_calls,
+  })
+
+
+def build_tokens(sessions):
+  """Returns the tokens.json document for the recorded sessions."""
+  total = {k: 0 for k in COUNT_KEYS}
+  for s in sessions:
+    for k in COUNT_KEYS:
+      total[k] += s["usage"][k]
+  return {
+      "usage_scope": USAGE_SCOPE,
+      "sessions": sessions,
+      "total": total,
+  }
+
+
+def tokens_table(tokens):
+  """Returns the markdown table of tokens.json's sessions."""
+  lines = [
+      "| role | model | input | output | thinking | cache read | total |",
+      "|---|---|---|---|---|---|---|",
+  ]
+  for s in tokens["sessions"]:
+    u = s["usage"]
+    lines.append(
+        f"| {s['role']} | {s['model']} | "
+        + " | ".join(str(u[k]) for k in COUNT_KEYS)
+        + " |"
+    )
+  t = tokens["total"]
+  lines.append(
+      "| total | | " + " | ".join(str(t[k]) for k in COUNT_KEYS) + " |"
+  )
+  return "\n".join(lines)
+
+
+def record_ledger_row(step, model, mode, tokens, rounds, error, environ):
+  """Adds this run's dispatch-ledger row through dashboard_lanes.py."""
+  total = tokens["total"]
+  breakdown = "; ".join(
+      f"{s['name']}={s['usage']['total_tokens']}" for s in tokens["sessions"]
+  )
+  notes = f"foreman mode={mode}; {breakdown}"
+  if error:
+    notes += "; failed"
+  cmd = [
+      sys.executable,
+      "-I",
+      os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                   "dashboard_lanes.py"),
+      "ledger",
+      "add",
+      f"step={step}",
+      "agent=agy",
+      f"model={model}",
+      f"tokens={total['total_tokens']}",
+      f"input_tokens={total['input_tokens']}",
+      f"output_tokens={total['output_tokens']}",
+      f"cache_read_tokens={total['cache_read_tokens']}",
+      f"rounds={rounds}",
+      f"notes={notes}",
+  ]
+  res = subprocess.run(
+      cmd,
+      env=environ,
+      stdout=subprocess.PIPE,
+      stderr=subprocess.PIPE,
+      text=True,
+  )
+  if res.stderr:
+    print(f"foreman: ledger: {res.stderr.strip()}", file=sys.stderr)
 
 
 def default_out_dir(step, environ=os.environ):
@@ -209,7 +371,11 @@ def run_review(
     lane,
     environ=os.environ,
 ):
-  """Runs a read-only review session using plain -p --mode plan."""
+  """Runs a read-only review session using -p --mode plan, JSON output.
+
+  Writes the review text to out_review_path and the raw JSON beside it.
+  Returns (ok, error, text, is_clean, usage).
+  """
   review_prompt = (
       "Read-only review; do not modify anything and do not run builds. "
       f"In the current directory (the dcfs repository), review `git diff {base}"
@@ -228,31 +394,57 @@ def run_review(
       review_model,
       "--mode",
       "plan",
+      "--output-format",
+      "json",
   ]
+  usage = SessionUsage(model=review_model)
   try:
     res = subprocess.run(
         cmd,
         cwd=lane,
         env=environ,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=subprocess.PIPE,
         text=True,
     )
-    with open(out_review_path, "w", encoding="utf-8") as f:
-      f.write(res.stdout)
-    if res.returncode != 0:
-      return (
-          False,
-          f"review exited with code {res.returncode}",
-          res.stdout,
-          False,
-      )
-    is_clean = any(line.strip() == "NONE" for line in res.stdout.splitlines())
-    return True, None, res.stdout, is_clean
   except (subprocess.SubprocessError, OSError) as e:
     with open(out_review_path, "w", encoding="utf-8") as f:
       f.write(str(e))
-    return False, f"review failed to run: {e}", "", False
+    return False, f"review failed to run: {e}", "", False, usage
+
+  with open(
+      os.path.splitext(out_review_path)[0] + ".json", "w", encoding="utf-8"
+  ) as f:
+    f.write(res.stdout)
+  parsed = parse_review_json(res.stdout)
+  if parsed is None:
+    with open(out_review_path, "w", encoding="utf-8") as f:
+      f.write(res.stdout + res.stderr)
+    return (
+        False,
+        f"review output is not JSON (code {res.returncode})",
+        res.stdout,
+        False,
+        usage,
+    )
+  text = parsed.get("response") or ""
+  with open(out_review_path, "w", encoding="utf-8") as f:
+    f.write(text if text.endswith("\n") else text + "\n")
+  counts = parsed.get("usage") or {}
+  usage.counts = {k: int(counts.get(k, 0)) for k in COUNT_KEYS}
+  if parsed.get("status") == "ERROR":
+    return (
+        False,
+        f"review ERROR: {parsed.get('error') or 'ERROR status'}",
+        text,
+        False,
+        usage,
+    )
+  if res.returncode != 0:
+    code = res.returncode
+    return False, f"review exited with code {code}", text, False, usage
+  is_clean = any(line.strip() == "NONE" for line in text.splitlines())
+  return True, None, text, is_clean, usage
 
 
 def build_fix_prompt(branch, review_output, worker_prompt):
@@ -272,7 +464,8 @@ def build_fix_prompt(branch, review_output, worker_prompt):
 
 
 def generate_summary(
-    out_dir, step, lane, branch, base, git_bin="git", error_msg=None
+    out_dir, step, lane, branch, base, git_bin="git", error_msg=None,
+    tokens=None,
 ):
   """Generates summary.md matching run.sh formatting."""
   lines = [f"# {step}", "", f"branch {branch} in {lane}, base {base}"]
@@ -313,6 +506,8 @@ def generate_summary(
     usage_after = f.read()
   quota_text = (usage_before + usage_after).rstrip("\n")
   lines.extend(["", "## quota before / after", quota_text])
+  if tokens is not None:
+    lines.extend(["", "## tokens", tokens_table(tokens)])
 
   summary_content = "\n".join(lines) + "\n"
   summary_path = os.path.join(out_dir, "summary.md")
@@ -355,27 +550,51 @@ def run_foreman(
   with open(os.path.join(out_dir, "usage.before"), "w", encoding="utf-8") as f:
     f.write(ub)
 
-  ok, err = run_stream_session(
-      agy_bin=agy_bin,
-      model=model,
-      prompt=worker_prompt,
-      out_jsonl_path=os.path.join(out_dir, "worker.jsonl"),
-      out_txt_path=os.path.join(out_dir, "worker.out"),
-      lane=lane,
-      clock=clock,
-      environ=environ,
-  )
-  if not ok:
+  sessions = []
+  rounds = 0
+
+  def finish(error=None):
     ua = read_usage(agy_bin, lane, environ=environ)
     with open(os.path.join(out_dir, "usage.after"), "w", encoding="utf-8") as f:
       f.write(ua)
+    tokens = build_tokens(sessions)
+    with open(
+        os.path.join(out_dir, "tokens.json"), "w", encoding="utf-8"
+    ) as f:
+      json.dump(tokens, f, indent=2)
+      f.write("\n")
     generate_summary(
-        out_dir, step, lane, branch, base, git_bin=git_bin, error_msg=err
+        out_dir, step, lane, branch, base, git_bin=git_bin, error_msg=error,
+        tokens=tokens,
     )
-    return 1
+    record_ledger_row(
+        step, model, "orchestrator", tokens, rounds, error, environ
+    )
+    return 1 if error else 0
+
+  def run_session(role, name, prompt):
+    ok, err = run_stream_session(
+        agy_bin=agy_bin,
+        model=model,
+        prompt=prompt,
+        out_jsonl_path=os.path.join(out_dir, f"{name}.jsonl"),
+        out_txt_path=os.path.join(out_dir, f"{name}.out"),
+        lane=lane,
+        clock=clock,
+        environ=environ,
+    )
+    add_session(
+        sessions, role, name, model,
+        parse_stream_usage(os.path.join(out_dir, f"{name}.jsonl")),
+    )
+    return ok, err
+
+  ok, err = run_session("worker", "worker", worker_prompt)
+  if not ok:
+    return finish(err)
 
   for r in (1, 2):
-    rev_ok, rev_err, rev_text, is_clean = run_review(
+    rev_ok, rev_err, rev_text, is_clean, rev_usage = run_review(
         agy_bin=agy_bin,
         review_model=review_model,
         base=base,
@@ -384,47 +603,21 @@ def run_foreman(
         lane=lane,
         environ=environ,
     )
+    rounds = r
+    add_session(sessions, "review", f"review{r}", review_model, rev_usage)
     if not rev_ok:
-      ua = read_usage(agy_bin, lane, environ=environ)
-      with open(
-          os.path.join(out_dir, "usage.after"), "w", encoding="utf-8"
-      ) as f:
-        f.write(ua)
-      generate_summary(
-          out_dir, step, lane, branch, base, git_bin=git_bin, error_msg=rev_err
-      )
-      return 1
+      return finish(rev_err)
 
     if is_clean:
       break
 
-    fix_prompt = build_fix_prompt(branch, rev_text, worker_prompt)
-    fix_ok, fix_err = run_stream_session(
-        agy_bin=agy_bin,
-        model=model,
-        prompt=fix_prompt,
-        out_jsonl_path=os.path.join(out_dir, f"fix{r}.jsonl"),
-        out_txt_path=os.path.join(out_dir, f"fix{r}.out"),
-        lane=lane,
-        clock=clock,
-        environ=environ,
+    fix_ok, fix_err = run_session(
+        "fix", f"fix{r}", build_fix_prompt(branch, rev_text, worker_prompt)
     )
     if not fix_ok:
-      ua = read_usage(agy_bin, lane, environ=environ)
-      with open(
-          os.path.join(out_dir, "usage.after"), "w", encoding="utf-8"
-      ) as f:
-        f.write(ua)
-      generate_summary(
-          out_dir, step, lane, branch, base, git_bin=git_bin, error_msg=fix_err
-      )
-      return 1
+      return finish(fix_err)
 
-  ua = read_usage(agy_bin, lane, environ=environ)
-  with open(os.path.join(out_dir, "usage.after"), "w", encoding="utf-8") as f:
-    f.write(ua)
-  generate_summary(out_dir, step, lane, branch, base, git_bin=git_bin)
-  return 0
+  return finish()
 
 
 def main(argv):
