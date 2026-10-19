@@ -7426,8 +7426,8 @@ TEST_F(DirCacheFSTest, ATruncateFailsWhereTheDaemonLacksCapFsetid) {
 // the SETATTR that sets nothing for a writer without CAP_FSETID. So the
 // write itself, run with CAP_FSETID, removes nothing, whoever sends it, and
 // whether or not it carries FUSE_WRITE_KILL_SUIDGID (which the pinned
-// libfuse 3.18.2 does not hand over). Goes with 23.16, which retires the
-// path that does not go through passthrough.
+// libfuse 3.18.2 does not hand over). The path that does not go through
+// passthrough stays for a backing the kernel refuses it for (ELOOP).
 TEST_F(DirCacheFSTest, FallbackWriteRemovesNoPrivilegesItself) {
   struct Case {
     std::string name;

@@ -2118,12 +2118,14 @@ through a shared mapping even though the backing descriptor is `O_RDWR`.
 Passthrough is granted per backing file. The kernel refuses it when the
 backing filesystem's stack depth is at or above the connection's
 `max_stack_depth` (overlay on overlay, or dcfs over dcfs), with `ELOOP` from
-`fuse_backing_open` (fs/fuse/backing.c:112 (Linux v7.3-rc7)). Where the kernel
-refuses passthrough, or dcfs declines it (a file with setuid and setgid but
-not group execute; see [Caller credentials](#caller-credentials)), `Read` and
-`Write` serve the data through the same descriptor. That fallback is the
-supported path for those files, not a stopgap, and it needs its own tests and
-model coverage.
+`fuse_backing_open` (fs/fuse/backing.c:111-114 (Linux v7.3-rc7)). dcfs sends
+`max_backing_stack_depth = FUSE_BACKING_STACKED_OVER`, so the limit is 2: a
+backing on an overlayfs over a disk (depth 1) gets passthrough and one on an
+overlayfs over an overlayfs (depth 2) does not (libfuse logs the
+refusal; `test/qemu/guest/stacked_backing_test.cc`). Where the kernel refuses
+passthrough, `Read` and `Write` serve the data through the same descriptor.
+That fallback is the supported path for those files, not a stopgap, and it
+needs its own tests and model coverage.
 
 `FUSE_CAP_ATOMIC_O_TRUNC` is turned off, so an `O_TRUNC` open arrives as
 an OPEN followed by a separate `SETATTR(size=0)`, which the ordinary

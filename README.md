@@ -84,7 +84,12 @@ The repository carries forward the history of a 2023 experiment called
   the Linux v6.8 and v6.9 tags). Planned for plan step 24.2 (Thursday
   2026-10-22): the minimum rises to Linux 6.12 LTS, and the test kernel
   becomes Alpine's `linux-virt` 6.12 (`third_party/linux/README.md`). Until
-  that lands, the test kernel is 6.18 and 6.12 is not tested yet.
+  that lands, the test kernel is 6.18 and 6.12 is not tested yet. The kernel
+  refuses passthrough for a backing whose own stack depth is too high (a
+  backing on overlayfs on another overlayfs: `ELOOP` from
+  `FUSE_DEV_IOC_BACKING_OPEN`, `fs/fuse/backing.c`, Linux v7.3-rc7), and dcfs
+  then serves that file's reads and writes itself, as it does on a kernel
+  that never grants passthrough.
 - **A backing filesystem that supports file handles
   (`name_to_handle_at`) and a stable filesystem identity.** ext4, xfs and
   btrfs are all tested (step 5.2: every e2e test runs on all three). ext4
