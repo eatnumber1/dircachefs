@@ -336,7 +336,7 @@ cc_library(
     deps = [
       ":status",
       ":syscalls",
-            ":syscalls_process",
+      ":syscalls_process",
       "@absl//absl/status",
       "@absl//absl/status:statusor",
     ],
