@@ -4,7 +4,8 @@
 Harness tool, not part of dcfs; see tools/agents/README.md. Drives worker
 and review/fix rounds via agy in stream-json mode, holding stdin open until
 JOB-COMPLETE is signaled. With --single it runs the one worker session and
-nothing else.
+nothing else; with --read-only as well it runs in agy plan mode, leaves the
+lane's git state alone and saves the worker's final text as report.md.
 """
 
 import argparse
@@ -239,10 +240,13 @@ def run_stream_session(
     out_jsonl_path,
     out_txt_path,
     lane,
+    read_only=False,
     clock=time.time,
     environ=os.environ,
 ):
   """Runs a worker or fix agy session in stream-json mode.
+
+  With read_only, agy runs in plan mode.
 
   Starts agy with --input-format stream-json --output-format stream-json and
   -p=, writes prompt as one input line with JOB-COMPLETE instruction appended,
@@ -264,6 +268,8 @@ def run_stream_session(
       "stream-json",
       "-p=",
   ]
+  if read_only:
+    cmd += ["--mode", "plan"]
 
   prompt_with_instruction = prompt + COMPLETION_INSTRUCTION
   input_event = (
@@ -443,27 +449,35 @@ def build_fix_prompt(branch, review_output, worker_prompt):
 
 def generate_summary(
     out_dir, step, lane, branch, base, git_bin="git", error_msg=None,
-    tokens=None, single=False,
+    tokens=None, single=False, read_only=False,
 ):
-  """Generates summary.md matching run.sh formatting."""
-  lines = [f"# {step}", "", f"branch {branch} in {lane}, base {base}"]
+  """Generates summary.md matching run.sh formatting.
+
+  A read-only run has no branch or commits: the summary says read-only and
+  names the directory.
+  """
+  if read_only:
+    lines = [f"# {step}", "", f"read-only run in {lane}"]
+  else:
+    lines = [f"# {step}", "", f"branch {branch} in {lane}, base {base}"]
 
   if error_msg:
     lines.extend(["", "## error", error_msg])
 
-  commits = subprocess.check_output(
-      [git_bin, "log", "--oneline", f"{base}..HEAD"],
-      cwd=lane,
-      text=True,
-  )
-  lines.extend(["", "## commits", commits.rstrip("\n")])
+  if not read_only:
+    commits = subprocess.check_output(
+        [git_bin, "log", "--oneline", f"{base}..HEAD"],
+        cwd=lane,
+        text=True,
+    )
+    lines.extend(["", "## commits", commits.rstrip("\n")])
 
-  uncommitted = subprocess.check_output(
-      [git_bin, "status", "--short"],
-      cwd=lane,
-      text=True,
-  )
-  lines.extend(["", "## uncommitted", uncommitted.rstrip("\n")])
+    uncommitted = subprocess.check_output(
+        [git_bin, "status", "--short"],
+        cwd=lane,
+        text=True,
+    )
+    lines.extend(["", "## uncommitted", uncommitted.rstrip("\n")])
 
   if not single:
     review_files = []
@@ -495,6 +509,14 @@ def generate_summary(
   return summary_path
 
 
+def save_report(out_dir):
+  """Saves the worker's text, minus its JOB-COMPLETE line, as report.md."""
+  with open(os.path.join(out_dir, "worker.out"), "r", encoding="utf-8") as f:
+    kept = [line for line in f if line.strip() != "JOB-COMPLETE"]
+  with open(os.path.join(out_dir, "report.md"), "w", encoding="utf-8") as f:
+    f.writelines(kept)
+
+
 def run_foreman(
     step,
     lane,
@@ -506,13 +528,23 @@ def run_foreman(
     agy_bin="agy",
     git_bin="git",
     single=False,
+    read_only=False,
     clock=time.time,
     environ=os.environ,
 ):
   """Runs one queued step end to end on Gemini in a lane.
 
   With single, runs one held-open worker session and no review or fix rounds.
+  With read_only (requires single), the worker runs in agy plan mode, nothing
+  in lane changes (it is only the working directory, and branch is unused),
+  and the worker's final text is saved as report.md.
   """
+  if read_only and not single:
+    raise ValueError("read_only requires single")
+  if single:
+    mode = "read-only" if read_only else "single"
+  else:
+    mode = "orchestrator"
   if not review_model:
     review_model = model
   if not out_dir:
@@ -522,12 +554,14 @@ def run_foreman(
   with open(prompt_file, "r", encoding="utf-8") as f:
     worker_prompt = f.read()
 
-  base = setup_git_branch(
-      lane=lane,
-      branch=branch,
-      git_bin=git_bin,
-      environ=environ,
-  )
+  base = None
+  if not read_only:
+    base = setup_git_branch(
+        lane=lane,
+        branch=branch,
+        git_bin=git_bin,
+        environ=environ,
+    )
 
   ub = read_usage(agy_bin, lane, environ=environ)
   with open(os.path.join(out_dir, "usage.before"), "w", encoding="utf-8") as f:
@@ -548,12 +582,9 @@ def run_foreman(
       f.write("\n")
     generate_summary(
         out_dir, step, lane, branch, base, git_bin=git_bin, error_msg=error,
-        tokens=tokens, single=single,
+        tokens=tokens, single=single, read_only=read_only,
     )
-    record_ledger_row(
-        step, model, "single" if single else "orchestrator", tokens, rounds,
-        error, environ,
-    )
+    record_ledger_row(step, model, mode, tokens, rounds, error, environ)
     return 1 if error else 0
 
   def run_session(role, name, prompt):
@@ -564,6 +595,7 @@ def run_foreman(
         out_jsonl_path=os.path.join(out_dir, f"{name}.jsonl"),
         out_txt_path=os.path.join(out_dir, f"{name}.out"),
         lane=lane,
+        read_only=read_only,
         clock=clock,
         environ=environ,
     )
@@ -574,8 +606,10 @@ def run_foreman(
     return ok, err
 
   ok, err = run_session(
-      "single" if single else "worker", "worker", worker_prompt
+      "worker" if mode == "orchestrator" else "single", "worker", worker_prompt
   )
+  if ok and read_only:
+    save_report(out_dir)
   if not ok or single:
     return finish(err)
 
@@ -613,8 +647,13 @@ def main(argv):
   )
   parser.add_argument("step", help="Step name (e.g. 25.33)")
   parser.add_argument("lane", help="Path to lane directory")
-  parser.add_argument("branch", help="Target branch name")
-  parser.add_argument("prompt_file", help="Path to worker prompt file")
+  parser.add_argument(
+      "rest",
+      nargs="+",
+      metavar="branch prompt_file",
+      help="Target branch name and path to the worker prompt file; with "
+      "--read-only only the prompt file (there is no branch)",
+  )
   parser.add_argument(
       "--model",
       default=DEFAULT_MODEL,
@@ -645,19 +684,37 @@ def main(argv):
       action="store_true",
       help="One worker session; no review or fix rounds",
   )
+  parser.add_argument(
+      "--read-only",
+      action="store_true",
+      help="With --single: agy plan mode, no branch setup, saves report.md",
+  )
   args = parser.parse_args(argv)
+  if args.read_only and not args.single:
+    parser.error("--read-only requires --single")
+  if args.single and args.review_model:
+    parser.error("--review-model has no effect with --single")
+  if args.read_only:
+    if len(args.rest) != 1:
+      parser.error("--read-only takes no branch: step lane prompt_file")
+    branch, prompt_file = None, args.rest[0]
+  else:
+    if len(args.rest) != 2:
+      parser.error("expected branch and prompt_file after the lane")
+    branch, prompt_file = args.rest
 
   return run_foreman(
       step=args.step,
       lane=args.lane,
-      branch=args.branch,
-      prompt_file=args.prompt_file,
+      branch=branch,
+      prompt_file=prompt_file,
       model=args.model,
       review_model=args.review_model,
       out_dir=args.out,
       agy_bin=args.agy_bin,
       git_bin=args.git_bin,
       single=args.single,
+      read_only=args.read_only,
   )
 
 

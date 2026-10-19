@@ -46,7 +46,7 @@ if "-p" in args and "/usage" in args:
   sys.stdout.flush()
   sys.exit(0)
 
-if "--mode" in args and "plan" in args:
+if "--mode" in args and "plan" in args and "--input-format" not in args:
   # Review mode: one JSON object, as agy --output-format json prints it.
   if "--output-format" not in args or (
       args[args.index("--output-format") + 1] != "json"
@@ -740,11 +740,107 @@ class ForemanTest(unittest.TestCase):
     self.assertNotIn("## last review", summary)
     self.assertIn("| single |", summary)
 
-  def test_single_mode_ends_on_job_complete_and_reports_failure(self):
+  def test_single_mode_failure_is_recorded(self):
     self.assertEqual(
         self._run(single=True, env={"FAKE_AGY_STREAM_MODE": "exit_early"}), 1
     )
     self.assertIn("failed", self._ledger_rows()[0]["notes"])
+    self.assertFalse(os.path.exists(os.path.join(self.out_dir, "review1.out")))
+
+  def _run_read_only(self, env=None, **kwargs):
+    environ = {
+        "DCFS_MAIN_REPO": self.main_repo,
+        "DCFS_DASHBOARD_DIR": self.dashboard,
+    }
+    environ.update(env or {})
+    return foreman.run_foreman(
+        step="25.97",
+        lane=self.lane,
+        branch=None,
+        prompt_file=self.prompt_file,
+        out_dir=self.out_dir,
+        agy_bin=self.fake_agy_path,
+        environ=environ,
+        single=True,
+        read_only=True,
+        **kwargs,
+    )
+
+  def _head(self):
+    res = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=self.lane,
+        capture_output=True, text=True,
+    )
+    return res.stdout.strip() if res.returncode == 0 else ""
+
+  def test_read_only_runs_plan_mode_without_touching_the_lane(self):
+    log_file = os.path.join(self.root, "agy_args.log")
+    before = self._head()
+    self.assertEqual(
+        self._run_read_only(env={"FAKE_AGY_LOG": log_file}), 0
+    )
+    self.assertEqual(self._head(), before)
+    self.assertFalse(
+        os.path.exists(os.path.join(self.lane, ".git", "FETCH_HEAD"))
+    )
+    with open(log_file, "r", encoding="utf-8") as f:
+      calls = [json.loads(line) for line in f]
+    stream = [c for c in calls if "stream-json" in c]
+    self.assertEqual(len(stream), 1)
+    self.assertEqual(stream[0][stream[0].index("--mode") + 1], "plan")
+    with open(
+        os.path.join(self.out_dir, "report.md"), "r", encoding="utf-8"
+    ) as f:
+      report = f.read()
+    self.assertIn("Work is done.", report)
+    self.assertNotIn("JOB-COMPLETE", report)
+    with open(
+        os.path.join(self.out_dir, "summary.md"), "r", encoding="utf-8"
+    ) as f:
+      summary = f.read()
+    self.assertIn("read-only", summary)
+    self.assertIn("| single |", summary)
+    row = self._tokens()["sessions"][0]
+    self.assertEqual(row["role"], "single")
+    self.assertEqual(
+        self._ledger_rows()[0]["notes"],
+        "foreman mode=read-only; worker=2200",
+    )
+
+  def test_default_mode_has_no_plan_flag_on_the_worker(self):
+    log_file = os.path.join(self.root, "agy_args.log")
+    self.assertEqual(self._run(env={"FAKE_AGY_LOG": log_file}), 0)
+    with open(log_file, "r", encoding="utf-8") as f:
+      calls = [json.loads(line) for line in f]
+    stream = [c for c in calls if "stream-json" in c]
+    self.assertNotIn("--mode", stream[0])
+
+  def _parse_error(self, argv):
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+      foreman.main(argv)
+    return stderr.getvalue()
+
+  def test_review_model_with_single_is_refused(self):
+    err = self._parse_error(
+        ["s", self.lane, "b", self.prompt_file, "--single",
+         "--review-model", "m"]
+    )
+    self.assertIn("--review-model", err)
+
+  def test_read_only_without_single_is_refused(self):
+    err = self._parse_error(
+        ["s", self.lane, "b", self.prompt_file, "--read-only"]
+    )
+    self.assertIn("--read-only requires --single", err)
+
+  def test_read_only_takes_no_branch_argument(self):
+    err = self._parse_error(
+        ["s", self.lane, "b", self.prompt_file, "--single", "--read-only"]
+    )
+    self.assertIn("takes no branch", err)
+    err = self._parse_error(["s", self.lane, "b", "--single"])
+    self.assertIn("branch and prompt_file", err)
 
   def test_custom_models_passed(self):
     log_file = os.path.join(self.root, "agy_args.log")
