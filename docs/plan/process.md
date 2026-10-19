@@ -681,12 +681,13 @@ reading. Not for writing code, nor for subtle protocol judgement.
    judgement-heavy design. A job that needs Claude-grade judgement but not
    the session's tools can run through agy instead of a Claude Code subagent.
 10. <a id="rule-agy-invocation"></a>
-    Invoking agy (learned 2026-10-18). Jobs do not call agy directly: they
-   go through `tools/agents/foreman.py` by the `dcfs-foreman` skill (rule
-   12). Direct calls are for the usage reads only, `agy -p "/usage"` and
+    Invoking agy (learned 2026-10-18). Every agy job goes through
+   `tools/agents/foreman.py` by the `dcfs-foreman` skill (rule 12): it
+   holds the session open past agy's 30-minute print timeout and handles
+   the hang on a non-JSON error. Direct calls are for the usage reads only, `agy -p "/usage"` and
    `agy -p '/quota'`, run with the Bash tool's `run_in_background: true`
    when they might block (russ, 2026-10-18: "I think those agy invocations
-   were blocking for you"). Facts that hold for foreman's own calls: the
+   were blocking for you"). Facts for foreman's own calls: the
    prompt is attached to `-p` with `=` (`-p="$(cat prompt.txt)"`, or a bare
    `-p --model` swallows the flag); `agy -p` ends when the model's turn
    ends and kills any background task it started, so foreman holds a
@@ -706,12 +707,21 @@ reading. Not for writing code, nor for subtle protocol judgement.
    a skill and put it in AGENTS.md." and "I'd like it if our subagents
    started doing this too, and themselves leveraging dumber agents for
    more of the menial work." and "Use the foreman script instead of
-   calling agy directly."). Every agent, orchestrator or subagent, hands a
-   bounded chunk that needs labour rather than judgement (surveys, greps
+   calling agy directly."). russ, the same day, on foreman's purpose: "foreman's
+   purpose was to have an orchestrator in Gemini as well. Maybe we should
+   have both an in-gemini orchestrator and a non-orchestrator mode?
+   foreman.py also was extended to not be subject to the 30 minute
+   timeout, so we do need to keep using it." So foreman has an
+   orchestrator mode (a worker plus review/fix rounds and a merge-ready
+   branch: a whole step on Gemini) and, from 25.48, a single mode (one
+   worker session, no review round; `--read-only` adds plan mode and no
+   branch) for bounded chunks; until 25.48 lands a chunk uses orchestrator
+   mode and pays the extra review round. Every agent, orchestrator or
+   subagent, hands a bounded chunk that needs labour rather than judgement (surveys, greps
    across trees, doc passes, test boilerplate, warning-fix batches) to
    Gemini through `tools/agents/foreman.py`, by the `dcfs-foreman` skill
-   (`.claude/skills/dcfs-foreman/SKILL.md`). It reconciles rule 10: jobs
-   go through foreman, not a bare `agy -p`; only `agy -p '/quota'` and
+   (`.claude/skills/dcfs-foreman/SKILL.md`). It reconciles rule 10: every
+   agy job goes through foreman, not a bare `agy -p`; only `agy -p '/quota'` and
    `/usage` stay direct. A Claude subagent cannot spawn another Claude
    subagent, so foreman is how it delegates down, and the Claude quota it
    would have spent stays for judgement work. The delegating agent reads

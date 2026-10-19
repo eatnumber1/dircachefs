@@ -11,6 +11,14 @@ description: >-
 
 # Delegate to Gemini with foreman
 
+Foreman has two modes. **Orchestrator mode** (today's default) runs a
+worker plus review/fix rounds and leaves a merge-ready branch: a whole step
+on Gemini. **Single mode** (from 25.48: one worker session, no review
+round, `--read-only` for plan mode and no branch) is for bounded chunks.
+Foreman also holds the session past agy's 30-minute print timeout, which is
+why every agy job goes through it. Until 25.48 lands, a bounded chunk uses
+orchestrator mode.
+
 The rule is `rule-delegate-down` in
 [process](/docs/plan/process.md#rule-delegate-down); the invocation
 rules are
@@ -49,8 +57,9 @@ crash handling, reviews (Flash is lenient), or design that needs judgement
 6. **Check the lane** with `git status`: a non-JSON `AGY_ERROR` or 429
    makes foreman hang and can leave the lane mid-rebase (README, known
    issue); abort any rebase.
-7. **Read-only jobs cost extra today**: an empty-diff review round and a
-   throwaway branch, until 25.48 adds `--read-only`. Ignore the branch.
+7. **Bounded chunks cost extra today** (orchestrator mode only): an
+   empty-diff review round and a throwaway branch, until 25.48 adds single
+   mode and `--read-only`. Ignore the branch.
 8. **Record it**, from the main checkout, naming the parent step:
 
    ```bash
