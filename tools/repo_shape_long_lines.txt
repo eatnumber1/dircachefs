@@ -77,11 +77,11 @@ docs/plan/phases/20-statistics.md 1
 docs/plan/phases/22-cancellation.md 2
 docs/plan/phases/23-semantics-gaps.md 10
 docs/plan/phases/24-alpine-series-pins.md 2
-docs/plan/phases/25-style-convergence.md 81
+docs/plan/phases/25-style-convergence.md 80
 docs/plan/phases/26-bumpers.md 26
 docs/plan/phases/27-in-memory-cache.md 1
 docs/plan/process.md 11
-docs/plan/README.md 5
+docs/plan/README.md 4
 docs/plan/review-fixes.md 1
 docs/rules/index-style.md 1
 docs/rules/index-tests.md 1
