@@ -14,6 +14,7 @@ test/qemu/guest/init for the guest side.
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//test/qemu:coverage.bzl", "E2E_COVERAGE_OBJECTS", "coverage_args", "coverage_data")
 load("//test/qemu:modules.bzl", "modules_cpio", "test_modules")
+load("//test/qemu:refusals.bzl", "initramfs_refusal", "mem_refusal", "qemu_test_matrix_refusal", "qemu_test_refusal")
 
 # Guest memory (step 6.2). Every guest has an allowance, in MiB, passed to
 # run-qemu.sh as --mem; the defaults below are for a test that is no bigger
@@ -70,8 +71,9 @@ QEMU_OVERHEAD_MB = 100
 # checked one.
 def initramfs_for(size, plain_dcfs = False, checked_dcfs = False):
     """The initramfs label a qemu_test of tier `size` boots."""
-    if plain_dcfs and checked_dcfs:
-        fail("plain_dcfs and checked_dcfs exclude each other")
+    refusal = initramfs_refusal(plain_dcfs, checked_dcfs)
+    if refusal:
+        fail(refusal)
     if plain_dcfs:
         return ":initramfs"
     if checked_dcfs:
@@ -122,8 +124,9 @@ def resolve_mem(mem, asan_mem, default, asan_default):
         mem = default
     if asan_mem == None:
         asan_mem = max(asan_default, mem)
-    if asan_mem < mem:
-        fail("asan_mem (%d) is smaller than mem (%d)" % (asan_mem, mem))
+    refusal = mem_refusal(mem, asan_mem)
+    if refusal:
+        fail(refusal)
     return mem, asan_mem
 
 def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None, plain_dcfs = False, power_cut = [], cmdline = "", checked_dcfs = False, tags = [], cpus = E2E_CPUS, systemd_image = None, boots = 1, ram_disks = False, target_compatible_with = []):
@@ -225,36 +228,17 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             size = "enormous"; defaults to "long" (900s), unchanged from
             before this parameter existed.
     """
-    if size == None or timeout == None:
-        fail("qemu_test(%s): size and timeout are required (the test tier; see test/qemu/README.md)" % name)
+    refusal = qemu_test_refusal(name, size, timeout, kernel_failure, systemd_image, rootfs, boots, power_cut, ram_disks, mem, disks)
+    if refusal:
+        fail(refusal)
     # A disk-spec with mke2fs options has spaces: Bazel shell-tokenizes `args`.
     disk_args = ["'" + ":".join(d) + "'" if len(d) > 3 else ":".join(d) for d in disks]
     guest_script_basename = guest_script.split("/")[-1]
 
-    if kernel_failure not in (None, "expected"):
-        fail("qemu_test(%s): kernel_failure must be None or \"expected\"" % name)
     kernel_failure_args = ["--expect-kernel-failure", guest_script.split("/")[-1]] if kernel_failure else []
     power_cut_args = ["--power-cut", ",".join(power_cut)] if power_cut else []
     power_cut_args += ["--cmdline", "'" + cmdline + "'"] if cmdline else []
 
-    if systemd_image and rootfs:
-        fail("qemu_test(%s): systemd_image and rootfs exclude each other" % name)
-    if boots < 1 or (boots > 1 and power_cut):
-        fail("qemu_test(%s): boots is 1 or more, and excludes power_cut" % name)
-    if ram_disks and (power_cut or boots > 1 or rootfs or systemd_image):
-        fail("qemu_test(%s): ram_disks excludes power_cut, boots, rootfs and systemd_image (the disks are in the guest's RAM)" % name)
-    if ram_disks and [d for d in disks if len(d) > 3]:
-        fail("qemu_test(%s): ram_disks disks carry no mkfs options" % name)
-    # The guest holds its disks: the 256 MiB default has no room for them, and
-    # a test that forgot to size it would run with a warning every time.
-    if ram_disks and mem == None:
-        fail("qemu_test(%s): ram_disks needs an explicit mem (the guest holds its disks; size it from the MEM line, README.md \"Guest memory\")" % name)
-    # The profile disk of `bazel coverage` is /dev/vda when no virtio disk is
-    # attached, so a RAM disk of that name would collide with it.
-    if ram_disks and [d for d in disks if d[0] == "vda"]:
-        fail("qemu_test(%s): a ram_disks disk cannot be named vda (the coverage disk's name)" % name)
-    if ram_disks and [d for d in disks if d[0].startswith("sd")]:
-        fail("qemu_test(%s): a ram_disks disk cannot be a SCSI disk" % name)
     ram_disks_data = ["//test/qemu:fstools_cpio"] if ram_disks else []
     ram_disks_args = ["--ram-disks", "$(location //test/qemu:fstools_cpio)"] if ram_disks else []
     systemd_data = [systemd_image, "@alpine_qemu_img//:qemu_img"] if systemd_image else []
@@ -403,11 +387,9 @@ def qemu_test_matrix(
         fstypes: filesystems to generate variants for, in order; the first
             is what plain "<name>" aliases to.
     """
-    if not disks:
-        fail("qemu_test_matrix(%s): disks must have at least one entry " % name +
-             "(the backing source disk, vdb, whose fstype is varied)")
-    if size == None or other_size == None or timeout == None:
-        fail("qemu_test_matrix(%s): size, other_size and timeout are required" % name)
+    refusal = qemu_test_matrix_refusal(name, disks, size, other_size, timeout)
+    if refusal:
+        fail(refusal)
     for fstype in fstypes:
         # The mkfs options (a fourth element) are ext4's: the other variants
         # drop them.

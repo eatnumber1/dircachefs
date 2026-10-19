@@ -39,6 +39,7 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//test/qemu:coverage.bzl", "coverage_args", "coverage_data")
 load("//test/qemu:guest_libs.bzl", "GUEST_LIBS_ENV", "GUEST_LIBS_TOOLS")
 load("//test/qemu:modules.bzl", "modules_cpio", "test_modules")
+load("//test/qemu:refusals.bzl", "qemu_cc_test_refusal")
 load("//test/qemu:qemu_test.bzl", "BUDGET_ARGS", "BUDGET_DATA", "QEMU_OVERHEAD_MB", "mem_args_for", "resolve_mem", "sanitizer_args")
 
 # Unit guests (step 6.2): the plain tests peak at 35 MiB (MemTotal - MemAvailable
@@ -112,8 +113,9 @@ def qemu_cc_test(
         **kwargs: forwarded to the underlying cc_binary (e.g. extra
             copts).
     """
-    if size == None or timeout == None:
-        fail("qemu_cc_test(%s): size and timeout are required (the test tier; see test/qemu/README.md)" % name)
+    refusal = qemu_cc_test_refusal(name, size, timeout)
+    if refusal:
+        fail(refusal)
     bin_name = name + "_bin"
     initramfs_out = name + ".cpio.gz"
 
