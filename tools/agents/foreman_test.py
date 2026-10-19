@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import foreman
@@ -761,27 +762,16 @@ class ForemanTest(unittest.TestCase):
         out_dir=self.out_dir,
         agy_bin=self.fake_agy_path,
         environ=environ,
+        git_bin=os.path.join(self.root, "no-such-git"),
         single=True,
         read_only=True,
         **kwargs,
     )
 
-  def _head(self):
-    res = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=self.lane,
-        capture_output=True, text=True,
-    )
-    return res.stdout.strip() if res.returncode == 0 else ""
-
   def test_read_only_runs_plan_mode_without_touching_the_lane(self):
     log_file = os.path.join(self.root, "agy_args.log")
-    before = self._head()
     self.assertEqual(
         self._run_read_only(env={"FAKE_AGY_LOG": log_file}), 0
-    )
-    self.assertEqual(self._head(), before)
-    self.assertFalse(
-        os.path.exists(os.path.join(self.lane, ".git", "FETCH_HEAD"))
     )
     with open(log_file, "r", encoding="utf-8") as f:
       calls = [json.loads(line) for line in f]
@@ -798,7 +788,9 @@ class ForemanTest(unittest.TestCase):
         os.path.join(self.out_dir, "summary.md"), "r", encoding="utf-8"
     ) as f:
       summary = f.read()
-    self.assertIn("read-only", summary)
+    self.assertIn("read-only run in " + self.lane, summary)
+    self.assertNotIn("## commits", summary)
+    self.assertNotIn("## uncommitted", summary)
     self.assertIn("| single |", summary)
     row = self._tokens()["sessions"][0]
     self.assertEqual(row["role"], "single")
@@ -806,6 +798,31 @@ class ForemanTest(unittest.TestCase):
         self._ledger_rows()[0]["notes"],
         "foreman mode=read-only; worker=2200",
     )
+
+  def test_read_only_failure_is_recorded(self):
+    self.assertEqual(
+        self._run_read_only(env={"FAKE_AGY_STREAM_MODE": "exit_early"}), 1
+    )
+    notes = self._ledger_rows()[0]["notes"]
+    self.assertIn("mode=read-only", notes)
+    self.assertIn("failed", notes)
+    self.assertFalse(os.path.exists(os.path.join(self.out_dir, "report.md")))
+
+  def test_main_read_only_form_saves_report(self):
+    with mock.patch.dict(
+        os.environ,
+        {
+            "DCFS_MAIN_REPO": self.main_repo,
+            "DCFS_DASHBOARD_DIR": self.dashboard,
+        },
+    ):
+      ret = foreman.main([
+          "25.96", self.lane, self.prompt_file, "--single", "--read-only",
+          "--out", self.out_dir, "--agy-bin", self.fake_agy_path,
+          "--git-bin", os.path.join(self.root, "no-such-git"),
+      ])
+    self.assertEqual(ret, 0)
+    self.assertTrue(os.path.exists(os.path.join(self.out_dir, "report.md")))
 
   def test_default_mode_has_no_plan_flag_on_the_worker(self):
     log_file = os.path.join(self.root, "agy_args.log")

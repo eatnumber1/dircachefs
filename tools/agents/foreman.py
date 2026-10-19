@@ -246,8 +246,6 @@ def run_stream_session(
 ):
   """Runs a worker or fix agy session in stream-json mode.
 
-  With read_only, agy runs in plan mode.
-
   Starts agy with --input-format stream-json --output-format stream-json and
   -p=, writes prompt as one input line with JOB-COMPLETE instruction appended,
   keeps stdin open, reads stdout events line by line, writes events to .jsonl
@@ -539,8 +537,6 @@ def run_foreman(
   in lane changes (it is only the working directory, and branch is unused),
   and the worker's final text is saved as report.md.
   """
-  if read_only and not single:
-    raise ValueError("read_only requires single")
   if single:
     mode = "read-only" if read_only else "single"
   else:
