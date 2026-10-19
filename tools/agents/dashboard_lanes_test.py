@@ -15,6 +15,16 @@ import unittest
 import dashboard_lanes
 
 TESTDATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata")
+
+
+def read_fixture(path):
+    """Returns the text of path, or of the testdata file of that name."""
+    if not os.path.isabs(path):
+        path = os.path.join(TESTDATA, path)
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
 AGENT_DEF = (
     "---\nname: dcfs-implementer\nmodel: sonnet\neffort: medium\n---\nbody\n"
 )
@@ -1023,6 +1033,60 @@ class DispatchLedgerTest(Fixture):
     def test_backfill_tokens_takes_no_arguments(self):
         with self.assertRaises(ValueError):
             dashboard_lanes.ledger(self.env, ["backfill-tokens", "x"])
+
+    def add_subagent(self, agent_id, transcript=None, meta=None):
+        """Installs fixture transcript and meta.json files for agent_id."""
+        self.add_transcript(agent_id, read_fixture(
+            transcript or "agent-a1.jsonl"))
+        d = os.path.join(self.env.projects_dir, "proj", "sess", "subagents")
+        self.write(os.path.join(d, "agent-%s.meta.json" % agent_id),
+                   read_fixture(meta or "agent-a1.meta.json"))
+
+    def test_restore_missing_adds_rows_only_for_absent_agents(self):
+        self.launch(agent_id="present")
+        self.add_subagent("present")
+        self.add_subagent("a1")
+        out, err = self.run_cmd(["ledger", "restore-missing"])
+        self.assertEqual(out, "restored 1\n")
+        self.assertEqual(err, "")
+        rows = {r["id"]: r for r in self.ledger_rows()}
+        self.assertEqual(set(rows), {"present", "a1"})
+        self.assertEqual(rows["present"]["tokens"], "")
+        r = rows["a1"]
+        self.assertEqual(
+            (r["dispatched"], r["step"], r["agent"], r["model"],
+             r["task_class"], r["tokens"], r["duration_s"],
+             r["output_tokens"]),
+            ("2026-10-18T10:00:00Z", "26.1: restore me",
+             "dcfs-implementer", "claude-sonnet-5-5", "implementation",
+             "2262", "75", "57"))
+
+    def test_restore_missing_second_run_adds_nothing(self):
+        self.add_subagent("a1")
+        self.run_cmd(["ledger", "restore-missing"])
+        before = read_fixture(self.env.ledger_path())
+        out, _ = self.run_cmd(["ledger", "restore-missing"])
+        self.assertEqual(out, "restored 0\n")
+        self.assertEqual(read_fixture(self.env.ledger_path()), before)
+
+    def test_restore_missing_since_skips_earlier_agents(self):
+        self.add_subagent("a1")
+        out, _ = self.run_cmd(
+            ["ledger", "restore-missing", "--since", "2026-10-18T10:00:01Z"])
+        self.assertEqual(out, "restored 0\n")
+        self.assertEqual(self.ledger_rows(), [])
+
+    def test_restore_missing_reports_bad_transcript(self):
+        self.add_subagent("a1")
+        self.add_subagent("bad", transcript="bad.jsonl")
+        out, err = self.run_cmd(["ledger", "restore-missing"])
+        self.assertEqual(out, "restored 1\n")
+        self.assertIn("line 1 is not JSON", err)
+        self.assertEqual([r["id"] for r in self.ledger_rows()], ["a1"])
+
+    def test_restore_missing_rejects_unknown_arguments(self):
+        with self.assertRaises(ValueError):
+            dashboard_lanes.ledger(self.env, ["restore-missing", "x"])
 
     def test_foreground_completion_with_tokens_and_duration(self):
         self.run_hook("post-agent", {

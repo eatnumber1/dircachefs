@@ -231,6 +231,14 @@ id	dispatched	step	task_class	agent	model	effort	tokens	duration_s	rounds	blocke
   - `dashboard_lanes.py ledger backfill-tokens` fills the same fields for rows
     whose `tokens` is empty, finding `agent-<id>.jsonl` under
     `~/.claude/projects/*/*/subagents/`, and prints how many rows it filled.
+  - `dashboard_lanes.py ledger restore-missing [--since ISO]` rebuilds rows
+    lost from the ledger (for example by a `git reset --hard` over
+    uncommitted hook rows): every `agent-<id>.meta.json` under the same
+    directories with no row gets one, from the meta's `agentType` and
+    `description` and the transcript's first timestamp and model, token
+    columns and duration; `--since` skips agents dispatched earlier. Rows
+    are inserted in dispatch-time order, existing rows are untouched, and a
+    second run adds nothing.
 - Outcome fields filled at merge time:
   - `rounds`: number of review rounds or revisions.
   - `blockers`: count of blocking review issues.

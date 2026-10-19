@@ -21,6 +21,7 @@ this directory for the hook configuration.
     dashboard_lanes.py ledger add ...  append row for unhooked agent job
     dashboard_lanes.py ledger set ...  fill outcome fields at merge time
     dashboard_lanes.py ledger backfill-tokens  fill empty tokens
+    dashboard_lanes.py ledger restore-missing [--since ISO]  re-add lost rows
     dashboard_lanes.py clerk-queue add TEXT...  queue a bookkeeping item
     dashboard_lanes.py clerk-queue drain        print the clerk brief, empty it
 
@@ -1263,6 +1264,94 @@ def ledger_backfill_tokens(env, args):
         filled, missing, failed)
 
 
+def transcript_start(path):
+    """Returns (first timestamp, first model) of a readable transcript."""
+    stamp, model = "", ""
+    with open(os.path.expanduser(path), encoding="utf-8") as f:
+        for line in f:
+            entry = json.loads(line) if line.strip() else {}
+            if not stamp and isinstance(entry.get("timestamp"), str):
+                stamp = entry["timestamp"]
+            message = entry.get("message")
+            if isinstance(message, dict) and isinstance(
+                    message.get("model"), str) and not model:
+                if not message["model"].startswith("<"):
+                    model = message["model"]
+            if stamp and model:
+                break
+    return stamp, model
+
+
+def restore_row(path, meta_path):
+    """Builds a ledger row from a subagent's transcript and meta.json.
+
+    Raises ValueError (saying why) when either file cannot be trusted.
+    """
+    agent_id = os.path.basename(meta_path)[len("agent-"):-len(".meta.json")]
+    try:
+        with open(meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, ValueError) as e:
+        raise ValueError("meta %s unreadable: %s" % (meta_path, e))
+    if not isinstance(meta, dict):
+        raise ValueError("meta %s is not an object" % meta_path)
+    row = {col: "" for col in LEDGER_COLUMNS}
+    fill_from_transcript(row, path)
+    stamp, model = transcript_start(path)
+    if not stamp:
+        raise ValueError("transcript %s: no timestamp" % path)
+    agent = str(meta.get("agentType", ""))
+    row.update({
+        "id": agent_id,
+        "dispatched": parse_iso_datetime(stamp).astimezone(
+            datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "step": str(meta.get("description", "")),
+        "task_class": TASK_CLASSES.get(agent, ""),
+        "agent": agent,
+        "model": model,
+    })
+    return row
+
+
+def ledger_restore_missing(env, args):
+    """Re-adds rows for subagents that have transcripts but no ledger row."""
+    since = ""
+    if args and args[0] == "--since" and len(args) == 2:
+        since = parse_iso_datetime(args[1]).astimezone(
+            datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    elif args:
+        raise ValueError("usage: ledger restore-missing [--since ISO]")
+    ledger_path = env.ledger_path()
+    rows = read_ledger(ledger_path)
+    have = {r.get("id") for r in rows}
+    pattern = os.path.join(env.projects_dir, "*", "*", "subagents",
+                           "agent-*.meta.json")
+    added = []
+    for meta_path in sorted(glob.glob(pattern)):
+        name = os.path.basename(meta_path)
+        agent_id = name[len("agent-"):-len(".meta.json")]
+        transcript = meta_path[:-len(".meta.json")] + ".jsonl"
+        if agent_id in have:
+            continue
+        try:
+            row = restore_row(transcript, meta_path)
+        except (OSError, ValueError) as e:
+            env.stderr.write("dashboard_lanes: ledger: %s\n" % e)
+            continue
+        if row["dispatched"] >= since:
+            added.append(row)
+            have.add(agent_id)
+    if added:
+        for row in sorted(added, key=lambda r: r["dispatched"]):
+            at = len(rows)
+            while at > 0 and rows[at - 1].get(
+                    "dispatched", "") > row["dispatched"]:
+                at -= 1
+            rows.insert(at, row)
+        write_ledger(ledger_path, rows)
+    return "restored %d\n" % len(added)
+
+
 def parse_key_value_args(args):
     """Parses list of arguments as dict of key-value pairs."""
     kwargs = {}
@@ -1360,7 +1449,8 @@ def ledger_set(env, args):
 def ledger(env, args):
     if not args:
         raise ValueError(
-            "ledger requires a subcommand (add, set or backfill-tokens)")
+            "ledger requires a subcommand (add, set, backfill-tokens or "
+            "restore-missing)")
     sub = args[0]
     if sub == "add":
         return ledger_add(env, args[1:])
@@ -1368,6 +1458,8 @@ def ledger(env, args):
         return ledger_set(env, args[1:])
     elif sub == "backfill-tokens":
         return ledger_backfill_tokens(env, args[1:])
+    elif sub == "restore-missing":
+        return ledger_restore_missing(env, args[1:])
     else:
         raise ValueError("unknown ledger subcommand: %r" % sub)
 
