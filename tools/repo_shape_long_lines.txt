@@ -93,7 +93,6 @@ formal/trace.bzl 10
 formal/trace_validate.sh 14
 .github/ci/accelerator.sh 2
 .github/ci/collect-logs.sh 1
-.github/ci/commit_subjects.sh 3
 .github/ci/coverage.sh 1
 .github/ci/noisy.sh 1
 .github/ci/profile.sh 1
@@ -172,7 +171,7 @@ test/qemu/identity_oracle_test.sh 11
 test/qemu/kernel_mode_test.sh 1
 test/qemu/mkinitramfs_test.sh 15
 test/qemu/pjdfstest_suite_sane_test.sh 4
-test/qemu/qemu_cc_test.bzl 6
+test/qemu/qemu_cc_test.bzl 5
 test/qemu/qemu_test.bzl 13
 test/qemu/ram_disks_lib_test.sh 4
 test/qemu/README.md 32

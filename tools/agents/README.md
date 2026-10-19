@@ -106,10 +106,11 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
   run that is `in_progress` or `queued` (recording `origin/main` in
   `ci.read_sha`). It prints nothing for dataset news (the PostToolUse
   reminder tells the orchestrator on its next tool call; a Stop block forces
-  an extra turn) and blocks only for a clerk ask (below), unless `stop_hook_active` is true (no
-  loops) or the caller is a subagent. `post-agent` treats a `dcfs-mechanical`
-  agent whose prompt names the `dcfs-dashboard-upload` skill as laneless,
-  even if the prompt names a lane path, so an upload does not mark
+  an extra turn) and blocks only for a clerk ask (below), unless
+  `stop_hook_active` is true (no loops) or the caller is a subagent.
+  `post-agent` treats a `dcfs-mechanical` agent whose prompt names the
+  `dcfs-dashboard-upload` skill as laneless, even if the prompt names a lane
+  path, so an upload does not mark
   `lanes.json` changed. When each dataset asks:
   - `lanes`: on material changes compared with the last uploaded table (a
     lane's step changed, an agent was newly dispatched, or an override was set

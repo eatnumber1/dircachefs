@@ -3,16 +3,17 @@
 # Plan step 26.13: every commit subject on a CI push range starts with the
 # plan step it belongs to (`N.M:` or `N:`, optionally with a letter suffix, a
 # `-N.M` / `/N.M` second step and a parenthesized note) or one of the
-# prefixes `plan:`, `style:`, `process:`, `warnings:`, `notes:`, `audits:`, `agents:`,
-# `R<n>:` and `R<n>.<m>:` (docs/style.md, "Docs and commits"). Co-Authored-By
-# lines are trailers, not subjects.
+# prefixes `plan:`, `style:`, `process:`, `warnings:`, `notes:`,
+# `audits:`, `agents:`, `R<n>:` and `R<n>.<m>:` (docs/style.md, "Docs and
+# commits"). Co-Authored-By lines are trailers, not subjects.
 #
 # Also (docs/style.md 7, "Commit subject" and "Commit body"): a subject and
 # every body line are at most 72 columns, except a body line that is indented
 # (4 spaces or a tab), quoted with `>`, contains a URL, or is a trailer. An
 # agent commit (its body has a `Claude-Session:` line, or its subject is
-# `agents:`) ends with a `Co-Authored-By:` trailer. Columns are bytes (LC_ALL=C),
-# which is the same as columns while names and messages are ASCII.
+# `agents:`) ends with a `Co-Authored-By:` trailer. Columns are bytes
+# (LC_ALL=C), which is the same as columns while names and messages are
+# ASCII.
 #
 # Usage: commit_subjects.sh RANGE   (e.g. "$BEFORE..$GITHUB_SHA"; an empty
 #                                    or all-zero base checks the tip only)
@@ -39,12 +40,15 @@ check_commit() {
   local hash=$1 subject=$2 body=$3
   local LC_ALL=C line number=0 bad=0 has_trailer=0 has_session=0
   if [[ ! "${subject}" =~ ${PATTERN} ]]; then
-    echo "commit ${hash}: subject does not start with a plan step (N.M:) or one of" \
-      "plan:, style:, process:, warnings:, notes:, audits:, agents:, R<n>.<m>: -> ${subject}" >&2
+    echo "commit ${hash}: subject does not start with a plan step (N.M:)" \
+      "or one of" \
+      "plan:, style:, process:, warnings:, notes:, audits:, agents:," \
+      "R<n>.<m>: -> ${subject}" >&2
     bad=1
   fi
   if ((${#subject} > MAX_COLUMNS)); then
-    echo "subject is ${#subject} columns (max ${MAX_COLUMNS}): ${hash} ${subject}" >&2
+    echo "subject is ${#subject} columns (max ${MAX_COLUMNS}):" \
+      "${hash} ${subject}" >&2
     bad=1
   fi
   while IFS= read -r line; do
@@ -58,7 +62,8 @@ check_commit() {
         Co-Authored-By:* | Claude-Session:*) continue ;;
     esac
     if ((${#line} > MAX_COLUMNS)); then
-      echo "body line ${number} is ${#line} columns (max ${MAX_COLUMNS}): ${hash} ${line}" >&2
+      echo "body line ${number} is ${#line} columns" \
+        "(max ${MAX_COLUMNS}): ${hash} ${line}" >&2
       bad=1
     fi
   done <<<"${body}"
