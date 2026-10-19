@@ -669,6 +669,14 @@ TEST(BuildRuleViolationsTest, ACodeFileSwappedForATestFileIsRefused) {
       ElementsAre(HasSubstr("sources")));
 }
 
+TEST(BuildRuleViolationsTest, ATestFileAddedToAnEmptySrcsIsAllowed) {
+  EXPECT_THAT(
+      BuildRuleViolations(
+          BuildRule("filegroup", "sources", "  srcs = [],\n"),
+          BuildRule("filegroup", "sources", Srcs({"//dcfs:a_test.cc"}))),
+      IsEmpty());
+}
+
 TEST(BuildRuleViolationsTest, MovedRulesAreNotChangedRules) {
   EXPECT_THAT(BuildRuleViolations(BuildRule("cc_library", "lib", "", 10),
                                   BuildRule("cc_library", "lib", "", 25)),

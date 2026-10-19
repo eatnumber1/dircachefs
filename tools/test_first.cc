@@ -610,14 +610,14 @@ std::vector<std::string> BodyEntries(std::string_view body) {
   std::vector<std::string> entries;
   for (std::string_view line : absl::StrSplit(body, '\n')) {
     constexpr std::string_view kOpen = "srcs = [";
-    if (!line.starts_with(kOpen) || !line.ends_with("],") ||
-        line.size() < kOpen.size() + 2) {
+    if (!line.starts_with(kOpen) || !line.ends_with("],")) {
       entries.emplace_back(line);
       continue;
     }
     entries.emplace_back(kOpen);
     const std::string_view list =
         line.substr(kOpen.size(), line.size() - kOpen.size() - 2);
+    if (list.empty()) continue;
     for (std::string_view entry : absl::StrSplit(list, ", ")) {
       entries.push_back(absl::StrCat("srcs:", entry, ","));
     }
