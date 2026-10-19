@@ -3,6 +3,8 @@
 
 #include <array>
 #include <cstddef>
+#include <iterator>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -77,6 +79,8 @@ struct Changes {
   std::vector<std::string> files;          // paths
   std::vector<std::string> labels;         // their Bazel labels
   std::vector<std::string> source_labels;  // the labels of the test sources
+  std::vector<std::string>
+      build_packages;  // packages whose BUILD.bazel changed
 };
 
 absl::StatusOr<std::vector<Change>> ChangedFiles(CommandRunner &runner,
@@ -169,6 +173,80 @@ absl::StatusOr<Stage> Test(CommandRunner &runner, const std::string &commit,
                .failing = ParseFailures(result.output),
                .passed = ParsePassed(result.output),
                .errors = ErrorLines(result.output)};
+}
+
+// The rules of `bazel query //package:all --output=build` at the commit
+// checked out.
+absl::StatusOr<std::string> QueryBuild(CommandRunner &runner,
+                                       const std::string &package) {
+  return Capture(
+      runner, {"bazel", "query", "--keep_going", "--output=build", "--color=no",
+               "--curses=no", absl::StrCat("//", package, ":all")});
+}
+
+// The first commit's parent, or empty for a root commit.
+absl::StatusOr<std::string> ParentOf(CommandRunner &runner,
+                                     const std::string &commit) {
+  ASSIGN_OR_RETURN(
+      std::string history,
+      Capture(runner, {"git", "rev-list", "--parents", "-n", "1", commit}));
+  const std::vector<std::string_view> words =
+      absl::StrSplit(history, ' ', absl::SkipEmpty());
+  return words.size() > 1 ? std::string(words[1]) : std::string();
+}
+
+// The build file of `package` in `commit`: whether it has one.
+absl::StatusOr<bool> HasBuildFile(CommandRunner &runner,
+                                  const std::string &commit,
+                                  const std::string &package) {
+  const std::vector<std::string> argv = {
+      "git", "cat-file", "-e",
+      absl::StrCat(commit, ":",
+                   package.empty() ? std::string(kBuildFile)
+                                   : absl::StrCat(package, "/", kBuildFile))};
+  ASSIGN_OR_RETURN(CommandResult found, runner.Run(argv));
+  return found.exit_code == 0;
+}
+
+// The rules of the packages that had a build file at the parent, queried there.
+// The commit checked out is `first` again on return.
+absl::StatusOr<std::map<std::string, std::string>> RulesAtParent(
+    CommandRunner &runner, const std::string &first,
+    const std::vector<std::string> &packages) {
+  std::map<std::string, std::string> before;
+  ASSIGN_OR_RETURN(std::string parent, ParentOf(runner, first));
+  if (parent.empty()) return before;
+  std::vector<std::string> existing;
+  for (const std::string &package : packages) {
+    ASSIGN_OR_RETURN(bool has, HasBuildFile(runner, parent, package));
+    if (has) existing.push_back(package);
+  }
+  if (existing.empty()) return before;
+  RETURN_IF_ERROR(Detach(runner, parent));
+  for (const std::string &package : existing) {
+    ASSIGN_OR_RETURN(before[package], QueryBuild(runner, package));
+  }
+  RETURN_IF_ERROR(Detach(runner, first));
+  return before;
+}
+
+// What the build files of `packages` say in the first commit against its
+// parent: a reason for each rule that may not change in a tests-only commit.
+// The commit checked out is the first commit, and is again on return.
+absl::StatusOr<std::vector<std::string>> BuildFileViolations(
+    CommandRunner &runner, const std::string &first,
+    const std::vector<std::string> &packages) {
+  std::vector<std::string> reasons;
+  std::map<std::string, std::string> after;
+  for (const std::string &package : packages) {
+    ASSIGN_OR_RETURN(after[package], QueryBuild(runner, package));
+  }
+  ASSIGN_OR_RETURN(auto before, RulesAtParent(runner, first, packages));
+  for (const std::string &package : packages) {
+    absl::c_move(BuildRuleViolations(before[package], after[package], package),
+                 std::back_inserter(reasons));
+  }
+  return reasons;
 }
 
 struct Owners {
@@ -265,6 +343,9 @@ void JudgeFirst(const Changes &changes, const Owners &owners, Report &report) {
 absl::Status RunStages(CommandRunner &runner, const Options &options,
                        const Changes &changes, Report &report) {
   RETURN_IF_ERROR(Detach(runner, report.first));
+  ASSIGN_OR_RETURN(report.reasons, BuildFileViolations(runner, report.first,
+                                                       changes.build_packages));
+  if (!report.reasons.empty()) return absl::OkStatus();
   ASSIGN_OR_RETURN(Owners owners, FindOwners(runner, changes));
   if (owners.partial) {
     // A rule of the first commit does not load (it needs what the code adds):
@@ -313,7 +394,14 @@ absl::StatusOr<Changes> ClassifyFirstCommit(CommandRunner &runner,
       continue;
     }
     // A deleted file has no target to query, and a build file is not a test.
-    if (change.status == 'D' || IsBuildFile(change.path)) continue;
+    if (change.status == 'D') continue;
+    if (IsBuildFile(change.path)) {
+      changes.build_packages.push_back(std::string(
+          change.path.substr(0, change.path.size() > kBuildFile.size()
+                                    ? change.path.size() - kBuildFile.size() - 1
+                                    : 0)));
+      continue;
+    }
     ASSIGN_OR_RETURN(std::string label,
                      LabelOf(runner, report.first, change.path));
     if (IsTestSource(change.path)) changes.source_labels.push_back(label);
@@ -410,6 +498,79 @@ std::string_view BazelName(std::string_view line) {
   return failed ? words[0] : std::string_view();
 }
 
+struct Rule {
+  std::string kind;
+  std::string generator;
+  std::string visibility;
+  std::string body;  // without comments, which carry line numbers
+  bool testonly = false;
+};
+
+// The value of `  attribute = value,` in a rule's line, or empty.
+std::string_view AttributeValue(std::string_view line,
+                                std::string_view attribute) {
+  line = absl::StripAsciiWhitespace(line);
+  if (!absl::ConsumePrefix(&line, attribute)) return {};
+  if (!absl::ConsumePrefix(&line, " = ")) return {};
+  absl::ConsumeSuffix(&line, ",");
+  return line;
+}
+
+std::string Unquoted(std::string_view value) {
+  return std::string(absl::StripPrefix(absl::StripSuffix(value, "\""), "\""));
+}
+
+// Reads the attributes that matter from a line of a rule.
+void ReadAttribute(std::string_view line, std::string &name, Rule &rule) {
+  if (std::string_view n = AttributeValue(line, "name"); !n.empty()) {
+    name = Unquoted(n);
+  }
+  if (std::string_view g = AttributeValue(line, "generator_name"); !g.empty()) {
+    rule.generator = Unquoted(g);
+  }
+  if (std::string_view v = AttributeValue(line, "testonly"); !v.empty()) {
+    rule.testonly = v == "True" || v == "1";
+  }
+  if (!AttributeValue(line, "visibility").empty()) {
+    rule.visibility = std::string(line);
+  }
+}
+
+std::map<std::string, Rule> ParseRules(std::string_view output) {
+  std::map<std::string, Rule> rules;
+  Rule rule;
+  std::string name;
+  bool inside = false;
+  for (std::string_view line : absl::StrSplit(output, '\n')) {
+    line = absl::StripTrailingAsciiWhitespace(line);
+    if (line.starts_with("#") || line.empty()) continue;
+    if (!inside) {
+      inside = absl::ConsumeSuffix(&line, "(");
+      if (inside) rule = Rule{.kind = std::string(line)};
+    } else if (line == ")") {
+      rules[name] = rule;
+      inside = false;
+    } else {
+      absl::StrAppend(&rule.body, line, "\n");
+      ReadAttribute(line, name, rule);
+    }
+  }
+  return rules;
+}
+
+// Whether a rule may change in a tests-only commit: a test, testonly, or
+// generated by a test (the files a test macro makes).
+bool IsTestRule(const Rule &rule, const std::map<std::string, Rule> &known) {
+  if (rule.kind.ends_with("_test") || rule.testonly) return true;
+  const auto generator = known.find(rule.generator);
+  return generator != known.end() && generator->second.kind.ends_with("_test");
+}
+
+std::string_view ChangeOf(bool was, bool is) {
+  if (!was) return "new";
+  return is ? "changed" : "removed";
+}
+
 }  // namespace
 
 bool IsTestFile(std::string_view path) {
@@ -435,6 +596,33 @@ std::vector<std::string> ParseFailures(std::string_view output) {
     }
   }
   return names;
+}
+
+std::vector<std::string> BuildRuleViolations(std::string_view before,
+                                             std::string_view after,
+                                             std::string_view package) {
+  const std::map<std::string, Rule> old_rules = ParseRules(before);
+  const std::map<std::string, Rule> new_rules = ParseRules(after);
+  std::map<std::string, Rule> known = old_rules;
+  for (const auto &[name, rule] : new_rules) known[name] = rule;
+  std::vector<std::string> violations;
+  for (const auto &[name, rule] : known) {
+    const auto was = old_rules.find(name);
+    const auto is = new_rules.find(name);
+    const bool in_both = was != old_rules.end() && is != new_rules.end();
+    if (in_both && was->second.body == is->second.body) continue;
+    const std::string label =
+        package.empty() ? name : absl::StrCat("//", package, ":", name);
+    if (!IsTestRule(rule, known)) {
+      violations.push_back(
+          absl::StrCat(label, " (", rule.kind, ") is ",
+                       ChangeOf(was != old_rules.end(), is != new_rules.end()),
+                       " and is neither a test nor testonly"));
+    } else if (in_both && was->second.visibility != is->second.visibility) {
+      violations.push_back(absl::StrCat(label, " changes visibility"));
+    }
+  }
+  return violations;
 }
 
 std::vector<std::string> ParsePassed(std::string_view output) {

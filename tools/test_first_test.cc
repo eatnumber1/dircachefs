@@ -34,12 +34,21 @@ using ::testing::Not;
 
 constexpr char kFirstSha[] = "1111111111111111111111111111111111111111";
 constexpr char kLastSha[] = "2222222222222222222222222222222222222222";
+constexpr char kParentSha[] = "0000000000000000000000000000000000000000";
 constexpr char kQuery[] =
     "kind(\"(cc|py|sh)_test\", rdeps(//..., set(//dcfs:foo_test.cc "
     "//dcfs:testdata/case.txt)))";
 // The same for the test sources among them (not the test data).
 constexpr char kSourceQuery[] =
     "kind(\"(cc|py|sh)_test\", rdeps(//..., set(//dcfs:foo_test.cc)))";
+
+// The query of a package's rules as BUILD text, which the check reads at the
+// parent and at the first commit.
+std::string BuildQueryLine(std::string_view package) {
+  return absl::StrCat(
+      "bazel query --keep_going --output=build --color=no --curses=no //",
+      package, ":all");
+}
 
 std::string QueryLine(std::string_view expression) {
   return absl::StrCat(
@@ -123,6 +132,11 @@ ScriptedRunner HappyRunner() {
             ":dcfs/testdata/BUILD.bazel"] = Exit(128, "");
   r.answers[std::string("git cat-file -e ") + kFirstSha + ":dcfs/BUILD.bazel"] =
       Exit(0, "");
+  r.answers[absl::StrCat("git rev-list --parents -n 1 ", kFirstSha)] =
+      Exit(0, absl::StrCat(kFirstSha, " ", kParentSha, "\n"));
+  r.answers[absl::StrCat("git cat-file -e ", kParentSha, ":dcfs/BUILD.bazel")] =
+      Exit(0, "");
+  r.answers[BuildQueryLine("dcfs")] = Exit(0, "");
   r.answers[QueryLine(kQuery)] = Exit(0, "//dcfs:foo_test\n");
   r.answers[QueryLine(kSourceQuery)] = Exit(0, "//dcfs:foo_test\n");
   r.test_results[kFirstSha] =
@@ -194,6 +208,8 @@ TEST(CheckTest, AcceptsTestsThatFailFirstAndPassLast) {
   // Left as found: the starting branch is checked out again.
   EXPECT_THAT(runner.Checkouts(),
               ElementsAre(std::string("git checkout -q --detach ") + kFirstSha,
+                          std::string("git checkout -q --detach ") + kParentSha,
+                          std::string("git checkout -q --detach ") + kFirstSha,
                           std::string("git checkout -q --detach ") + kLastSha,
                           "git checkout -q step-x"));
 }
@@ -496,6 +512,91 @@ TEST(CheckErrorsTest, RestoringFailsAfterBazelBroke) {
               StatusIs(absl::StatusCode::kInternal,
                        AllOf(HasSubstr("exit 2"),
                              HasSubstr("restoring step-x failed"))));
+}
+
+// One rule as `bazel query --output=build` prints it.
+std::string BuildRule(std::string_view kind, std::string_view name,
+                      std::string_view extra = "", int line = 10) {
+  return absl::StrCat("# /w/dcfs/BUILD.bazel:", line, ":1\n", kind, "(\n",
+                      "  name = \"", name, "\",\n", "  generator_name = \"",
+                      name, "\",\n", extra, ")\n", "# Rule ", name,
+                      " instantiated at (most recent call):\n",
+                      "#   /w/dcfs/BUILD.bazel:", line, ":1 in <toplevel>\n");
+}
+
+TEST(BuildRuleViolationsTest, NewTestsAndTheirTestonlyPartsAreAllowed) {
+  const std::string after = absl::StrCat(
+      BuildRule("sh_test", "foo_test"),
+      BuildRule("cc_binary", "foo_test_bin", "  testonly = True,\n"),
+      "# /w/dcfs/BUILD.bazel:30:1\ngenrule(\n  name = \"foo_test_cpio\",\n"
+      "  generator_name = \"foo_test\",\n)\n");
+  EXPECT_THAT(BuildRuleViolations("", after), IsEmpty());
+}
+
+TEST(BuildRuleViolationsTest, ANewLibraryThatIsNotTestonlyIsRefused) {
+  EXPECT_THAT(BuildRuleViolations("", BuildRule("cc_library", "helper")),
+              ElementsAre(HasSubstr("helper")));
+}
+
+TEST(BuildRuleViolationsTest, ANewTestonlyLibraryIsAllowed) {
+  EXPECT_THAT(BuildRuleViolations(
+                  "", BuildRule("cc_library", "helper", "  testonly = 1,\n")),
+              IsEmpty());
+}
+
+TEST(BuildRuleViolationsTest, ChangingAProductionRuleIsRefused) {
+  EXPECT_THAT(BuildRuleViolations(
+                  BuildRule("cc_library", "lib", "  deps = [],\n"),
+                  BuildRule("cc_library", "lib", "  deps = [\"x\"],\n")),
+              ElementsAre(HasSubstr("lib")));
+}
+
+TEST(BuildRuleViolationsTest, ChangingVisibilityIsRefusedEvenOnATestRule) {
+  EXPECT_THAT(
+      BuildRuleViolations(
+          BuildRule("sh_test", "t", "  visibility = [\"//a:__pkg__\"],\n"),
+          BuildRule("sh_test", "t", "  visibility = [\"//b:__pkg__\"],\n")),
+      ElementsAre(HasSubstr("visibility")));
+}
+
+TEST(BuildRuleViolationsTest, AddingASourceToATestIsAllowed) {
+  EXPECT_THAT(BuildRuleViolations(
+                  BuildRule("sh_test", "t", "  srcs = [\"a\"],\n"),
+                  BuildRule("sh_test", "t", "  srcs = [\"a\", \"b\"],\n")),
+              IsEmpty());
+}
+
+TEST(BuildRuleViolationsTest, MovedRulesAreNotChangedRules) {
+  EXPECT_THAT(BuildRuleViolations(BuildRule("cc_library", "lib", "", 10),
+                                  BuildRule("cc_library", "lib", "", 25)),
+              IsEmpty());
+}
+
+TEST(BuildRuleViolationsTest, RemovingAProductionRuleIsRefused) {
+  EXPECT_THAT(BuildRuleViolations(BuildRule("cc_library", "lib"), ""),
+              ElementsAre(HasSubstr("lib")));
+}
+
+TEST(CheckTest, RejectsABuildFileThatAddsAProductionLibrary) {
+  ScriptedRunner runner = HappyRunner();
+  runner.query_at_head[absl::StrCat(kFirstSha, "|", BuildQueryLine("dcfs"))] =
+      Exit(0, BuildRule("cc_library", "helper"));
+  ASSERT_OK_AND_ASSIGN(Report report,
+                       Check(runner, {.first = "FIRST", .last = "LAST"}));
+  EXPECT_FALSE(report.Accepted());
+  EXPECT_THAT(report.reasons, ElementsAre(HasSubstr("//dcfs:helper")));
+  EXPECT_EQ(runner.Checkouts().back(), "git checkout -q step-x");
+}
+
+TEST(CheckTest, ABuildFileNewAtTheFirstCommitHasNothingToCompareWith) {
+  ScriptedRunner runner = HappyRunner();
+  runner.answers[absl::StrCat("git cat-file -e ", kParentSha,
+                              ":dcfs/BUILD.bazel")] = Exit(128, "");
+  runner.query_at_head[absl::StrCat(kFirstSha, "|", BuildQueryLine("dcfs"))] =
+      Exit(0, BuildRule("sh_test", "foo_test"));
+  ASSERT_OK_AND_ASSIGN(Report report,
+                       Check(runner, {.first = "FIRST", .last = "LAST"}));
+  EXPECT_TRUE(report.Accepted());
 }
 
 TEST(FormatReportTest, QuotesTheFailingNamesForTheMergeRecord) {
