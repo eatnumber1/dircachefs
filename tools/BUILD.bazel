@@ -801,6 +801,8 @@ cc_library(
     deps = [
         "//dcfs:status",
         "@absl//absl/algorithm:container",
+        "@absl//absl/container:btree",
+        "@absl//absl/container:flat_hash_map",
         "@absl//absl/status",
         "@absl//absl/status:statusor",
         "@absl//absl/strings",
@@ -813,10 +815,14 @@ qemu_cc_test(
     size = "small",
     timeout = "short",
     srcs = ["test_first_test.cc"],
+    data = ["testdata/build_query.txt"],
     deps = [
         ":test_first",
         "//dcfs:status",
         "//dcfs/testonly:assert_ok_and_assign",
+        "//dcfs/testonly:files",
+        "@absl//absl/container:flat_hash_map",
+        "@absl//absl/container:flat_hash_set",
         "@absl//absl/status",
         "@absl//absl/status:status_matchers",
         "@absl//absl/status:statusor",

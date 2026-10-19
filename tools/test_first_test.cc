@@ -3,21 +3,23 @@
 // runner: no git and no Bazel is run.
 #include "tools/test_first.h"
 
-#include <map>
-#include <set>
 #include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/str_replace.h"
 #include "dcfs/status.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
+#include "dcfs/testonly/files.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -27,10 +29,13 @@ namespace {
 using ::absl_testing::IsOk;
 using ::absl_testing::StatusIs;
 using ::testing::AllOf;
+using ::testing::Contains;
 using ::testing::ElementsAre;
 using ::testing::HasSubstr;
 using ::testing::IsEmpty;
 using ::testing::Not;
+using ::testing::SizeIs;
+using ::testing::StartsWith;
 
 constexpr char kFirstSha[] = "1111111111111111111111111111111111111111";
 constexpr char kLastSha[] = "2222222222222222222222222222222222222222";
@@ -101,12 +106,13 @@ class ScriptedRunner : public CommandRunner {
     return out;
   }
 
-  std::map<std::string, CommandResult> answers;
-  std::map<std::string, CommandResult> test_results;  // by commit
+  absl::flat_hash_map<std::string, CommandResult> answers;
+  absl::flat_hash_map<std::string, CommandResult> test_results;  // by commit
   // The answer to a command while a commit is checked out ("sha|command"),
   // before `answers`.
-  std::map<std::string, CommandResult> query_at_head;
-  std::set<std::string> failing_checkouts;  // the whole `git checkout` line
+  absl::flat_hash_map<std::string, CommandResult> query_at_head;
+  absl::flat_hash_set<std::string>
+      failing_checkouts;  // the whole `git checkout` line
   std::vector<std::string> calls;
   std::string head = "step-x";
 };
@@ -222,9 +228,9 @@ TEST(CheckTest, RunsBazelWithTheCallersFlags) {
                                       .bazel_flags = {"--config=fast"}}));
   EXPECT_TRUE(report.Accepted());
   EXPECT_THAT(runner.calls,
-              testing::Contains("bazel test --keep_going "
-                                "--test_output=errors --color=no --curses=no "
-                                "--config=fast //dcfs:foo_test"));
+              Contains("bazel test --keep_going "
+                       "--test_output=errors --color=no --curses=no "
+                       "--config=fast //dcfs:foo_test"));
 }
 
 TEST(CheckTest, RejectsTestsThatPassAtTheFirstCommit) {
@@ -236,7 +242,7 @@ TEST(CheckTest, RejectsTestsThatPassAtTheFirstCommit) {
   EXPECT_EQ(report.at_first.outcome, Outcome::kPassed);
   EXPECT_THAT(report.reasons,
               ElementsAre(HasSubstr("passed at the first commit")));
-  EXPECT_THAT(runner.Checkouts().back(), "git checkout -q step-x");
+  EXPECT_EQ(runner.Checkouts().back(), "git checkout -q step-x");
 }
 
 TEST(CheckTest, RejectsTestsThatStillFailAtTheLastCommit) {
@@ -277,8 +283,7 @@ TEST(CheckTest, RejectsAFirstCommitThatTouchesCode) {
               ElementsAre(HasSubstr("dcfs/foo.cc"), HasSubstr("docs/old.md")));
   // Nothing was built or checked out.
   EXPECT_THAT(runner.Checkouts(), IsEmpty());
-  EXPECT_THAT(runner.calls,
-              Not(testing::Contains(testing::StartsWith("bazel"))));
+  EXPECT_THAT(runner.calls, Not(Contains(StartsWith("bazel"))));
 }
 
 TEST(CheckTest, RejectsAFirstCommitWithNoFiles) {
@@ -299,7 +304,7 @@ TEST(CheckTest, RejectsTestFilesNoTestTargetOwns) {
                        Check(runner, {.first = "FIRST", .last = "LAST"}));
   EXPECT_FALSE(report.Accepted());
   EXPECT_THAT(report.reasons, ElementsAre(HasSubstr("no test target")));
-  EXPECT_THAT(runner.Checkouts().back(), "git checkout -q step-x");
+  EXPECT_EQ(runner.Checkouts().back(), "git checkout -q step-x");
 }
 
 TEST(CheckTest, TestFilesAtTheRepositoryRootAreInPackageRoot) {
@@ -430,7 +435,7 @@ TEST(CheckTest, TheReportQuotesTheBuildErrorsForTheReviewerToConfirm) {
            "ERROR: a\nERROR: b\nERROR: c\nERROR: d\n");
   ASSERT_OK_AND_ASSIGN(Report report,
                        Check(runner, {.first = "FIRST", .last = "LAST"}));
-  EXPECT_THAT(report.at_first.errors, testing::SizeIs(5));
+  EXPECT_THAT(report.at_first.errors, SizeIs(5));
   const std::string text = FormatReport(report);
   EXPECT_THAT(text, HasSubstr("error: ERROR: dcfs/foo_test.cc:3:1"));
   EXPECT_THAT(text, HasSubstr("confirm the error names a symbol or target "
@@ -518,9 +523,8 @@ TEST(CheckErrorsTest, RestoringFailsAfterBazelBroke) {
 std::string BuildRule(std::string_view kind, std::string_view name,
                       std::string_view extra = "", int line = 10) {
   return absl::StrCat("# /w/dcfs/BUILD.bazel:", line, ":1\n", kind, "(\n",
-                      "  name = \"", name, "\",\n", "  generator_name = \"",
-                      name, "\",\n", extra, ")\n", "# Rule ", name,
-                      " instantiated at (most recent call):\n",
+                      "  name = \"", name, "\",\n", extra, ")\n", "# Rule ",
+                      name, " instantiated at (most recent call):\n",
                       "#   /w/dcfs/BUILD.bazel:", line, ":1 in <toplevel>\n");
 }
 
@@ -597,6 +601,98 @@ TEST(CheckTest, ABuildFileNewAtTheFirstCommitHasNothingToCompareWith) {
   ASSERT_OK_AND_ASSIGN(Report report,
                        Check(runner, {.first = "FIRST", .last = "LAST"}));
   EXPECT_TRUE(report.Accepted());
+}
+
+// A real `bazel query --output=build` of a library with a multi-element
+// visibility, a macro's test binary and its generated rule.
+std::string RealBuildQuery() {
+  absl::StatusOr<std::string> text =
+      testonly::ReadFileToString("/test/data/testdata/build_query.txt");
+  return text.ok() ? *text : std::string();
+}
+
+TEST(RealBuildQueryTest, TheFileIsThere) {
+  EXPECT_THAT(RealBuildQuery(), HasSubstr("name = \"status\""));
+}
+
+TEST(RealBuildQueryTest, ComparedWithItselfNothingChanged) {
+  EXPECT_THAT(BuildRuleViolations(RealBuildQuery(), RealBuildQuery()),
+              IsEmpty());
+}
+
+TEST(RealBuildQueryTest, GeneratorLocationsMoveWithTheLineNumbers) {
+  const std::string moved = absl::StrReplaceAll(
+      RealBuildQuery(), {{"BUILD.bazel:811:13", "BUILD.bazel:900:1"},
+                         {"BUILD.bazel:196:11", "BUILD.bazel:20:1"}});
+  ASSERT_NE(moved, RealBuildQuery());
+  EXPECT_THAT(BuildRuleViolations(RealBuildQuery(), moved), IsEmpty());
+}
+
+TEST(RealBuildQueryTest, OnlyTheProductionLibraryIsAViolation) {
+  EXPECT_THAT(BuildRuleViolations("", RealBuildQuery(), "dcfs"),
+              ElementsAre(HasSubstr("//dcfs:status")));
+}
+
+TEST(RealBuildQueryTest, ATestBinaryGainingOrChangingVisibilityIsRefused) {
+  const std::string with_visibility = absl::StrReplaceAll(
+      RealBuildQuery(), {{"testonly = True,\n  features",
+                          "testonly = True,\n  visibility = [\"//a:__pkg__\", "
+                          "\"//b:__pkg__\"],\n  features"}});
+  const std::string changed = absl::StrReplaceAll(
+      with_visibility, {{"\"//b:__pkg__\"", "\"//c:__pkg__\""}});
+  EXPECT_THAT(BuildRuleViolations(with_visibility, changed),
+              ElementsAre(HasSubstr("test_first_test_bin changes visibility")));
+}
+
+TEST(BuildRuleViolationsTest, AVisibilityListOverSeveralLinesIsReadToItsEnd) {
+  const std::string before = BuildRule(
+      "sh_test", "t",
+      "  visibility = [\n    \"//a:__pkg__\",\n    \"//b:__pkg__\",\n  ],\n");
+  const std::string after = BuildRule(
+      "sh_test", "t",
+      "  visibility = [\n    \"//a:__pkg__\",\n    \"//c:__pkg__\",\n  ],\n");
+  EXPECT_THAT(BuildRuleViolations(before, after),
+              ElementsAre(HasSubstr("t changes visibility")));
+}
+
+TEST(BuildRuleViolationsTest, ARuleBecomingTestonlyWasProductionBefore) {
+  EXPECT_THAT(BuildRuleViolations(
+                  BuildRule("cc_library", "lib"),
+                  BuildRule("cc_library", "lib", "  testonly = True,\n")),
+              ElementsAre(HasSubstr("lib")));
+}
+
+TEST(CheckTest, RejectsACommitThatOnlyChangesABuildFile) {
+  ScriptedRunner runner = HappyRunner();
+  runner.answers[DiffTree()] = Exit(0, "M\tdcfs/BUILD.bazel\n");
+  ASSERT_OK_AND_ASSIGN(Report report,
+                       Check(runner, {.first = "FIRST", .last = "LAST"}));
+  EXPECT_FALSE(report.Accepted());
+  EXPECT_THAT(report.reasons, ElementsAre(HasSubstr("changes no test file")));
+  EXPECT_THAT(runner.Checkouts(), IsEmpty());
+  EXPECT_THAT(runner.calls, Not(Contains(StartsWith("bazel"))));
+}
+
+TEST(CheckTest, ADeletedTestFileIsNotQueried) {
+  ScriptedRunner runner = HappyRunner();
+  runner.answers[DiffTree()] =
+      Exit(0, "A\tdcfs/foo_test.cc\nD\tdcfs/old_test.cc\n");
+  ASSERT_OK_AND_ASSIGN(Report report,
+                       Check(runner, {.first = "FIRST", .last = "LAST"}));
+  EXPECT_TRUE(report.Accepted());
+  for (const std::string &call : runner.calls) {
+    EXPECT_THAT(call, Not(HasSubstr("old_test.cc")));
+  }
+}
+
+TEST(CheckTest, ACommitThatOnlyDeletesTestsIsRejected) {
+  ScriptedRunner runner = HappyRunner();
+  runner.answers[DiffTree()] = Exit(0, "D\tdcfs/old_test.cc\n");
+  ASSERT_OK_AND_ASSIGN(Report report,
+                       Check(runner, {.first = "FIRST", .last = "LAST"}));
+  EXPECT_FALSE(report.Accepted());
+  EXPECT_THAT(report.reasons, ElementsAre(HasSubstr("changes no test file")));
+  EXPECT_THAT(runner.Checkouts(), IsEmpty());
 }
 
 TEST(FormatReportTest, QuotesTheFailingNamesForTheMergeRecord) {

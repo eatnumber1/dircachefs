@@ -1,0 +1,54 @@
+# Real `bazel query --output=build` output (Bazel 9.2.0), paths shortened.
+# /w/dcfs/BUILD.bazel:196:11
+cc_library(
+  name = "status",
+  visibility = ["//dcfs/testonly:__pkg__", "//test/qemu:__pkg__", "//tools:__pkg__"],
+  generator_name = "status",
+  generator_function = "cc_library",
+  generator_location = "dcfs/BUILD.bazel:196:11",
+  srcs = ["//dcfs:status.cc", "//dcfs:errno.cc"],
+  defines = ["ABSL_DEFINE_UNQUALIFIED_STATUS_MACROS"],
+  hdrs = ["//dcfs:status.h"],
+  deps = ["@absl//absl/base:no_destructor", "@absl//absl/container:flat_hash_map", "@absl//absl/status:status", "@absl//absl/status:status_builder", "@absl//absl/status:status_macros", "@absl//absl/status:statusor", "@absl//absl/strings:strings", "@absl//absl/strings:cord", "@absl//absl/types:source_location"],
+)
+# Rule status instantiated at (most recent call last):
+#   /w/dcfs/BUILD.bazel:196:11                                              in <toplevel>
+#   /cache/external/rules_cc+/cc/cc_library.bzl:19:16 in cc_library
+# Rule cc_library defined at (most recent call last):
+#   /cache/external/rules_cc+/cc/private/rules_impl/cc_library.bzl:42:18 in <toplevel>
+
+# /w/tools/BUILD.bazel:811:13
+cc_binary(
+  name = "test_first_test_bin",
+  generator_name = "test_first_test",
+  generator_function = "qemu_cc_test",
+  generator_location = "tools/BUILD.bazel:811:13",
+  testonly = True,
+  features = select({"//test/qemu:asan_build": [], "//test/qemu:ubsan_build": [], "//conditions:default": ["fully_static_link"]}),
+  srcs = ["//tools:test_first_test.cc"],
+  deps = ["//tools:test_first", "//dcfs:status", "//dcfs/testonly:assert_ok_and_assign", "@absl//absl/status:status", "@absl//absl/status:status_matchers", "@absl//absl/status:statusor", "@absl//absl/strings:strings", "@googletest//:gtest_main", "@rules_cc//:link_extra_lib"],
+  linkstatic = True,
+)
+# Rule test_first_test_bin instantiated at (most recent call last):
+#   /w/tools/BUILD.bazel:811:13                                            in <toplevel>
+#   /w/test/qemu/qemu_cc_test.bzl:120:14                                   in qemu_cc_test
+#   /cache/external/rules_cc+/cc/cc_binary.bzl:44:15 in cc_binary
+# Rule cc_binary defined at (most recent call last):
+#   /cache/external/rules_cc+/cc/private/rules_impl/cc_binary.bzl:29:17 in <toplevel>
+
+# /w/tools/BUILD.bazel:811:13
+genrule(
+  name = "test_first_test_initramfs",
+  generator_name = "test_first_test",
+  generator_function = "qemu_cc_test",
+  generator_location = "tools/BUILD.bazel:811:13",
+  testonly = True,
+  srcs = ["@alpine_busybox//:root/bin/busybox.static", "//test/qemu:guest/init", "//test/qemu:guest/cost_lib.sh", "//tools:test_first_test_bin"],
+  tools = ["//test/qemu:scripts/mkinitramfs.sh", "@dcfs_llvm//:bin/llvm-readelf", "@dcfs_llvm//sysroot:sysroot"],
+  outs = ["//tools:test_first_test.cpio.gz"],
+  cmd = "DCFS_SYSROOT=$(location @dcfs_llvm//sysroot) DCFS_READELF=$(location @dcfs_llvm//:bin/llvm-readelf) $(location //test/qemu:scripts/mkinitramfs.sh) --unit $@ $(location @alpine_busybox//:root/bin/busybox.static) $(location //test/qemu:guest/init) $(location //test/qemu:guest/cost_lib.sh) $(location :test_first_test_bin) - ''",
+)
+# Rule test_first_test_initramfs instantiated at (most recent call last):
+#   /w/tools/BUILD.bazel:811:13          in <toplevel>
+#   /w/test/qemu/qemu_cc_test.bzl:142:19 in qemu_cc_test
+

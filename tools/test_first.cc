@@ -4,13 +4,14 @@
 #include <array>
 #include <cstddef>
 #include <iterator>
-#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/container/btree_map.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
@@ -210,10 +211,10 @@ absl::StatusOr<bool> HasBuildFile(CommandRunner &runner,
 
 // The rules of the packages that had a build file at the parent, queried there.
 // The commit checked out is `first` again on return.
-absl::StatusOr<std::map<std::string, std::string>> RulesAtParent(
+absl::StatusOr<absl::flat_hash_map<std::string, std::string>> RulesAtParent(
     CommandRunner &runner, const std::string &first,
     const std::vector<std::string> &packages) {
-  std::map<std::string, std::string> before;
+  absl::flat_hash_map<std::string, std::string> before;
   ASSIGN_OR_RETURN(std::string parent, ParentOf(runner, first));
   if (parent.empty()) return before;
   std::vector<std::string> existing;
@@ -237,7 +238,7 @@ absl::StatusOr<std::vector<std::string>> BuildFileViolations(
     CommandRunner &runner, const std::string &first,
     const std::vector<std::string> &packages) {
   std::vector<std::string> reasons;
-  std::map<std::string, std::string> after;
+  absl::flat_hash_map<std::string, std::string> after;
   for (const std::string &package : packages) {
     ASSIGN_OR_RETURN(after[package], QueryBuild(runner, package));
   }
@@ -255,11 +256,15 @@ struct Owners {
   bool partial = false;          // some package did not load
 };
 
+struct QueryResult {
+  std::vector<std::string> targets;
+  bool partial = false;  // some package did not load
+};
+
 // The test targets that own `labels`, found at the commit checked out. Bazel
 // exits 3 when it answers from the packages that did load.
-absl::StatusOr<std::vector<std::string>> Query(
-    CommandRunner &runner, const std::vector<std::string> &labels,
-    bool &partial) {
+absl::StatusOr<QueryResult> Query(CommandRunner &runner,
+                                  const std::vector<std::string> &labels) {
   const std::vector<std::string> argv = {
       "bazel",
       "query",
@@ -275,27 +280,29 @@ absl::StatusOr<std::vector<std::string>> Query(
            << "`" << absl::StrJoin(argv, " ") << "` exit " << result.exit_code
            << ": " << result.output;
   }
-  partial = partial || result.exit_code == 3;
-  std::vector<std::string> targets;
+  QueryResult found = {.partial = result.exit_code == 3};
   for (std::string_view line :
        absl::StrSplit(result.output, '\n', absl::SkipEmpty())) {
     line = absl::StripAsciiWhitespace(line);
     if (line.starts_with("//") || line.starts_with("@")) {
-      targets.emplace_back(line);
+      found.targets.emplace_back(line);
     }
   }
-  return targets;
+  return found;
 }
 
 absl::StatusOr<Owners> FindOwners(CommandRunner &runner,
                                   const Changes &changes) {
   Owners owners;
-  ASSIGN_OR_RETURN(owners.all, Query(runner, changes.labels, owners.partial));
+  ASSIGN_OR_RETURN(QueryResult all, Query(runner, changes.labels));
+  owners.all = std::move(all.targets);
+  owners.partial = all.partial;
   if (changes.source_labels.size() == changes.labels.size()) {
     owners.own = owners.all;
   } else if (!changes.source_labels.empty()) {
-    ASSIGN_OR_RETURN(owners.own,
-                     Query(runner, changes.source_labels, owners.partial));
+    ASSIGN_OR_RETURN(QueryResult own, Query(runner, changes.source_labels));
+    owners.own = std::move(own.targets);
+    owners.partial = owners.partial || own.partial;
   }
   return owners;
 }
@@ -520,39 +527,64 @@ std::string Unquoted(std::string_view value) {
   return std::string(absl::StripPrefix(absl::StripSuffix(value, "\""), "\""));
 }
 
-// Reads the attributes that matter from a line of a rule.
-void ReadAttribute(std::string_view line, std::string &name, Rule &rule) {
-  if (std::string_view n = AttributeValue(line, "name"); !n.empty()) {
-    name = Unquoted(n);
+// Reads a rule line by line from `bazel query --output=build`.
+class RuleReader {
+ public:
+  void Line(std::string_view line) {
+    line = absl::StripAsciiWhitespace(line);
+    // The location of the macro call shifts with every line added above it.
+    if (line.starts_with("generator_location = ")) return;
+    absl::StrAppend(&rule_.body, line, "\n");
+    if (collecting_visibility_) {
+      absl::StrAppend(&rule_.visibility, "\n", line);
+      collecting_visibility_ = !line.starts_with("]");
+      return;
+    }
+    if (std::string_view n = AttributeValue(line, "name"); !n.empty()) {
+      name_ = Unquoted(n);
+    }
+    if (std::string_view g = AttributeValue(line, "generator_name");
+        !g.empty()) {
+      rule_.generator = Unquoted(g);
+    }
+    if (std::string_view v = AttributeValue(line, "testonly"); !v.empty()) {
+      rule_.testonly = v == "True" || v == "1";
+    }
+    if (std::string_view v = AttributeValue(line, "visibility"); !v.empty()) {
+      rule_.visibility = std::string(line);
+      collecting_visibility_ = v == "[";
+    }
   }
-  if (std::string_view g = AttributeValue(line, "generator_name"); !g.empty()) {
-    rule.generator = Unquoted(g);
-  }
-  if (std::string_view v = AttributeValue(line, "testonly"); !v.empty()) {
-    rule.testonly = v == "True" || v == "1";
-  }
-  if (!AttributeValue(line, "visibility").empty()) {
-    rule.visibility = std::string(line);
-  }
-}
 
-std::map<std::string, Rule> ParseRules(std::string_view output) {
-  std::map<std::string, Rule> rules;
-  Rule rule;
-  std::string name;
+  void Begin(std::string_view kind) {
+    rule_ = Rule{.kind = std::string(kind)};
+    name_.clear();
+    collecting_visibility_ = false;
+  }
+  const std::string &name() const { return name_; }
+  const Rule &rule() const { return rule_; }
+
+ private:
+  Rule rule_;
+  std::string name_;
+  bool collecting_visibility_ = false;
+};
+
+absl::btree_map<std::string, Rule> ParseRules(std::string_view output) {
+  absl::btree_map<std::string, Rule> rules;
+  RuleReader reader;
   bool inside = false;
   for (std::string_view line : absl::StrSplit(output, '\n')) {
     line = absl::StripTrailingAsciiWhitespace(line);
     if (line.starts_with("#") || line.empty()) continue;
     if (!inside) {
       inside = absl::ConsumeSuffix(&line, "(");
-      if (inside) rule = Rule{.kind = std::string(line)};
+      if (inside) reader.Begin(line);
     } else if (line == ")") {
-      rules[name] = rule;
+      rules[reader.name()] = reader.rule();
       inside = false;
     } else {
-      absl::StrAppend(&rule.body, line, "\n");
-      ReadAttribute(line, name, rule);
+      reader.Line(line);
     }
   }
   return rules;
@@ -560,7 +592,8 @@ std::map<std::string, Rule> ParseRules(std::string_view output) {
 
 // Whether a rule may change in a tests-only commit: a test, testonly, or
 // generated by a test (the files a test macro makes).
-bool IsTestRule(const Rule &rule, const std::map<std::string, Rule> &known) {
+bool IsTestRule(const Rule &rule,
+                const absl::btree_map<std::string, Rule> &known) {
   if (rule.kind.ends_with("_test") || rule.testonly) return true;
   const auto generator = known.find(rule.generator);
   return generator != known.end() && generator->second.kind.ends_with("_test");
@@ -601,9 +634,9 @@ std::vector<std::string> ParseFailures(std::string_view output) {
 std::vector<std::string> BuildRuleViolations(std::string_view before,
                                              std::string_view after,
                                              std::string_view package) {
-  const std::map<std::string, Rule> old_rules = ParseRules(before);
-  const std::map<std::string, Rule> new_rules = ParseRules(after);
-  std::map<std::string, Rule> known = old_rules;
+  const absl::btree_map<std::string, Rule> old_rules = ParseRules(before);
+  const absl::btree_map<std::string, Rule> new_rules = ParseRules(after);
+  absl::btree_map<std::string, Rule> known = old_rules;
   for (const auto &[name, rule] : new_rules) known[name] = rule;
   std::vector<std::string> violations;
   for (const auto &[name, rule] : known) {
@@ -618,6 +651,9 @@ std::vector<std::string> BuildRuleViolations(std::string_view before,
           absl::StrCat(label, " (", rule.kind, ") is ",
                        ChangeOf(was != old_rules.end(), is != new_rules.end()),
                        " and is neither a test nor testonly"));
+    } else if (in_both && !IsTestRule(was->second, old_rules)) {
+      violations.push_back(absl::StrCat(
+          label, " (", rule.kind, ") was neither a test nor testonly before"));
     } else if (in_both && was->second.visibility != is->second.visibility) {
       violations.push_back(absl::StrCat(label, " changes visibility"));
     }

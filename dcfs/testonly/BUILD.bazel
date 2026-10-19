@@ -63,6 +63,7 @@ cc_library(
         "//bench:__pkg__",
         "//dcfs:__pkg__",
         "//test/qemu:__pkg__",
+        "//tools:__pkg__",
     ],
     deps = [
         "//dcfs:syscalls",
