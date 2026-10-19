@@ -253,6 +253,8 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
     # attached, so a RAM disk of that name would collide with it.
     if ram_disks and [d for d in disks if d[0] == "vda"]:
         fail("qemu_test(%s): a ram_disks disk cannot be named vda (the coverage disk's name)" % name)
+    if ram_disks and [d for d in disks if d[0].startswith("sd")]:
+        fail("qemu_test(%s): a ram_disks disk cannot be a SCSI disk" % name)
     ram_disks_data = ["//test/qemu:fstools_cpio"] if ram_disks else []
     ram_disks_args = ["--ram-disks", "$(location //test/qemu:fstools_cpio)"] if ram_disks else []
     systemd_data = [systemd_image, "@alpine_qemu_img//:qemu_img"] if systemd_image else []

@@ -1084,7 +1084,8 @@ host disks, to compare or to see whether a RAM disk hides something (1 is the
 default; anything else is an error). The option is refused with `power_cut`
 and `boots` (the disks must outlive the guest: `fault_power_kill_test` keeps
 image files, and that is the point of it), `rootfs`, `systemd_image`, mke2fs
-options and a disk named `vda` (the coverage disk's name). Every run prints
+options, a disk named `vda` (the coverage disk's name) and a SCSI disk
+(`sd<letter>`). Every run prints
 `run-qemu.sh: time: guest wall S s, host CPU C s`: the CPU is what QEMU used
 between its start and its end (not the mkfs before it), the pair a
 latency-noisy run shows in.
@@ -2656,4 +2657,5 @@ One script serves both kinds of test (see the usage comment at the top of
 "Firmware: qboot" above). Each `disk-spec` is `<device>:<fstype>:<size>[:<mke2fs options>]`,
 e.g. `vdb:ext4:256M` (options for ext4 only); disks are attached in `<letter>` order, with a small
 unformatted filler drive for any skipped letter, so the guest kernel
-enumerates the requested disk at exactly `/dev/vd<letter>`.
+enumerates the requested disk at exactly `/dev/vd<letter>`. A spec named
+`sd<letter>` is a SCSI disk found by its LUN; see "SCSI disks".

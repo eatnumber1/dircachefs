@@ -7,7 +7,7 @@
 # guest/strace_lib.sh, which says why); 26.41 (6) removes it. KIND is one of
 #
 #   reads writes sectors_read sectors_written flushes
-#       the disks of the test (the virtio disks, or the loop devices that are the
+#       the disks of the test (the virtio and SCSI disks, or the loop devices that are the
 #       RAM disks), summed, from /sys/block/<disk>/stat: reads and writes
 #       issued (completed plus merged into another request: the block layer
 #       merges by the timing of its queue, so the completed count moves while
