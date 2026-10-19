@@ -183,9 +183,11 @@ use it as design guidance rather than firm rules."
     against the real kernel in the guest.
   - Enforcement, no exceptions: the `syscalls::` library's BUILD visibility
     admits only `RealSyscalls`'s library and its own kernel tests, and a
-    genquery golden pins that. `FileDescriptor` holds the `Syscalls` that
-    opened it and closes through it (only `Syscalls` methods construct
-    one). Each binary's `main` constructs one `RealSyscalls` and passes it
+    genquery golden pins that. Thin wrappers return plain values and
+    non-owning handles (`syscalls::RawFd`); owning types such as
+    `FileDescriptor` are created by `Syscalls` implementations only, via
+    a passkey, and close through the `Syscalls` that made them.
+    Each binary's `main` constructs one `RealSyscalls` and passes it
     down; there are no globals and no default instance.
   - Not yet true of the code: until steps 25.57 and 25.41 land, today's
     code still has the old shape (door wrappers in `syscalls_backing.h`,

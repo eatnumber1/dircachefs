@@ -1891,11 +1891,26 @@ door-guarded library, which 25.57 dissolves, so it is dropped. The design is:
   given; `banned_symbols` and `rule-no-raw-syscalls` still stop direct libc
   calls. This rule and the golden are part of this step (sub-steps 1 and 8).
   How each former exception goes:
-  1. `FileDescriptor` holds the `Syscalls` that opened it and its destructor
-     calls `syscalls_->Close(fd)`. Only `Syscalls` methods construct one
-     (`Openat` and friends return one bound to `*this`); there is no public
-     constructor from a bare `int`. It grows from 4 to 16 bytes, which is
-     negligible, and fakes can count opens and closes (fd-leak tests).
+  1. Ownership is a feature, so it lives above the thin layer (russ,
+     2026-10-19: "The problem with FileDescriptor::close is that
+     FileDescriptor is created in the thin wrappers where no Syscalls
+     object exists. Same goes for any other types originating inside the
+     Syscalls wrapper"). Thin `syscalls::` wrappers return plain values
+     (`Stat`, `Statfs`, bytes, names) and strong-typed non-owning handles
+     for kernel resources: `syscalls::RawFd` (no destructor, no close)
+     from `openat`, and likewise pidfds, both ends of a socketpair,
+     eventfd and signalfd. The owning types are born in the `Syscalls`
+     layer: `RealSyscalls::Openat(...)` calls `syscalls::openat` and wraps
+     the `RawFd` in a `FileDescriptor` bound to `*this`, whose destructor
+     calls `syscalls_->Close(raw)`. The constructor is private, reachable
+     only by `Syscalls` implementations through a passkey type, so nothing
+     outside the interface can make an owning descriptor that closes
+     behind the seam. Fakes construct `FileDescriptor`s bound to
+     themselves and see every close. Only `RealSyscalls` (error paths
+     before wrapping) and the thin wrappers' own kernel tests close a
+     `RawFd` directly; the thin library's visibility limits who can obtain
+     one. `FileDescriptor` grows from 4 to 16 bytes, which is negligible,
+     and fakes can count opens and closes (fd-leak tests).
   2. The daemon's lock file uses `ctx.syscalls()` like everything else; its
      old exemption existed only to skip the door, which now lives in
      `backing::`.
@@ -1905,6 +1920,10 @@ door-guarded library, which 25.57 dissolves, so it is dropped. The design is:
      covers the host tools.
   4. The subprocess child after `fork` (`dup2`, `execv`, `_exit`) calls
      through the same `Syscalls &` (a virtual call does not allocate).
+- Mechanical check (an item of this step): no type with a non-trivial
+  destructor appears in a `syscalls::` function's return type. A
+  clang-query or a `static_assert` on the wrapper signatures; the step
+  decides.
 - Restrictions the three libraries carried (only startup forks, only
   `bench/` and the tools reach `execv`) are call-site checks if they are kept
   at all (`tools/banned_symbols.txt`, a `repo_shape` rule), not interface
@@ -1992,7 +2011,8 @@ second is a test-only knob in production code, `docs/style.md` 2).
    `Context` carry it, `backing::` call `ctx.syscalls()`, and restrict the
    `syscalls::` library's BUILD visibility to `RealSyscalls`'s library and
    its kernel tests with no exceptions, with the genquery golden;
-   `FileDescriptor` holds its `Syscalls`; every `main` builds a
+   `FileDescriptor` is born in `Syscalls` (thin wrappers return `RawFd`);
+   every `main` builds a
    `RealSyscalls`. Measure `dcfs_bench` before
    and after (miss-heavy and mutation-heavy). The
    step stops for russ if the cost is not negligible. *Test:* unit tests of
@@ -2035,7 +2055,7 @@ second is a test-only knob in production code, `docs/style.md` 2).
 - *Bypassing the injected interface:* a caller invoking a member directly
   would skip `NoTransactionAt` and `FaultSitesTest`. Mitigation: BUILD
   visibility and the genquery test in sub-step 8, with no exceptions
-  (`FileDescriptor` closes through its own `Syscalls`).
+  (`FileDescriptor` closes through the `Syscalls` that made it).
 - *Variadic `openat`/`ioctl`/`fcntl`:* virtual members cannot be variadic or
   templates. Mitigation: split `Openat` with and without a mode, and the
   `ioctl<OP>`/`fcntl<OP>` templates over per-op members (25.38).

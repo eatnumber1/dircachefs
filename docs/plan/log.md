@@ -4583,3 +4583,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   binary's `main` constructs one `RealSyscalls` and passes `Syscalls &`
   down (no globals); the post-`fork` child calls through the same
   `Syscalls &`. Recorded in 25.41.
+- 2026-10-19, owning types are born in `Syscalls` (russ's thin-wrapper
+  principle applied; plan edit by Sonnet 5.5): russ, "The problem with
+  FileDescriptor::close is that FileDescriptor is created in the thin
+  wrappers where no Syscalls object exists. Same goes for any other types
+  originating inside the Syscalls wrapper". Decided: thin `syscalls::`
+  wrappers return plain values and non-owning handles (`syscalls::RawFd`;
+  likewise pidfds, socketpair ends, eventfd, signalfd). `RealSyscalls`
+  wraps them in `FileDescriptor`s bound to itself; the constructor is
+  private behind a passkey only `Syscalls` implementations hold; fakes
+  bind to themselves and see every close. 25.41 gains a check that no
+  `syscalls::` return type has a non-trivial destructor. Edited: phases/25
+  25.41; `docs/style.md` `rule-function-names`.
