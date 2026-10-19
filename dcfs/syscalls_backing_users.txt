@@ -70,6 +70,7 @@
 //dcfs:session_loop_test_bin
 //dcfs:startup_channel_test_bin
 //dcfs:syscalls_process_test_bin
+//dcfs:syscalls_tcg_test_bin
 //dcfs:syscalls_test_bin
 //dcfs:umount_helper_test_bin
 //dcfs:fsck_test_bin
