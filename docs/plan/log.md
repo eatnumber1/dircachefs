@@ -4391,3 +4391,21 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   - The 80-column and commit-width rules already exist in tools/; nothing
     added.
   - dispatch-ledger.tsv: committed with this batch.
+- 2026-10-19, clerk batch 34 (23.18 done, 23.19 and 25.46 side-effect
+  tests, 25.48 and 25.49 queued):
+  - Item 1: README row 23 lists 23.18 and 23.19; row 25 lists 25.48 and
+    25.49.
+  - Item 2: 23.19 and 25.46 take russ's 2026-10-18 requirement for
+    side-effect tests without sleeps, timers or I/O waits (backing-syscall
+    trace, cachestat after an ordering barrier, guest ftrace counts; no
+    cgroup io.stat).
+  - Item 3: 23.18 marked done 2026-10-19 with no change left (a459b300
+    already fixed the one stale comment; grep found no others). The
+    dashboard plan census entry for 23.18 is set to done.
+  - Items 5 and 6: 25.48 (foreman `--read-only` research mode) and 25.49
+    (subagents delegate down, four parts) queued after 25.47, russ's
+    2026-10-19 words quoted.
+  - Item 4 (`--help`) is not a plan edit and was not acted on; it was not
+    clear what it asked for.
+  - Not committed: docs/plan/dispatch-ledger.tsv had two uncommitted rows
+    from another batch, left alone.

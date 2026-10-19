@@ -2026,6 +2026,16 @@ Steps:
    Gaps become steps. Differential tests for hint syscalls compare side
    effects (cachestat residency), not only results.
 
+   The side-effect checks take no sleeps, timers or waiting for I/O to settle
+   (russ, 2026-10-18: "a non-timer / more deterministic way to measure the
+   side effects is needed in the differential tests."). They observe side
+   effects only as events or as state reached after an ordering barrier: dcfs's
+   own backing-syscall trace (`syscall_traces` / `BackingCall`); a
+   `cachestat(2)` snapshot taken after a synchronous, always-sent FUSE request that orders the
+   background READ; guest ftrace tracepoint counts filtered by inode where the
+   kernel's side must be seen. Never cgroup `io.stat` byte or request counters,
+   which move with load (the 26.41 lesson). The same rule as 23.19.
+
 Test: each new case fails first on a deliberately wrong expectation, then passes
 on the pinned kernel; the step names the commands when it starts.
 
@@ -2100,6 +2110,39 @@ attribution check covers them). Scripts under `tools/agents/` come with tests.
     2026-10-18, from the 17.2e final round's log.
 
 *Test:* the scripts come with tests under `tools/agents/`.
+
+## 25.48 Foreman research mode (russ, 2026-10-19: "Use the foreman script instead of calling agy directly"; queued, not started)
+
+A `--read-only` flag on the foreman script. Today every read-only job pays an
+empty-diff review and a throwaway branch.
+
+1. `--read-only` runs the worker in agy plan mode.
+2. No branch setup.
+3. No review round when the diff is empty.
+4. The worker's final text is saved as `report.md`.
+
+Owner: not yet assigned (the orchestrator chooses). Dependencies: none.
+
+*Test:* the foreman script's tests under `tools/` cover the flag.
+
+## 25.49 Subagents delegate down (russ, 2026-10-19; queued, not started; after 25.48)
+
+russ, 2026-10-19: "I'd like it if our subagents started doing this too, and
+themselves leveraging dumber agents for more of the menial work"
+
+1. A rule in `docs/plan/process.md` with an index line in
+   `docs/rules/index-process.md`. Each `.claude/agents/*.md` names the
+   delegation tool.
+2. `tools/agents/delegate.py`: one command for a subagent to run a read-only or
+   write job on agy through foreman. It does a live quota check first, writes a
+   ledger row naming the parent step, and refuses when the pool is under the
+   job's size.
+3. Briefs carry a decomposition section; step reports carry a `Delegated` line.
+4. Measure in the ledger: parent tokens with and without delegation.
+
+Owner: not yet assigned (the orchestrator chooses). Dependencies: 25.48.
+
+*Test:* `delegate.py` comes with tests under `tools/agents/`.
 
 ### 25.34 as built (dcfs-implementer, 2026-10-17)
 

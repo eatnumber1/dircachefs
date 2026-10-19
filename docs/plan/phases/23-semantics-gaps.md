@@ -1182,7 +1182,14 @@ expectations for that mode move to the passthrough path.
 
 Owner: dcfs-implementer.
 
-## 23.18 Comments that name the cancelled 23.16 (queued, not started)
+## 23.18 Comments that name the cancelled 23.16 (done 2026-10-19)
+
+Status (2026-10-19): done with no change left. The one known stale comment
+(`dcfs/dir_cache_fs_test.cc`, "Goes with 23.16, which retires the path...")
+was already fixed by the salvage commit a459b300. `git grep` finds no other
+comment in `dcfs/`, `test/` or `formal/` that names 23.16 or calls the
+fallback temporary. The remaining "fallback Write" and "fallback writes"
+comments are accurate now that the fallback stays.
 
 23.16 is cancelled and the fallback stays in full, so comments that say the
 fallback goes with 23.16 are wrong. Remove them, and any comment that calls
@@ -1222,6 +1229,25 @@ the background READ before the check with a synchronous request that is always
 sent (getxattr of a missing name: the same FIFO, and dcfs serves in order).
 Differential against the native backing: the same hint with dcfs out of the
 loop must leave the same residency.
+
+No sleeps, timers or waiting for I/O to settle (russ, 2026-10-18: "a
+non-timer / more deterministic way to measure the side effects is needed in
+the differential tests."). Observe the side effects only as events or as
+state reached after an ordering barrier:
+
+1. dcfs's own backing-syscall trace (the `syscall_traces` / `BackingCall`
+   recorder already logs every backing syscall exactly): assert that
+   `posix_fadvise(WILLNEED, off, len)` was issued on the backing fd.
+2. A state snapshot after an ordering barrier: `cachestat(2)` counts the
+   folios inserted into the mapping, which readahead does synchronously before
+   fadvise returns. Take it after the synchronous, always-sent FUSE request
+   that orders dcfs's handling of the background READ (same FIFO, served in
+   order).
+3. Where the kernel's side must be seen, guest ftrace tracepoint counts (for
+   example `mm_filemap_add_to_page_cache` filtered by inode), not timing.
+
+Never use cgroup `io.stat` byte or request counters: they move with load (the
+26.41 lesson).
 
 Logging: one INFO line per mount (not per open) when a passthrough registration
 is refused with ELOOP, because the backing stack is too deep
