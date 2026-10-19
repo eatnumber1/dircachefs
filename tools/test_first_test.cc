@@ -579,13 +579,13 @@ TEST(BuildRuleViolationsTest, AddingASourceToATestIsAllowed) {
               IsEmpty());
 }
 
-// A glob-made srcs list, as `bazel query --output=build` prints it.
+// A srcs list, as `bazel query --output=build` prints it: on one line.
 std::string Srcs(std::initializer_list<std::string_view> labels) {
-  std::string text = "  srcs = [\n";
+  std::vector<std::string> quoted;
   for (std::string_view label : labels) {
-    absl::StrAppend(&text, "    \"", label, "\",\n");
+    quoted.push_back(absl::StrCat("\"", label, "\""));
   }
-  return absl::StrCat(text, "  ],\n");
+  return absl::StrCat("  srcs = [", absl::StrJoin(quoted, ", "), "],\n");
 }
 
 TEST(BuildRuleViolationsTest, ATestFileAddedToAnyRulesSrcsIsAllowed) {
@@ -633,6 +633,40 @@ TEST(BuildRuleViolationsTest, ACodeFileAddedToAProductionRulesSrcsIsRefused) {
                             Srcs({"//dcfs:a.cc", "//dcfs:b_test.cc"}) +
                                 "  visibility = [\"//x:__pkg__\"],\n")),
               ElementsAre(HasSubstr("sources")));
+}
+
+TEST(BuildRuleViolationsTest, WideningVisibilityToATestonlyPackageIsRefused) {
+  EXPECT_THAT(
+      BuildRuleViolations(BuildRule("filegroup", "sources",
+                                    "  visibility = [\"//tools:__pkg__\"],\n"),
+                          BuildRule("filegroup", "sources",
+                                    "  visibility = [\"//tools:__pkg__\", "
+                                    "\"//dcfs/testonly:__pkg__\"],\n")),
+      ElementsAre(HasSubstr("changes visibility")));
+}
+
+TEST(BuildRuleViolationsTest, ATestonlyDepAddedToAProductionRuleIsRefused) {
+  EXPECT_THAT(
+      BuildRuleViolations(BuildRule("filegroup", "sources", "  deps = [],\n"),
+                          BuildRule("filegroup", "sources",
+                                    "  deps = [\"//dcfs/testonly:x\"],\n")),
+      ElementsAre(HasSubstr("sources")));
+}
+
+TEST(BuildRuleViolationsTest, AKindChangeWithATestSrcIsRefused) {
+  EXPECT_THAT(
+      BuildRuleViolations(BuildRule("cc_library", "lib", Srcs({"//dcfs:a.cc"})),
+                          BuildRule("cc_binary", "lib",
+                                    Srcs({"//dcfs:a.cc", "//dcfs:b_test.cc"}))),
+      ElementsAre(HasSubstr("lib")));
+}
+
+TEST(BuildRuleViolationsTest, ACodeFileSwappedForATestFileIsRefused) {
+  EXPECT_THAT(
+      BuildRuleViolations(
+          BuildRule("filegroup", "sources", Srcs({"//dcfs:a.cc"})),
+          BuildRule("filegroup", "sources", Srcs({"//dcfs:a_test.cc"}))),
+      ElementsAre(HasSubstr("sources")));
 }
 
 TEST(BuildRuleViolationsTest, MovedRulesAreNotChangedRules) {
