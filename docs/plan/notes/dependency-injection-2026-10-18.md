@@ -1,6 +1,14 @@
 Draft by Gemini 4 Argon (high), 2026-10-18; orchestrator review notes in the
 plan step (25.41 in `phases/25-style-convergence.md`).
 
+**Superseded again 2026-10-19 (russ): thin wrappers.** The `syscalls::` free
+functions do not take `Context`; they are true thin wrappers, and the
+`Syscalls` interface is the only seam. The layering is `backing::ReadFile` ->
+`backing::Read` (door check) -> `ctx.syscalls().Read(...)` ->
+`RealSyscalls::Read` -> `syscalls::read(fd, buf)` -> `::read`. See 25.41 and
+the 2026-10-19 "thin `syscalls::` wrappers" entry in `docs/plan/log.md`.
+Read "`syscalls::x(ctx, ...)`" anywhere below as "`ctx.syscalls().X(...)`".
+
 **Rewritten 2026-10-19 (clerk batch 47).** The draft step that stood here
 proposed three interfaces mirroring the three syscall libraries
 (`BackingSyscalls`, `LocalSyscalls`, `ProcessSyscalls`). russ (2026-10-19)

@@ -4541,3 +4541,33 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   - review-findings.tsv: the 5.18 rows' outcomes are "fixed/merged
     37c2990a..9957121c".
   - Not done: none in this batch. dispatch-ledger.tsv left alone.
+- 2026-10-19, thin `syscalls::` wrappers (russ's ruling; plan edit by Sonnet
+  5.5): russ, "I'm waffling on the decision to pass the Syscalls interface
+  into the syscalls:: functions vs having the syscalls:: functions be true
+  thin wrappers around the libc functions. What do you recommend?", then on
+  the recommendation: "I like your recommendation. Make it so". This
+  reverses his 2026-10-18 ruling that the `syscalls::` free functions take
+  `Context` (`syscalls::write(ctx, ...)`).
+  - Layering: `backing::ReadFile(ctx, ...)` -> `backing::Read(ctx, ...)`
+    (door check) -> `ctx.syscalls().Read(...)` (the seam: `RealSyscalls` or
+    a test fake) -> `RealSyscalls::Read(...)` (one line) ->
+    `syscalls::read(fd, buf)` (thin: typed args, `Status`, nothing else) ->
+    `::read`.
+  - `syscalls::` functions are true thin wrappers: no `Context`, tested
+    against the real kernel in the guest, never faked. The `Syscalls`
+    interface (CamelCase members, `RealSyscalls`, fakes on
+    `DelegatingSyscalls`) is the only seam; `Context` carries it.
+  - One way to reach the kernel, by BUILD visibility: the `syscalls::`
+    library is visible only to `RealSyscalls`'s library plus a named,
+    shrink-only exception list (`FileDescriptor::close`, the daemon's lock
+    file, host tools), pinned by a genquery golden like
+    `syscalls_backing_users.txt`.
+  - Why: the same principle as the door decision (thin wrappers must not
+    grow features; injection dispatch is a feature); one seam at one place;
+    no `Context` threaded through code nobody fakes (25.41's draft already
+    exempted `close`); "who calls the kernel" is greppable and enforceable.
+  - Edited: phases/25 25.41 (design, visibility rule and golden, migration
+    order) and 25.57 (layering; its `docs/style.md` list gains
+    `rule-function-names`); the notes/dependency-injection-2026-10-18.md
+    header; the handoff-2026-10-19.md line recording the old ruling. The
+    2026-10-18 log lines (clerk batch 24) are history and stand.

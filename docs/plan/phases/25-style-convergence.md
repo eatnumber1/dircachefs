@@ -1866,32 +1866,57 @@ door-guarded library, which 25.57 dissolves, so it is dropped. The design is:
   inheritance; no virtual inheritance; never derived from `RealSyscalls`).
   One or more fakes override what a test needs.
 - `Context` carries a `Syscalls &` (constructed in `main` and in the test
-  harnesses; no global `Default()` accessor). The thin `syscalls::` free
-  functions of 25.57 take `Context` first and call the member, so a call
-  looks like `syscalls::read(ctx, fd, buf)` and
-  `RealSyscalls::Read` is the layering's bottom: `backing::ReadFile` ->
-  `backing::Read` -> `syscalls::read(ctx, ...)` -> `RealSyscalls::Read` ->
-  `::read`.
+  harnesses; no global `Default()` accessor). The `syscalls::` free
+  functions of 25.57 stay true thin wrappers: no `Context` parameter, typed
+  arguments, `Status`, nothing else. They are tested against the real kernel
+  in the guest and never faked. The `Syscalls` interface is the only seam.
+  The layering (russ, 2026-10-19; see the superseded note below):
+
+  ```
+  backing::ReadFile(ctx, ...)
+    -> backing::Read(ctx, ...)         door check, then:
+    -> ctx.syscalls().Read(...)        the seam: RealSyscalls or a test fake
+    -> RealSyscalls::Read(...)         one line:
+    -> syscalls::read(fd, buf)         thin: typed args, Status, nothing else
+    -> ::read
+  ```
+
+- One way to reach the kernel, by BUILD visibility. The `syscalls::` library
+  is visible only to `RealSyscalls`'s library plus a named, shrink-only
+  exception list (`FileDescriptor::close`, the daemon's lock file, host
+  tools). A genquery golden test pins the list, like
+  `dcfs/syscalls_backing_users.txt` today. Daemon and backing code reach the
+  kernel only through the `Syscalls &` they are given. This visibility rule
+  and the golden are part of this step (sub-steps 1 and 8).
 - Restrictions the three libraries carried (only startup forks, only
   `bench/` and the tools reach `execv`) are call-site checks if they are kept
   at all (`tools/banned_symbols.txt`, a `repo_shape` rule), not interface
   boundaries. Which to keep is decided when the step starts.
 
-russ's earlier rulings stand where they do not name the split. 2026-10-18:
-"for the change to use a dependency-injected syscalls wrapper, keep the global
-free functions (so call sites look like syscalls::write(...)), but pass in
-the Context or Syscalls object." Then: "Actually, let's have the syscalls::
-free functions take Context. It can pull Syscalls from inside it, and it
-provides a uniform surface for the API (syscalls functions look and feel
-mostly like libc, with an additional Context argument)." The typed
+**Superseded (russ, 2026-10-19; the [log entry](/docs/plan/log.md), "thin
+`syscalls::` wrappers").**
+russ asked: "I'm waffling on the decision to pass the Syscalls interface into
+the syscalls:: functions vs having the syscalls:: functions be true thin
+wrappers around the libc functions. What do you recommend?", then on the
+recommendation: "I like your recommendation. Make it so". This reverses his
+2026-10-18 ruling that the `syscalls::` free functions take `Context`
+(`syscalls::write(ctx, ...)`; "Actually, let's have the syscalls:: free
+functions take Context. It can pull Syscalls from inside it ..."). Why: the
+same principle as the door decision (thin wrappers must not grow features;
+injection dispatch is a feature); one seam at one place; no `Context`
+threaded through code nobody fakes (this step's draft already exempted
+`close` for that reason); "who calls the kernel" is greppable and
+enforceable. The rest of russ's 2026-10-18 rulings stand: the typed
 signatures stay ("Be sure not to let that invalidate the other libc
 deviations we've already done (such as changing pointer+len to std::span, or
-changing char* to string_view)."). The members are public and called only by
-the `syscalls::` free functions and the testonly fakes; the build graph
-enforces that by BUILD visibility and a genquery test, not the compiler
+changing char* to string_view)."), and the `Syscalls` members are public,
+reached only by BUILD visibility and a genquery test, not the compiler
 (`docs/style.md`, rule-function-names; russ, 2026-10-18: "maybe we keep the
 Syscalls functions public, but control access via BUILD visibility?", then
-"Yes"). libfuse gets its own small seam (`FuseLowlevelOps`), separate from
+"Yes"). Now the members' only callers are `backing::` (and other code
+holding a `Syscalls &`) and the testonly fakes, and the only caller of the
+`syscalls::` functions is `RealSyscalls` plus the exception list above.
+libfuse gets its own small seam (`FuseLowlevelOps`), separate from
 `Syscalls`.
 
 **Relation to prior decision (`docs/design.md:3292-3312`).** On 2026-10-16
@@ -1900,8 +1925,9 @@ Syscalls functions public, but control access via BUILD visibility?", then
 libraries into one, weakening `//tools:syscalls_backing_users_test`; (2) left
 two ways to call a syscall (`RealSyscalls::Default()` and free functions);
 and (3) used virtual-inheritance mixins. This step answers (2) and (3)
-directly: one way to call (the free functions over `Context`) and single
-inheritance. For (1), 25.57 has already moved the door's enforcement to the
+directly: one way to call (`ctx.syscalls()`; the thin `syscalls::` functions
+are reachable only from `RealSyscalls` and the named exception list) and
+single inheritance. For (1), 25.57 has already moved the door's enforcement to the
 `backing::` layer and the check that the backing layers do not call a thin
 `syscalls::` function that has a `backing::` twin, so one interface no longer
 weakens the invariant.
@@ -1919,11 +1945,13 @@ second is a test-only knob in production code, `docs/style.md` 2).
 - **Nth-call faults:** a `CountdownFault` helper in `testonly/` decrements a
   counter on matching calls and returns `ErrnoToStatus(err, op)` when
   `++calls == fail_at` or while `times-- > 0` (for the existing wrap tests).
-- **Typed ioctl and fcntl:** `ioctl<OP>` and `fcntl<OP>` stay free function
-  templates taking `Context`, each calling a per-op CamelCase member
-  (`IoctlGetVersion`, `IoctlGetFsUuid`, `IoctlBtrfsFsInfo`,
-  `IoctlBtrfsSubvolInfo`, `IoctlFlags`, `IoctlRaw`), as in 25.38 (russ,
-  2026-10-18: "Yes, ioctl and fcntl become free function templates.").
+- **Typed ioctl and fcntl:** `syscalls::ioctl<OP>` and `syscalls::fcntl<OP>`
+  stay free function templates (thin, no `Context`); the `Syscalls`
+  interface has the per-op CamelCase members (`IoctlGetVersion`,
+  `IoctlGetFsUuid`, `IoctlBtrfsFsInfo`, `IoctlBtrfsSubvolInfo`, `IoctlFlags`,
+  `IoctlRaw`), each of which `RealSyscalls` implements with one call to the
+  matching template, as in 25.38 (russ, 2026-10-18: "Yes, ioctl and fcntl
+  become free function templates.").
 - **Libfuse seam:** a `FuseLowlevelOps` interface on `FuseSession` and
   `FuseRequest` for `fuse_passthrough_open`, `fuse_passthrough_close` and
   `fuse_reply_none`, replacing three wraps.
@@ -1943,8 +1971,9 @@ second is a test-only knob in production code, `docs/style.md` 2).
 
 **Migration order (small mergeable commits, each tested).**
 1. **Define `Syscalls`, `RealSyscalls` and `DelegatingSyscalls`;** make
-   `Context` carry it and the `syscalls::` free functions take `Context`.
-   Measure `dcfs_bench` before and after (miss-heavy and mutation-heavy). The
+   `Context` carry it, `backing::` call `ctx.syscalls()`, and restrict the
+   `syscalls::` library's BUILD visibility to `RealSyscalls`'s library plus
+   the exception list, with the genquery golden. Measure `dcfs_bench` before and after (miss-heavy and mutation-heavy). The
    step stops for russ if the cost is not negligible. *Test:* unit tests of
    `RealSyscalls` and `DelegatingSyscalls` plus
    `//tools:syscalls_backing_users_test`.
@@ -1960,16 +1989,16 @@ second is a test-only knob in production code, `docs/style.md` 2).
    `FuseLowlevelOps`; drop the `fuse_*` wraps.
 6. **Migrate `DIR_CACHE_FS_TEST_WRAPS`:** move `NoTransactionAt`,
    `DCFS_INJECT`, `WrappedCalls`, `FakeInodeNumbers`, hooks and
-   `SetgroupsFault` into a `HarnessSyscalls` fake on the test harness's
+   `SetgroupsFault` into a `HarnessSyscalls` fake (a `Syscalls`) on the test harness's
    `Context`; delete the wrap list. *Test:* `bazel test //dcfs:dir_cache_fs_test
    //dcfs:dir_cache_fs_poisoned_test //dcfs:dir_cache_fs_slope_test
    //dcfs:dir_cache_fs_fault_sites_test`.
 7. **Migrate `DIR_CACHE_FS_FAULTS` and
    `dir_cache_fs_crash_during_recovery_test`;** replace the eight
    `dcfs/testonly/` `--wrap` libraries with fakes or the authorizer.
-8. **Delete the `--wrap` allow-lists, ban `-Wl,--wrap`, update docs.** Ban
-   calls to the interface members outside `syscalls*.cc` (BUILD visibility,
-   russ 2026-10-18); remove `__wrap_` and `__real_` exceptions from
+8. **Delete the `--wrap` allow-lists, ban `-Wl,--wrap`, update docs.** Shrink
+   the exception list to its floor and pin it with the genquery golden
+   (BUILD visibility, russ 2026-10-18 and 2026-10-19); remove `__wrap_` and `__real_` exceptions from
    `.clang-tidy` and `tools/raw_syscalls_test.py`; add a `style_checks_test`
    check banning `--wrap` in `BUILD.bazel` and `*.bzl`; update `AGENTS.md`,
    `docs/style.md` and `docs/design.md:3292-3312`. *Test:*
@@ -1982,9 +2011,9 @@ second is a test-only knob in production code, `docs/style.md` 2).
 **Risks.**
 - *Bypassing the injected interface:* a caller invoking a member directly
   would skip `NoTransactionAt` and `FaultSitesTest`. Mitigation: BUILD
-  visibility and the genquery test in sub-step 8 (`FileDescriptor::Close`,
-  which calls `syscalls::close` without a `Context`, needs the same
-  treatment).
+  visibility and the genquery test in sub-step 8; `FileDescriptor::close`
+  (which has no `Context`) is on the named exception list, with the lock file
+  and host tools.
 - *Variadic `openat`/`ioctl`/`fcntl`:* virtual members cannot be variadic or
   templates. Mitigation: split `Openat` with and without a mode, and the
   `ioctl<OP>`/`fcntl<OP>` templates over per-op members (25.38).
@@ -2689,9 +2718,23 @@ more fake syscalls implementations for tests?" He confirmed the plan with
 2. The thin wrappers in `dcfs/syscalls.h` own the man-page names
    (`syscalls::read`, ...); today's `syscalls::read_own` becomes
    `syscalls::read`. `//dcfs:syscalls_backing`'s thin layer goes away, and
-   with it the second set of by-name wrappers. The layering is
-   `backing::ReadFile` -> `backing::Read` -> `syscalls::read(ctx, ...)` ->
-   `RealSyscalls::Read` -> `::read` (the last two arrows arrive with 25.41).
+   with it the second set of by-name wrappers. The layering (russ,
+   2026-10-19, reversing his 2026-10-18 ruling that the `syscalls::` free
+   functions take `Context`; see the
+   [log entry](/docs/plan/log.md), "thin `syscalls::` wrappers") is:
+
+   ```
+   backing::ReadFile(ctx, ...)
+     -> backing::Read(ctx, ...)         door check, then:
+     -> ctx.syscalls().Read(...)        the seam: RealSyscalls or a test fake
+     -> RealSyscalls::Read(...)         one line:
+     -> syscalls::read(fd, buf)         thin: typed args, Status, nothing else
+     -> ::read
+   ```
+
+   `syscalls::read` takes no `Context`. The two middle arrows arrive with
+   25.41; until then `backing::Read` calls `syscalls::read(fd, buf)`
+   directly.
 3. The enforcement is retargeted. `backing_door_guard.query` checks the
    `backing::` CamelCase functions, the poisoned-door test
    (`EveryWrapperRefusesOnceTheDoorIsPoisoned`) walks them, and a new check
@@ -2738,3 +2781,17 @@ passes with the allowlist; the existing suites pass unchanged.
   `dcfs/syscalls_backing.cc` and `dcfs/syscalls_process.cc`".
 - The `docs/rules/index-*.md` lines for those rules, where their wording
   names the old layering.
+- `rule-function-names` (about lines 155 to 205) carries the 2026-10-18
+  Context-in-free-functions text, superseded by the thin-wrapper ruling
+  (25.41 carries the rewrite; listed here so the edit is not missed):
+  "Every `syscalls::` free function takes the `Context` as its first
+  argument."; "a call looks like `syscalls::write(ctx, fd, buf)`"; "The
+  Context argument changes none of these deviations from libc"; "Every
+  `syscalls::` free function pulls the right Syscalls interface out of the
+  Context, and calls that interface's CamelCase member (`Write`)."; "The
+  members of the injected syscall interfaces (`BackingSyscalls`,
+  `LocalSyscalls`, `ProcessSyscalls`) ..."; the quoted "pass in the Context
+  or Syscalls object" and "Actually, let's have the syscalls:: free
+  functions take Context" decisions; and "`syscalls::ioctl<OP>(ctx, ...)`
+  and `syscalls::fcntl<OP>(ctx, ...)` are free function templates taking
+  `Context` like every `syscalls::` function".
