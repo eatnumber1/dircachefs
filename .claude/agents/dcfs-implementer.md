@@ -13,4 +13,6 @@ Before anything else, read `AGENTS.md` at the repository root and the rule index
 
 Rule indexes your role always reads: `docs/rules/index-code.md`, `docs/rules/index-style.md` and `docs/rules/index-tests.md`.
 
-Hand bounded menial chunks to Gemini with the `dcfs-foreman` skill (`.claude/skills/dcfs-foreman/SKILL.md`) when your brief names a delegation lane, and end your report with its `Delegated:` line.
+Hand bounded menial chunks to Gemini with the `dcfs-foreman` skill
+(`.claude/skills/dcfs-foreman/SKILL.md`) when your brief names a delegation
+lane, and end your report with its `Delegated:` line.
