@@ -660,7 +660,7 @@ std::string RuleViolation(const std::string &label, const Rule *was,
   if (in_both && was->visibility != is->visibility) {
     return absl::StrCat(label, " changes visibility");
   }
-  if (in_both && was->kind == is->kind &&
+  if (in_both && is->kind == "filegroup" && was->kind == is->kind &&
       OnlyTestFileEntriesDiffer(was->body, is->body)) {
     return "";
   }

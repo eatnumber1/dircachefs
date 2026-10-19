@@ -677,6 +677,14 @@ TEST(BuildRuleViolationsTest, ATestFileAddedToAnEmptySrcsIsAllowed) {
       IsEmpty());
 }
 
+TEST(BuildRuleViolationsTest, ATestFileAddedToAProductionLibraryIsRefused) {
+  EXPECT_THAT(BuildRuleViolations(
+                  BuildRule("cc_library", "lib", Srcs({"//dcfs:a.cc"})),
+                  BuildRule("cc_library", "lib",
+                            Srcs({"//dcfs:a.cc", "//dcfs/testonly:x.cc"}))),
+              ElementsAre(HasSubstr("lib")));
+}
+
 TEST(BuildRuleViolationsTest, MovedRulesAreNotChangedRules) {
   EXPECT_THAT(BuildRuleViolations(BuildRule("cc_library", "lib", "", 10),
                                   BuildRule("cc_library", "lib", "", 25)),
