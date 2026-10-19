@@ -1193,3 +1193,48 @@ the fallback temporary. Known at queueing: `dcfs/dir_cache_fs_test.cc:7429`
 edit: a comment-only change with no behaviour change.
 
 Owner: dcfs-mechanical.
+
+## 23.19 Readahead hints reach the backing (russ, 2026-10-18; queued)
+
+Not started. Thursday ramp or after the 2026-10-23 reset.
+
+russ, 2026-10-18: "we need to do what the backing does, so if
+posix_fadvise(WILLNEED) causes readahead, we need to pass that through to the
+backing".
+
+Findings from the cancelled 23.16 (Linux v6.12):
+
+- FUSE has no `.fadvise` (fs/fuse/file.c:3312-3331), so
+  `posix_fadvise(WILLNEED)` and `readahead(2)` go to `generic_fadvise`
+  (mm/fadvise.c:96-106, 180-185), and `fuse_readahead`
+  (fs/fuse/file.c:985-1027) sends FUSE_READ with a passthrough open's fh.
+- The fallback READ handler then fills the FUSE page cache, which passthrough
+  reads never use, and the backing's cache stays cold.
+
+Fix: on a READ for a passthrough handle, `posix_fadvise(WILLNEED)` on the
+backing fd for the requested range (a new `syscalls::` wrapper), then serve or
+reply as the design decides. The kernel-side fix is kernel-patches row 11
+(forward fadvise to the backing); this step is dcfs's half.
+
+Test, without timing: `cachestat(2)` counts the folios in the mapping as soon
+as fadvise returns (mm/filemap.c `filemap_cachestat`), unlike `mincore`. Order
+the background READ before the check with a synchronous request that is always
+sent (getxattr of a missing name: the same FIFO, and dcfs serves in order).
+Differential against the native backing: the same hint with dcfs out of the
+loop must leave the same residency.
+
+Logging: one INFO line per mount (not per open) when a passthrough registration
+is refused with ELOOP, because the backing stack is too deep
+(fs/fuse/passthrough.c:236-239, fs/fuse/inode.c:1326-1347). The line says
+that files on this mount are served
+by dcfs without passthrough and will be slower. russ, 2026-10-18: "Since the
+call is now expected in some cases even with passthrough, it's not worth adding
+special additional logging for it." Then, the same day, changing his mind:
+"Actually, I changed my mind. It's useful to have a log line saying
+passthrough isn't happening otherwise it's silently slower." The later
+message stands: the line is kept.
+
+Also: fix the stray comment above `ReadWholeFile` in
+`dcfs/dir_cache_fs_test.cc` (about line 581).
+
+Owner: not yet assigned (the orchestrator chooses).

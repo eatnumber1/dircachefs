@@ -1974,6 +1974,13 @@ items 1 to 4; item 1 needs `~/Sources/linux` at the pinned tag.
 
 ## 25.46 Audit the kernel invariants dcfs relies on, and pin each one (russ, 2026-10-18; queued, not started)
 
+Why the miss, for the record (russ, 2026-10-18: "why did we miss
+fadvise(WILLNEED) until now? Incomplete model?"): the TLA+ model covers the
+metadata write-through protocol, not which kernel requests reach dcfs on which
+handles (passthrough is not modelled); the differential tests compare results,
+and a hint changes no result, only caching; and no inventory of entry points
+existed. Step 5 is that inventory.
+
 Russ, 2026-10-18: "For this and everything else that we're relying on kernel
 invariants like this, add a test." A kernel invariant that lets dcfs skip work
 or decide a result needs a native `kernel_facts_test` case citing `path:line`
@@ -2004,6 +2011,20 @@ Steps:
      (fs/fuse/req.c:13);
    - passthrough writes using the daemon's credentials.
    Citations as `path:line (Linux vX)` at the tested kernel.
+5. "What the backing does" entry-point table (russ, 2026-10-18: "why did we
+   miss fadvise(WILLNEED) until now?"): every VFS entry point a program can use
+   on a dcfs file, with, for each one:
+   - the `struct file_operations`, `inode_operations` and
+     `address_space_operations` of FUSE at the tested kernel, plus fadvise,
+     readahead, madvise, sync_file_range, the FS_IOC_* ioctls, mmap flags,
+     O_DIRECT, and the copy, clone and dedupe ranges;
+   - how it reaches the backing under dcfs: passthrough, fallback served by
+     dcfs, or not forwarded;
+   - whether the backing's behaviour is reproduced, including side effects
+     such as cache warming and readahead;
+   - the test or kernel-facts case that pins it.
+   Gaps become steps. Differential tests for hint syscalls compare side
+   effects (cachestat residency), not only results.
 
 Test: each new case fails first on a deliberately wrong expectation, then passes
 on the pinned kernel; the step names the commands when it starts.

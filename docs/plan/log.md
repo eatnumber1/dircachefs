@@ -4367,3 +4367,27 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
     anchor and index entry in docs/rules/. That is code work, outside the
     clerk's files, so it is queued for the orchestrator to dispatch.
   - dispatch-ledger.tsv: committed with this batch as it stood.
+- 2026-10-19, clerk batch 33 (23.19 readahead hints queued, 25.46 entry-point
+  table, batch 32 follow-ups):
+  - Item 1: queued 23.19 "Readahead hints reach the backing" in
+    phases/23 (queued, not started; Thursday ramp or after the 2026-10-23
+    reset), with the 23.16 findings, the cachestat test design, the
+    differential and the ReadWholeFile comment fix. Owner not assigned.
+  - Item 2: 25.46 gains step 5 (the "what the backing does" entry-point
+    table) and the cause of the miss, quoting russ's 2026-10-18 question.
+  - Item 3: kernel-patches row 11 now names 23.19 as owner and the planned
+    workaround (fadvise on the backing fd for the range, no EIO reply);
+    review-findings.tsv row 182 outcome "moot: 23.16 cancelled, fallback
+    kept (russ 2026-10-18)"; phases/12 "Kernel facts" heading reads "from
+    23.15; 23.16 was cancelled the same day".
+  - Item 4 and item 5: the ELOOP INFO line is kept in 23.19. The later
+    message governs: russ 2026-10-18, "Since the call is now expected in
+    some cases even with passthrough, it's not worth adding special
+    additional logging for it." then "Actually, I changed my mind. It's
+    useful to have a log line saying passthrough isn't happening otherwise
+    it's silently slower." The step text quotes both in order.
+  - Not applied: docs/plan/README.md row 23 does not list 23.19 (the file
+    was not named in this batch; the orchestrator adds it).
+  - The 80-column and commit-width rules already exist in tools/; nothing
+    added.
+  - dispatch-ledger.tsv: committed with this batch.

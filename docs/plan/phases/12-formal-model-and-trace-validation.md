@@ -742,7 +742,7 @@ will). Nothing checks the model's guards against the code.
   enforcement, a guard whose removal breaks nothing is deleted.
 - **Signal sweep (26.6):** SIGTERM/SIGHUP to the daemon at each backing
   call site in a guest test, alongside the syscall-fault sweep.
-- **Kernel facts the register records (2026-10-18, from 23.15 and 23.16):**
+- **Kernel facts the register records (2026-10-18, from 23.15):**
   - "On a non-passthrough FUSE file, the kernel turns an O_SYNC, O_DSYNC or
     RWF_*SYNC write into a FUSE_FSYNC (generic_write_sync)." Entered once
     23.15 verifies it; enforced by 23.15's differential test.
