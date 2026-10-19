@@ -46,11 +46,10 @@ Each function takes the root of a source tree and returns a list of problems
   (it renders with a space), except those counted in
   tools/repo_shape_split_spans.txt, a list that only shrinks.
 
-`python3 -I tools/repo_shape.py [root]` prints the problems of every rule
-above (the same list, `CHECKS`, as //tools:repo_shape_test) and exits 1 if
-there are any (step 25.51).
-
-(The fourth rule, commit subjects, needs git: .github/ci/commit_subjects.sh.)
+`python3 -I tools/repo_shape.py [root]` prints the problems of every check
+in `CHECKS` (the list //tools:repo_shape_test runs) and exits 1 if there are
+any (step 25.51). Commit subjects are checked by
+.github/ci/commit_subjects.sh, not here.
 """
 
 import os
@@ -881,9 +880,6 @@ def split_code_spans(root, tracked=None):
                           "split code span(s)")
 
 
-# The rules that read git's list of tracked files.
-TRACKED_CHECKS = (spdx_licenses, long_lines, split_code_spans)
-
 # Every rule, once: `all_problems` runs them, `//tools:repo_shape_test`
 # asserts each is clean and the command line (`python3 -I
 # tools/repo_shape.py`) prints their problems, so the three cannot differ
@@ -893,7 +889,7 @@ CHECKS = (
     no_new_guest_shell, fixed_arrays, absl_prefixed_status_macros,
     nodiscard_on_status, project_prefix, disabled_checks_listed,
     no_test_only_comments, no_testonly_friends, rule_index,
-    agent_file_attributions) + TRACKED_CHECKS
+    agent_file_attributions, spdx_licenses, long_lines, split_code_spans)
 
 
 def all_problems(root):

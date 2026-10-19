@@ -6,10 +6,9 @@ DISABLED_ check and a bare sleep: each rule must report it; a good tree
 reports nothing.
 """
 
-import contextlib
-import io
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -88,11 +87,6 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
 
     def tearDown(self):
         self.dir.cleanup()
-
-    def test_good_tree_has_no_problems(self):
-        for check in repo_shape.CHECKS:
-            if check not in repo_shape.TRACKED_CHECKS:
-                self.assertEqual([], check(self.root), check.__name__)
 
     def test_a_rule_in_no_index_is_reported(self):
         write(self.root, "docs/design.md",
@@ -625,10 +619,10 @@ class RepoShapeCliTest(unittest.TestCase):
     def run_cli(self):
         subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
         subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            code = repo_shape.main(["repo_shape.py", self.root])
-        return code, out.getvalue()
+        done = subprocess.run(
+            [sys.executable, "-I", repo_shape.__file__, self.root],
+            capture_output=True, text=True, check=False)
+        return done.returncode, done.stdout
 
     def test_a_good_tree_exits_zero(self):
         code, out = self.run_cli()
@@ -637,29 +631,28 @@ class RepoShapeCliTest(unittest.TestCase):
     def test_a_new_long_line_in_a_tracked_md_file_fails(self):
         write(self.root, "docs/a.md", "word " * 17 + "\n")
         code, out = self.run_cli()
-        self.assertEqual(1, code)
-        self.assertIn("docs/a.md has 1 line(s) over 80 columns", out)
+        self.assertEqual((1, [
+            "docs/a.md has 1 line(s) over 80 columns, 0 known: fix them "
+            "(the list tools/repo_shape_long_lines.txt does not grow)"]),
+                         (code, out.splitlines()))
 
     def test_an_allowlist_count_above_the_actual_fails(self):
         write(self.root, "docs/a.md", "short\n")
         write(self.root, "tools/repo_shape_long_lines.txt",
               "# known\ndocs/a.md 2\n")
         code, out = self.run_cli()
-        self.assertEqual(1, code)
-        self.assertIn("lists 2 for docs/a.md, which has 0", out)
+        self.assertEqual((1, [
+            "tools/repo_shape_long_lines.txt lists 2 for docs/a.md, which "
+            "has 0: lower it or take the entry off (the list only shrinks)"]),
+                         (code, out.splitlines()))
 
     def test_a_split_backtick_span_fails(self):
         write(self.root, "docs/a.md", "Use `foo\nbar` here.\n")
         code, out = self.run_cli()
-        self.assertEqual(1, code)
-        self.assertIn("docs/a.md has 1 split code span(s)", out)
-
-    def test_the_cli_and_the_test_run_the_one_list_of_checks(self):
-        names = [f.__name__ for f in repo_shape.CHECKS]
-        self.assertIn("long_lines", names)
-        self.assertIn("split_code_spans", names)
-        self.assertIn("spdx_licenses", names)
-        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual((1, [
+            "docs/a.md has 1 split code span(s), 0 known: fix them (the "
+            "list tools/repo_shape_split_spans.txt does not grow)"]),
+                         (code, out.splitlines()))
 
 
 if __name__ == "__main__":

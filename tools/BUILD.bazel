@@ -301,10 +301,9 @@ py_library(
     imports = ["."],
 )
 
-# Every third_party/<name>/ has a README.md, every guest script is used by a
-# qemu_test, every DISABLED_ check is named in README.md's Limitations. It
-# walks the real source tree (found through MODULE.bazel's symlink): Bazel
-# cannot declare "every directory of third_party" as inputs, so the target is
+# Every check in repo_shape.CHECKS is clean over the real source tree (the
+# list `python3 -I tools/repo_shape.py` prints the problems of). It walks the
+# tree (found through MODULE.bazel's symlink): Bazel cannot declare "every directory of third_party" as inputs, so the target is
 # `external` (never cached) and is cheap.
 py_test(
     name = "repo_shape_test",
@@ -317,7 +316,8 @@ py_test(
     deps = [":repo_shape_lib"],
 )
 
-# Self-check of the three rules over fixture trees (26.1).
+# Self-check of the repo_shape checks, and of its command line, over fixture
+# trees (26.1, 25.51).
 py_test(
     name = "repo_shape_self_check_test",
     size = "small",
