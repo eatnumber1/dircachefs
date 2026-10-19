@@ -251,7 +251,7 @@ def weekly_remaining_pct(usage_text):
   for line in usage_text.splitlines():
     parts = [p.strip() for p in line.split("\t")]
     if len(parts) >= 3 and "Weekly" in parts[1]:
-      m = re.search(r"(\d+)%", parts[2])
+      m = re.fullmatch(r"(\d+)%", parts[2])
       if m:
         return int(m.group(1))
   return None

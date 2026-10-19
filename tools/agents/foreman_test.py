@@ -804,6 +804,20 @@ class ForemanTest(unittest.TestCase):
     with contextlib.redirect_stderr(stderr):
       ret = self._run(single=True, env={"FAKE_AGY_WEEKLY_PCT": "0%"})
     self.assertEqual(ret, 2)
+    self.assertIn("0%", stderr.getvalue())
+
+  def test_fractional_percent_cell_is_unreadable_and_refuses(self):
+    self.assertIsNone(foreman.weekly_remaining_pct(
+        "Gemini Models\tWeekly Limit Remaining\t14.5%\tx\n"))
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+      ret = self._run(single=True, env={"FAKE_AGY_WEEKLY_PCT": "14.5%"})
+    self.assertEqual(ret, 2)
+    self.assertIn("cannot read", stderr.getvalue())
+
+  def test_empty_meter_is_unreadable(self):
+    self.assertIsNone(foreman.weekly_remaining_pct(""))
+    self.assertIn("no output", foreman.quota_refusal("", 1))
 
   def test_zero_threshold_skips_the_check(self):
     self.assertEqual(
@@ -830,6 +844,7 @@ class ForemanTest(unittest.TestCase):
           "--agy-bin", self.fake_agy_path, "br", self.prompt_file,
       ])
     self.assertEqual(ret, 2)
+    self.assertIn("--min-weekly-pct 90", stderr.getvalue())
 
   def test_single_mode_failure_is_recorded(self):
     self.assertEqual(
