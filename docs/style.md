@@ -109,6 +109,14 @@ use it as design guidance rather than firm rules."
   `FS_IOC_SHUTDOWN` definition in `tools/testutil.c`, because the pinned
   sysroot's `<linux/fs.h>` (6.12) predates it; it goes when the pin is
   raised.
+- <a id="rule-kernel-headers-match-test-kernel"></a>
+  **Kernel headers match the tested kernel.** If our kernel headers are out of
+  date, then we need to upgrade them. We should be using the kernel headers for
+  the kernel version we test against. The toolchain sysroot's kernel UAPI
+  headers are the tested kernel's; a missing UAPI definition is fixed by
+  upgrading the headers, never by pasting a constant. This strengthens
+  rule-no-uapi-copies: the `USER_NS_INIT_INO` paste in `dcfs/proc_status.cc` is
+  a defect to remove, not an exception (russ, 2026-10-18).
 - Include blocks are what clang-format's Google style produces: own header,
   C headers, C++ headers, then every other header in one sorted block
   (`"absl/..."`, `"dcfs/..."`, `"fuse_lowlevel.h"`).
@@ -1579,6 +1587,11 @@ necessary, but if you think one is necessary, come to me."
   **A test comment does not start with its step number.** The test name
   states the behavior and the commit names the step (russ, 2026-10-17).
   Existing prefixes go when the test is touched.
+- **Test against the minimum supported kernel.** The QEMU test kernel is the
+  documented minimum supported kernel, and we should test against the minimum
+  supported kernel. Under the idea that the kernel is backwards compatible,
+  that should make it safe to use dcfs with more recent kernels than we're
+  testing with (russ, 2026-10-18; `docs/design.md`, "Assumptions").
 - <a id="rule-tests-in-qemu"></a>
   **Every test of dcfs runs in a QEMU guest as root**: `qemu_cc_test` for
   GoogleTest binaries, `qemu_test`/`qemu_test_matrix` for guest scripts

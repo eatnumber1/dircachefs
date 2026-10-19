@@ -821,7 +821,8 @@ boot), so `bazel test //...` is dominated by compilation, not booting.
 
 ### The `kvm` group and the Bazel server
 
-The tests' QEMU processes need `/dev/kvm`, and they inherit the groups of
+The tests' QEMU processes benefit from `/dev/kvm` (without it they fall
+back to TCG), and they inherit the groups of
 Bazel's long-lived server, not of your shell. Join the `kvm` group and log
 in again before the first `bazel test`; if a server was started without the
 group, run `bazel shutdown` so that the next invocation starts one that has

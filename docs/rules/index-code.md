@@ -20,6 +20,9 @@ indexes to read for which task.
   touches. [design](/docs/design.md#rule-bounded-memory)
 - Root is required; there are no unprivileged fallbacks.
   [design](/docs/design.md#rule-root-required)
+- Test against the minimum supported kernel, and keep our kernel headers
+  matching the tested kernel (russ, 2026-10-18).
+  [design](/docs/design.md#rule-test-minimum-kernel)
 - No backward compatibility until the first deployment (russ, 2026-10-10/11:
   "we've never shipped dcfs"). [design](/docs/design.md#rule-no-backcompat)
 - File names are bytes; escape them whenever printed (from phase 9).

@@ -1157,6 +1157,8 @@ the follow-up for 23.13's sub-items (7) and (9).
 Passthrough is a required kernel feature like the others. Its fallback
 for a kernel without it is removed, not kept beside the requirement.
 
+Unblocked by 17.2e's merge (26bf55c1, 2026-10-18); not started.
+
 - Require FUSE_CAP_PASSTHROUGH at mount, as the other required kernel
   features are. Refuse to mount with FailedPrecondition in DirCacheFS
   Init, next to the existing "which dcfs requires; refusing to mount"

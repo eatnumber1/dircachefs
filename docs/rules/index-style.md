@@ -18,7 +18,8 @@ that holds its reasoning. `AGENTS.md` says which indexes to read for which task.
   2026-10-18). [style 1.1](/docs/style.md#rule-reformat-commit)
 - Include what you use, and no copies of UAPI definitions.
   [style 1.1](/docs/style.md#rule-include-what-you-use),
-  [style 1.1](/docs/style.md#rule-no-uapi-copies)
+  [style 1.1](/docs/style.md#rule-no-uapi-copies),
+  [style 1.1 (russ, 2026-10-18)](/docs/style.md#rule-kernel-headers-match-test-kernel)
 - Warnings are errors: `-Werror` today, `-Weverything -Werror` from phase 7.
   [style 1.1](/docs/style.md#rule-warnings-are-errors)
 - Narrowing Google's C++ rules:

@@ -1967,6 +1967,22 @@ Steps:
    listed with its reason in the step's "As built" notes.
 3. Check that the weekly noisy job runs every case (`kernel_facts_test` runs
    only in the weekly workflow, `rule-kernel-facts-weekly`).
+4. Recording FUSE server fixture (russ, 2026-10-18: "Yes. Queue the recording
+   FUSE server fixture."): a `testonly` recording FUSE server (libfuse
+   passthrough that logs every request: opcode, valid and flags bits, pid,
+   uid, gid), used by `kernel_facts_test` to pin, with dcfs out of the loop,
+   every FUSE-module behaviour dcfs relies on:
+   - `FATTR_KILL_SUIDGID` on truncate only for a caller without `CAP_FSETID`,
+     and always on an id-changing chown (fs/fuse/dir.c:2231-2243);
+   - under `KILLPRIV_V2`, a non-`CAP_FSETID` write arriving as an empty SETATTR
+     with the kill bits and mode dropped (fs/fuse/dir.c:2340-2342, 2248);
+   - `REMOVEXATTR` of `security.capability` before that SETATTR;
+   - `SB_NOSEC` under V2;
+   - `kiocb_modified` on fallback writes (fs/fuse/file.c:1518);
+   - a caller outside the server's pid namespace arriving as pid 0
+     (fs/fuse/req.c:13);
+   - passthrough writes using the daemon's credentials.
+   Citations as `path:line (Linux vX)` at the tested kernel.
 
 Test: each new case fails first on a deliberately wrong expectation, then passes
 on the pinned kernel; the step names the commands when it starts.

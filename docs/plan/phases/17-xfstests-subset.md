@@ -133,9 +133,9 @@ the guest exporting a dcfs mount), then decide the fix. Before dcfs is
 NFS-exported in earnest. The same root cause, the request not carrying
 the caller's full credentials, leaves one 17.2b edge: a uid 0 caller
 without CAP_FSETID writing a setgid file outside its group keeps setgid
-through dcfs where the backing clears it. dcfs-protocol.
+through dcfs where the backing clears it. The uid-0-without-CAP_FSETID edge is closed for writes, fallocate, copy_file_range and truncate (the *-nofsetid-* cases, 17.2e round 4); what remains is the chown case, sgid-nofsetid-chown (native 0:666, mount 0:2666). dcfs-protocol.
 
-## 17.2e Negotiate HANDLE_KILLPRIV_V2 (russ, 2026-10-17: "LGTM to adopting killpriv_v2")
+## 17.2e Negotiate HANDLE_KILLPRIV_V2 (russ, 2026-10-17: "LGTM to adopting killpriv_v2"; merged 2026-10-18 26bf55c1: killpriv V2 with the kernel's FUSE verdict obeyed for truncate both ways, one removal for fallocate and copy_file_range, /proc only after file capabilities go, startup refusal without CAP_FSETID or outside the init user namespace, CapabilitySet, caller_capabilities_test, kernel_facts cases for every relied-on kernel behaviour)
 
 17.2c's option A (`docs/plan/notes/passthrough-write-cost-17.2c.md`,
 section 4A, which is the brief's detail). dcfs sets

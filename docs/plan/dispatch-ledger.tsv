@@ -147,7 +147,7 @@ a5185f58c3796c3a5	2026-10-18T21:27:38Z	Upload ci dataset	mechanical	dcfs-mechani
 a3af6f71e6e68108b	2026-10-18T21:40:25Z	Upload sloc and ci datasets	mechanical	dcfs-mechanical	haiku	low	276273	20								14	116	232837	43306
 abea83bf2c986ea22	2026-10-18T22:00:00Z	17.2e	review	dcfs-reviewer	claude-opus-5-5	high	5513973	551								98	458	5355312	158105
 a2f125ed2382bd6b9	2026-10-18T22:00:00Z	17.2e	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	3422252	238								64	590	3252169	169429
-acad7f2863d179f6a	2026-10-18T22:37:47Z	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high	52181828	4371								402	24150	50736099	1421177
+acad7f2863d179f6a	2026-10-18T22:37:47Z	17.2e	protocol	dcfs-protocol	claude-opus-5-5	high	129075800	7337								702	39442	127427141	1608515
 a7b1c2c44cb93db42	2026-10-18T22:42:20Z	Rank mechanizable review findings		Explore	sonnet		142321	48								12	50	109841	32418
 a33a7764dc1c9fd20	2026-10-18T22:42:46Z	Upload quota and budget datasets	mechanical	dcfs-mechanical	haiku	low	340294	32								18	729	292160	47387
 a434a974f638733a1	2026-10-18T22:43:35Z	Upload ci dataset	mechanical	dcfs-mechanical	haiku	low	213141	17								12	136	177117	35876
@@ -168,3 +168,10 @@ a0d9acea70630589f	2026-10-18T23:28:40Z	Clerk batch 27	mechanical	dcfs-mechanical
 a13e7bbdef45b1b32	2026-10-18T23:44:53Z	Upload quota/budget/ci via skill	mechanical	dcfs-mechanical	haiku	low	345372	33								18	239	295230	49885
 a4e6c25792178e14f	2026-10-18T23:48:16Z	bazel-agent-config	implementation	dcfs-implementer	claude-sonnet-5-5	medium	860942	141								36	201	799974	60731
 a7549c5cf2ee2a5f4	2026-10-18T23:48:29Z	Upload lanes via skill	mechanical	dcfs-mechanical	haiku	low	305937	20								16	291	267990	37640
+a7b1c33075034426a	2026-10-19T00:21:35Z	Clerk batch 28	mechanical	dcfs-mechanical	claude-haiku-5-5	low	725940	73								32	5049	667118	53741
+a23b71374636ccdea	2026-10-19T00:30:52Z	17.6	investigation	dcfs-investigator	claude-sonnet-5-5	high	6095962	1318								154	1192	5921906	172710
+a614c80589b8971ea	2026-10-19T00:31:05Z	Upload lanes and sloc via skill	mechanical	dcfs-mechanical	haiku	low	280153	22								14	688	231838	47613
+a15934212531abbb0	2026-10-19T00:40:33Z	17.2e	mechanical	dcfs-mechanical	haiku	low	100516	48								8	37	73291	27180
+af0038b8702617f93	2026-10-19T00:48:52Z	Upload sloc/quota/budget via skill	mechanical	dcfs-mechanical	haiku	low	344495	32								18	345	294099	50033
+a18f5fe9e53978495	2026-10-19T00:53:10Z	Kernel version facts for headers ruling		Explore	sonnet		440815	207								28	142	397602	43043
+a846de2f66d165ee7	2026-10-19T00:55:00Z	Clerk batch 29	mechanical	dcfs-mechanical	claude-haiku-5-5	low													

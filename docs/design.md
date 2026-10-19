@@ -260,6 +260,13 @@ the slope at zero.
   `flock(2)` on the database file for the life of the process. SQLite
   would serialize two daemons' transactions but not their three-phase
   protocols or their in-memory state.
+- <a id="rule-test-minimum-kernel"></a>
+  **Test against the minimum supported kernel.** The QEMU test kernel is the
+  documented minimum supported kernel, and we should test against the minimum
+  supported kernel. Under the idea that the kernel is backwards compatible,
+  that should make it safe to use dcfs with more recent kernels than we're
+  testing with (russ, 2026-10-18). The kernel headers match that kernel too
+  (`docs/style.md`, `rule-kernel-headers-match-test-kernel`).
 - <a id="rule-root-required"></a>
   **Root.** dcfs needs `CAP_DAC_READ_SEARCH` for `open_by_handle_at`,
   `CAP_SYS_ADMIN` to mount and to register passthrough backing files, and
@@ -3305,8 +3312,8 @@ Every test target, unit tests included, boots the project's own minimal
 kernel in a QEMU guest and runs there as root. To make that cheap
 (amendment 4), the runner (`test/qemu/scripts/run-qemu.sh`) boots the
 `microvm` machine type with qboot and direct PVH kernel boot, no PCI, no
-ACPI, virtio-mmio disks, a kernel trimmed to what the guests use, KVM, and
-a small amount of memory. The kernel reaches userspace in about a second.
+ACPI, virtio-mmio disks, a kernel trimmed to what the guests use, KVM (TCG
+fallback), and a small amount of memory. The kernel reaches userspace in about a second.
 `qemu_cc_test` wraps a GoogleTest binary in a per-test initramfs;
 `qemu_test` runs a guest shell script against the real daemon. Test-only
 helpers are fakes, never mocks, and live in test files or `testonly`
