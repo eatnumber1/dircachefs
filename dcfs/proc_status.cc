@@ -101,7 +101,10 @@ absl::StatusOr<bool> SharesMyUserNamespace(pid_t tid) {
 }
 
 absl::StatusOr<bool> InInitUserNamespace() {
-  // USER_NS_INIT_INO; the sysroot's <linux/nsfs.h> predates it.
+  // USER_NS_INIT_INO; the sysroot's <linux/nsfs.h> (6.12) predates it. Its
+  // NS_GET_PARENT cannot stand in: it fails with EPERM in every user
+  // namespace, not only the init one (kernel_facts_test's
+  // NsGetParentFailsWithEpermInEveryUserNamespace).
   constexpr ino_t kInitUserNamespaceInode = 0xEFFFFFFDU;
   ASSIGN_OR_RETURN(struct stat mine, syscalls::stat("/proc/self/ns/user"));
   return mine.st_ino == kInitUserNamespaceInode;
