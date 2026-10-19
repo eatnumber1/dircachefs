@@ -2005,6 +2005,13 @@ class ClerkQueueTest(Fixture):
         self.assertIn("usage", err)
         self.assertFalse(os.path.exists(self.env.path("clerk_queue.md")))
 
+    def test_add_rejects_flags(self):
+        out, err = self.clerk("add", "--help")
+        self.assertEqual(out, "")
+        self.assertIn("usage: clerk-queue add TEXT...", err)
+        self.assertEqual(len(err.splitlines()), 1)
+        self.assertFalse(os.path.exists(self.env.path("clerk_queue.md")))
+
     def test_bare_and_unknown_subcommands_are_errors(self):
         for args in ([], ["bogus"]):
             out, err = self.clerk(*args)
