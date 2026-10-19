@@ -71,7 +71,7 @@ final hardware check (Phase 21.2).
 
 | | Milestone | Steps | Done when |
 |---|---|---|---|
-| M0 | Gates | 5.18 (done 2026-10-19, 37c2990a..9957121c), 25.48 and 25.49 items 2-4 (done 2026-10-19), 25.56 (queued 2026-10-19), 25.52 and 25.53 (done 2026-10-19), 25.54, 25.55, 25.50 (done 2026-10-19), 25.51, 25.45 items 4-6, 12.27 items 1-3, 25.39a/b, 24.2, 25.45 item 1 (kernel-citation checker, after 24.2), 25.47 (three review passes, scoped style check), 25.44, 25.27-0 and 25.27a to d (C++ only), 12.25 | diff coverage and mutation run on changed code as Bazel targets, the kernel-citation checker and the model unit tests pass on main, a review brief names the three passes, and 24.2's minimum-kernel tier is green |
+| M0 | Gates | 5.18 (done 2026-10-19, 37c2990a..9957121c), 25.48 and 25.49 items 2-4 (done 2026-10-19), 25.56 (queued 2026-10-19), 25.57 (the door moves to `backing::`, russ 2026-10-19; before 25.41), 25.52 and 25.53 (done 2026-10-19), 25.54, 25.55, 25.50 (done 2026-10-19), 25.51, 25.45 items 4-6, 12.27 items 1-3, 25.39a/b, 24.2, 25.45 item 1 (kernel-citation checker, after 24.2), 25.47 (three review passes, scoped style check), 25.44, 25.27-0 and 25.27a to d (C++ only), 12.25 | diff coverage and mutation run on changed code as Bazel targets, the kernel-citation checker and the model unit tests pass on main, a review brief names the three passes, and 24.2's minimum-kernel tier is green |
 | M1 | Gaps proved, then closed | 25.28b, 22.5, 17.2e (done), 12.24, then in this order: 12.16a, 25.10a/b/c, 12.19, 12.21, 12.20a/b, 17.2f and 17.2g, 25.28d, 25.28f, 25.28c, 26.40a/b/c, 22.7a to e, 25.28e (after 25.28d), 26.39, 23.19 | every user-visible promise in the README has a test and, where it is the protocol, a model property; the expected-red configs are all retired into the model (none left on main) |
 | M2 | CI you can trust | 26.41 and 26.43 (load-agnostic to zero, russ 2026-10-18; holds 26.36's follow-ups and the write_test_ext4 budget; split by item), 25.41 (approved 2026-10-19) and the type chain: 25.42, 25.35, 25.36, 25.37, 25.38 (module by module, about 800 lines per round), 25.39c/d, 25.46a/b/c, 12.26, 12.27 rest, 12.16b, 7.6b, 25.33b, the shell ports (boot.sh first), the 5.x hygiene steps, 17.5, 25.40 (support FUSE_STATX, russ 2026-10-17), 26.42 (warn about FUSE request timeouts at start, russ 2026-10-18) | main stays green through a week of normal merges with no budget re-measure |
 | M2.5 | In-memory cache (the database on tmpfs) | 27.1, 27.2 | the guest suites pass with the cache on tmpfs, restart and reboot behave as documented, and the kernel-cache interplay is measured and decided |
@@ -94,7 +94,7 @@ below). New phases stay frozen. russ added: foreman single mode and delegating
 down come first, "since we'll want to use that to save tokens thereafter";
 25.27 is maximalist and C++ only. 25.48 and 25.49 are done (2026-10-19);
 25.52 is done (2026-10-19, 81299351..d82f8168); 25.53 is done (2026-10-19,
-75f49e8b..4d25bdb5); 25.54 and 25.55 are next, then 25.45 items 4-6;
+75f49e8b..4d25bdb5); 25.54 and 25.57 are next (25.55 is folded into 25.57), then 25.45 items 4-6;
 25.50 is done (2026-10-19, cef83075..626595ad). Each
 entry: step, why here, prerequisites. Two lanes: P is protocol and model, T is
 tooling and tests; "red" is an expected-failing proof, "green" the step that
@@ -125,11 +125,16 @@ M0, gates (about a week, lane T; nothing here needs a feature):
     datasets whose assets succeeded are still batch-written and marked
     uploaded, and the denied ones are reported. Not started.
 2d. 25.55 non-backing fds read door-free (orchestrator's proposal, 2026-10-19,
-    not russ's words): the 25.53 review's question, ruled under style 1.6's
-    door paragraph. Not started.
+    not russ's words): the 25.53 review's question. Folded into 25.57
+    (2f); do not start it on its own.
 2e. 25.56 refusal tests for `qemu_test.bzl` (orchestrator's proposal,
     2026-10-19, not russ's words): each `fail(...)` gets an analysis test,
     found by the 5.18 review. Not started.
+2f. 25.57 the door moves to `backing::` (russ, 2026-10-19; supersedes 25.55):
+    the door-guarded wrappers become CamelCase `backing::` functions in
+    `dcfs/backing.h`, the thin `syscalls::` wrappers own the man-page names
+    (`read_own` becomes `read`), and the enforcement is retargeted with a
+    shrink-only allowlist for dcfs's own fds. Before 25.41. Not started.
 3. 25.50 done 2026-10-19 (cef83075..626595ad); 25.51 keeps main green
    (repo_shape CLI checks); none.
 4. 25.45 items 4-6: step numbers in comments, const locals, bazel pipes leave
@@ -197,8 +202,9 @@ M1 block 2, close the gaps (green):
 M2 (lane T may start item 34 as soon as 25.41 is scheduled, in small commits,
 one library at a time; pause it during 22.7 if conflicts bite):
 
-34. 25.41 dependency injection (approved 2026-10-19), by library: 25.42 and
-    the chain wait for it; none else.
+34. 25.41 dependency injection (approved 2026-10-19; one `Syscalls`
+    interface, `RealSyscalls` and delegating test fakes), by module: 25.42 and
+    the chain wait for it; 25.57.
 35. 25.42 pidfds, then 25.35, 25.36, 25.37, 25.38, one module per commit:
     25.41 (25.42 before 25.36).
 36. 25.39c style-rule inventory, 25.39d "no production caller": 25.38.

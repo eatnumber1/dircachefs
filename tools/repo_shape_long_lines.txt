@@ -37,7 +37,7 @@ docs/plan/notes/coverage-branch-underflow-2026-10-09.md 1
 docs/plan/notes/coverage-determinism-2026-10-08.md 2
 docs/plan/notes/coverage-fork-artifacts-2026-10-09.md 6
 docs/plan/notes/crash-audit-25.9.md 45
-docs/plan/notes/dependency-injection-2026-10-18.md 15
+docs/plan/notes/dependency-injection-2026-10-18.md 14
 docs/plan/notes/formal-coverage-audit-2026-10-09.md 4
 docs/plan/notes/formal-prior-art-2026-10-07.md 55
 docs/plan/notes/fuse-features-survey-2026-10-18.md 14
@@ -77,7 +77,7 @@ docs/plan/phases/20-statistics.md 1
 docs/plan/phases/22-cancellation.md 2
 docs/plan/phases/23-semantics-gaps.md 10
 docs/plan/phases/24-alpine-series-pins.md 2
-docs/plan/phases/25-style-convergence.md 80
+docs/plan/phases/25-style-convergence.md 51
 docs/plan/phases/26-bumpers.md 26
 docs/plan/phases/27-in-memory-cache.md 1
 docs/plan/process.md 11

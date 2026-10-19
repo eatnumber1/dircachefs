@@ -1,49 +1,28 @@
-Draft by Gemini 4 Argon (high), 2026-10-18; orchestrator review notes in the plan step (25.41 in `phases/25-style-convergence.md`).
+Draft by Gemini 4 Argon (high), 2026-10-18; orchestrator review notes in the
+plan step (25.41 in `phases/25-style-convergence.md`).
 
-### Draft Plan Step (for `docs/plan/phases/25-style-convergence.md`)
+**Rewritten 2026-10-19 (clerk batch 47).** The draft step that stood here
+proposed three interfaces mirroring the three syscall libraries
+(`BackingSyscalls`, `LocalSyscalls`, `ProcessSyscalls`). russ (2026-10-19)
+asked: "For the BackingSyscalls interface we had planned, why did we need that
+again? Why not just RealSyscalls and one or more fake syscalls
+implementations for tests?" The split only mirrored the door-guarded library,
+which 25.57 dissolves (the door moves up to `backing::`, the thin wrappers in
+`syscalls.h` own the man-page names). The step now specifies one `Syscalls`
+interface, `RealSyscalls`, and test fakes on a `DelegatingSyscalls` base,
+with `Context` carrying `Syscalls &`; restrictions such as "only startup
+forks" move to call-site checks if kept. The step text in
+`phases/25-style-convergence.md` (25.41) is the current design; the draft is
+not repeated here.
 
-```markdown
-### 25.34b Replace link-time `-Wl,--wrap` fakes with dependency injection
-
-**Relation to prior decision ([`docs/design.md:3292-3312`]).** On 2026-10-16 `docs/design.md` recorded keeping `-Wl,--wrap` after reverting `attic/virtual-syscalls` because that branch (1) collapsed [`//dcfs:syscalls`], [`//dcfs:syscalls_backing`], and [`//dcfs:syscalls_process`] into one library, weakening [`//tools:syscalls_backing_users_test`] ([`dcfs/syscalls_backing_users.txt:1-64`]); (2) left two ways to call a syscall (`RealSyscalls::Default()` and free functions); and (3) used virtual-inheritance mixins (`public virtual Syscalls`). This step executes the deliberate design sketched at [`docs/design.md:3307-3312`] ahead of steps 25.35–25.38 ([`docs/plan/phases/25-style-convergence.md:1363-1437`]) so strong types and span buffers land once on the final interfaces.
-
-**Why.** Link-time wrapping relies on glibc symbol names (`openat64`, `fstatfs64` at [`dcfs/BUILD.bazel:1126-1134`]), fragile IA-64 C++ mangled names ([`dcfs/BUILD.bazel:1100`], [`dcfs/BUILD.bazel:1341-1348`], [`dcfs/BUILD.bazel:1429-1432`]), inlining avoidance across translation units ([`dcfs/BUILD.bazel:1439-1440`]), global mutable state in tests ([`dcfs/dir_cache_fs_test.cc:134-203`]), and reserved-identifier exceptions ([`.clang-tidy:35-37`], [`tools/raw_syscalls_test.py:15-17`]).
-
-**Design options evaluated.**
-1. **Three narrow virtual interfaces mirroring the three Bazel libraries, injected by reference (Recommended).**
-   - `BackingSyscalls` in [`//dcfs:syscalls_backing`], `LocalSyscalls` in [`//dcfs:syscalls`], and `ProcessSyscalls` in [`//dcfs:syscalls_process`]. Each library provides its `Real*Syscalls` implementation; `testonly/` provides `Delegating*Syscalls` wrappers holding `inner_` by reference (single inheritance, no virtual inheritance).
-   - *Rules check:* No test-only knobs in production; the injected object is the real operating-system boundary of [`Context`] and standalone tools. No `CHECK`/abort in production. Preserves [`dcfs/syscalls_backing_users.txt:1-64`] and [`tools/banned_symbols.txt:1-147`].
-   - *Hot-path cost:* Cache hits do zero backing syscalls (`SlopeTest`, [`dcfs/dir_cache_fs_test.cc:8460-8503`]). On cache misses and mutations, one indirect call (~1–2 ns) precedes a kernel transition and filesystem operation (~300–5,000+ ns) — <0.5% overhead, verified by [`//bench:dcfs_bench`].
-   - *Nth-call faults:* A `CountdownFault` helper in `testonly/` decrements a counter on matching calls and returns `ErrnoToStatus(err, op)` when `++calls == fail_at` (for [`dcfs/dir_cache_fs_test.cc:288-306`], [`dcfs/dir_cache_fs_test.cc:486-495`]) or while `times-- > 0` (for [`dcfs/fsck_test.cc:52-67`]).
-2. **Template parameter (`template <typename Syscalls = RealSyscalls>`) on callers.**
-   - *Rejected:* Zero dispatch cost, but [`dcfs/backing.cc`] (2,555 lines), [`dcfs/dir_cache_fs.cc`] (4,072 lines), [`dcfs/file_handle.cc`], [`dcfs/device_id.cc`], and [`dcfs/fsck.cc`] would either move into headers or require explicit instantiations of production `.cc` files for every test fake, breaking `.o`-level symbol enforcement in [`tools/banned_symbols.txt:117`] and bloating compile times. And [`FaultSitesTest`] still needs runtime dispatch across hooks. (Compile-time selection *is* used in step 25.38 for typed `ioctl`/`fcntl` tags that dispatch to non-template virtual methods on `BackingSyscalls`.)
-3. **Per-thread or per-instance fault table inside `syscalls::`.**
-   - *Rejected:* Violates [`docs/style.md:505-511`] (step 25.7: no test-only knobs in production code) and adds a TLS/table branch to every production syscall solely for tests.
-
-**Architecture of the seams.**
-- **Syscall interfaces:** [`Context`] carries `BackingSyscalls &backing_syscalls` and `LocalSyscalls &syscalls` (constructed in `main` at [`dcfs/main.cc:322-375`] and in test harnesses; no global `Default()` accessor). Low-level helpers in [`dcfs/backing.cc`], [`dcfs/file_handle.h:35-66`], and [`dcfs/device_id.h:33`] take `BackingSyscalls &` (or `Context &`). [`dcfs/fsck.h:37-49`] and [`dcfs/startup_channel.h:58`] take a small `FsckDeps` / `DaemonDeps` struct holding references to `BackingSyscalls`, `LocalSyscalls`, and `ProcessSyscalls`. [`FileDescriptor`] keeps calling [`syscalls::close`] directly (never wrapped; avoids doubling `sizeof(FileDescriptor)`). The template [`syscalls::ioctl`] becomes a typed front-end (anticipating 25.38) dispatching to concrete virtual methods on `BackingSyscalls` (`IoctlGetVersion`, `IoctlGetFsUuid`, `IoctlBtrfsFsInfo`, `IoctlBtrfsSubvolInfo`, `IoctlFlags`, `IoctlRaw`).
-- **Call sites (russ, 2026-10-18):** "for the change to use a dependency-injected syscalls wrapper, keep the global free functions (so call sites look like syscalls::write(...)), but pass in the Context or Syscalls object. Then the wrapper can call syscalls.Write(...) (and note I'm removing the function naming exception for the member methods of Syscalls, since those functions will now only ever be called by the free functions in syscalls::." Then (russ, 2026-10-18): "Actually, let's have the syscalls:: free functions take Context. It can pull Syscalls from inside it, and it provides a uniform surface for the API (syscalls functions look and feel mostly like libc, with an additional Context argument)." Every `syscalls::` free function takes the `Context` as its first argument, pulls the right Syscalls interface out of it, and calls its CamelCase member (`Write`). The typed signatures stay (russ, 2026-10-18: "Be sure not to let that invalidate the other libc deviations we've already done (such as changing pointer+len to std::span, or changing char* to string_view)."): a call looks like `syscalls::write(ctx, fd, buf)` with `buf` a `std::span<const std::byte>`, not `(fd, buf, n)`; names are `std::string_view`; errors are `Status`/`StatusOr`. The deviations are `docs/style.md` section 1.2 (`char *`), step 25.37 (spans) and step 25.38 (typed signatures). The members are called only by the free functions. The build graph enforces it: the members are public, and the interfaces' BUILD visibility admits only the `syscalls::` free functions and the testonly fakes (russ, 2026-10-18: "maybe we keep the Syscalls functions public, but control access via BUILD visibility?", then "Yes" to the orchestrator's conditions). Fakes override the virtual members and are still called only through the free functions.
-- **Libfuse seam:** Extract a `FuseLowlevelOps` interface on [`FuseSession`] / [`FuseRequest`] for `fuse_passthrough_open`, `fuse_passthrough_close` ([`dcfs/dir_cache_fs.cc:158-221`]), and `fuse_reply_none` ([`dcfs/fuse_request.cc:136`]), replacing those 3 wraps in [`dcfs/fuse_request_test.cc:159`] and [`dcfs/dir_cache_fs_test.cc:320-335`].
-- **Trace-validation & recovery fault tests:** The 6 negative tests in [`DIR_CACHE_FS_FAULTS`] (`skip_mark_unknown`, `syscall_before_phase1`, `phase3_before_syscall`, `snapshot_after_syncfs`, `create_syscall_before_phase1`, `swallow_syscall_error`) test [`//formal:trace_validate`], not `dcfs`, by corrupting `dcfs` at link time. Replace `syscall_before_phase1`, `snapshot_after_syncfs`, `create_syscall_before_phase1`, and `swallow_syscall_error` with injected `BackingSyscalls` fakes that emit/alter trace events or run the backing syscall inside the fake before phase 1 commits, and replace `skip_mark_unknown` and `phase3_before_syscall` by either a `sqlite3_authorizer` on the test's [`sqlite::Database`] (`SQLITE_IGNORE` on the `unknown` write) or direct negative trace tests on `trace_validate`. In [`dir_cache_fs_crash_during_recovery_test`], replace wrapping mangled `cache::RecoverDirty` and `backing::BackingNlink` ([`dcfs/testonly/recover_dirty_fails_once.cc:25`], [`dcfs/testonly/probe_fails_once.cc:26`]) by injecting a `BackingSyscalls` fake that fails `statx` / `open_by_handle_at` on the first recovery pass and on the root-nlink probe.
-- **`tools/waitexit.c`:** Split `waitexit_run(pid_t pid, const struct waitexit_sys *sys)` in [`tools/waitexit.c:18-62`] with function pointers `.pidfd_open` and `.poll` so [`test/qemu/waitexit_test.cc:56-96`] injects fakes without `-Wl,--wrap`.
-
-**Migration order (small mergeable commits, each tested).**
-1. **Define `LocalSyscalls`, `ProcessSyscalls`, and `BackingSyscalls` + `Delegating*Syscalls` fakes.** Keep [`tools/style_matchers/backing_door_guard.query:1-9`] enforcing `BackingDoor()` in `RealBackingSyscalls`. *Test:* unit tests of `Real*Syscalls` and `Delegating*Syscalls` + [`//tools:syscalls_backing_users_test`].
-2. **Migrate [`//test/qemu:waitexit_test`] and [`//dcfs:startup_channel_fault_test`].** Inject `waitexit_sys` in `waitexit.c` and `LocalSyscalls &` in [`ForkDaemon`]; drop `--wrap=pidfd_open`, `--wrap=poll`, `--wrap=setsid`. *Test:* `bazel test //test/qemu:waitexit_test //dcfs:startup_channel_fault_test`.
-3. **Migrate [`//dcfs:device_id_fault_test`] and [`//dcfs:backing_fault_test`].** Thread `BackingSyscalls &` through [`GetDeviceId`], [`Context`], [`file_handle.cc`], and [`backing.cc`]; drop `--wrap=ioctl`, `--wrap=fstatfs64`, `--wrap=getxattr`, `--wrap=listxattr`, `--wrap=readlinkat`, and the [`tools/style_checks_allow.txt:66`] exception. *Test:* `bazel test //dcfs:device_id_fault_test //dcfs:backing_fault_test`.
-4. **Migrate [`//dcfs:fsck_test`].** Thread `FsckDeps` through [`dcfs/fsck.cc:49-393`]; drop `--wrap={fork,waitpid,dup2,flock,unlinkat}`. *Test:* `bazel test //dcfs:fsck_test`.
-5. **Migrate [`//dcfs:fuse_request_test`] and libfuse passthrough in `dir_cache_fs`.** Inject `FuseLowlevelOps`; drop `--wrap=fuse_reply_none` and `--wrap=fuse_passthrough_{open,close}`. *Test:* `bazel test //dcfs:fuse_request_test //dcfs:dir_cache_fs_test`.
-6. **Migrate [`DIR_CACHE_FS_TEST_WRAPS`].** Move `NoTransactionAt`, `DCFS_INJECT`, `WrappedCalls`, `FakeInodeNumbers`, hooks, and `SetgroupsFault` ([`dcfs/dir_cache_fs_test.cc:134-516`]) into a `HarnessSyscalls` delegating wrapper on the test harness's `Context`; delete `DIR_CACHE_FS_TEST_WRAPS`. *Test:* `bazel test //dcfs:dir_cache_fs_test //dcfs:dir_cache_fs_poisoned_test //dcfs:dir_cache_fs_slope_test //dcfs:dir_cache_fs_fault_sites_test`.
-7. **Migrate [`DIR_CACHE_FS_FAULTS`] and [`dir_cache_fs_crash_during_recovery_test`].** Replace the 8 `dcfs/testonly/` `--wrap` libraries ([`dcfs/testonly/BUILD.bazel:184-237`], [`dcfs/testonly/BUILD.bazel:310-334`]) with injected fakes/authorizer. *Test:* `bazel test //dcfs:dir_cache_fs_fault_... //dcfs:dir_cache_fs_crash_during_recovery_test`.
-8. **Delete `--wrap` allow-lists, ban `-Wl,--wrap`, and update docs.** Ban calls to the interface members outside `syscalls*.cc` (the `syscalls::` free functions, which take `Context`, are their only callers; the mechanism is BUILD visibility, with `//dcfs:syscalls` the only admitted user, russ 2026-10-18); remove `__wrap_`/`__real_` exceptions from [`.clang-tidy:35-37,68-70`] and [`tools/raw_syscalls_test.py:15-17,141`]; add a check in [`tools/style_checks_test.py`] banning `--wrap` in `BUILD.bazel`/`*.bzl`; update [`AGENTS.md:22-23`], [`docs/style.md:474-475,516,532,1491-1493,1559,1757-1758`], and [`docs/design.md:3292-3312`]. *Test:* `bazel test --config=presubmit //...`.
-
-**Risks.**
-- *Bypassing the injected interface:* A caller invoking an interface member directly would silently skip `NoTransactionAt` and `FaultSitesTest`. Mitigation: the members are reachable only through the `syscalls::` free functions, enforced by BUILD visibility and a genquery test in sub-step 8 (`FileDescriptor::Close`, which calls `syscalls::close` without an interface argument, needs the same treatment).
-- *Variadic `openat`/`ioctl`/`fcntl`:* Virtual methods cannot be variadic or templates. Mitigation: split `openat(dirfd, path, flags)` and `openat(dirfd, path, flags, mode)` and use the `ioctl<OP>`/`fcntl<OP>` free function templates over per-op members, aligning directly with step 25.38 ([`docs/plan/phases/25-style-convergence.md:1405-1437`]).
-- *Coverage Baseline:* Every `Real*Syscalls` method and error branch must stay covered so total coverage never drops ([`AGENTS.md:24-29`]).
-```
+Appendix A (the `-Wl,--wrap` inventory) is still the migration's work list;
+read "`BackingSyscalls`", "`LocalSyscalls`" and "`ProcessSyscalls`" in it as
+"`Syscalls`". Appendix B describes the layering before 25.57: its three
+libraries and the 41 door-guarded functions of B.1 are the inventory 25.57
+moves to `backing::`.
 
 ---
+
 
 ## Appendix A: Complete Inventory of `-Wl,--wrap` Uses
 
