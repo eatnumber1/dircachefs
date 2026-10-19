@@ -4,11 +4,23 @@
 
 #include <span>
 #include <string>
+#include <string_view>
+#include <utility>
 
 #include "absl/status/statusor.h"
 #include "tools/test_first.h"
 
 namespace dcfs::test_first {
+
+// The path of the program `name`: itself when it has a '/', else the first
+// executable regular file of that name in a directory of `path` (an empty
+// component is the current directory; a directory that does not exist is
+// skipped).
+absl::StatusOr<std::string> Resolve(std::string_view name,
+                                    std::string_view path);
+
+// Everything `fd` yields until its end; a failed read is an error.
+absl::StatusOr<std::string> ReadAll(int fd);
 
 // Runs the programs of the test-first check as child processes: argv[0] is
 // searched for in `path` (a ':'-separated list, as PATH) unless it has a '/',

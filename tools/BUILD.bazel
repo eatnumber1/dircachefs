@@ -855,16 +855,30 @@ cc_binary(
     srcs = ["test_first_main.cc"],
     deps = [
         ":process_runner",
+        ":test_first_cli",
+        "@absl//absl/flags:flag",
+        "@absl//absl/flags:parse",
+        "@absl//absl/flags:usage",
+        "@absl//absl/strings",
+        "@absl//absl/strings:str_format",
+    ],
+)
+
+# What the command does with its flags' values (tools/test_first_cli.h).
+cc_library(
+    name = "test_first_cli",
+    srcs = ["test_first_cli.cc"],
+    hdrs = ["test_first_cli.h"],
+    deps = [
         ":test_first",
         "//dcfs:syscalls",
-        "//dcfs:syscalls_backing",
         "@absl//absl/status",
         "@absl//absl/status:statusor",
         "@absl//absl/strings",
     ],
 )
 
-# Runs git and Bazel for //tools:test_first_tool in a guest over busybox.
+# The runner of child processes, over the busybox programs of the guest.
 qemu_cc_test(
     name = "process_runner_test",
     size = "small",
@@ -873,10 +887,33 @@ qemu_cc_test(
     deps = [
         ":process_runner",
         ":test_first",
+        "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
         "//dcfs/testonly:assert_ok_and_assign",
         "@absl//absl/status",
         "@absl//absl/status:status_matchers",
         "@absl//absl/status:statusor",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# The command's behaviour: exit codes, usage, --workspace and its output, over
+# a scripted runner (no git or Bazel in the guest).
+qemu_cc_test(
+    name = "test_first_cli_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["test_first_cli_test.cc"],
+    deps = [
+        ":test_first",
+        ":test_first_cli",
+        "//dcfs:status",
+        "//dcfs:syscalls",
+        "//dcfs/testonly:assert_ok_and_assign",
+        "@absl//absl/status",
+        "@absl//absl/status:status_matchers",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
         "@googletest//:gtest_main",
     ],
 )

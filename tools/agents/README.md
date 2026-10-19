@@ -500,14 +500,15 @@ the lane that holds the branch; the work tree must be clean:
 
 ```bash
 bazel run //tools:test_first_tool -- --first=REV --last=REV \
-    [--bazel_flag=FLAG]... [--workspace=DIR]
+    [--bazel_flag=FLAG[,FLAG...]] [--workspace=DIR]
 ```
 
 - `--first=REV`: the slice's first commit, the one that adds or changes only
   tests. `--last=REV`: the slice's last commit. Both are explicit because the
   implementer's slice report already names them.
-- `--bazel_flag=FLAG` (repeatable): added to `bazel test`, e.g.
-  `--bazel_flag=--config=fast`.
+- `--bazel_flag=FLAG[,FLAG...]`: added to `bazel test`, e.g.
+  `--bazel_flag=--config=fast`. It is one comma-separated list, not repeatable
+  (the last occurrence wins), so a flag value cannot contain a comma.
 - `--workspace=DIR`: the checkout; default `$BUILD_WORKSPACE_DIRECTORY`, which
   `bazel run` sets.
 
@@ -535,4 +536,5 @@ What it does:
 The report (stdout) is what the merge record quotes: `ACCEPTED` or `REJECTED`,
 the targets, the failing test names at the first commit (one `failing:` line
 each) and the reasons for a rejection. Exit code 0 is accepted, 1 rejected, 2
-the check could not be made.
+the check could not be made or the usage is wrong; a flag Abseil does not know
+exits 1 before the tool runs.

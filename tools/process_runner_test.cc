@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
-// Tests of the runner that starts the real git and Bazel processes, over
-// programs the guest has (busybox's).
+// Tests of the runner that starts child processes, over the programs the
+// guest has (busybox's).
 #include "tools/process_runner.h"
+
+#include <fcntl.h>
+#include <sys/types.h>
 
 #include <string>
 #include <vector>
@@ -9,6 +12,9 @@
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
+#include "dcfs/fd.h"
+#include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -17,8 +23,10 @@
 namespace dcfs::test_first {
 namespace {
 
+using ::absl_testing::IsOk;
 using ::absl_testing::StatusIs;
 using ::testing::HasSubstr;
+using ::testing::Not;
 
 absl::StatusOr<CommandResult> RunSh(const std::string &script,
                                     const std::string &path = "/bin") {
@@ -35,7 +43,7 @@ TEST(ProcessRunnerTest, FindsTheProgramOnThePath) {
   EXPECT_EQ(result.output, "hi\n");
 }
 
-TEST(ProcessRunnerTest, ARelativeNameWithASlashIsNotSearched) {
+TEST(ProcessRunnerTest, AnAbsolutePathIsNotSearched) {
   ProcessRunner runner("/nonexistent");
   const std::vector<std::string> argv = {"/bin/echo", "direct"};
   ASSERT_OK_AND_ASSIGN(CommandResult result, runner.Run(argv));
@@ -46,8 +54,7 @@ TEST(ProcessRunnerTest, ExitCodeAndBothStreams) {
   ASSERT_OK_AND_ASSIGN(CommandResult result,
                        RunSh("echo out; echo err >&2; exit 3"));
   EXPECT_EQ(result.exit_code, 3);
-  EXPECT_THAT(result.output, HasSubstr("out\n"));
-  EXPECT_THAT(result.output, HasSubstr("err\n"));
+  EXPECT_EQ(result.output, "out\nerr\n");
 }
 
 TEST(ProcessRunnerTest, ADeathBySignalIsExitCode128PlusTheSignal) {
@@ -73,6 +80,70 @@ TEST(ProcessRunnerTest, AProgramThatCannotBeExecutedExits127) {
   const std::vector<std::string> argv = {"/etc/passwd"};
   ASSERT_OK_AND_ASSIGN(CommandResult result, runner.Run(argv));
   EXPECT_EQ(result.exit_code, 127);
+}
+
+// A directory of /tmp holding what a test makes.
+class ResolveTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    ASSERT_OK_AND_ASSIGN(dir_, syscalls::mkdtemp("/tmp/resolve.XXXXXX"));
+  }
+  void TearDown() override { syscalls::chdir("/").IgnoreError(); }
+
+  // Makes `dir_/name` a file with `mode`.
+  void MakeFile(const std::string &name, mode_t mode) {
+    ASSERT_OK_AND_ASSIGN(FileDescriptor fd,
+                         syscalls::openat(AT_FDCWD, dir_ + "/" + name,
+                                          O_CREAT | O_WRONLY, mode));
+    ASSERT_THAT(syscalls::fchmod(*fd, mode), IsOk());
+  }
+
+  std::string dir_;
+};
+
+TEST_F(ResolveTest, AnEmptyComponentOfThePathIsTheCurrentDirectory) {
+  MakeFile("prog", 0755);
+  ASSERT_THAT(syscalls::chdir(dir_), IsOk());
+  ASSERT_OK_AND_ASSIGN(std::string found,
+                       Resolve("prog", "/nonexistent::/bin"));
+  EXPECT_EQ(found, "./prog");
+}
+
+TEST_F(ResolveTest, ANameWithASlashIsReturnedAsGiven) {
+  ASSERT_OK_AND_ASSIGN(std::string found, Resolve("./x", "/nonexistent"));
+  EXPECT_EQ(found, "./x");
+}
+
+TEST_F(ResolveTest, AFileThatIsNotExecutableIsSkipped) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, dir_ + "/a", 0755), IsOk());
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, dir_ + "/b", 0755), IsOk());
+  MakeFile("a/prog", 0644);
+  MakeFile("b/prog", 0755);
+  ASSERT_OK_AND_ASSIGN(std::string found,
+                       Resolve("prog", dir_ + "/a:" + dir_ + "/b"));
+  EXPECT_EQ(found, dir_ + "/b/prog");
+}
+
+TEST_F(ResolveTest, ADirectoryOfThatNameIsSkipped) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, dir_ + "/a", 0755), IsOk());
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, dir_ + "/a/prog", 0755), IsOk());
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, dir_ + "/b", 0755), IsOk());
+  MakeFile("b/prog", 0755);
+  ASSERT_OK_AND_ASSIGN(std::string found,
+                       Resolve("prog", dir_ + "/a:" + dir_ + "/b"));
+  EXPECT_EQ(found, dir_ + "/b/prog");
+}
+
+TEST_F(ResolveTest, ADirectoryThatDoesNotExistIsSkipped) {
+  ASSERT_OK_AND_ASSIGN(std::string found, Resolve("echo", "/nonexistent:/bin"));
+  EXPECT_EQ(found, "/bin/echo");
+}
+
+TEST(ReadAllTest, AFailedReadIsReturnedNotTakenForTheEnd) {
+  // Reading a directory fails with EISDIR.
+  ASSERT_OK_AND_ASSIGN(FileDescriptor dir,
+                       syscalls::openat(AT_FDCWD, "/", O_RDONLY | O_DIRECTORY));
+  EXPECT_THAT(ReadAll(*dir), Not(IsOk()));
 }
 
 }  // namespace

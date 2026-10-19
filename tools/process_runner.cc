@@ -6,6 +6,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+// WIFSIGNALED, WTERMSIG and WEXITSTATUS: misc-include-cleaner attributes the
+// POSIX macros to this C header (docs/style.md, "A POSIX macro").
+// NOLINTNEXTLINE(modernize-deprecated-headers): the macros are defined here.
+#include <stdlib.h>
+
 #include <cerrno>
 #include <cstddef>
 #include <span>
@@ -27,8 +32,6 @@
 #include "tools/test_first.h"
 
 namespace dcfs::test_first {
-namespace {
-
 // The path of the program `name`: itself when it has a '/', else the first
 // executable regular file of that name in a directory of `path`.
 absl::StatusOr<std::string> Resolve(std::string_view name,
@@ -46,26 +49,15 @@ absl::StatusOr<std::string> Resolve(std::string_view name,
          << name << " is not in any directory of PATH (" << path << ")";
 }
 
-// A wait status as a shell reports it. The low 7 bits are the signal that
-// killed the child, 0 when it exited, and the next 8 bits its exit code
-// (waitpid(2); the macros WIFEXITED and WEXITSTATUS are these shifts).
-int ExitCodeOf(int wait_status) {
-  const int signal = wait_status & 0x7f;
-  return signal == 0 ? (wait_status >> 8) & 0xff : 128 + signal;
-}
-
-std::string ReadAll(int fd) {
+absl::StatusOr<std::string> ReadAll(int fd) {
   std::string text;
   char buffer[4096];
   while (true) {
-    absl::StatusOr<size_t> n = syscalls::read(fd, buffer, sizeof(buffer));
-    if (!n.ok() || *n == 0) break;
-    text.append(buffer, *n);
+    ASSIGN_OR_RETURN(size_t n, syscalls::read(fd, buffer, sizeof(buffer)));
+    if (n == 0) return text;
+    text.append(buffer, n);
   }
-  return text;
 }
-
-}  // namespace
 
 absl::StatusOr<CommandResult> ProcessRunner::Run(
     std::span<const std::string> argv) {
@@ -82,7 +74,8 @@ absl::StatusOr<CommandResult> ProcessRunner::Run(
     syscalls::_exit(127);
   }
   pipe.second.Close().IgnoreError();
-  CommandResult result = {.output = ReadAll(*pipe.first)};
+  CommandResult result;
+  ASSIGN_OR_RETURN(result.output, ReadAll(*pipe.first));
   int wait_status = 0;
   while (true) {
     absl::StatusOr<pid_t> reaped = syscalls::waitpid(child, &wait_status, 0);
@@ -92,7 +85,9 @@ absl::StatusOr<CommandResult> ProcessRunner::Run(
              << "while waiting for " << program;
     }
   }
-  result.exit_code = ExitCodeOf(wait_status);
+  // As a shell reports it: 128 plus the signal for a death by signal.
+  result.exit_code = WIFSIGNALED(wait_status) ? 128 + WTERMSIG(wait_status)
+                                              : WEXITSTATUS(wait_status);
   return result;
 }
 
