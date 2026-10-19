@@ -19,6 +19,7 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/str_replace.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/strip.h"
 #include "dcfs/status.h"
@@ -603,9 +604,51 @@ bool IsTestRule(const Rule &rule,
   return generator != known.end() && generator->second.kind.ends_with("_test");
 }
 
+// Whether two rule bodies differ only in list entries that are test files
+// (a glob of sources gains or loses a test file with the commit that adds or
+// removes it).
+bool OnlyTestFileEntriesDiffer(std::string_view before,
+                               std::string_view after) {
+  absl::btree_map<std::string_view, int> changes;
+  for (std::string_view line : absl::StrSplit(before, '\n')) --changes[line];
+  for (std::string_view line : absl::StrSplit(after, '\n')) ++changes[line];
+  return absl::c_all_of(changes, [](const auto &change) {
+    if (change.second == 0) return true;
+    const std::string_view entry = absl::StripSuffix(change.first, ",");
+    return entry.starts_with("\"") &&
+           IsTestFile(absl::StrReplaceAll(
+               absl::StripPrefix(Unquoted(entry), "//"), {{":", "/"}}));
+  });
+}
+
 std::string_view ChangeOf(bool was, bool is) {
   if (!was) return "new";
   return is ? "changed" : "removed";
+}
+
+// Why a changed rule is not allowed in a tests-only commit, or empty: `was`
+// and `is` are the rule before and after (null when it is new or removed).
+std::string RuleViolation(const std::string &label, const Rule &rule,
+                          const Rule *was, const Rule *is,
+                          const absl::btree_map<std::string, Rule> &old_rules,
+                          const absl::btree_map<std::string, Rule> &known) {
+  if (was != nullptr && is != nullptr &&
+      OnlyTestFileEntriesDiffer(was->body, is->body)) {
+    return "";
+  }
+  if (!IsTestRule(rule, known)) {
+    return absl::StrCat(label, " (", rule.kind, ") is ",
+                        ChangeOf(was != nullptr, is != nullptr),
+                        " and is neither a test nor testonly");
+  }
+  if (was != nullptr && is != nullptr && !IsTestRule(*was, old_rules)) {
+    return absl::StrCat(label, " (", rule.kind,
+                        ") was neither a test nor testonly before");
+  }
+  if (was != nullptr && is != nullptr && was->visibility != is->visibility) {
+    return absl::StrCat(label, " changes visibility");
+  }
+  return "";
 }
 
 }  // namespace
@@ -650,16 +693,11 @@ std::vector<std::string> BuildRuleViolations(std::string_view before,
     if (in_both && was->second.body == is->second.body) continue;
     const std::string label =
         package.empty() ? name : absl::StrCat("//", package, ":", name);
-    if (!IsTestRule(rule, known)) {
-      violations.push_back(
-          absl::StrCat(label, " (", rule.kind, ") is ",
-                       ChangeOf(was != old_rules.end(), is != new_rules.end()),
-                       " and is neither a test nor testonly"));
-    } else if (in_both && !IsTestRule(was->second, old_rules)) {
-      violations.push_back(absl::StrCat(
-          label, " (", rule.kind, ") was neither a test nor testonly before"));
-    } else if (in_both && was->second.visibility != is->second.visibility) {
-      violations.push_back(absl::StrCat(label, " changes visibility"));
+    if (std::string violation = RuleViolation(
+            label, rule, was != old_rules.end() ? &was->second : nullptr,
+            is != new_rules.end() ? &is->second : nullptr, old_rules, known);
+        !violation.empty()) {
+      violations.push_back(std::move(violation));
     }
   }
   return violations;

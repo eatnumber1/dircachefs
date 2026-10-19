@@ -3,6 +3,7 @@
 // runner: no git and no Bazel is run.
 #include "tools/test_first.h"
 
+#include <initializer_list>
 #include <span>
 #include <string>
 #include <string_view>
@@ -576,6 +577,42 @@ TEST(BuildRuleViolationsTest, AddingASourceToATestIsAllowed) {
                   BuildRule("sh_test", "t", "  srcs = [\"a\"],\n"),
                   BuildRule("sh_test", "t", "  srcs = [\"a\", \"b\"],\n")),
               IsEmpty());
+}
+
+// A glob-made srcs list, as `bazel query --output=build` prints it.
+std::string Srcs(std::initializer_list<std::string_view> labels) {
+  std::string text = "  srcs = [\n";
+  for (std::string_view label : labels) {
+    absl::StrAppend(&text, "    \"", label, "\",\n");
+  }
+  return absl::StrCat(text, "  ],\n");
+}
+
+TEST(BuildRuleViolationsTest, ATestFileAddedToAnyRulesSrcsIsAllowed) {
+  EXPECT_THAT(BuildRuleViolations(
+                  BuildRule("filegroup", "sources", Srcs({"//dcfs:a.cc"})),
+                  BuildRule("filegroup", "sources",
+                            Srcs({"//dcfs:a.cc", "//dcfs:b_test.cc"}))),
+              IsEmpty());
+  EXPECT_THAT(BuildRuleViolations(
+                  BuildRule("filegroup", "sources",
+                            Srcs({"//dcfs:a.cc", "//dcfs:b_test.cc"})),
+                  BuildRule("filegroup", "sources", Srcs({"//dcfs:a.cc"}))),
+              IsEmpty());
+}
+
+TEST(BuildRuleViolationsTest, ACodeFileAddedToAProductionRulesSrcsIsRefused) {
+  EXPECT_THAT(BuildRuleViolations(
+                  BuildRule("filegroup", "sources", Srcs({"//dcfs:a.cc"})),
+                  BuildRule("filegroup", "sources",
+                            Srcs({"//dcfs:a.cc", "//dcfs:b.cc"}))),
+              ElementsAre(HasSubstr("sources")));
+  EXPECT_THAT(BuildRuleViolations(
+                  BuildRule("filegroup", "sources", Srcs({"//dcfs:a.cc"})),
+                  BuildRule("filegroup", "sources",
+                            Srcs({"//dcfs:a.cc", "//dcfs:b_test.cc"}) +
+                                "  visibility = [\"//x:__pkg__\"],\n")),
+              ElementsAre(HasSubstr("sources")));
 }
 
 TEST(BuildRuleViolationsTest, MovedRulesAreNotChangedRules) {
