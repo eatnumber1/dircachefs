@@ -601,6 +601,26 @@ TEST(BuildRuleViolationsTest, ATestFileAddedToAnyRulesSrcsIsAllowed) {
               IsEmpty());
 }
 
+// A real query prints a glob's labels on one line.
+TEST(BuildRuleViolationsTest, TestFilesInAnInlineSrcsListAreAllowed) {
+  EXPECT_THAT(BuildRuleViolations(
+                  BuildRule("filegroup", "sources",
+                            "  srcs = [\"//dcfs:a.cc\", \"//dcfs:a.h\"],\n"),
+                  BuildRule("filegroup", "sources",
+                            "  srcs = [\"//dcfs:a.cc\", \"//dcfs:a.h\", "
+                            "\"//dcfs:b_test.cc\"],\n")),
+              IsEmpty());
+}
+
+TEST(BuildRuleViolationsTest, ACodeFileInAnInlineSrcsListIsRefused) {
+  EXPECT_THAT(
+      BuildRuleViolations(
+          BuildRule("filegroup", "sources", "  srcs = [\"//dcfs:a.cc\"],\n"),
+          BuildRule("filegroup", "sources",
+                    "  srcs = [\"//dcfs:a.cc\", \"//dcfs:b.cc\"],\n")),
+      ElementsAre(HasSubstr("sources")));
+}
+
 TEST(BuildRuleViolationsTest, ACodeFileAddedToAProductionRulesSrcsIsRefused) {
   EXPECT_THAT(BuildRuleViolations(
                   BuildRule("filegroup", "sources", Srcs({"//dcfs:a.cc"})),

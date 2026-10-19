@@ -607,11 +607,33 @@ bool IsTestRule(const Rule &rule,
 // Whether two rule bodies differ only in list entries that are test files
 // (a glob of sources gains or loses a test file with the commit that adds or
 // removes it).
+// The lines of a rule body, with a list on one line (`srcs = ["a", "b"],`)
+// made into its opening line and one line per entry.
+std::vector<std::string> BodyEntries(std::string_view body) {
+  std::vector<std::string> entries;
+  for (std::string_view line : absl::StrSplit(body, '\n')) {
+    const size_t open = line.find('[');
+    if (open == std::string_view::npos || !line.ends_with("],") ||
+        !absl::StrContains(line, '"')) {
+      entries.emplace_back(line);
+      continue;
+    }
+    entries.emplace_back(line.substr(0, open + 1));
+    std::string_view list = line.substr(open + 1, line.size() - open - 3);
+    for (std::string_view entry : absl::StrSplit(list, ", ")) {
+      entries.push_back(absl::StrCat(entry, ","));
+    }
+  }
+  return entries;
+}
+
 bool OnlyTestFileEntriesDiffer(std::string_view before,
                                std::string_view after) {
   absl::btree_map<std::string_view, int> changes;
-  for (std::string_view line : absl::StrSplit(before, '\n')) --changes[line];
-  for (std::string_view line : absl::StrSplit(after, '\n')) ++changes[line];
+  const std::vector<std::string> old_entries = BodyEntries(before);
+  const std::vector<std::string> new_entries = BodyEntries(after);
+  for (const std::string &line : old_entries) --changes[line];
+  for (const std::string &line : new_entries) ++changes[line];
   return absl::c_all_of(changes, [](const auto &change) {
     if (change.second == 0) return true;
     const std::string_view entry = absl::StripSuffix(change.first, ",");
