@@ -245,8 +245,11 @@ a00deb63a3684646c	2026-10-19T07:35:54Z	25.52	style-review	dcfs-style-reviewer	cl
 afa6529055d27bd81	2026-10-19T07:38:10Z	Clerk batch 41	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1001796	117								42	9724	926494	65536
 a0b0cdc42a1e144d7	2026-10-19T07:41:01Z	25.50	mechanical	dcfs-mechanical	haiku	low	68527	14								6	43	50952	17526
 a6ad08cd937de2ef3	2026-10-19T07:41:32Z	Clerk batch 42	mechanical	dcfs-mechanical	claude-haiku-5-5	low	2758434	186								84	8085	2665572	84693
-aa93e0c339a9e4166	2026-10-19T15:45:58Z	25.52	implementation	dcfs-implementer	claude-sonnet-5-5	medium	4800541	1448								126	689	4586503	213223
+aa93e0c339a9e4166	2026-10-19T15:45:58Z	25.52	implementation	dcfs-implementer	claude-sonnet-5-5	medium	9427322	2314								202	3783	9166835	256502
 a5b1ef2ba909cf87e	2026-10-19T15:46:04Z	Dashboard upload	mechanical	dcfs-mechanical	haiku	low	454984	63								28	791	399336	54829
 76f9587c	2026-10-19T15:48:40Z	25.53		agy	gemini-3.8-flash	low	997830	130	0						foreman mode=read-only; parent=25.53; worker=117311	111961	5350	880519	
-a9b1d695dc5c130dd	2026-10-19T15:52:28Z	25.53	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	882000	1149								34	154	760039	121773
+a9b1d695dc5c130dd	2026-10-19T15:52:28Z	25.53	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	1648895	1617								54	224	1496156	152461
 a1f46bcb226d9a5bb	2026-10-19T16:12:06Z	Clerk batch 43	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1017951	125								34	11972	930141	75804
+a8d2e5305fcd21728	2026-10-19T16:18:50Z	Read CI coverage failure	mechanical	dcfs-mechanical	haiku	low	136600	20								12	1118	110069	25401
+aabd71adfe3fe47a1	2026-10-19T16:19:34Z	main-check	investigation	dcfs-investigator	claude-sonnet-5-5	high													
+ad2f1c85d1b360c93	2026-10-19T16:21:11Z	25.53	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	627106	104								26	122	570959	55999
