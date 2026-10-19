@@ -684,16 +684,18 @@ reading. Not for writing code, nor for subtle protocol judgement.
     Invoking agy (learned 2026-10-18). Every agy job goes through
    `tools/agents/foreman.py` by the `dcfs-foreman` skill (rule 12): it holds
    the session open past agy's 30-minute print timeout and handles the hang
-   on a non-JSON error. Direct calls are for the usage reads only,
-   `agy -p "/usage"` and `agy -p '/quota'`, run with the Bash tool's
-   `run_in_background: true` when they might block (russ, 2026-10-18: "I
-   think those agy invocations were blocking for you"). Facts for foreman's
-   own calls: the prompt is attached to `-p` with `=`
-   (`-p="$(cat prompt.txt)"`, or a bare `-p --model` swallows the flag);
-   `agy -p` ends when the model's turn ends and kills any background task it
-   started, so foreman holds a stream-json session open until JOB-COMPLETE
-   and the model is told to run everything in the foreground; `--mode auto`
-   is not available on this account.
+   on a non-JSON error. Foreman runs are always background (the Bash tool's
+   `run_in_background: true`; russ, 2026-10-18: "I think those agy
+   invocations were blocking for you"). The only direct calls are the usage
+   reads, also run in the background: `agy -p '/usage'` is the one to use
+   everywhere (the dashboard reader and foreman use it); `/quota` printed the
+   same pools on 2026-10-19 (Gemini weekly and five-hour, Claude and GPT,
+   Gemini 4 Argon) and adds nothing. Facts for foreman's own calls: the
+   prompt is attached to `-p` with `=` (`-p="$(cat prompt.txt)"`, or a bare
+   `-p --model` swallows the flag); `agy -p` ends when the model's turn ends
+   and kills any background task it started, so foreman holds a stream-json
+   session open until JOB-COMPLETE and the model is told to run everything in
+   the foreground; `--mode auto` is not available on this account.
 11. <a id="rule-dont-start-unfinishable"></a>
     Don't start work you can't finish (russ, 2026-10-18, offering the last of
    the week's Gemini quota): size a job to the remaining pool. With a few
@@ -701,7 +703,6 @@ reading. Not for writing code, nor for subtle protocol judgement.
    that could die midway. agy Opus at high effort drains its pool in minutes:
    check headroom before each such job and give it work that is safe to
    abandon.
-
 12. <a id="rule-delegate-down"></a>
     **Delegate menial chunks down** (russ, 2026-10-19: "Make use of foreman a
    skill and put it in AGENTS.md." and "I'd like it if our subagents started
@@ -715,19 +716,23 @@ reading. Not for writing code, nor for subtle protocol judgement.
    rounds and a merge-ready branch: a whole step on Gemini) and, from 25.48,
    a single mode (one worker session, no review round; `--read-only` adds
    plan mode and no branch) for bounded chunks; until 25.48 lands a chunk
-   uses orchestrator mode and pays the extra review round. Every agent,
-   orchestrator or subagent, hands a bounded chunk that needs labour rather
-   than judgement (surveys, greps across trees, doc passes, test boilerplate,
-   warning-fix batches) to Gemini through `tools/agents/foreman.py`, by the
-   `dcfs-foreman` skill (`.claude/skills/dcfs-foreman/SKILL.md`). It
-   reconciles rule 10: every agy job goes through foreman, not a bare
-   `agy -p`; only `agy -p '/quota'` and `/usage` stay direct. A Claude
-   subagent cannot spawn another Claude subagent, so foreman is how it
-   delegates down, and the Claude quota it would have spent stays for
-   judgement work. The delegating agent reads the pool first, reviews the
-   result before using it, records a ledger row naming its parent step, and
-   puts a `Delegated:` line in its report. Rule 6's table still decides what
-   may be delegated.
+   uses orchestrator mode and pays the extra review round. Every agent hands
+   a bounded chunk that needs labour rather than judgement (surveys, greps
+   across trees, doc passes, test boilerplate, warning-fix batches) to Gemini
+   through `tools/agents/foreman.py`, by the `dcfs-foreman` skill
+   (`.claude/skills/dcfs-foreman/SKILL.md`); rule 9 (routing) decides what
+   may go, and rule 6 only the model and effort. It reconciles rule 10: every
+   agy job goes through foreman, not a bare `agy -p`. A Claude subagent
+   cannot spawn another Claude subagent, so foreman is how it delegates down,
+   and the Claude quota it would have spent stays for judgement work. A
+   subagent delegates only into a lane its brief names as its delegation
+   lane; with none named it does not delegate and says so in its report. The
+   reviewers (`dcfs-reviewer`, `dcfs-style-reviewer`) do not delegate until
+   25.48's `--read-only` lands. The delegating agent reads the pool first,
+   reviews the result before using it, and records a ledger row naming its
+   parent step. The step report of an implementer, mechanical, investigator
+   or protocol agent carries a `Delegated:` line (`none` if nothing was); a
+   reviewer adds one only if it delegated.
 
 ## Quota management, Claude and Gemini together (russ, 2026-10-16)
 

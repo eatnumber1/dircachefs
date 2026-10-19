@@ -15,34 +15,28 @@ Foreman has two modes. **Orchestrator mode** (today's default) runs a
 worker plus review/fix rounds and leaves a merge-ready branch: a whole step
 on Gemini. **Single mode** (from 25.48: one worker session, no review
 round, `--read-only` for plan mode and no branch) is for bounded chunks.
-Foreman also holds the session past agy's 30-minute print timeout, which is
-why every agy job goes through it. Until 25.48 lands, a bounded chunk uses
-orchestrator mode.
+Foreman holds the session past agy's 30-minute print timeout, which is why
+every agy job goes through it.
 
-The rule is `rule-delegate-down` in
-[process](/docs/plan/process.md#rule-delegate-down); the invocation
-rules are
-[agy-invocation](/docs/plan/process.md#rule-agy-invocation),
+What may be delegated, who may delegate and why are in
+[process](/docs/plan/process.md#rule-delegate-down); routing is
+[rule 9](/docs/plan/process.md#rule-route-before-dispatch). The invocation
+rules are [agy-invocation](/docs/plan/process.md#rule-agy-invocation),
 [dont-start-unfinishable](/docs/plan/process.md#rule-dont-start-unfinishable)
 and [agy-write-jobs](/docs/plan/process.md#rule-agy-write-jobs). Flags and
 output files are in the foreman section of
-[tools/agents/README.md](/tools/agents/README.md). Never call `agy -p` for
-a job; `agy -p '/quota'` is the one direct call.
+[tools/agents/README.md](/tools/agents/README.md). A subagent delegates
+only into the delegation lane its brief names; with none named, do not
+delegate and say so in your report.
 
-**Use it for**: surveys of the kernel or other trees, greps across them,
-doc accuracy passes, test boilerplate to a pattern, warning-fix batches.
-**Do not use it for**: the write-through protocol, the model, identity,
-crash handling, reviews (Flash is lenient), or design that needs judgement
-([process](/docs/plan/process.md#rule-route-before-dispatch)).
-
-1. **Quota first.** `agy -p '/quota'`. Size the job to the pool left;
-   with little left, choose a small job that is safe to abandon.
-2. **Lane and branch.** Pick a free, clean lane (not yours, not one with a
-   job running) and a new branch name, such as `delegate-STEP-WHAT`.
-3. **Prompt file.** Self-contained: the task, the paths to read, the
-   rules that matter (never push, Docker is production, no timers or retry
-   loops, test first), and whether it is read-only. The worker's final
-   answer is the report, so say what it must contain.
+1. **Quota first.** `agy -p '/usage'` in the background. Size the job to
+   the pool left; with little left, choose a small job that is safe to
+   abandon.
+2. **Lane and branch.** Use the lane your brief names and a new branch
+   name, such as `delegate-STEP-WHAT`.
+3. **Prompt file.** Self-contained, per mode: see
+   [prompts.md](prompts.md) for the checklist (orchestrator mode) and the
+   template (single mode).
 4. **Run it with the Bash tool in the background**
    (`run_in_background: true`), never in the foreground and never behind a
    polling loop; you are told when it exits:
@@ -57,9 +51,8 @@ crash handling, reviews (Flash is lenient), or design that needs judgement
 6. **Check the lane** with `git status`: a non-JSON `AGY_ERROR` or 429
    makes foreman hang and can leave the lane mid-rebase (README, known
    issue); abort any rebase.
-7. **Bounded chunks cost extra today** (orchestrator mode only): an
-   empty-diff review round and a throwaway branch, until 25.48 adds single
-   mode and `--read-only`. Ignore the branch.
+7. **Bounded chunks cost extra until 25.48**: orchestrator mode only, so
+   an empty-diff review round and a throwaway branch. Ignore the branch.
 8. **Record it**, from the main checkout, naming the parent step:
 
    ```bash

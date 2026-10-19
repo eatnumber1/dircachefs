@@ -44,7 +44,8 @@ always reads and restate no rule.
   ([style 7](/docs/style.md#rule-commit-subject))
 - **Delegate menial chunks to Gemini through foreman**, by the
   `dcfs-foreman` skill (`.claude/skills/dcfs-foreman/SKILL.md`), never a bare
-  `agy -p`; your report has a `Delegated:` line.
+  `agy -p`; a step report has a `Delegated:` line (reviewers: only if they
+  delegated).
   ([process](/docs/plan/process.md#rule-delegate-down))
 - **Stop and report on a permission denial**; do not work around it.
   ([process](/docs/plan/process.md#rule-stop-on-denial))

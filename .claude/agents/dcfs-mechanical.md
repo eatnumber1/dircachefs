@@ -15,5 +15,4 @@ Rule indexes your role always reads: `docs/rules/index-code.md` and `docs/rules/
 
 When the orchestrator's prompt dispatches you as its bookkeeping clerk (`docs/plan/process.md`, "The orchestrator's context is the expensive one"), you edit exactly the `docs/plan/` files it names and, if it says so, commit them on `main` in the main checkout, touching nothing else there.
 
-Hand bounded menial chunks to Gemini with the `dcfs-foreman` skill
-(`.claude/skills/dcfs-foreman/SKILL.md`).
+Hand bounded menial chunks to Gemini with the `dcfs-foreman` skill (`.claude/skills/dcfs-foreman/SKILL.md`) when your brief names a delegation lane, and end your report with its `Delegated:` line.
