@@ -63,13 +63,17 @@ process (its waves and file ownership table) is in `history.md`.
    and the CI subject gate rightly failed the push); the step's text
    from its phase file; `/AGENTS.md`; the files it
    should read first; the step's "done" criteria; and the instructions
-   below. Agents are told not to explore the tree beyond that, not to touch
-   files outside the step, to stop and report after two failed attempts at
-   the same build or test error, and to leave the lane's Bazel server
-   running (it is reused by the next step). After dispatching, refresh
-   the dashboard's lanes and steps (step 6 says how; a Haiku subagent does
-   it), and do the same
-   when a lane's agent finishes or is stopped, or a Gemini job ends.
+   below. The prompt ends with a decomposition section: a short list of the
+   chunks (greps, boilerplate, warning fixes, surveys) the dispatcher expects
+   to go down a tier through foreman, each with its paths, and the delegation
+   lane to use, or "none: do not delegate". The agent's step report answers
+   with its `Delegated:` line. Agents are told not to explore the tree beyond
+   that, not to touch files outside the step, to stop and report after two
+   failed attempts at the same build or test error, and to leave the lane's
+   Bazel server running (it is reused by the next step). After dispatching,
+   refresh the dashboard's lanes and steps (step 6 says how; a Haiku subagent
+   does it), and do the same when a lane's agent finishes or is stopped, or a
+   Gemini job ends.
 3. **Test first.** The agent writes the step's tests, runs them, and
    records them failing on the unchanged code (quoted output), then makes
    them pass.
@@ -766,7 +770,10 @@ reading. Not for writing code, nor for subtle protocol judgement.
    it, and records a ledger row naming its parent step. The step report of an
    implementer, mechanical, investigator or protocol agent carries a
    `Delegated:` line (`none` if nothing was); a reviewer adds one only if it
-   delegated.
+   delegated. The delegating agent passes `--parent` its own step and a
+   `--min-weekly-pct` sized to the job; foreman refuses to start on an empty
+   or unreadable Gemini weekly pool, and `dashboard_lanes.py ledger by-parent`
+   totals a step's own tokens against its delegated ones (25.49).
 
 ## Quota management, Claude and Gemini together (russ, 2026-10-16)
 

@@ -4437,3 +4437,16 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
     fa037f4a..1565b72d (heading resolved against batch 38); slice reviews
     of 25.48 and 25.49 slices 1 and 2 recorded in review-findings.tsv;
     review-findings line 344 (25.49d) repaired to 11 fields.
+- 2026-10-19, clerk batch 40 (25.49 merged; README and rules caught up):
+  - Item 1: the slice 3 review of 25.49 is in review-findings.tsv (six
+    Sonnet rows and the orchestrator's refusal-message finding), all fixed
+    and merged at fe4f9953.
+  - Item 2: 25.49 merged 1887e3ea..fe4f9953. process.md rule 12 gained the
+    `--parent` and `--min-weekly-pct` sentences; dispatch rule 2 gained the
+    decomposition section sentences, quoted from the implementer.
+  - Item 2c: 25.49 marked done in phases/25; its item 2 is now foreman's
+    `--parent` and `--min-weekly-pct`, and the by-parent report is the
+    measurement. Its Test line no longer names delegate.py.
+  - Item 2d: README row 25, Queue and M0 show 25.48 and 25.49 done
+    2026-10-19; 25.52 then 25.50 are next.
+  - Not committed: docs/plan/dispatch-ledger.tsv, left alone as asked.

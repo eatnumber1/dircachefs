@@ -378,3 +378,10 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-19	25.49	2	Sonnet	should	dead-code	1.10a	tools/agents/dashboard_lanes.py:1486	two-step lookup	could	fixed before slice 3 report
 2026-10-19	25.49	2	Sonnet	should	test-gap	-	tools/agents/dashboard_lanes_test.py	four missing by-parent cases: delegated-only, filter, extra args, empty tokens	no	fixed before slice 3 report
 2026-10-19	25.49	2	Sonnet	nit	docs	-	-	delegated_pct is a token share, not cost	no	fixed before slice 3 report
+2026-10-19	25.49	3	Sonnet	should	docs	1.9	tools/agents/dashboard_lanes.py:1468	docstring and README said own rows are Claude's by construction; false (slice 2 reviewer's wording)	no	fixed/merged fe4f9953
+2026-10-19	25.49	3	Sonnet	should	test-shape	-	tools/agents/dashboard_lanes_test.py:1258	exit code unasserted	no	fixed/merged fe4f9953
+2026-10-19	25.49	3	Sonnet	should	contract-claim	-	tools/agents/README.md:366	'no output files' false; quota check now precedes makedirs	no	fixed/merged fe4f9953
+2026-10-19	25.49	3	Sonnet	nit	docs	-	tools/agents/README.md:335	synopsis	could	fixed/merged fe4f9953
+2026-10-19	25.49	3	Sonnet	nit	docs	-	.claude/skills/dcfs-foreman/SKILL.md:51	STEP vs PARENT_STEP	could	fixed/merged fe4f9953
+2026-10-19	25.49	3	Sonnet	nit	style-other	-	tools/agents/dashboard_lanes_test.py:1238	test name	could	fixed/merged fe4f9953
+2026-10-19	25.49	3	orchestrator	should	contract-claim	-	tools/agents/foreman.py	refusal message suggested rerunning with --min-weekly-pct 0, contradicting 'a refusal is final'	no	fixed/merged fe4f9953

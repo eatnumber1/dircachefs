@@ -2296,32 +2296,31 @@ checked nothing when run, so every "repo_shape clean" report from the CLI
 before 2026-10-19 was meaningless; only `//tools:repo_shape_test` checked. The
 slice review of 2026-10-19 is in `review-findings.tsv`.
 
-## 25.49 Subagents delegate down
+## 25.49 Subagents delegate down (russ, 2026-10-19; done, 1887e3ea..fe4f9953)
 
-Partly done: 25.49a merged 8779ff6d (2026-10-19); items 2 and 3 are queued
-after 25.48; item 4 is partly done by 25.49d (merged 2026-10-19, 17e1a466 and
-da80d74e). russ, 2026-10-19: "I'd like it if
+Done 2026-10-19: 25.49a merged 8779ff6d; 25.49d merged 17e1a466 and da80d74e;
+items 2 to 4 merged 1887e3ea..fe4f9953. russ, 2026-10-19: "I'd like it if
 our subagents started doing this too, and themselves leveraging dumber
 agents for more of the menial work"
 
 1. A rule in `docs/plan/process.md` with an index line in
    `docs/rules/index-process.md`. Each `.claude/agents/*.md` names the
    delegation tool.
-2. `tools/agents/delegate.py`: one command for a subagent to run a read-only or
-   write job on agy through foreman. It does a live quota check first, writes a
-   ledger row naming the parent step, and refuses when the pool is under the
-   job's size.
+2. foreman `--parent` and `--min-weekly-pct` (default 1, refuses on an
+   empty or unreadable weekly pool; a refusal creates nothing and is final).
 3. Briefs carry a decomposition section; step reports carry a `Delegated` line.
 4. Measure in the ledger: parent tokens with and without delegation.
 
 Status: item 1 (the rule, `rule-delegate-down`, and the agent definitions)
-and the `dcfs-foreman` skill are done by 25.49a. Items 2 (`delegate.py`) and
-3 (briefs and the report line's check) remain.
+and the `dcfs-foreman` skill are done by 25.49a. Items 2 and 3 are done by
+1887e3ea..fe4f9953: the `--parent` token and the weekly-pool check in foreman,
+and the decomposition section in `process.md` dispatch rule 2.
 
-Item 4 (measure) is partly done by 25.49d (merged 2026-10-19, 17e1a466 and
-da80d74e): foreman writes `tokens.json` and one ledger row per run, with
-tokens = total + cache_read, as Claude rows count them. Gemini subagent tokens
-are inside the session total and not attributable to a subagent.
+Item 4 (measure) is the `dashboard_lanes.py ledger by-parent` report, which
+totals a step's own tokens against its delegated ones. 25.49d writes
+`tokens.json` and one ledger row per foreman run, with tokens = total +
+cache_read, as Claude rows count them. Gemini subagent tokens are inside the
+session total and not attributable to a subagent.
 
 Process note (2026-10-19, from the slice 2 review): slice 2's four added tests
 pinned existing behaviour, so none fails on the old code first. Slice 1's
@@ -2330,7 +2329,8 @@ code.
 
 Owner: not yet assigned (the orchestrator chooses). Dependencies: 25.48.
 
-*Test:* `delegate.py` comes with tests under `tools/agents/`.
+*Test:* `tools/agents/foreman_test.py` and `dashboard_lanes_test.py` cover
+the `--parent` token, the weekly-pool refusal and the by-parent report.
 
 ### 25.34 as built (dcfs-implementer, 2026-10-17)
 
