@@ -87,9 +87,10 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
   `resolvedModel`, else the `model:` of `.claude/agents/<type>.md`) and effort
   (`tool_input.effort`, else that file's `effort:`); a foreground agent
   records nothing. Calls made by a subagent (the input has `agent_id`) are
-  ignored. If the table changed since
-  the last upload it prints `additionalContext` telling the orchestrator to
-  upload the file.
+  ignored. If a dataset has news
+  since the last upload it prints `additionalContext` telling the
+  orchestrator to upload the files, followed by the clerk ask when the queue
+  holds 5 items.
 - `post-message` (PostToolUse, matcher `SendMessage`): when `tool_input.to`
   names a finished agent, moves it back to running (the orchestrator resumed
   it), regenerates and prints the same `additionalContext` as `post-agent` if
@@ -103,9 +104,13 @@ Subcommands (all read the hook JSON from stdin, all exit 0):
   detached `quota` reader at most once per hour; launches the detached `ci`
   reader once when `origin/main` differs from `ci.read_sha` or `ci.json` has a
   run that is `in_progress` or `queued` (recording `origin/main` in
-  `ci.read_sha`). It asks for an upload only when a dataset carries news,
-  blocking with a reason naming the files, unless `stop_hook_active` is true
-  (no loops) or the caller is a subagent. When each dataset asks:
+  `ci.read_sha`). It prints nothing for dataset news (the PostToolUse
+  reminder tells the orchestrator on its next tool call; a Stop block forces
+  an extra turn) and blocks only for a clerk ask (below), unless `stop_hook_active` is true (no
+  loops) or the caller is a subagent. `post-agent` treats a `dcfs-mechanical`
+  agent whose prompt names the `dcfs-dashboard-upload` skill as laneless,
+  even if the prompt names a lane path, so an upload does not mark
+  `lanes.json` changed. When each dataset asks:
   - `lanes`: on material changes compared with the last uploaded table (a
     lane's step changed, an agent was newly dispatched, or an override was set
     or cleared; a lane going to idle by SubagentStop alone asks nothing).
@@ -156,8 +161,9 @@ The clerk rule: `stop` asks for a clerk when the queue is non-empty and either
 no agent is running or the queue holds 5 items (`CLERK_BATCH`), and the ask
 names the count and the drain command. It does not ask while
 `clerk_queue.dispatched` exists; a `dcfs-mechanical` agent stopping (the
-SubagentStop hook) removes that marker. The ask is added to a dataset ask in
-the same block when both apply.
+SubagentStop hook) removes that marker. `stop` blocks with the ask (the
+`stop_hook_active` guard stops a second block); `post-agent` and
+`post-message` add it to their `additionalContext` at 5 items only.
 
 The table has an orchestrator row and one row per `lane-N` under
 `~/Sources/dircachefs-lanes/`. A lane with recorded agents shows the step

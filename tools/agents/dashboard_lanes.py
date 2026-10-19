@@ -51,6 +51,7 @@ import uuid
 import zoneinfo
 
 LANE_IN_PROMPT = re.compile(r"dircachefs-lanes/lane-(\d+)")
+UPLOAD_SKILL = "dcfs-dashboard-upload"
 LANE_DIR = re.compile(r"lane-(\d+)$")
 EFFORT_SUFFIX = re.compile(r"(.+)-(low|medium|high)$")
 FINISHED_KEPT = 50
@@ -838,6 +839,12 @@ def record_agent(env, event):
     front = frontmatter(env, tool_input["subagent_type"])
     match = LANE_IN_PROMPT.search(tool_input["prompt"])
     lane = "lane-" + match.group(1) if match else None
+    # An uploader works on the dashboard, not in a lane, even when its prompt
+    # names a lane's path: it must not make the lane look newly dispatched
+    # (and so ask for another upload).
+    if (tool_input["subagent_type"] == "dcfs-mechanical"
+            and UPLOAD_SKILL in tool_input["prompt"]):
+        lane = None
     if lane:
         clear_lane_override(env, lane)
     running = load_json(env.path("running.json"), {})
@@ -982,17 +989,45 @@ def regenerate(env):
     return dataset_changed(env, "lanes")
 
 
-def upload_context(env):
-    """The PostToolUse output asking for an upload, or "" if unchanged."""
-    if not regenerate(env):
+def dataset_ask(env):
+    """The sentence asking for uploads of the datasets with news, or "".
+
+    Only news asks. sloc never asks on its own: it rides along with an ask.
+    """
+    asking = [name for name in ASKING if dataset_changed(env, name)]
+    if not asking:
         return ""
-    path = env.path("lanes.json")
+    names = [
+        name for name in DATASETS
+        if name in asking or (name == "sloc" and dataset_changed(env, name))
+    ]
+    paths = [env.path("%s.json" % name) for name in names]
+    mark_command = "dashboard_lanes.py mark-uploaded %s." % " ".join(names)
+    if len(names) == 1:
+        return (
+            "Dashboard %s changed: upload %s to the dashboard's %s dataset "
+            "(skill: dcfs-dashboard-upload) and run %s"
+            % (names[0], paths[0], names[0], mark_command)
+        )
+    names_str = ", ".join(names[:-1]) + " and " + names[-1]
+    paths_str = ", ".join(paths[:-1]) + " and " + paths[-1]
+    return (
+        "Dashboard %s changed: upload %s (skill: dcfs-dashboard-upload) "
+        "and run %s"
+        % (names_str, paths_str, mark_command)
+    )
+
+
+def upload_context(env):
+    """The PostToolUse output with the dashboard and clerk asks, or ""."""
+    regenerate(env)
+    asks = [dataset_ask(env), clerk_ask(env, full_only=True)]
+    text = " ".join(ask for ask in asks if ask)
+    if not text:
+        return ""
     return json.dumps({"hookSpecificOutput": {
         "hookEventName": "PostToolUse",
-        "additionalContext": (
-            "Dashboard lanes changed: upload %s (skill: "
-            "dcfs-dashboard-upload) and run "
-            "dashboard_lanes.py mark-uploaded lanes." % path),
+        "additionalContext": text,
     }})
 
 
@@ -1411,17 +1446,18 @@ def clear_clerk_marker(env):
         os.remove(path)
 
 
-def clerk_ask(env):
+def clerk_ask(env, full_only=False):
     """The sentence asking for a clerk, or "" when none is due.
 
     A batch of CLERK_BATCH items asks even with agents running. Fewer wait
-    for a stop with no agent running, so that nothing is left unasked.
+    for a stop with no agent running, so that nothing is left unasked;
+    full_only leaves those to the Stop hook.
     """
     items = clerk_items(env)
     if not items or os.path.exists(env.path(CLERK_MARKER)):
         return ""
     running = load_json(env.path("running.json"), {})
-    if running and len(items) < CLERK_BATCH:
+    if (running or full_only) and len(items) < CLERK_BATCH:
         return ""
     return ("Clerk queue has %d items: run `dashboard_lanes.py clerk-queue "
             "drain` and dispatch one dcfs-mechanical clerk (effort low) with "
@@ -1541,37 +1577,12 @@ def stop(env, event):
         write_atomic(env.path("ci.read_sha"), (origin or "") + "\n")
         launch_reader(env, "ci")
 
-    # Only news asks. sloc never asks on its own: it rides along with an ask.
-    asking = [name for name in ASKING if dataset_changed(env, name)]
+    # Dashboard news is not announced here: the PostToolUse reminder tells
+    # the orchestrator on its next tool call, and a block forces a turn.
     clerk = clerk_ask(env)
-    if not asking:
-        if clerk:
-            return json.dumps({"decision": "block", "reason": clerk})
-        return ""
-
-    names = [
-        name for name in DATASETS
-        if name in asking or (name == "sloc" and dataset_changed(env, name))
-    ]
-    paths = [env.path("%s.json" % name) for name in names]
-    mark_command = "dashboard_lanes.py mark-uploaded %s." % " ".join(names)
-    if len(names) == 1:
-        reason = (
-            "Dashboard %s changed: upload %s to the dashboard's %s dataset "
-            "(skill: dcfs-dashboard-upload) and run %s"
-            % (names[0], paths[0], names[0], mark_command)
-        )
-    else:
-        names_str = ", ".join(names[:-1]) + " and " + names[-1]
-        paths_str = ", ".join(paths[:-1]) + " and " + paths[-1]
-        reason = (
-            "Dashboard %s changed: upload %s (skill: dcfs-dashboard-upload) "
-            "and run %s"
-            % (names_str, paths_str, mark_command)
-        )
     if clerk:
-        reason += " " + clerk
-    return json.dumps({"decision": "block", "reason": reason})
+        return json.dumps({"decision": "block", "reason": clerk})
+    return ""
 
 
 def mark_uploaded(env, names):

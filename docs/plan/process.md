@@ -155,7 +155,8 @@ process (its waves and file ownership table) is in `history.md`.
    each lane's step, agent type, model and effort, which the
    `dashboard_lanes` hooks write to `~/.cache/dcfs-dashboard/lanes.json`
    on every agent launch and finish (`tools/agents/README.md`; after an
-   upload, `mark-uploaded`, or the Stop hook holds the turn open); the
+   upload, `mark-uploaded`, or the PostToolUse reminder; the Stop hook
+   is silent about it); the
    quota readings
    from "Quota management" below; `gh run list --limit 12`; and
    `~/.cache/dcfs-dashboard/plan.json`, every plan step, its phase, title,
