@@ -101,8 +101,9 @@ reasoning. `AGENTS.md` says which indexes to read for which task.
   [process](/docs/plan/process.md#rule-effort-per-dispatch)
 - The trailer names the model that wrote the commit (russ, 2026-10-18).
   [process](/docs/plan/process.md#rule-coauthor-trailer)
-- Gemini and agy: route each dispatch, invoke agy in the background, size jobs
-  to the pool, write jobs obey the same rules.
+- Gemini and agy: route each dispatch, run jobs through foreman (direct agy
+  only for usage reads), size jobs to the pool, write jobs obey the same
+  rules.
   [process](/docs/plan/process.md#rule-route-before-dispatch),
   [process](/docs/plan/process.md#rule-agy-invocation),
   [process](/docs/plan/process.md#rule-dont-start-unfinishable),

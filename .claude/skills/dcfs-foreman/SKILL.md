@@ -1,6 +1,12 @@
 ---
 name: dcfs-foreman
-description: Hand a bounded, menial chunk of work (kernel or source surveys, greps across trees, doc passes, test boilerplate, warning-fix batches) to Gemini through tools/agents/foreman.py instead of doing it yourself or calling agy directly. Use when you are an orchestrator or a subagent and the work needs labour rather than judgement. Claude subagents cannot spawn Claude subagents, so this is how they delegate down.
+description: >-
+  Hand a bounded, menial chunk of work (kernel or source surveys, greps
+  across trees, doc passes, test boilerplate, warning-fix batches) to Gemini
+  through tools/agents/foreman.py instead of doing it yourself or calling
+  agy directly. Use when you are an orchestrator or a subagent and the work
+  needs labour rather than judgement. Claude subagents cannot spawn Claude
+  subagents, so this is how they delegate down.
 ---
 
 # Delegate to Gemini with foreman

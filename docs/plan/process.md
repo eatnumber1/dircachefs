@@ -681,16 +681,18 @@ reading. Not for writing code, nor for subtle protocol judgement.
    judgement-heavy design. A job that needs Claude-grade judgement but not
    the session's tools can run through agy instead of a Claude Code subagent.
 10. <a id="rule-agy-invocation"></a>
-    Invoking agy (learned 2026-10-18). Use `agy --model <id> --mode plan
-   -p="$(cat prompt.txt)"`: the prompt must be attached to `-p` with `=`, or
-   a bare `-p --model` swallows the flag. ALWAYS run agy with the Bash tool's
-   `run_in_background: true`: a foreground call blocked the session for
-   minutes (russ, 2026-10-18: "I think those agy invocations were blocking
-   for you"). `agy -p` ends when the model's turn ends and kills any
-   background task it started, so a long or multi-command job runs through
-   `tools/agents/foreman.py` (stream-json, held open until JOB-COMPLETE) with
-   the model told to run everything in the foreground. `--mode auto` is not
-   available on this account.
+    Invoking agy (learned 2026-10-18). Jobs do not call agy directly: they
+   go through `tools/agents/foreman.py` by the `dcfs-foreman` skill (rule
+   12). Direct calls are for the usage reads only, `agy -p "/usage"` and
+   `agy -p '/quota'`, run with the Bash tool's `run_in_background: true`
+   when they might block (russ, 2026-10-18: "I think those agy invocations
+   were blocking for you"). Facts that hold for foreman's own calls: the
+   prompt is attached to `-p` with `=` (`-p="$(cat prompt.txt)"`, or a bare
+   `-p --model` swallows the flag); `agy -p` ends when the model's turn
+   ends and kills any background task it started, so foreman holds a
+   stream-json session open until JOB-COMPLETE and the model is told to run
+   everything in the foreground; `--mode auto` is not available on this
+   account.
 11. <a id="rule-dont-start-unfinishable"></a>
     Don't start work you can't finish (russ, 2026-10-18, offering the last of
    the week's Gemini quota): size a job to the remaining pool. With a few
