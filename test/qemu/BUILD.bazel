@@ -183,8 +183,24 @@ qemu_cc_test(
     deps = [
         "//dcfs/testonly:assert_ok_and_assign",
         "//dcfs/testonly:files",
-        "@absl//absl/status:statusor",
-        "@absl//absl/status:status_matchers",
+        "//dcfs/testonly:hypervisor",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Step 26.44: the same signature under the default accelerator is KVM's
+# (guest/kvm_boot_test.cc), so the TCG test's check tells them apart; skipped
+# where run-qemu.sh fell back to TCG.
+qemu_cc_test(
+    name = "kvm_boot_test",
+    size = "small",
+    timeout = "moderate",
+    srcs = ["guest/kvm_boot_test.cc"],
+    deps = [
+        "//dcfs/testonly:assert_ok_and_assign",
+        "//dcfs/testonly:files",
+        "//dcfs/testonly:hypervisor",
+        "@absl//absl/strings",
         "@googletest//:gtest_main",
     ],
 )

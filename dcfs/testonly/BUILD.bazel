@@ -47,6 +47,13 @@ cc_library(
     ],
 )
 
+# The hypervisor a test runs under, read from CPUID.
+cc_library(
+    name = "hypervisor",
+    hdrs = ["hypervisor.h"],
+    visibility = ["//test/qemu:__pkg__"],
+)
+
 # File helpers for tests, over the syscalls:: wrappers.
 cc_library(
     name = "files",
