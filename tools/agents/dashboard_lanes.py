@@ -1546,6 +1546,7 @@ def clerk_items(env):
 def clerk_add(env, words):
     # One item per line: a newline in the text would split it in two.
     text = " ".join(words).replace("\n", " ").strip()
+    # A flag is a mistaken invocation (--help), not an item.
     if not text or any(w.startswith("-") for w in words):
         raise ValueError("usage: clerk-queue add TEXT...")
     items = clerk_items(env)
