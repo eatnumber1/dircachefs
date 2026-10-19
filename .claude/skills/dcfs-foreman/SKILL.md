@@ -32,7 +32,13 @@ delegate and say so in your report.
 
 1. **Quota first.** `agy -p '/usage'` in the background. Size the job to
    the pool left; with little left, choose a small job that is safe to
-   abandon.
+   abandon. Foreman repeats the check itself and refuses (exit 2, nothing
+   started, no ledger row) when the Gemini weekly pool is under
+   `--min-weekly-pct` or the meter is unreadable. The default is 1, so only
+   an empty pool refuses (a 429 mid-run hangs foreman); pass a threshold
+   sized to the job ("don't start work you can't finish"), for example
+   `--min-weekly-pct 15` for a large survey. A refusal is final: report it
+   and do the work yourself or leave it; never rerun in a loop.
 2. **Lane and branch.** Use the lane your brief names and a new branch
    name, such as `delegate-STEP-WHAT`. A `--read-only` survey needs no
    branch and changes nothing in the lane.
@@ -45,9 +51,11 @@ delegate and say so in your report.
 
    ```bash
    cd YOUR_LANE && python3 -I tools/agents/foreman.py \
-       STEP LANE BRANCH PROMPT_FILE --single --out OUT_DIR
+       STEP LANE BRANCH PROMPT_FILE --single --parent PARENT_STEP \
+       --min-weekly-pct N --out OUT_DIR
    cd YOUR_LANE && python3 -I tools/agents/foreman.py \
-       STEP WORKDIR PROMPT_FILE --single --read-only --out OUT_DIR
+       STEP WORKDIR PROMPT_FILE --single --read-only \
+       --parent PARENT_STEP --min-weekly-pct N --out OUT_DIR
    ```
 
    The first is a write chunk; the second a survey (no branch; `WORKDIR` is
@@ -66,8 +74,11 @@ delegate and say so in your report.
 7. **Bounded chunks use `--single`**: no review round. A write chunk still
    gets a throwaway branch; ignore it.
 8. **The ledger row is foreman's.** It adds one row for the run (step as
-   you passed it, `agent=agy`, tokens, per-session breakdown in `notes`);
-   pass the parent step as `STEP` so it is attributed. Add a second row
+   you passed it, `agent=agy`, tokens, per-session breakdown in `notes`).
+   Pass `--parent PARENT_STEP` (your own plan step) on every delegation:
+   foreman writes it into `notes` as the token `parent=PARENT_STEP`, a
+   stable contract that `dashboard_lanes.py ledger by-parent [STEP]` reads
+   to total a step's own tokens against its delegated ones. Add a second row
    by hand only to record something foreman cannot know, such as the quota
    delta (`ledger add` from the main checkout, `notes=QUOTA_DELTA`).
 9. **Report it.** Your step report gets a line

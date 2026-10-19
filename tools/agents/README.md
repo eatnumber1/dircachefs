@@ -232,6 +232,12 @@ id	dispatched	step	task_class	agent	model	effort	tokens	duration_s	rounds	blocke
   - `dashboard_lanes.py ledger backfill-tokens` fills the same fields for rows
     whose `tokens` is empty, finding `agent-<id>.jsonl` under
     `~/.claude/projects/*/*/subagents/`, and prints how many rows it filled.
+  - `dashboard_lanes.py ledger by-parent [STEP]` prints a TSV per step: its own
+    tokens (rows with no `parent=` token), the tokens of foreman rows
+    delegated by it (`parent=STEP`), the number of those rows and the
+    delegated share. The share is of tokens, not of cost: own rows are
+    Claude's and delegated rows Gemini's. With STEP only that step is listed
+    (all zero if it has no rows). Compare steps with and without delegation.
   - `dashboard_lanes.py ledger restore-missing [--since ISO]` rebuilds rows
     lost from the ledger (for example by a `git reset --hard` over
     uncommitted hook rows): every `agent-<id>.meta.json` under the same
@@ -352,6 +358,17 @@ python3 -I tools/agents/foreman.py STEP DIR PROMPT_FILE --single --read-only \
   `JOB-COMPLETE` line, is saved as `report.md` in `--out`. `summary.md` says
   "read-only run in DIR" and has no commit sections; the ledger row says
   `mode=read-only`.
+- `--parent STEP`: the plan step of the subagent delegating this run. The
+  ledger row's `notes` gets the token `parent=STEP` (after `foreman mode=...;`,
+  before the sessions). The token is a stable contract: read it with the
+  regex `(?:^|; )parent=([^;]+)`, never by position, as
+  `dashboard_lanes.ledger_parent` does.
+- `--min-weekly-pct N` (default 1; 0 turns the check off): before touching
+  the lane, foreman reads `agy -p /usage` and, when the Gemini weekly pool has
+  less than N percent left, or the meter cannot be read (the weekly cell must
+  be a whole-number percent), prints why on stderr and exits 2. Nothing else
+  happens: no branch, no output files, no ledger row. A refusal is reported,
+  never retried. Callers size N to the job.
 - `--out DIR`: output directory where `.jsonl`, `.out`, usage readings,
   `summary.md`, `tokens.json` and (read-only mode) `report.md` are saved
   (default: scratchpad foreman directory or `/tmp/foreman/<step>`).
