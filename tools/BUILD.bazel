@@ -800,6 +800,7 @@ cc_library(
     hdrs = ["test_first.h"],
     deps = [
         "//dcfs:status",
+        "@absl//absl/algorithm:container",
         "@absl//absl/status",
         "@absl//absl/status:statusor",
         "@absl//absl/strings",

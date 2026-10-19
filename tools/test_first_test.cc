@@ -4,14 +4,17 @@
 #include "tools/test_first.h"
 
 #include <map>
+#include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "dcfs/status.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
@@ -23,6 +26,7 @@ namespace {
 
 using ::absl_testing::IsOk;
 using ::absl_testing::StatusIs;
+using ::testing::AllOf;
 using ::testing::ElementsAre;
 using ::testing::HasSubstr;
 using ::testing::IsEmpty;
@@ -33,6 +37,15 @@ constexpr char kLastSha[] = "2222222222222222222222222222222222222222";
 constexpr char kQuery[] =
     "kind(\"(cc|py|sh)_test\", rdeps(//..., set(//dcfs:foo_test.cc "
     "//dcfs:testdata/case.txt)))";
+// The same for the test sources among them (not the test data).
+constexpr char kSourceQuery[] =
+    "kind(\"(cc|py|sh)_test\", rdeps(//..., set(//dcfs:foo_test.cc)))";
+
+std::string QueryLine(std::string_view expression) {
+  return absl::StrCat(
+      "bazel query --keep_going --output=label --color=no --curses=no ",
+      expression);
+}
 
 CommandResult Exit(int exit_code, std::string output = "") {
   return {.exit_code = exit_code, .output = std::move(output)};
@@ -48,8 +61,13 @@ class ScriptedRunner : public CommandRunner {
     const std::string line = absl::StrJoin(argv, " ");
     calls.push_back(line);
     if (line.starts_with("git checkout -q ")) {
+      if (failing_checkouts.contains(line)) return Exit(1, "cannot checkout");
       head = argv.back();
       return CommandResult{};
+    }
+    if (auto at = query_at_head.find(absl::StrCat(head, "|", line));
+        at != query_at_head.end()) {
+      return at->second;
     }
     if (line.starts_with("bazel test ")) {
       auto found = test_results.find(head);
@@ -76,6 +94,10 @@ class ScriptedRunner : public CommandRunner {
 
   std::map<std::string, CommandResult> answers;
   std::map<std::string, CommandResult> test_results;  // by commit
+  // The answer to a command while a commit is checked out ("sha|command"),
+  // before `answers`.
+  std::map<std::string, CommandResult> query_at_head;
+  std::set<std::string> failing_checkouts;  // the whole `git checkout` line
   std::vector<std::string> calls;
   std::string head = "step-x";
 };
@@ -101,8 +123,8 @@ ScriptedRunner HappyRunner() {
             ":dcfs/testdata/BUILD.bazel"] = Exit(128, "");
   r.answers[std::string("git cat-file -e ") + kFirstSha + ":dcfs/BUILD.bazel"] =
       Exit(0, "");
-  r.answers[std::string("bazel query --output=label --color=no --curses=no ") +
-            kQuery] = Exit(0, "//dcfs:foo_test\n");
+  r.answers[QueryLine(kQuery)] = Exit(0, "//dcfs:foo_test\n");
+  r.answers[QueryLine(kSourceQuery)] = Exit(0, "//dcfs:foo_test\n");
   r.test_results[kFirstSha] =
       Exit(3,
            "//dcfs:foo_test                                      FAILED in 9s\n"
@@ -163,7 +185,7 @@ TEST(CheckTest, AcceptsTestsThatFailFirstAndPassLast) {
   ScriptedRunner runner = HappyRunner();
   ASSERT_OK_AND_ASSIGN(Report report,
                        Check(runner, {.first = "FIRST", .last = "LAST"}));
-  EXPECT_EQ(report.verdict, Verdict::kAccepted);
+  EXPECT_TRUE(report.Accepted());
   EXPECT_THAT(report.targets, ElementsAre("//dcfs:foo_test"));
   EXPECT_EQ(report.at_first.outcome, Outcome::kTestsFailed);
   EXPECT_THAT(report.at_first.failing,
@@ -182,7 +204,7 @@ TEST(CheckTest, RunsBazelWithTheCallersFlags) {
                        Check(runner, {.first = "FIRST",
                                       .last = "LAST",
                                       .bazel_flags = {"--config=fast"}}));
-  EXPECT_EQ(report.verdict, Verdict::kAccepted);
+  EXPECT_TRUE(report.Accepted());
   EXPECT_THAT(runner.calls,
               testing::Contains("bazel test --keep_going "
                                 "--test_output=errors --color=no --curses=no "
@@ -194,7 +216,7 @@ TEST(CheckTest, RejectsTestsThatPassAtTheFirstCommit) {
   runner.test_results[kFirstSha] = Exit(0, "//dcfs:foo_test PASSED in 9s\n");
   ASSERT_OK_AND_ASSIGN(Report report,
                        Check(runner, {.first = "FIRST", .last = "LAST"}));
-  EXPECT_EQ(report.verdict, Verdict::kRejected);
+  EXPECT_FALSE(report.Accepted());
   EXPECT_EQ(report.at_first.outcome, Outcome::kPassed);
   EXPECT_THAT(report.reasons,
               ElementsAre(HasSubstr("passed at the first commit")));
@@ -207,7 +229,7 @@ TEST(CheckTest, RejectsTestsThatStillFailAtTheLastCommit) {
       Exit(3, "[  FAILED  ] FooTest.Works (0 ms)\n");
   ASSERT_OK_AND_ASSIGN(Report report,
                        Check(runner, {.first = "FIRST", .last = "LAST"}));
-  EXPECT_EQ(report.verdict, Verdict::kRejected);
+  EXPECT_FALSE(report.Accepted());
   EXPECT_EQ(report.at_last.outcome, Outcome::kTestsFailed);
   EXPECT_THAT(report.at_last.failing, ElementsAre("FooTest.Works"));
   EXPECT_THAT(report.reasons, ElementsAre(HasSubstr("fail at the last")));
@@ -216,10 +238,10 @@ TEST(CheckTest, RejectsTestsThatStillFailAtTheLastCommit) {
 TEST(CheckTest, ABuildFailureAtTheFirstCommitCountsAsFailingAndIsLabelled) {
   ScriptedRunner runner = HappyRunner();
   runner.test_results[kFirstSha] =
-      Exit(1, "ERROR: foo_test.cc: no member 'Bar'\n");
+      Exit(1, "ERROR: dcfs/foo_test.cc: no member 'Bar'\n");
   ASSERT_OK_AND_ASSIGN(Report report,
                        Check(runner, {.first = "FIRST", .last = "LAST"}));
-  EXPECT_EQ(report.verdict, Verdict::kAccepted);
+  EXPECT_TRUE(report.Accepted());
   EXPECT_EQ(report.at_first.outcome, Outcome::kBuildFailed);
   EXPECT_THAT(FormatReport(report), HasSubstr("build failed"));
 }
@@ -234,7 +256,7 @@ TEST(CheckTest, RejectsAFirstCommitThatTouchesCode) {
                                    "D\tdocs/old.md\n");
   ASSERT_OK_AND_ASSIGN(Report report,
                        Check(runner, {.first = "FIRST", .last = "LAST"}));
-  EXPECT_EQ(report.verdict, Verdict::kRejected);
+  EXPECT_FALSE(report.Accepted());
   EXPECT_THAT(report.reasons,
               ElementsAre(HasSubstr("dcfs/foo.cc"), HasSubstr("docs/old.md")));
   // Nothing was built or checked out.
@@ -250,18 +272,16 @@ TEST(CheckTest, RejectsAFirstCommitWithNoFiles) {
                  kFirstSha] = Exit(0, "");
   ASSERT_OK_AND_ASSIGN(Report report,
                        Check(runner, {.first = "FIRST", .last = "LAST"}));
-  EXPECT_EQ(report.verdict, Verdict::kRejected);
+  EXPECT_FALSE(report.Accepted());
   EXPECT_THAT(report.reasons, ElementsAre(HasSubstr("touches no file")));
 }
 
 TEST(CheckTest, RejectsTestFilesNoTestTargetOwns) {
   ScriptedRunner runner = HappyRunner();
-  runner.answers[std::string("bazel query --output=label --color=no "
-                             "--curses=no ") +
-                 kQuery] = Exit(0, "");
+  runner.answers[QueryLine(kQuery)] = Exit(0, "");
   ASSERT_OK_AND_ASSIGN(Report report,
                        Check(runner, {.first = "FIRST", .last = "LAST"}));
-  EXPECT_EQ(report.verdict, Verdict::kRejected);
+  EXPECT_FALSE(report.Accepted());
   EXPECT_THAT(report.reasons, ElementsAre(HasSubstr("no test target")));
   EXPECT_THAT(runner.Checkouts().back(), "git checkout -q step-x");
 }
@@ -273,10 +293,8 @@ TEST(CheckTest, TestFilesAtTheRepositoryRootAreInPackageRoot) {
                  kFirstSha] = Exit(0, "A\tx_test.py\n");
   runner.answers[std::string("git cat-file -e ") + kFirstSha + ":BUILD.bazel"] =
       Exit(0, "");
-  runner
-      .answers[std::string("bazel query --output=label --color=no "
-                           "--curses=no kind(\"(cc|py|sh)_test\", "
-                           "rdeps(//..., set(//:x_test.py)))")] =
+  runner.answers[QueryLine(
+      "kind(\"(cc|py|sh)_test\", rdeps(//..., set(//:x_test.py)))")] =
       Exit(0, "//:x_test\n");
   ASSERT_OK_AND_ASSIGN(Report report,
                        Check(runner, {.first = "FIRST", .last = "LAST"}));
@@ -317,6 +335,167 @@ TEST(CheckTest, RestoresTheStartingBranchWhenBazelItselfBreaks) {
   EXPECT_THAT(Check(runner, {.first = "FIRST", .last = "LAST"}),
               StatusIs(absl::StatusCode::kInternal, HasSubstr("exit 2")));
   EXPECT_EQ(runner.Checkouts().back(), "git checkout -q step-x");
+}
+
+std::string DiffTree() {
+  return absl::StrCat(
+      "git diff-tree --no-commit-id --name-status -r --no-renames --root ",
+      kFirstSha);
+}
+
+TEST(CheckTest, AQueryThatCannotLoadAPackageAtTheFirstCommitIsABuildFailure) {
+  // At the first commit the test's rule does not load (it needs a library the
+  // code commit adds): the query is partial, and the target is found at the
+  // last commit.
+  ScriptedRunner runner = HappyRunner();
+  runner.query_at_head[absl::StrCat(kFirstSha, "|", QueryLine(kQuery))] =
+      Exit(3, "ERROR: dcfs/BUILD.bazel:9:1: no such target '//dcfs:foo'\n");
+  runner.query_at_head[absl::StrCat(kFirstSha, "|", QueryLine(kSourceQuery))] =
+      Exit(3, "ERROR: dcfs/BUILD.bazel:9:1: no such target '//dcfs:foo'\n");
+  runner.test_results[kFirstSha] =
+      Exit(1, "ERROR: dcfs/foo_test.cc:3:1: no such target '//dcfs:foo'\n");
+  ASSERT_OK_AND_ASSIGN(Report report,
+                       Check(runner, {.first = "FIRST", .last = "LAST"}));
+  EXPECT_TRUE(report.Accepted());
+  EXPECT_THAT(report.targets, ElementsAre("//dcfs:foo_test"));
+  EXPECT_EQ(report.at_first.outcome, Outcome::kBuildFailed);
+}
+
+TEST(CheckTest, ATargetThatPassesWhileAnotherFailsIsReportedNotRejected) {
+  // //dcfs:data_test only reads the changed test data; its own sources did not
+  // change, so it may pass at the first commit.
+  ScriptedRunner runner = HappyRunner();
+  runner.answers[QueryLine(kQuery)] =
+      Exit(0, "//dcfs:foo_test\n//dcfs:data_test\n");
+  runner.test_results[kFirstSha] =
+      Exit(3,
+           "//dcfs:data_test                  PASSED in 1s\n"
+           "//dcfs:foo_test                   FAILED in 1s\n");
+  ASSERT_OK_AND_ASSIGN(Report report,
+                       Check(runner, {.first = "FIRST", .last = "LAST"}));
+  EXPECT_TRUE(report.Accepted());
+  EXPECT_THAT(report.at_first.passed, ElementsAre("//dcfs:data_test"));
+  EXPECT_THAT(FormatReport(report),
+              HasSubstr("passed at first: //dcfs:data_test"));
+}
+
+TEST(CheckTest, RejectsATargetWhoseOwnSourceChangedAndStillPasses) {
+  ScriptedRunner runner = HappyRunner();
+  runner.answers[QueryLine(kQuery)] =
+      Exit(0, "//dcfs:foo_test\n//dcfs:data_test\n");
+  runner.test_results[kFirstSha] =
+      Exit(3,
+           "//dcfs:foo_test                   PASSED in 1s\n"
+           "//dcfs:data_test                  FAILED in 1s\n");
+  ASSERT_OK_AND_ASSIGN(Report report,
+                       Check(runner, {.first = "FIRST", .last = "LAST"}));
+  EXPECT_FALSE(report.Accepted());
+  EXPECT_THAT(report.reasons,
+              ElementsAre(HasSubstr("//dcfs:foo_test passed at the first "
+                                    "commit")));
+}
+
+TEST(CheckTest, ABuildFailureNamingNeitherATestFileNorATargetIsRefused) {
+  ScriptedRunner runner = HappyRunner();
+  runner.test_results[kFirstSha] = Exit(1, "ERROR: unrelated/BUILD:3: boom\n");
+  ASSERT_OK_AND_ASSIGN(Report report,
+                       Check(runner, {.first = "FIRST", .last = "LAST"}));
+  EXPECT_FALSE(report.Accepted());
+  EXPECT_THAT(report.reasons,
+              ElementsAre(HasSubstr("name no test file or target")));
+}
+
+TEST(CheckTest, TheReportQuotesTheBuildErrorsForTheReviewerToConfirm) {
+  ScriptedRunner runner = HappyRunner();
+  runner.test_results[kFirstSha] =
+      Exit(1,
+           "ERROR: dcfs/foo_test.cc:3:1: no member named 'Bar'\n"
+           "ERROR: dcfs/foo_test.cc:4:1: no member named 'Baz'\n"
+           "ERROR: a\nERROR: b\nERROR: c\nERROR: d\n");
+  ASSERT_OK_AND_ASSIGN(Report report,
+                       Check(runner, {.first = "FIRST", .last = "LAST"}));
+  EXPECT_THAT(report.at_first.errors, testing::SizeIs(5));
+  const std::string text = FormatReport(report);
+  EXPECT_THAT(text, HasSubstr("error: ERROR: dcfs/foo_test.cc:3:1"));
+  EXPECT_THAT(text, HasSubstr("confirm the error names a symbol or target "
+                              "the code commit adds"));
+}
+
+TEST(ParsePassedTest, ReadsPassedAndCachedTargets) {
+  EXPECT_THAT(ParsePassed("//a:t   PASSED in 1s\n"
+                          "//b:u   FAILED in 2s\n"
+                          "//c:v   (cached) PASSED in 0.1s\n"),
+              ElementsAre("//a:t", "//c:v"));
+}
+
+TEST(CheckErrorsTest, GitStatusFailing) {
+  ScriptedRunner runner = HappyRunner();
+  runner.answers["git status --porcelain"] = Exit(128, "not a repository");
+  EXPECT_THAT(Check(runner, {.first = "FIRST", .last = "LAST"}),
+              StatusIs(absl::StatusCode::kInternal, HasSubstr("exit 128")));
+}
+
+TEST(CheckErrorsTest, UnknownRevision) {
+  ScriptedRunner runner = HappyRunner();
+  runner.answers["git rev-parse --verify LAST^{commit}"] = Exit(128, "bad");
+  EXPECT_THAT(Check(runner, {.first = "FIRST", .last = "LAST"}),
+              StatusIs(absl::StatusCode::kInternal, HasSubstr("exit 128")));
+  EXPECT_THAT(runner.Checkouts(), IsEmpty());
+}
+
+TEST(CheckErrorsTest, UnreadableDiffTree) {
+  ScriptedRunner runner = HappyRunner();
+  runner.answers[DiffTree()] = Exit(0, "garbage\n");
+  EXPECT_THAT(
+      Check(runner, {.first = "FIRST", .last = "LAST"}),
+      StatusIs(absl::StatusCode::kInternal, HasSubstr("unreadable line")));
+}
+
+TEST(CheckErrorsTest, TestFileInNoBazelPackage) {
+  ScriptedRunner runner = HappyRunner();
+  runner.answers[absl::StrCat("git cat-file -e ", kFirstSha,
+                              ":dcfs/BUILD.bazel")] = Exit(128, "");
+  runner.answers[absl::StrCat("git cat-file -e ", kFirstSha, ":BUILD.bazel")] =
+      Exit(128, "");
+  EXPECT_THAT(Check(runner, {.first = "FIRST", .last = "LAST"}),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("no Bazel package")));
+}
+
+TEST(CheckErrorsTest, QueryThatFailsOutright) {
+  ScriptedRunner runner = HappyRunner();
+  runner.answers[QueryLine(kQuery)] = Exit(7, "server died");
+  EXPECT_THAT(Check(runner, {.first = "FIRST", .last = "LAST"}),
+              StatusIs(absl::StatusCode::kInternal, HasSubstr("exit 7")));
+  EXPECT_EQ(runner.Checkouts().back(), "git checkout -q step-x");
+}
+
+TEST(CheckErrorsTest, CheckoutOfTheFirstCommitFailsAndTheBranchIsRestored) {
+  ScriptedRunner runner = HappyRunner();
+  runner.failing_checkouts.insert(
+      absl::StrCat("git checkout -q --detach ", kFirstSha));
+  EXPECT_THAT(
+      Check(runner, {.first = "FIRST", .last = "LAST"}),
+      StatusIs(absl::StatusCode::kInternal, HasSubstr("cannot checkout")));
+  EXPECT_EQ(runner.Checkouts().back(), "git checkout -q step-x");
+}
+
+TEST(CheckErrorsTest, RestoringTheBranchFailsAfterASuccessfulCheck) {
+  ScriptedRunner runner = HappyRunner();
+  runner.failing_checkouts.insert("git checkout -q step-x");
+  EXPECT_THAT(
+      Check(runner, {.first = "FIRST", .last = "LAST"}),
+      StatusIs(absl::StatusCode::kInternal, HasSubstr("cannot checkout")));
+}
+
+TEST(CheckErrorsTest, RestoringFailsAfterBazelBroke) {
+  ScriptedRunner runner = HappyRunner();
+  runner.test_results[kFirstSha] = Exit(2, "FATAL: bazel crashed\n");
+  runner.failing_checkouts.insert("git checkout -q step-x");
+  EXPECT_THAT(Check(runner, {.first = "FIRST", .last = "LAST"}),
+              StatusIs(absl::StatusCode::kInternal,
+                       AllOf(HasSubstr("exit 2"),
+                             HasSubstr("restoring step-x failed"))));
 }
 
 TEST(FormatReportTest, QuotesTheFailingNamesForTheMergeRecord) {

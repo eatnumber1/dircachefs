@@ -39,13 +39,14 @@ bool IsTestFile(std::string_view path);
 // that failed, timed out or did not build), each once, in output order.
 std::vector<std::string> ParseFailures(std::string_view output);
 
+// The targets that passed, named by Bazel's summary lines (cached or not).
+std::vector<std::string> ParsePassed(std::string_view output);
+
 struct Options {
   std::string first;  // the slice's first commit (any revision git resolves)
   std::string last;   // the slice's last commit
   std::vector<std::string> bazel_flags;  // added to `bazel test`
 };
-
-enum class Verdict { kAccepted, kRejected };
 
 enum class Outcome { kNotRun, kPassed, kTestsFailed, kBuildFailed };
 
@@ -54,22 +55,24 @@ struct Stage {
   std::string commit;
   Outcome outcome = Outcome::kNotRun;
   std::vector<std::string> failing;
+  std::vector<std::string> passed;  // targets that passed (a mixed run)
+  std::vector<std::string> errors;  // the first of Bazel's ERROR: lines
 };
 
 struct Report {
-  Verdict verdict = Verdict::kRejected;
-  std::vector<std::string> reasons;  // why kRejected
+  std::vector<std::string> reasons;  // why the slice is rejected
   std::string first;                 // full commit ids
   std::string last;
-  std::vector<std::string> test_files;  // the first commit's files, as labels
-  std::vector<std::string> targets;     // the test targets that own them
+  std::vector<std::string> targets;  // the test targets that own them
   Stage at_first;
   Stage at_last;
+
+  bool Accepted() const { return reasons.empty(); }
 };
 
 // Checks the slice from the first commit to the last. Needs a clean work tree
 // and leaves it on the commit it started on. An error Status means the check
-// could not be made; a slice that fails it is a Report that is kRejected.
+// could not be made; a slice that fails it is a Report that is rejected.
 absl::StatusOr<Report> Check(CommandRunner &runner, const Options &options);
 
 // The report as the text a merge record quotes.
