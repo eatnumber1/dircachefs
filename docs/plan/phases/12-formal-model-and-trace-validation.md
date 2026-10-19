@@ -1098,3 +1098,10 @@ in `tla2tools.jar`). Items 1 to 3 come first.
 
 Owner: dcfs-protocol for items 5, 7, 11 and 12; dcfs-implementer for the
 others.
+
+**Split into reviewed slices (backlog order, russ, 2026-10-19: "Yes I approve
+proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
+- **12.27a** items 1 to 3.
+- **12.27b** items 4 to 6, 9 and 10.
+- **12.27c** items 7 and 8. Prerequisite: 12.26 (SYMMETRY).
+- **12.27d** items 11 and 12. Prerequisite: 25.46b.

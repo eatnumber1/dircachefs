@@ -1894,6 +1894,12 @@ draft's step, numbered 25.41 (the draft's working number was 25.34b, and
 - (c) Order: it lands before 25.35–25.38, so strong types and spans land once on the final interfaces.
 - (d) Owner: dcfs-protocol for sub-steps 6 and 7 (the fault and trace-validation tests touch the protocol's negative tests); dcfs-implementer otherwise.
 
+**Split into reviewed slices (backlog order, from backlog proposal 2,
+2026-10-18, approved by russ 2026-10-19 as a whole: "Yes I approve proposal 2
+as a whole."; `process.md` `rule-reviewed-slices`).** By library: 25.41a
+`BackingSyscalls`, 25.41b `LocalSyscalls`, 25.41c `ProcessSyscalls`, then the
+fault tests per the 6-test list in this section.
+
 ## 25.42 Pidfds over pids (russ, 2026-10-18; queued after the 2026-10-23 quota reset)
 
 Russ's rule (2026-10-18): "Prefer pidfds over plain pids"
@@ -2220,6 +2226,13 @@ attribution check covers them). Scripts under `tools/agents/` come with tests.
 
 *Test:* the scripts come with tests under `tools/agents/`.
 
+**Split into reviewed slices (backlog order, russ, 2026-10-19: "Yes I approve
+proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
+- **25.47a** hooks and the scoped style check.
+- **25.47b** skills.
+- **25.47c** scripts (merge lane, quota, census).
+- **25.47d** metrics.
+
 ## 25.48 Foreman single mode (russ, 2026-10-19; queued, not started)
 
 russ, 2026-10-19: "foreman's purpose was to have an orchestrator in Gemini
@@ -2242,6 +2255,10 @@ Owner: not yet assigned (the orchestrator chooses). Dependencies: none.
 
 *Test:* `//tools/agents:foreman_test` covers both modes and the
 `--single --read-only` combination.
+
+Process note (2026-10-19, from the slice 2 review): the implementer wrote
+slice 2's tests and code in one pass, so the failing-first evidence had to be
+recovered by running the tests against slice 1's code. Queued as 25.52.
 
 ## 25.50 `clerk-queue add` rejects flags (batch 35, 2026-10-19; queued)
 
@@ -2273,6 +2290,11 @@ Owner: not yet assigned (the orchestrator chooses). Dependencies: 25.45 item 2
 (merged b1349d6e).
 
 *Test:* a long line fails the CLI.
+
+Status (2026-10-19): before this step `tools/repo_shape.py` had no `main()` and
+checked nothing when run, so every "repo_shape clean" report from the CLI
+before 2026-10-19 was meaningless; only `//tools:repo_shape_test` checked. The
+slice review of 2026-10-19 is in `review-findings.tsv`.
 
 ## 25.49 Subagents delegate down
 
@@ -2368,3 +2390,26 @@ needs only the helpers above plus what is named):
 8. Host-side `test/qemu/*_test.sh` (run_qemu_verdict_test 599, run_qemu_cost_test
    396, strace_lib_test 263, xfstests_gate_test 243, ...): Python or C++, not
    part of this family.
+
+## 25.52 Mechanical test-first evidence (orchestrator, 2026-10-19; queued)
+
+Orchestrator's proposal, not russ's words. Source: 25.48 on 2026-10-19, where
+the implementer wrote tests and code in one pass twice in one step, and the
+failing-first evidence had to be recovered by hand.
+
+1. Each slice's first commit adds or changes only tests.
+2. A tool, C++ preferred (`docs/plan/process.md` and russ's C++ rule) or a
+   small addition to existing tooling, runs at merge. It checks that the
+   slice's test targets FAIL at that first commit and PASS at the slice's last
+   commit, and records the failing test names in the merge record.
+3. Commits on main stay green: the orchestrator cherry-picks the slice squashed
+   or fast-forwards only after the check. The step decides which.
+
+Placed in M0 right after 25.49 items 2-4 (`README.md`, Queue item 2a).
+
+Owner: not yet assigned (the orchestrator chooses). Dependencies: 25.49d
+merged (da80d74e).
+
+*Test:* the tool fails a slice whose test targets pass at its first commit, and
+accepts a slice whose targets fail there and pass at its last commit.
+

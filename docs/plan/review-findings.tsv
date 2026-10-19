@@ -350,3 +350,15 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-19	25.49d	1	dcfs-style-reviewer/sonnet/high	nit	correctness	-	ledger row	duration_s is empty	could	fixed/merged da80d74e
 2026-10-19	25.49d	1	dcfs-style-reviewer/sonnet/high	nit	docs	-	docs	doc duplication	no	fixed/merged da80d74e
 2026-10-19	25.49d	1	dcfs-style-reviewer/sonnet/high	nit	docs	-	foreman tests	question: success fixture joins the error fixture: yes	no	answered; fixed/merged da80d74e
+2026-10-19	25.51	1	Sonnet	should	test-gap	-	tools/repo_shape_test.py	CLI test called main(), not the __main__ entry	no	fixed/merged 64eadc13
+2026-10-19	25.51	1	Sonnet	should	dead-code	1.10a	tools/repo_shape.py	TRACKED_CHECKS only for one test	could	fixed/merged 64eadc13
+2026-10-19	25.51	1	Sonnet	should	contract-claim	1.9	tools/repo_shape.py	docstring 'every rule above' omitted five checks	no	fixed/merged 64eadc13
+2026-10-19	25.51	1	Sonnet	nit	test-gap	-	tools/repo_shape_self_check_test.py	one-list test	no	dropped by orchestrator
+2026-10-19	25.51	1	Sonnet	nit	test-shape	-	tools/repo_shape_test.py	assertIn on whole stdout	could	fixed/merged 64eadc13
+2026-10-19	25.48	1	Sonnet	nit	test-shape	-	tools/agents/foreman_test.py:741	test name claims JOB-COMPLETE handling, covers only exit_early	no	fixed in slice 2
+2026-10-19	25.48	1	Sonnet	nit	style-other	-	tools/agents/foreman.py:554	mode conditional repeated	could	fixed in slice 2
+2026-10-19	25.48	2	Sonnet	should	test-gap	-	tools/agents/foreman_test.py	read-only test did not prove no git command runs; use git_bin=no-such-git	no	fixed before merge
+2026-10-19	25.48	2	Sonnet	should	dead-code	1.10a	tools/agents/foreman.py	duplicate read_only-requires-single guard in run_foreman	could	fixed before merge
+2026-10-19	25.48	2	Sonnet	should	test-gap	-	tools/agents/foreman_test.py	summary absences unchecked	no	fixed before merge
+2026-10-19	25.48	2	Sonnet	should	test-gap	-	tools/agents/foreman_test.py	read-only failure path and main() read-only success path untested	no	fixed before merge
+2026-10-19	25.48	2	Sonnet	nit	docs	1.9	tools/agents/foreman.py	echo docstring line	no	fixed before merge

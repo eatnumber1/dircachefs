@@ -252,6 +252,10 @@ step makes the space explicit and checks all of it differentially.
 
 Owner: dcfs-implementer (medium), then a review against the kernel's rules.
 
+**Split into reviewed slices (backlog order, russ, 2026-10-19: "Yes I approve
+proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).** By operation
+family in the cross product (the list in this section).
+
 ## 17.2g CAP_SYS_RESOURCE reaches every caller through passthrough (found by 17.2e's round-3 review, 2026-10-18; queued, not started)
 
 Passthrough writes run with the daemon's CAP_SYS_RESOURCE: the backing file
