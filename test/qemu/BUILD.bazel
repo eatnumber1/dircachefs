@@ -171,6 +171,24 @@ qemu_test(
     timeout = "moderate",
 )
 
+# Step 26.44: a guest boots under forced TCG (guest/tcg_boot_test.cc), the
+# fallback for hosts without a usable /dev/kvm. TCG is 2-12x slower than KVM,
+# so the tier is medium; the verdict is an event, never a time.
+qemu_cc_test(
+    name = "tcg_boot_test",
+    size = "medium",
+    timeout = "moderate",
+    srcs = ["guest/tcg_boot_test.cc"],
+    env = {"DCFS_FORCE_TCG": "1"},
+    deps = [
+        "//dcfs/testonly:assert_ok_and_assign",
+        "//dcfs/testonly:files",
+        "@absl//absl/status:statusor",
+        "@absl//absl/status:status_matchers",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # Step 25.33b: waitexit tested exactly with pidfd_open and poll fakes.
 qemu_cc_test(
     name = "waitexit_test",

@@ -74,6 +74,7 @@ def qemu_cc_test(
         asan_mem = None,
         modules = [],
         dcfs = False,
+        env = {},
         **kwargs):
     """Declares a dcfs unit test that boots the QEMU guest to run it.
 
@@ -106,6 +107,8 @@ def qemu_cc_test(
             checking build for the small and medium tiers, the plain one
             for the others, as qemu_test does), for a test that mounts it
             (test/qemu/guest/guest.h).
+        env: environment variables of the test run on the host, so of
+            run-qemu.sh (e.g. DCFS_FORCE_TCG=1 to boot under TCG).
         **kwargs: forwarded to the underlying cc_binary (e.g. extra
             copts).
     """
@@ -216,6 +219,7 @@ def qemu_cc_test(
         ] + disk_args,
         # run-qemu.sh --unit: -smp 1 and the allowance above.
         tags = ["no-sandbox", "requires-kvm", "cpu:1", "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)] + tags,
+        env = env,
         size = size,
         timeout = timeout,
     )
