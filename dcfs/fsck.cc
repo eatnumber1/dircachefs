@@ -4,8 +4,11 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/file.h>
-#include <sys/socket.h>
-#include <unistd.h>
+// WIFEXITED, WEXITSTATUS, WIFSIGNALED and WTERMSIG: misc-include-cleaner
+// attributes the POSIX macros to this C header (docs/style.md, "A POSIX
+// macro").
+// NOLINTNEXTLINE(modernize-deprecated-headers): the macros are defined here.
+#include <stdlib.h>
 
 #include <cerrno>
 #include <cstddef>
@@ -33,9 +36,9 @@
 #include "dcfs/sql_statements.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
+#include "dcfs/subprocess.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
-#include "dcfs/syscalls_process.h"
 #include "dcfs/version.h"
 #include "sqlite3.h"
 
@@ -48,56 +51,24 @@ constexpr char kFindmntProgram[] = "/bin/findmnt";
 constexpr char kUsage[] =
     "usage: fsck.dcfs [-apynf] [-C[FD]] [-o OPTIONS] DEVICE";
 
-// Everything `fd` yields until its end.
-std::string ReadAll(int fd) {
-  std::string text;
-  char buf[1024];
-  while (true) {
-    absl::StatusOr<size_t> n = syscalls::read(fd, buf, sizeof(buf));
-    if (!n.ok() || *n == 0) break;
-    text.append(buf, *n);
-  }
-  return text;
-}
-
 // Runs `path` as `argv0 words...`, its standard output collected in `captured`
 // when it is given (standard input and error are ours). The exit status, as
 // fsck(8) would see it from a checker: the program's own; kFsckCancelled if it
 // died of SIGINT; kFsckOperational for any other signal.
-absl::StatusOr<int> RunProgram(const std::string &path,
+absl::StatusOr<int> RunChecker(const std::string &path,
                                const std::string &argv0,
                                const std::vector<std::string> &words,
                                std::string *captured) {
-  std::pair<FileDescriptor, FileDescriptor> pipe;
-  if (captured != nullptr) {
-    ASSIGN_OR_RETURN(pipe, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
-  }
-  ASSIGN_OR_RETURN(pid_t child, syscalls::fork());
-  if (child == 0) {
-    if (captured != nullptr &&
-        !syscalls::dup2(*pipe.second, STDOUT_FILENO).ok()) {
-      syscalls::_exit(126);
-    }
-    std::vector<std::string> argv = {argv0};
-    argv.insert(argv.end(), words.begin(), words.end());
-    syscalls::execv(path, argv).IgnoreError();
-    syscalls::_exit(127);
-  }
-  if (captured != nullptr) {
-    pipe.second.Close().IgnoreError();
-    *captured = ReadAll(*pipe.first);
-  }
-  int wait_status = 0;
-  while (true) {
-    absl::StatusOr<pid_t> reaped = syscalls::waitpid(child, &wait_status, 0);
-    if (reaped.ok()) break;
-    if (StatusToErrno(reaped.status()) != EINTR) {
-      return absl::StatusBuilder(reaped.status())
-             << "while waiting for " << path;
-    }
-  }
-  if (WIFEXITED(wait_status)) return WEXITSTATUS(wait_status);
-  return WTERMSIG(wait_status) == SIGINT ? kFsckCancelled : kFsckOperational;
+  std::vector<std::string> argv = {argv0};
+  argv.insert(argv.end(), words.begin(), words.end());
+  ASSIGN_OR_RETURN(
+      ProgramRun run,
+      RunProgram(path, argv,
+                 captured != nullptr ? Capture::kStdout : Capture::kNothing));
+  if (captured != nullptr) *captured = std::move(run.output);
+  if (WIFEXITED(run.wait_status)) return WEXITSTATUS(run.wait_status);
+  return WTERMSIG(run.wait_status) == SIGINT ? kFsckCancelled
+                                             : kFsckOperational;
 }
 
 // The options of the fstab line whose source is `device`, as findmnt prints
@@ -105,7 +76,7 @@ absl::StatusOr<int> RunProgram(const std::string &path,
 absl::StatusOr<std::string> FstabOptions(const std::string &device) {
   std::string out;
   absl::StatusOr<int> ran =
-      RunProgram(kFindmntProgram, "findmnt",
+      RunChecker(kFindmntProgram, "findmnt",
                  {"--fstab", "--noheadings", "--raw", "--output", "OPTIONS",
                   "--source", device},
                  &out);

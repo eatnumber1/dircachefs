@@ -325,6 +325,40 @@ cc_library(
     ],
 )
 
+# Runs a program and reads its output (fsck.dcfs, tools/process_runner).
+cc_library(
+    name = "subprocess",
+    srcs = ["subprocess.cc"],
+    hdrs = ["subprocess.h"],
+    visibility = [
+      "//tools:__pkg__",
+    ],
+    deps = [
+      ":status",
+      ":syscalls",
+      ":syscalls_backing",
+      ":syscalls_process",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+    ],
+)
+
+qemu_cc_test(
+    name = "subprocess_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["subprocess_test.cc"],
+    deps = [
+      ":subprocess",
+      ":syscalls",
+      ":syscalls_backing",
+      "//dcfs/testonly:assert_ok_and_assign",
+      "@absl//absl/status:status_matchers",
+      "@absl//absl/status:statusor",
+      "@googletest//:gtest_main",
+    ],
+)
+
 qemu_cc_test(
     name = "syscalls_process_test",
     size = "small",
@@ -868,9 +902,9 @@ cc_library(
       ":sql_statements",
       ":sqlite",
       ":status",
+      ":subprocess",
       ":syscalls",
       ":syscalls_backing",
-      ":syscalls_process",
       ":version",
       "@absl//absl/log",
       "@absl//absl/status",
