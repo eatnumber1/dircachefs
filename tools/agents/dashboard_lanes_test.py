@@ -1214,6 +1214,42 @@ class DispatchLedgerTest(Fixture):
         rows = self.ledger_rows()
         self.assertEqual(rows[0]["task_class"], "protocol")
 
+    def test_ledger_by_parent_sums_own_and_delegated_tokens(self):
+        self.run_cmd(["ledger", "add", "step=25.49", "agent=dcfs-implementer",
+                      "tokens=1000"])
+        self.run_cmd(["ledger", "add", "step=25.49", "agent=dcfs-implementer",
+                      "tokens=500"])
+        self.run_cmd(["ledger", "add", "step=25.97", "agent=agy",
+                      "tokens=300", "notes=foreman mode=single; parent=25.49; "
+                      "worker=300"])
+        self.run_cmd(["ledger", "add", "step=25.98", "agent=agy",
+                      "tokens=200", "notes=foreman mode=single; parent=25.49"])
+        self.run_cmd(["ledger", "add", "step=26.1", "agent=dcfs-mechanical",
+                      "tokens=400"])
+        out, err = self.run_cmd(["ledger", "by-parent"])
+        self.assertEqual(err, "")
+        self.assertEqual(out.splitlines(), [
+            "step\town_tokens\tdelegated_tokens\tdelegated_rows"
+            "\tdelegated_pct",
+            "25.49\t1500\t500\t2\t25.0",
+            "26.1\t400\t0\t0\t0.0",
+        ])
+
+    def test_ledger_by_parent_round_trips_foreman_notes(self):
+        notes = "foreman mode=orchestrator; parent=25.49; worker=1; review1=2"
+        self.run_cmd(["ledger", "add", "step=x", "tokens=7",
+                      "notes=" + notes])
+        row = self.ledger_rows()[0]
+        self.assertEqual(dashboard_lanes.ledger_parent(row), "25.49")
+        self.assertEqual(dashboard_lanes.ledger_parent({"notes": "a; b"}), "")
+        self.assertEqual(
+            dashboard_lanes.ledger_parent({"notes": "noparent=3"}), "")
+
+    def test_ledger_by_parent_one_step_lists_it_even_without_rows(self):
+        self.run_cmd(["ledger", "add", "step=1.1", "tokens=5"])
+        out, _ = self.run_cmd(["ledger", "by-parent", "9.9"])
+        self.assertEqual(out.splitlines()[1:], ["9.9\t0\t0\t0\t0.0"])
+
     def test_ledger_unknown_subcommand(self):
         out, err = self.run_cmd(["ledger", "bogus"])
         self.assertEqual(out, "")

@@ -22,6 +22,7 @@ this directory for the hook configuration.
     dashboard_lanes.py ledger set ...  fill outcome fields at merge time
     dashboard_lanes.py ledger backfill-tokens  fill empty tokens
     dashboard_lanes.py ledger restore-missing [--since ISO]  re-add lost rows
+    dashboard_lanes.py ledger by-parent [STEP]  own vs delegated tokens
     dashboard_lanes.py clerk-queue add TEXT...  queue a bookkeeping item
     dashboard_lanes.py clerk-queue drain        print the clerk brief, empty it
 
@@ -1448,11 +1449,56 @@ def ledger_set(env, args):
     return ""
 
 
+# foreman writes "parent=STEP" as one "; "-separated token of a row's notes.
+PARENT_TOKEN = re.compile(r"(?:^|; )parent=([^;]+)")
+
+
+def ledger_parent(row):
+    """Returns the step whose subagent delegated this row's job, or ""."""
+    m = PARENT_TOKEN.search(row.get("notes", ""))
+    return m.group(1).strip() if m else ""
+
+
+def ledger_by_parent(env, args):
+    """Per step: its own rows' tokens and its delegated rows' tokens.
+
+    A row naming a parent in its notes is delegated work and counts for
+    that parent; any other row counts for its own step. With STEP, only
+    that step is listed. Tokens are summed as the ledger holds them (cache
+    reads included), so Gemini and Claude tokens are in the same column
+    but not the same price.
+    """
+    if len(args) > 1:
+        raise ValueError("usage: ledger by-parent [STEP]")
+    totals = {}
+    for r in read_ledger(env.ledger_path()):
+        parent = ledger_parent(r)
+        step = parent or r.get("step", "")
+        t = totals.setdefault(step, [0, 0, 0])
+        tokens = int(r.get("tokens") or 0)
+        if parent:
+            t[1] += tokens
+            t[2] += 1
+        else:
+            t[0] += tokens
+    if args:
+        totals.setdefault(args[0], [0, 0, 0])
+        totals = {args[0]: totals[args[0]]}
+    lines = ["step\town_tokens\tdelegated_tokens\tdelegated_rows"
+             "\tdelegated_pct\n"]
+    for step in sorted(totals):
+        own, delegated, count = totals[step]
+        pct = 100.0 * delegated / (own + delegated) if own + delegated else 0.0
+        lines.append("%s\t%d\t%d\t%d\t%.1f\n"
+                     % (step, own, delegated, count, pct))
+    return "".join(lines)
+
+
 def ledger(env, args):
     if not args:
         raise ValueError(
-            "ledger requires a subcommand (add, set, backfill-tokens or "
-            "restore-missing)")
+            "ledger requires a subcommand (add, set, backfill-tokens, "
+            "restore-missing or by-parent)")
     sub = args[0]
     if sub == "add":
         return ledger_add(env, args[1:])
@@ -1462,6 +1508,8 @@ def ledger(env, args):
         return ledger_backfill_tokens(env, args[1:])
     elif sub == "restore-missing":
         return ledger_restore_missing(env, args[1:])
+    elif sub == "by-parent":
+        return ledger_by_parent(env, args[1:])
     else:
         raise ValueError("unknown ledger subcommand: %r" % sub)
 
