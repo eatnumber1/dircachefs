@@ -5,23 +5,48 @@
 
 #include <fcntl.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 // WIFEXITED, WEXITSTATUS, WIFSIGNALED and WTERMSIG: misc-include-cleaner
 // attributes the POSIX macros to this C header (docs/style.md, "A POSIX
 // macro").
 // NOLINTNEXTLINE(modernize-deprecated-headers): the macros are defined here.
 #include <stdlib.h>
 
+#include <cerrno>
+#include <cstddef>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
 #include "dcfs/fd.h"
 #include "dcfs/syscalls.h"
-#include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+
+extern "C" {
+ssize_t __real_read(int fd, void *buf, size_t count);
+}
+
+namespace {
+
+// The error the next read answers with (0: the real call). The parent's read
+// of a child's output fails the way a socket can (EIO).
+int g_read_error = 0;
+
+}  // namespace
+
+extern "C" {
+ssize_t __wrap_read(int fd, void *buf, size_t count) {
+  if (g_read_error != 0) {
+    errno = std::exchange(g_read_error, 0);
+    return -1;
+  }
+  return __real_read(fd, buf, count);
+}
+}
 
 namespace dcfs {
 namespace {
@@ -86,11 +111,19 @@ TEST(RunProgramTest, AProgramThatCannotBeExecutedExits127) {
   EXPECT_EQ(WEXITSTATUS(run.wait_status), 127);
 }
 
+// The child has far more output than a socket holds, so it blocks writing it;
+// once the read has failed nobody reads, and the child must be told (EPIPE)
+// rather than waited for. Without that the wait never ends.
+TEST(RunProgramTest, AFailedReadOfPendingOutputStillEndsTheChild) {
+  g_read_error = EIO;
+  EXPECT_THAT(RunSh("head -c 300000 /dev/zero", Capture::kStdout), Not(IsOk()));
+}
+
 TEST(ReadAllTest, ReadsEverythingUpToTheEnd) {
   ASSERT_OK_AND_ASSIGN(auto pair,
                        syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
   const std::string text(10000, 'z');
-  ASSERT_THAT(syscalls::write(*pair.first, text.data(), text.size()), IsOk());
+  ASSERT_THAT(syscalls::send(*pair.first, text.data(), text.size(), 0), IsOk());
   pair.first.Close().IgnoreError();
   EXPECT_THAT(ReadAll(*pair.second), ::absl_testing::IsOkAndHolds(text));
 }
@@ -98,7 +131,7 @@ TEST(ReadAllTest, ReadsEverythingUpToTheEnd) {
 TEST(ReadAllTest, AFailedReadIsReturnedNotTakenForTheEnd) {
   // Reading a directory fails with EISDIR.
   ASSERT_OK_AND_ASSIGN(FileDescriptor dir,
-                       syscalls::openat(AT_FDCWD, "/", O_RDONLY | O_DIRECTORY));
+                       syscalls::open("/", O_RDONLY | O_DIRECTORY));
   EXPECT_THAT(ReadAll(*dir), Not(IsOk()));
 }
 

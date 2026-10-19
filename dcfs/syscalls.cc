@@ -344,6 +344,12 @@ absl::StatusOr<size_t> send(int fd, const void *buf, size_t count, int flags) {
   return static_cast<size_t>(n);
 }
 
+absl::StatusOr<size_t> read_own(int fd, void *buf, size_t count) {
+  const ssize_t n = ::read(fd, buf, count);
+  if (n == -1) return ErrnoToStatus(errno, absl::StrCat("read(", fd, ")"));
+  return static_cast<size_t>(n);
+}
+
 void openlog(const char *ident, int option, int facility) {
   ::openlog(ident, option, facility);
 }

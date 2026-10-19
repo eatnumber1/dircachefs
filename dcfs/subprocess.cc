@@ -18,7 +18,6 @@
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
-#include "dcfs/syscalls_backing.h"
 #include "dcfs/syscalls_process.h"
 
 namespace dcfs {
@@ -27,7 +26,7 @@ absl::StatusOr<std::string> ReadAll(int fd) {
   std::string text;
   char buffer[4096];
   while (true) {
-    ASSIGN_OR_RETURN(size_t n, syscalls::read(fd, buffer, sizeof(buffer)));
+    ASSIGN_OR_RETURN(size_t n, syscalls::read_own(fd, buffer, sizeof(buffer)));
     if (n == 0) return text;
     text.append(buffer, n);
   }
@@ -56,6 +55,8 @@ absl::StatusOr<ProgramRun> RunProgram(std::string_view path,
   }
   ASSIGN_OR_RETURN(pid_t child, syscalls::fork());
   if (child == 0) {
+    // dup2 can fail even for open descriptors (EBUSY, racing an open of the
+    // new one, on Linux): the program does not run, as the doc says.
     if (!Redirect(capture, *pipe.second).ok()) syscalls::_exit(126);
     syscalls::execv(path, argv).IgnoreError();
     syscalls::_exit(127);
@@ -69,10 +70,14 @@ absl::StatusOr<ProgramRun> RunProgram(std::string_view path,
       run.output = *std::move(output);
     } else {
       read = output.status();
+      // A child with output pending is blocked writing it; it ends only when
+      // nobody can read it any more (EPIPE).
+      pipe.first.Close().IgnoreError();
     }
   }
   while (true) {
-    absl::StatusOr<pid_t> reaped = syscalls::waitpid(child, &run.wait_status, 0);
+    absl::StatusOr<pid_t> reaped =
+        syscalls::waitpid(child, &run.wait_status, 0);
     if (reaped.ok()) break;
     if (StatusToErrno(reaped.status()) != EINTR) {
       return absl::StatusBuilder(reaped.status())

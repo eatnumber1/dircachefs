@@ -336,8 +336,7 @@ cc_library(
     deps = [
       ":status",
       ":syscalls",
-      ":syscalls_backing",
-      ":syscalls_process",
+            ":syscalls_process",
       "@absl//absl/status",
       "@absl//absl/status:statusor",
     ],
@@ -348,10 +347,10 @@ qemu_cc_test(
     size = "small",
     timeout = "short",
     srcs = ["subprocess_test.cc"],
+    linkopts = ["-Wl,--wrap=read"],
     deps = [
       ":subprocess",
       ":syscalls",
-      ":syscalls_backing",
       "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/status:status_matchers",
       "@absl//absl/status:statusor",

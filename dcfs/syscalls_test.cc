@@ -653,6 +653,27 @@ TEST(SyscallsWrapperTest, SocketpairCarriesBytesBothWays) {
   EXPECT_EQ(std::string_view(buf, n), hello);
 }
 
+TEST(SyscallsWrapperTest, ReadOwnReadsWhatWasSent) {
+  ASSERT_OK_AND_ASSIGN(auto pair,
+                       syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  ASSERT_THAT(syscalls::send(*pair.first, "hello", 5, 0), IsOk());
+  char buf[16];
+  ASSERT_OK_AND_ASSIGN(size_t n,
+                       syscalls::read_own(*pair.second, buf, sizeof(buf)));
+  EXPECT_EQ(std::string_view(buf, n), "hello");
+  pair.first.Close().IgnoreError();
+  EXPECT_THAT(syscalls::read_own(*pair.second, buf, sizeof(buf)),
+              IsOkAndHolds(0u));
+}
+
+TEST(SyscallsWrapperTest, ReadOwnOfADirectoryIsAStatus) {
+  ASSERT_OK_AND_ASSIGN(FileDescriptor dir,
+                       syscalls::open("/", O_RDONLY | O_DIRECTORY));
+  char buf[16];
+  EXPECT_EQ(StatusToErrno(syscalls::read_own(*dir, buf, sizeof(buf)).status()),
+            EISDIR);
+}
+
 TEST(SyscallsWrapperTest, SendOnAClosedPeerIsAStatusNotASignal) {
   ASSERT_OK_AND_ASSIGN(auto pair,
                        syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));

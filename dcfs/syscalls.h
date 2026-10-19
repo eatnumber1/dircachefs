@@ -153,6 +153,12 @@ absl::StatusOr<std::pair<FileDescriptor, FileDescriptor>> socketpair(
 // never SIGPIPE, if `flags` has MSG_NOSIGNAL.
 absl::StatusOr<size_t> send(int fd, const void *buf, size_t count, int flags);
 
+// read(2) of a descriptor that is dcfs's own (a child's pipe, a socket), not a
+// file of the backing filesystem: it passes no backing door
+// (backing_door.h), so it differs from syscalls_backing.h's read in name only.
+// The bytes read; 0 at the end.
+absl::StatusOr<size_t> read_own(int fd, void *buf, size_t count);
+
 // openlog(3) and syslog(3): `message` is logged verbatim (a "%s" format).
 // `ident` must outlive the process's logging (a literal).
 void openlog(const char *ident, int option, int facility);
