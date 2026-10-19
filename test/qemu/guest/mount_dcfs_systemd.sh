@@ -28,13 +28,17 @@ FAILED=0
 
 BOOT=$(sed -n 's/.*\bdcfs_boot=\([^ ]*\).*/\1/p' /proc/cmdline)
 BOOT=${BOOT:-1}
-# The backing disks start at vda: a microvm guest sees at most four virtio
-# disks (a fifth is not probed, measured 2026-10-09), and the image is the
-# fourth. The kernel mounts the xfs and the btrfs: the image has no mkfs
+# The backing disks are SCSI disks behind one virtio-scsi controller: a microvm
+# guest has four usable virtio-mmio devices (the fifth shares the RTC's
+# interrupt and is not probed, measured 2026-10-09), and the image, the
+# controller and the coverage disk of `bazel coverage` take three of them.
+# They are found by LUN, as /dev/dcfs-scsi/sd<letter> (guest/init): the
+# kernel's own names follow its asynchronous probes, and a reboot can swap sdb
+# and sdc. The kernel mounts the xfs and the btrfs: the image has no mkfs
 # tools, run-qemu.sh made them.
-DEV=/dev/vda # ext4
-DEV_XFS=/dev/vdb
-DEV_BTRFS=/dev/vdc
+DEV=/dev/dcfs-scsi/sda # ext4
+DEV_XFS=/dev/dcfs-scsi/sdb
+DEV_BTRFS=/dev/dcfs-scsi/sdc
 CACHE=/var/cache/dcfs
 OUT=/tmp/out
 SRC=/srv/live # the bind form's directory
@@ -247,7 +251,7 @@ reboot_clean_check() {
 # --- boot 1 ---------------------------------------------------------------
 
 boot1() {
-	# The fixtures: an ext4 on vda (a virtio disk, as a real machine's
+	# The fixtures: an ext4 on sda (a SCSI disk, as a real machine's
 	# data disk) with a directory for the nested mount, a directory for the
 	# bind form, one nested under it.
 	restore_helpers
