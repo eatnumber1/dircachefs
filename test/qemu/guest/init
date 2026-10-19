@@ -145,6 +145,9 @@ for scsi_disk in /sys/block/sd*; do
   scsi_lun=$(readlink "$scsi_disk/device")
   scsi_lun=${scsi_lun##*:}
   mkdir -p /dev/dcfs-scsi
+  # The letter of the LUN: $((97 + scsi_lun)) is its ASCII code ('a' is 97), the
+  # inner printf makes that an octal escape (LUN 3: 100 -> \144), the outer one
+  # prints the character: LUN 0 is sda, LUN 3 is sdd.
   # shellcheck disable=SC2059 # the octal escape is the letter
   ln -s "/dev/${scsi_disk##*/}" "/dev/dcfs-scsi/sd$(printf "\\$(printf %03o $((97 + scsi_lun)))")"
 done

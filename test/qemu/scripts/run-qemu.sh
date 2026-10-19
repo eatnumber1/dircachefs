@@ -639,8 +639,8 @@ fi
 IMGDIR="${KEEP_DISKS:-$WORKDIR}"
 mkdir -p "$IMGDIR"
 
-# make_image IMAGE FSTYPE SIZE MKFS-OPTIONS: a sparse file of SIZE, formatted;
-# one shared by the virtio-blk and the SCSI disks.
+# make_image IMAGE FSTYPE SIZE MKFS-OPTIONS: a sparse file of SIZE, formatted,
+# unless --keep-disks keeps an earlier boot's.
 make_image() {
 	img=$1
 	fstype=$2
@@ -686,9 +686,8 @@ done
 
 # --- SCSI disks: one virtio-scsi controller (one virtio-mmio device, whatever
 # the number of disks) with a LUN per disk, the letter's ('a' is 0). Only the
-# controller takes a
-# virtio-mmio slot: the microvm has four usable, the fifth device's interrupt
-# is the RTC's (test/qemu/README.md, "SCSI disks"). ------------------------
+# controller takes a virtio-mmio slot: the microvm has four usable, the fifth
+# device's interrupt is the RTC's (test/qemu/README.md, "SCSI disks"). ------
 if [ -s "$scsi_specs_file" ]; then
 	drive_args="$drive_args -device virtio-scsi-device,id=scsi0"
 	for lun in $(cut -d: -f1 "$scsi_specs_file" | sort -n); do
