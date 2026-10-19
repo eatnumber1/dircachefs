@@ -236,7 +236,9 @@ id	dispatched	step	task_class	agent	model	effort	tokens	duration_s	rounds	blocke
     tokens (rows with no `parent=` token), the tokens of foreman rows
     delegated by it (`parent=STEP`), the number of those rows and the
     delegated share. The share is of tokens, not of cost: own rows are
-    Claude's and delegated rows Gemini's. With STEP only that step is listed
+    mostly Claude's and delegated rows Gemini's, which are priced
+    differently; the report does not split by the agent column. With STEP
+    only that step is listed
     (all zero if it has no rows). Compare steps with and without delegation.
   - `dashboard_lanes.py ledger restore-missing [--since ISO]` rebuilds rows
     lost from the ledger (for example by a `git reset --hard` over
@@ -320,22 +322,24 @@ How to use it as an agent (when, quota, prompt, ledger, report) is the
 Usage:
 
 ```bash
-python3 -I tools/agents/foreman.py STEP LANE BRANCH PROMPT_FILE [--model M] [--review-model M] [--out DIR]
+python3 -I tools/agents/foreman.py STEP LANE BRANCH PROMPT_FILE [--model M] [--review-model M] [--out DIR] \
+    [--parent S] [--min-weekly-pct N]
 ```
 
 Or via Bazel:
 
 ```bash
-bazel run //tools/agents:foreman -- STEP LANE BRANCH PROMPT_FILE [--model M] [--review-model M] [--out DIR]
+bazel run //tools/agents:foreman -- STEP LANE BRANCH PROMPT_FILE [--model M] [--review-model M] [--out DIR] \
+    [--parent S] [--min-weekly-pct N]
 ```
 
 Single mode and read-only mode:
 
 ```bash
 python3 -I tools/agents/foreman.py STEP LANE BRANCH PROMPT_FILE --single \
-    [--model M] [--out DIR]
+    [--model M] [--out DIR] [--parent S] [--min-weekly-pct N]
 python3 -I tools/agents/foreman.py STEP DIR PROMPT_FILE --single --read-only \
-    [--model M] [--out DIR]
+    [--model M] [--out DIR] [--parent S] [--min-weekly-pct N]
 ```
 
 - `STEP` (required): name of the step (e.g. `25.33`).
@@ -367,7 +371,7 @@ python3 -I tools/agents/foreman.py STEP DIR PROMPT_FILE --single --read-only \
   the lane, foreman reads `agy -p /usage` and, when the Gemini weekly pool has
   less than N percent left, or the meter cannot be read (the weekly cell must
   be a whole-number percent), prints why on stderr and exits 2. Nothing else
-  happens: no branch, no output files, no ledger row. A refusal is reported,
+  happens: no branch, no --out directory, no ledger row. A refusal is reported,
   never retried. Callers size N to the job.
 - `--out DIR`: output directory where `.jsonl`, `.out`, usage readings,
   `summary.md`, `tokens.json` and (read-only mode) `report.md` are saved

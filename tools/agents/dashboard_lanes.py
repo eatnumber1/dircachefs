@@ -1465,9 +1465,9 @@ def ledger_by_parent(env, args):
     A row naming a parent in its notes is delegated work and counts for
     that parent; any other row counts for its own step. With STEP, only
     that step is listed. Tokens are summed as the ledger holds them (cache
-    reads included). delegated_pct is a token share, not a cost share:
-    the ledger is not split by agent, and by construction own rows are
-    Claude's and delegated rows are Gemini's, which are priced differently.
+    reads included). delegated_pct is a token share, not a cost share: own
+    rows are mostly Claude's and delegated rows Gemini's, which are priced
+    differently; this report does not split by the agent column.
     """
     if len(args) > 1:
         raise ValueError("usage: ledger by-parent [STEP]")

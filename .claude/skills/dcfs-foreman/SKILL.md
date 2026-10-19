@@ -75,6 +75,9 @@ delegate and say so in your report.
    gets a throwaway branch; ignore it.
 8. **The ledger row is foreman's.** It adds one row for the run (step as
    you passed it, `agent=agy`, tokens, per-session breakdown in `notes`).
+   `STEP` is the plan step the chunk serves and names the output directory;
+   `PARENT_STEP` is your own step, normally equal to `STEP` for a subagent
+   delegating from its own step.
    Pass `--parent PARENT_STEP` (your own plan step) on every delegation:
    foreman writes it into `notes` as the token `parent=PARENT_STEP`, a
    stable contract that `dashboard_lanes.py ledger by-parent [STEP]` reads

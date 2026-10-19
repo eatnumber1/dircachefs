@@ -265,14 +265,13 @@ def quota_refusal(usage_text, min_weekly_pct):
   if pct is None:
     return (
         "cannot read the Gemini weekly pool from the usage meter "
-        f"({usage_text.strip() or 'no output'}); not starting. Rerun with "
-        "--min-weekly-pct 0 to start anyway."
+        f"({usage_text.strip() or 'no output'}); the pool is taken to be too "
+        "low for this job; not starting."
     )
   if pct < min_weekly_pct:
     return (
         f"Gemini weekly pool has {pct}% left, under --min-weekly-pct "
-        f"{min_weekly_pct}; not starting. Wait for the reset or do the work "
-        "yourself."
+        f"{min_weekly_pct}: the pool is too low for this job; not starting."
     )
   return None
 
@@ -596,7 +595,6 @@ def run_foreman(
     review_model = model
   if not out_dir:
     out_dir = default_out_dir(step, environ=environ)
-  os.makedirs(out_dir, exist_ok=True)
 
   with open(prompt_file, "r", encoding="utf-8") as f:
     worker_prompt = f.read()
@@ -606,6 +604,8 @@ def run_foreman(
   if refusal:
     print(f"foreman: {refusal}", file=sys.stderr)
     return 2
+
+  os.makedirs(out_dir, exist_ok=True)
 
   base = None
   if not read_only:

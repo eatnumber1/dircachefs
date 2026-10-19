@@ -1235,7 +1235,7 @@ class DispatchLedgerTest(Fixture):
             "26.1\t400\t0\t0\t0.0",
         ])
 
-    def test_ledger_parent_ignores_lookalikes(self):
+    def test_ledger_parent_reads_the_token_only_at_a_boundary(self):
         self.assertEqual(
             dashboard_lanes.ledger_parent(
                 {"notes": "foreman mode=orchestrator; parent=25.49; w=1"}),
@@ -1258,9 +1258,11 @@ class DispatchLedgerTest(Fixture):
 
     def test_ledger_by_parent_rejects_two_arguments(self):
         out, err = io.StringIO(), io.StringIO()
-        dashboard_lanes.main(["ledger", "by-parent", "a", "b"],
-                             stdin=io.StringIO(""), stdout=out, stderr=err,
-                             env=self.env)
+        # main reports failures on stderr and always returns 0 (its docstring).
+        code = dashboard_lanes.main(
+            ["ledger", "by-parent", "a", "b"],
+            stdin=io.StringIO(""), stdout=out, stderr=err, env=self.env)
+        self.assertEqual(code, 0)
         self.assertEqual(out.getvalue(), "")
         self.assertIn("usage: ledger by-parent [STEP]", err.getvalue())
 

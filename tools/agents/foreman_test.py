@@ -772,6 +772,9 @@ class ForemanTest(unittest.TestCase):
     self.assertEqual(ret, 2)
     self.assertIn("15%", stderr.getvalue())
     self.assertIn("--min-weekly-pct 20", stderr.getvalue())
+    self.assertIn("too low for this job", stderr.getvalue())
+    self.assertNotIn("--min-weekly-pct 0", stderr.getvalue())
+    self.assertFalse(os.path.exists(self.out_dir))
     with open(log_file, "r", encoding="utf-8") as f:
       calls = [json.loads(line) for line in f]
     self.assertEqual(calls, [["-p", "/usage"]])
@@ -797,6 +800,7 @@ class ForemanTest(unittest.TestCase):
       ret = self._run(single=True, env={"FAKE_AGY_WEEKLY_PCT": "n/a"})
     self.assertEqual(ret, 2)
     self.assertIn("cannot read", stderr.getvalue())
+    self.assertNotIn("--min-weekly-pct 0", stderr.getvalue())
 
   def test_default_threshold_runs_on_a_nearly_empty_pool(self):
     self.assertEqual(
