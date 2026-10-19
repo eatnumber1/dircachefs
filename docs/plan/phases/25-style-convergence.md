@@ -2415,8 +2415,8 @@ failing-first evidence had to be recovered by hand.
    code 0 is accepted and 3 rejected. Any other code means no verdict: 2 when
    the check could not be made or the usage is wrong, and 1 for a flag Abseil
    does not know.
-3. Commits on main stay green: the orchestrator cherry-picks the slice squashed
-   or fast-forwards only after the check. The step decides which.
+3. Commits on main stay green: the orchestrator cherry-picks each slice squashed
+   after the check, one commit per slice (process.md rule-reviewed-slices 4a).
 
 Design decisions:
 
