@@ -69,4 +69,69 @@ fi
   exit 1
 }
 printf '%s\t%s\n' abc1234 "26.8: fine" | "${script}" --stdin-log
+
+# --stdin-messages carries whole messages: `HASH<TAB>SUBJECT`, a newline,
+# the body, each message NUL-terminated (as `git log -z --format='%h%x09%B'`).
+message() {
+  printf 'abc1234\t%s\n%s\n\0' "$1" "$2"
+}
+
+accepts_message() {
+  if ! message "$1" "$2" | "${script}" --stdin-messages; then
+    echo "FAIL: rejected a good message: $1" >&2
+    exit 1
+  fi
+}
+
+rejects_message() {
+  local out
+  if out=$(message "$1" "$2" | "${script}" --stdin-messages 2>&1); then
+    echo "FAIL: accepted a bad message: $1" >&2
+    exit 1
+  fi
+  if [[ "${out}" != *"$3"* ]]; then
+    echo "FAIL: wrong failure for $1: ${out}" >&2
+    exit 1
+  fi
+}
+
+# A string of N ASCII letters: N columns.
+filler() {
+  printf "%${1}s" '' | tr ' ' x
+}
+
+# A 72-column subject passes, a 73-column one fails and is named.
+accepts_message "26.13: $(filler 65)" "Plain body."
+rejects_message "26.13: $(filler 66)" "Plain body." \
+  "subject is 73 columns (max 72): abc1234 26.13: $(filler 66)"
+
+# A 73-column body line fails and is named by its number; the same
+# width is fine at 72.
+accepts_message "26.13: short" "Para one.
+$(filler 72)"
+rejects_message "26.13: short" "Para one.
+$(filler 73)" "body line 2 is 73 columns (max 72): abc1234 $(filler 73)"
+
+# Exempt body lines: a URL, a quote, an indented block, a tab block.
+accepts_message "26.13: short" "See https://example.com/$(filler 80) for it.
+> quoted $(filler 80)
+Example:
+
+    $(filler 90)
+	$(filler 90)"
+
+# A missing Co-Authored-By trailer fails on an agent commit (a Claude-Session
+# line or an agents: subject) and is fine once the trailer is there.
+rejects_message "26.13: short" "Did the work.
+
+Claude-Session: https://claude.ai/code/session_x" \
+  "missing Co-Authored-By trailer: abc1234 26.13: short"
+accepts_message "26.13: short" "Did the work.
+
+Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_x"
+rejects_message "agents: short" "Did the work." \
+  "missing Co-Authored-By trailer: abc1234 agents: short"
+# A human commit with no session and no trailer passes.
+accepts_message "26.13: short" "Did the work."
 echo "PASS"
