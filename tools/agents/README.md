@@ -490,7 +490,6 @@ severity | category | rule | file | summary | mechanizable | outcome
 
 The tests are `//tools/agents:review_findings_test`.
 
-
 ## test_first_tool
 
 Checks one slice of a step branch for test-first evidence (plan step 25.52).

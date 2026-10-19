@@ -51,7 +51,7 @@ std::string Env(char **envp, std::string_view name) {
 }  // namespace
 
 // The standard library throws only on allocation failure, which this tool does
-// not handle (no catch: style 1.6).
+// not handle (no catch: style 1.2).
 // NOLINTNEXTLINE(bugprone-exception-escape): only std::bad_alloc can escape.
 int main(int argc, char **argv, char **envp) {
   absl::SetProgramUsageMessage(dcfs::test_first::kUsage);

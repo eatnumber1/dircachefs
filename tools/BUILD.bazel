@@ -918,6 +918,52 @@ qemu_cc_test(
     ],
 )
 
+# The command linked statically, for //tools:test_first_main_test, which runs it
+# in a guest that has no dynamic loader (same select() as //tools:testutil).
+cc_binary(
+    name = "test_first_tool_static",
+    testonly = 1,
+    srcs = ["test_first_main.cc"],
+    features = select({
+        "//test/qemu:asan_build": [],
+        "//test/qemu:ubsan_build": [],
+        "//conditions:default": ["fully_static_link"],
+    }),
+    linkstatic = True,
+    deps = [
+        ":process_runner",
+        ":test_first_cli",
+        "@absl//absl/flags:flag",
+        "@absl//absl/flags:parse",
+        "@absl//absl/flags:usage",
+        "@absl//absl/strings",
+        "@absl//absl/strings:str_format",
+    ],
+)
+
+# The command itself: flags, exit codes, the environment, over a fake git and
+# bazel on PATH.
+qemu_cc_test(
+    name = "test_first_main_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["test_first_main_test.cc"],
+    data = [":test_first_tool_static"],
+    deps = [
+        ":process_runner",
+        ":test_first",
+        "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
+        "//dcfs/testonly:assert_ok_and_assign",
+        "@absl//absl/status",
+        "@absl//absl/status:status_macros",
+        "@absl//absl/status:status_matchers",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
+
 style_findings_here()
 
 # ---- Step 25.32: Abseil Tip of the Week citations -----------------------
