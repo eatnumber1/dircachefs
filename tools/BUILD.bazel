@@ -831,6 +831,56 @@ qemu_cc_test(
     ],
 )
 
+# Runs git and Bazel as child processes for the test-first check.
+cc_library(
+    name = "process_runner",
+    srcs = ["process_runner.cc"],
+    hdrs = ["process_runner.h"],
+    deps = [
+        ":test_first",
+        "//dcfs:status",
+        "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
+        "//dcfs:syscalls_process",
+        "@absl//absl/status",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+    ],
+)
+
+# The test-first check of a slice (plan step 25.52), from a lane:
+#   bazel run //tools:test_first_tool -- --first=REV --last=REV
+cc_binary(
+    name = "test_first_tool",
+    srcs = ["test_first_main.cc"],
+    deps = [
+        ":process_runner",
+        ":test_first",
+        "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
+        "@absl//absl/status",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+    ],
+)
+
+# Runs git and Bazel for //tools:test_first_tool in a guest over busybox.
+qemu_cc_test(
+    name = "process_runner_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["process_runner_test.cc"],
+    deps = [
+        ":process_runner",
+        ":test_first",
+        "//dcfs/testonly:assert_ok_and_assign",
+        "@absl//absl/status",
+        "@absl//absl/status:status_matchers",
+        "@absl//absl/status:statusor",
+        "@googletest//:gtest_main",
+    ],
+)
+
 style_findings_here()
 
 # ---- Step 25.32: Abseil Tip of the Week citations -----------------------

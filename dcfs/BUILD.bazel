@@ -271,6 +271,7 @@ cc_library(
       "//bench:__pkg__",
       "//dcfs/testonly:__pkg__",
       "//test/qemu:__pkg__",
+      "//tools:__pkg__",
     ],
     hdrs = [
       "syscalls.h",
@@ -313,6 +314,7 @@ cc_library(
       "//bench:__pkg__",
       "//dcfs/testonly:__pkg__",
         "//test/qemu:__pkg__",
+      "//tools:__pkg__",
     ],
     deps = [
       ":status",
@@ -364,6 +366,7 @@ cc_library(
       "//bench:__pkg__",
       "//dcfs/testonly:__pkg__",
       "//test/qemu:__pkg__",
+      "//tools:__pkg__",
     ],
     deps = [
       ":backing_door",
