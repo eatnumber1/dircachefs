@@ -522,5 +522,73 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
         self.assertIn("tools/z.py has no", problems[2])
 
 
+    def long_problems(self, files, allow=""):
+        write(self.root, "tools/repo_shape_long_lines.txt", "# known\n" + allow)
+        for path, text in files.items():
+            write(self.root, path, text)
+        return repo_shape.long_lines(self.root, tracked=sorted(files))
+
+    def test_a_long_markdown_line_is_reported(self):
+        problems = self.long_problems({"docs/a.md": "word " * 17 + "\n"})
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("docs/a.md has 1 line(s) over 80 columns, 0 known",
+                      problems[0])
+
+    def test_long_lines_in_a_fence_a_table_or_a_link_definition_pass(self):
+        long = "word " * 17
+        text = ("```\n" + long + "\n```\n| " + long + "|\n"
+                "[ref]: https://example.com/" + "a" * 90 + "\n"
+                "See https://example.com/" + "a" * 90 + "\n"
+                "Read `" + "a/" * 45 + "x.cc` now.\n")
+        self.assertEqual([], self.long_problems({"docs/a.md": text}))
+
+    def test_other_extensions_and_third_party_are_scanned_or_skipped(self):
+        long = "x = 1  # " + "word " * 17 + "\n"
+        problems = self.long_problems({
+            "tools/a.py": long, "tools/b.sh": long, "BUILD.bazel": long,
+            "tools/c.bzl": long, ".bazelrc": long, "dcfs/a.cc": long,
+            "third_party/p/README.md": long, "MODULE.bazel.lock": long})
+        self.assertEqual(5, len(problems), problems)
+
+    def test_a_count_above_the_long_lines_list_is_reported(self):
+        files = {"docs/a.md": ("word " * 17 + "\n") * 3}
+        self.assertEqual([], self.long_problems(files, "docs/a.md 3\n"))
+        problems = self.long_problems(files, "docs/a.md 2\n")
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("3 line(s) over 80 columns, 2 known", problems[0])
+
+    def test_a_stale_long_lines_entry_is_reported(self):
+        files = {"docs/a.md": "short\n" * 2 + "word " * 17 + "\n"}
+        problems = self.long_problems(files, "docs/a.md 2\n")
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("lists 2 for docs/a.md, which has 1", problems[0])
+        problems = self.long_problems({"docs/a.md": "short\n"},
+                                      "docs/a.md 1\n")
+        self.assertIn("lists 1 for docs/a.md, which has 0", problems[0])
+
+    def split_problems(self, files, allow=""):
+        write(self.root, "tools/repo_shape_split_spans.txt", "# known\n" + allow)
+        for path, text in files.items():
+            write(self.root, path, text)
+        return repo_shape.split_code_spans(self.root, tracked=sorted(files))
+
+    def test_a_code_span_split_across_a_line_is_reported(self):
+        problems = self.split_problems({"docs/a.md": "Use `foo\nbar` here.\n"})
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("docs/a.md has 1 split code span(s), 0 known",
+                      problems[0])
+
+    def test_whole_spans_and_fences_are_not_split_spans(self):
+        text = ("Use `foo` and `bar`.\n\n```\nx `y\n```\nOk `a`\n\n"
+                "``` \nz\n```\n")
+        self.assertEqual([], self.split_problems({"docs/a.md": text}))
+
+    def test_a_listed_split_span_is_accepted_and_a_stale_one_is_not(self):
+        files = {"docs/a.md": "Use `foo\nbar` here.\n"}
+        self.assertEqual([], self.split_problems(files, "docs/a.md 1\n"))
+        problems = self.split_problems({"docs/a.md": "ok\n"}, "docs/a.md 1\n")
+        self.assertEqual(1, len(problems), problems)
+
+
 if __name__ == "__main__":
     unittest.main()

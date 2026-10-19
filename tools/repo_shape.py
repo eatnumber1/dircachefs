@@ -37,6 +37,14 @@ Each function takes the root of a source tree and returns a list of problems
 - agent_file_attributions: .claude/agents/*.md, .claude/skills/**/*.md and
   CLAUDE.md restate no rule with a "russ, 20NN-" attribution beyond the
   role-only ones counted in tools/repo_shape_attributions.txt.
+- long_lines: no line over 80 columns in *.md, *.py, *.sh, *.bzl,
+  BUILD.bazel or .bazelrc (not third_party/; C++ is clang-format's), except
+  fenced code and table rows in Markdown, link definitions, a line made long
+  by one unbreakable token, and the known ones counted per file in
+  tools/repo_shape_long_lines.txt, a list that only shrinks (step 25.45);
+- split_code_spans: no Markdown backtick code span runs over a line break
+  (it renders with a space), except those counted in
+  tools/repo_shape_split_spans.txt, a list that only shrinks.
 
 (The fourth rule, commit subjects, needs git: .github/ci/commit_subjects.sh.)
 """
@@ -733,6 +741,141 @@ def agent_file_attributions(root):
     return problems
 
 
+LONG_LINES_LIST = ("tools", "repo_shape_long_lines.txt")
+SPLIT_SPANS_LIST = ("tools", "repo_shape_split_spans.txt")
+MAX_COLUMNS = 80
+# An unbreakable token (a URL, a path in backticks) this long is the only
+# reason for a line to be long when the rest of the line fits.
+UNBREAKABLE_TOKEN = 20
+FENCE_RE = re.compile(r"^\s*(```|~~~)")
+LINK_DEFINITION_RE = re.compile(r"^\s*\[[^\]]+\]:\s")
+
+
+def wrapped_text(path):
+    """The files whose lines are held to 80 columns (C and C++ are
+    clang-format's; third_party/ is not ours)."""
+    if path.startswith("third_party/"):
+        return False
+    return (path.endswith((".md", ".py", ".sh", ".bzl")) or
+            os.path.basename(path) in ("BUILD.bazel", ".bazelrc"))
+
+
+def tracked_files(root, tracked):
+    if tracked is not None:
+        return tracked
+    return subprocess.run(
+        ["git", "ls-files"], cwd=root, capture_output=True, text=True,
+        check=True).stdout.splitlines()
+
+
+def unfenced_lines(text, markdown):
+    """(number, line, in_prose) of each line; in_prose is False inside a
+    Markdown fence (always True outside Markdown)."""
+    fenced = False
+    for number, line in enumerate(text.splitlines(), 1):
+        if markdown and FENCE_RE.match(line):
+            fenced = not fenced
+            yield number, line, False
+        else:
+            yield number, line, not fenced
+
+
+def long_line(line, markdown):
+    """Over 80 columns and not excused by one unbreakable token."""
+    if len(line) <= MAX_COLUMNS:
+        return False
+    if markdown and (line.startswith("|") or LINK_DEFINITION_RE.match(line)):
+        return False
+    longest = max(line.split(), key=len, default="")
+    return not (len(longest) >= UNBREAKABLE_TOKEN and
+                len(line) - len(longest) <= MAX_COLUMNS)
+
+
+def count_long_lines(text, markdown):
+    return sum(
+        1 for _, line, prose in unfenced_lines(text, markdown)
+        if (prose or not markdown) and long_line(line, markdown))
+
+
+def known_counts(root, parts):
+    """{path: count} from an allowlist of `path count` lines."""
+    known = {}
+    for line in read(root, *parts).splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            path, count = line.split()[:2]
+            known[path] = int(count)
+    return known
+
+
+def compare_counts(actual, known, list_name, what):
+    problems = []
+    for path in sorted(actual):
+        allowed = known.get(path, 0)
+        if actual[path] > allowed:
+            problems.append("%s has %d %s, %d known: fix them (the list %s "
+                            "does not grow)" %
+                            (path, actual[path], what, allowed, list_name))
+    for path in sorted(known):
+        if actual.get(path, 0) < known[path]:
+            problems.append(
+                "%s lists %d for %s, which has %d: lower it or take the "
+                "entry off (the list only shrinks)" %
+                (list_name, known[path], path, actual.get(path, 0)))
+    return problems
+
+
+def long_lines(root, tracked=None):
+    """No line over 80 columns in prose, Python, shell and Bazel files,
+    except the known ones counted per file in tools/repo_shape_long_lines.txt
+    (a list that only shrinks). Exempt: fenced code and tables in Markdown,
+    link definitions, and a line made long only by one unbreakable token."""
+    actual = {}
+    for path in sorted(p for p in tracked_files(root, tracked)
+                       if wrapped_text(p)):
+        count = count_long_lines(read(root, path), path.endswith(".md"))
+        if count:
+            actual[path] = count
+    return compare_counts(actual, known_counts(root, LONG_LINES_LIST),
+                          "tools/repo_shape_long_lines.txt",
+                          "line(s) over 80 columns")
+
+
+def split_span_lines(text):
+    """The first line numbers of the backtick code spans that run over a
+    line break within a paragraph (such a span renders with a space)."""
+    found = []
+    paragraph = []
+    for number, line, prose in list(unfenced_lines(text, True)) + [
+            (0, "", True)]:
+        if prose and line.strip() and not line.startswith("|"):
+            paragraph.append((number, line))
+            continue
+        joined = "\n".join(line for _, line in paragraph)
+        for match in re.finditer(r"(`+)(?!`)(.+?)(?<!`)\1(?!`)", joined,
+                                 re.DOTALL):
+            if "\n" in match.group(2):
+                offset = joined.count("\n", 0, match.start())
+                found.append(paragraph[offset][0])
+        paragraph = []
+    return found
+
+
+def split_code_spans(root, tracked=None):
+    """No Markdown backtick code span is split across a line break (it
+    renders with a space), except the known ones in
+    tools/repo_shape_split_spans.txt."""
+    actual = {}
+    for path in sorted(p for p in tracked_files(root, tracked)
+                       if p.endswith(".md") and wrapped_text(p)):
+        count = len(split_span_lines(read(root, path)))
+        if count:
+            actual[path] = count
+    return compare_counts(actual, known_counts(root, SPLIT_SPANS_LIST),
+                          "tools/repo_shape_split_spans.txt",
+                          "split code span(s)")
+
+
 def all_problems(root):
     return (third_party_readmes(root) + guest_scripts_used(root) +
             guest_sleeps(root) + no_new_guest_shell(root) +
@@ -741,3 +884,8 @@ def all_problems(root):
             fixed_arrays(root) + project_prefix(root) +
             absl_prefixed_status_macros(root) + nodiscard_on_status(root) +
             rule_index(root) + agent_file_attributions(root))
+
+
+def tracked_problems(root):
+    """The rules that read git's list of tracked files."""
+    return long_lines(root) + split_code_spans(root)

@@ -59,6 +59,12 @@ class RepoShapeTest(unittest.TestCase):
     def test_every_source_file_has_an_spdx_licence(self):
         self.assertEqual([], repo_shape.spdx_licenses(ROOT["root"]))
 
+    def test_no_new_line_over_80_columns(self):
+        self.assertEqual([], repo_shape.long_lines(ROOT["root"]))
+
+    def test_no_markdown_code_span_is_split_across_lines(self):
+        self.assertEqual([], repo_shape.split_code_spans(ROOT["root"]))
+
 
 def main():
     rest = []
