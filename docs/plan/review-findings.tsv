@@ -436,6 +436,20 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-19	25.53	4	Sonnet	nit	correctness	-	tools/test_first.cc BodyEntries	empty srcs list yields a bogus entry, refusing a test file added to an empty srcs	could	fixed/merged 4d25bdb5
 2026-10-19	25.53	4	Sonnet	none	clean-review	-	-	round-3 findings verified fixed; slice 2 verified behaviour-preserving apart from reaping the child on a read error	no	merged 4d25bdb5
 2026-10-19	25.53	5	Sonnet (fresh)	nit	docs	-	docs/plan/phases/25-style-convergence.md:~2441	stale doc: the 25.52 BUILD-files rule omits the test_suite and srcs test-file allowances	could	fixed/merged 4d25bdb5
-2026-10-19	25.53	5	Sonnet (fresh)	nit	docs	-	tools/agents/README.md:~524	stale doc: the 25.52 BUILD-files rule omits the test_suite and srcs test-file allowances	could	open (tools/ not in the clerk's scope)
+2026-10-19	25.53	5	Sonnet (fresh)	nit	docs	-	tools/agents/README.md:~524	stale doc: the 25.52 BUILD-files rule omits the test_suite and srcs test-file allowances	could	fixed/merged 5cdab343 (merged in 4d25bdb5)
 2026-10-19	25.53	5	Sonnet (fresh)	nit	docs	-	docs/plan/phases/25-style-convergence.md:~2472	stale doc: the 25.53 Test line names process_runner_test; tests are in dcfs/subprocess_test.cc; status queued	could	fixed/merged 4d25bdb5
 2026-10-19	25.53	5	Sonnet (fresh)	nit	correctness	-	tools/test_first.cc:~655	design gap (advisory in the review; recorded as nit): the srcs allowance let a test-tree file into a production rule's srcs; the continuing reviewer had accepted it; the orchestrator restricted the allowance to filegroups before merge	could	fixed/merged 4d25bdb5
+2026-10-19	5.18	1	Sonnet	should	comment-accuracy	-	test/qemu/README.md:1729	slot count stated as five/sixth/eighth; four usable, the fifth shares IRQ 8	no	fixed on step-5.18, merge pending
+2026-10-19	5.18	1	Sonnet	should	comment-accuracy	-	test/qemu/run-qemu.sh:~697	slot count stated as five/sixth/eighth; four usable, the fifth shares IRQ 8	no	fixed on step-5.18, merge pending
+2026-10-19	5.18	1	Sonnet	should	comment-accuracy	-	test/qemu/run_qemu_mkfs_test.sh:~112	slot count stated as five/sixth/eighth; four usable, the fifth shares IRQ 8	no	fixed on step-5.18, merge pending
+2026-10-19	5.18	1	Sonnet	should	test-shape	-	scsi_disks_test.cc:23	SizeOfDisk swallows errors into 0	could	fixed on step-5.18, merge pending
+2026-10-19	5.18	1	Sonnet	nit	style-other	-	BUILD	BUILD statusor dep	could	fixed on step-5.18, merge pending
+2026-10-19	5.18	1	Sonnet	nit	comment-accuracy	-	make_image comment	comment echo	could	fixed on step-5.18, merge pending
+2026-10-19	5.18	1	Sonnet	nit	style-other	-	vd?/sd? patterns	vd?/sd? patterns	could	fixed on step-5.18, merge pending
+2026-10-19	5.18	1	Sonnet	nit	test-gap	-	run_qemu_mkfs_test.sh	run_qemu_mkfs_test gaps	could	fixed on step-5.18, merge pending
+2026-10-19	5.18	1	Sonnet	nit	docs	-	qemu_cc_test.bzl	modules doc	could	fixed on step-5.18, merge pending
+2026-10-19	5.18	1	Sonnet	should	correctness	-	scsi disk links (sdX letters)	reviewer missed that sd probes asynchronously, so sdX letters follow probe completion, not LUN order; a swapped sdb gave an XFS invalid superblock in boot 2, found by a failing test, fixed in 9c7468f6 with /dev/dcfs-scsi/sd<letter> links by LUN	no	fixed on step-5.18, merge pending
+2026-10-19	5.18	2	Sonnet	should	test-gap	-	test/qemu/BUILD.bazel:237	scsi_disks_test used LUNs 0 and 1, so a by-kernel-name link would pass; gap sdb/sdd	could	fixed on step-5.18, merge pending
+2026-10-19	5.18	2	Sonnet	nit	comment-accuracy	-	run-qemu.sh:688	comment nit	could	fixed on step-5.18, merge pending
+2026-10-19	5.18	2	Sonnet	nit	comment-accuracy	-	run-qemu.sh:642	comment nit	could	fixed on step-5.18, merge pending
+2026-10-19	5.18	2	Sonnet	nit	style-other	-	guest/init:149	style nit	could	fixed on step-5.18, merge pending
