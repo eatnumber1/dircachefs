@@ -3,7 +3,8 @@
 
 Harness tool, not part of dcfs; see tools/agents/README.md. Drives worker
 and review/fix rounds via agy in stream-json mode, holding stdin open until
-JOB-COMPLETE is signaled.
+JOB-COMPLETE is signaled. With --single it runs the one worker session and
+nothing else.
 """
 
 import argparse
@@ -94,7 +95,7 @@ def parse_review_json(text):
 
 
 def add_session(sessions, role, name, model, usage):
-  """Appends one session record; role is worker, fix or review."""
+  """Appends one session record; role is worker, fix, review or single."""
   sessions.append({
       "role": role,
       "name": name,
@@ -442,7 +443,7 @@ def build_fix_prompt(branch, review_output, worker_prompt):
 
 def generate_summary(
     out_dir, step, lane, branch, base, git_bin="git", error_msg=None,
-    tokens=None,
+    tokens=None, single=False,
 ):
   """Generates summary.md matching run.sh formatting."""
   lines = [f"# {step}", "", f"branch {branch} in {lane}, base {base}"]
@@ -464,18 +465,19 @@ def generate_summary(
   )
   lines.extend(["", "## uncommitted", uncommitted.rstrip("\n")])
 
-  review_files = []
-  for f in os.listdir(out_dir):
-    if f.startswith("review") and f.endswith(".out"):
-      review_files.append(f)
-  review_files.sort()
-  last_review_text = ""
-  if review_files:
-    latest_review = os.path.join(out_dir, review_files[-1])
-    with open(latest_review, "r", encoding="utf-8") as rf:
-      rlines = rf.readlines()
-      last_review_text = "".join(rlines[-40:]).rstrip("\n")
-  lines.extend(["", "## last review", last_review_text])
+  if not single:
+    review_files = []
+    for f in os.listdir(out_dir):
+      if f.startswith("review") and f.endswith(".out"):
+        review_files.append(f)
+    review_files.sort()
+    last_review_text = ""
+    if review_files:
+      latest_review = os.path.join(out_dir, review_files[-1])
+      with open(latest_review, "r", encoding="utf-8") as rf:
+        rlines = rf.readlines()
+        last_review_text = "".join(rlines[-40:]).rstrip("\n")
+    lines.extend(["", "## last review", last_review_text])
 
   with open(os.path.join(out_dir, "usage.before"), "r", encoding="utf-8") as f:
     usage_before = f.read()
@@ -503,10 +505,14 @@ def run_foreman(
     out_dir=None,
     agy_bin="agy",
     git_bin="git",
+    single=False,
     clock=time.time,
     environ=os.environ,
 ):
-  """Runs one queued step end to end on Gemini in a lane."""
+  """Runs one queued step end to end on Gemini in a lane.
+
+  With single, runs one held-open worker session and no review or fix rounds.
+  """
   if not review_model:
     review_model = model
   if not out_dir:
@@ -542,10 +548,11 @@ def run_foreman(
       f.write("\n")
     generate_summary(
         out_dir, step, lane, branch, base, git_bin=git_bin, error_msg=error,
-        tokens=tokens,
+        tokens=tokens, single=single,
     )
     record_ledger_row(
-        step, model, "orchestrator", tokens, rounds, error, environ
+        step, model, "single" if single else "orchestrator", tokens, rounds,
+        error, environ,
     )
     return 1 if error else 0
 
@@ -566,8 +573,10 @@ def run_foreman(
     )
     return ok, err
 
-  ok, err = run_session("worker", "worker", worker_prompt)
-  if not ok:
+  ok, err = run_session(
+      "single" if single else "worker", "worker", worker_prompt
+  )
+  if not ok or single:
     return finish(err)
 
   for r in (1, 2):
@@ -631,6 +640,11 @@ def main(argv):
       default="git",
       help="git binary path (default: git)",
   )
+  parser.add_argument(
+      "--single",
+      action="store_true",
+      help="One worker session; no review or fix rounds",
+  )
   args = parser.parse_args(argv)
 
   return run_foreman(
@@ -643,6 +657,7 @@ def main(argv):
       out_dir=args.out,
       agy_bin=args.agy_bin,
       git_bin=args.git_bin,
+      single=args.single,
   )
 
 

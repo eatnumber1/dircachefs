@@ -714,6 +714,38 @@ class ForemanTest(unittest.TestCase):
     self.assertIsNone(foreman.parse_review_json("not json\n"))
     self.assertIsNone(foreman.parse_review_json("[1]"))
 
+  def test_single_mode_runs_one_worker_session_and_no_review(self):
+    log_file = os.path.join(self.root, "agy_args.log")
+    self.assertEqual(
+        self._run(step="25.98", single=True, env={"FAKE_AGY_LOG": log_file}),
+        0,
+    )
+    tokens = self._tokens()
+    self.assertEqual(
+        [(s["role"], s["name"]) for s in tokens["sessions"]],
+        [("single", "worker")],
+    )
+    self.assertEqual(tokens["total"]["total_tokens"], 2200)
+    self.assertFalse(os.path.exists(os.path.join(self.out_dir, "review1.out")))
+    with open(log_file, "r", encoding="utf-8") as f:
+      calls = [json.loads(line) for line in f]
+    self.assertFalse([c for c in calls if "plan" in c])
+    row = self._ledger_rows()[0]
+    self.assertEqual(row["rounds"], "0")
+    self.assertEqual(row["notes"], "foreman mode=single; worker=2200")
+    with open(
+        os.path.join(self.out_dir, "summary.md"), "r", encoding="utf-8"
+    ) as f:
+      summary = f.read()
+    self.assertNotIn("## last review", summary)
+    self.assertIn("| single |", summary)
+
+  def test_single_mode_ends_on_job_complete_and_reports_failure(self):
+    self.assertEqual(
+        self._run(single=True, env={"FAKE_AGY_STREAM_MODE": "exit_early"}), 1
+    )
+    self.assertIn("failed", self._ledger_rows()[0]["notes"])
+
   def test_custom_models_passed(self):
     log_file = os.path.join(self.root, "agy_args.log")
     env = {
