@@ -341,3 +341,12 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-19	25.49a	1	dcfs-style-reviewer/sonnet/high	nit	docs	-	-	skill restates rule 12	no	fixed/merged 8779ff6d
 2026-10-19	25.49a	1	dcfs-style-reviewer/sonnet/high	nit	style-other	-	-	blank line in the rule list	could	fixed/merged 8779ff6d
 2026-10-19	25.49a	1	dcfs-style-reviewer/sonnet/high	nit	style-other	-	-	pointer-line wrapping	checked	fixed/merged 8779ff6d
+2026-10-19	25.49d	1	dcfs-style-reviewer/sonnet/high	should	contract-claim	-	-ledger tokens are not comparable with Claude rows	no	fixed/merged da80d74e
+2026-10-19	25.49d	1	dcfs-style-reviewer/sonnet/high	should	status-handling	-	ledger add call	ledger add returncode is ignored	no	fixed/merged da80d74e
+2026-10-19	25.49d	1	dcfs-style-reviewer/sonnet/high	should	dead-code	1.10a	foreman	unreachable branches	no	fixed/merged da80d74e
+2026-10-19	25.49d	1	dcfs-style-reviewer/sonnet/high	should	test-gap	-	foreman tests	inexact tests	no	fixed/merged da80d74e
+2026-10-19	25.49d	1	dcfs-style-reviewer/sonnet/high	should	contract-claim	-	foreman single mode	single-mode claim without code	no	fixed/merged da80d74e
+2026-10-19	25.49d	1	dcfs-style-reviewer/sonnet/high	nit	test-shape	-	fake agy	fake agy lacks error field	could	fixed/merged da80d74e
+2026-10-19	25.49d	1	dcfs-style-reviewer/sonnet/high	nit	correctness	-	ledger row	duration_s is empty	could	fixed/merged da80d74e
+2026-10-19	25.49d	1	dcfs-style-reviewer/sonnet/high	nit	docs	-	docs	doc duplication	no	fixed/merged da80d74e
+2026-10-19	25.49d	1	dcfs-style-reviewer/sonnet/high	nit	docs	-	foreman tests	question: success fixture joins the error fixture: yes	no	answered; fixed/merged da80d74e

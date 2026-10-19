@@ -97,6 +97,15 @@ LTS (was 6.9; 6.9-6.11 are EOL non-LTS); the test kernel is Alpine's
 (`third_party/linux/README.md`, "Series, not version"); the toolchain's UAPI
 headers come from the same branch's `linux-virt-dev` through a genrule ("A
 genrule is acceptable"), floating in lockstep with the kernel.
+russ, 2026-10-19, on the header part: "Yes. Keep the Debian 6.12 headers."
+
+Header decision (2026-10-19): no genrule. The sysroot's Debian trixie
+`linux-libc-dev` 6.12.107 (`MODULE.bazel`, line 501) already matches the 6.12
+minimum. UAPI headers do not change within a stable series, and the pin is
+major.minor with the patch floating, so the sysroot's headers stay as they are.
+Research behind it: `linux-virt-dev` ships raw kernel headers and
+`headers_install.sh` but no compiled `unifdef`, so a genrule would need
+`unifdef` built or reimplemented, plus `headers_install`'s sed transforms.
 
 Work:
 
@@ -106,9 +115,8 @@ Work:
 - `test/qemu/guest/boot.sh`: `6.18.*-virt` -> `6.12.*-virt`.
 - `third_party/linux/README.md` and `test/qemu/README.md`: 6.18 -> 6.12, and
   the minimum-kernel text.
-- A genrule turns `linux-virt-dev`'s raw kernel headers into a UAPI include
-  tree and puts it ahead of the Debian sysroot's `linux-libc-dev` in the
-  toolchain (or replaces that deb).
+- No header work: the Debian sysroot's `linux-libc-dev` (6.12, see the header
+  decision above) stays, and no genrule reads `linux-virt-dev`.
 - `dcfs/proc_status.cc`: the `USER_NS_INIT_INO` exception, exactly as russ
   wrote it (russ, 2026-10-18; 6.12's headers lack the constant, it entered
   UAPI in 6.17):

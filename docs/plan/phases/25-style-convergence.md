@@ -939,26 +939,69 @@ russ: "let's schedule some time to investigate mechanical tools for
 measuring code duplication. I've seen several cases where there's clearly
 duplicate code in our codebase, and I want to catch that without relying
 on AI or human review and prompt the code author to refactor instead of
-duplicate." Investigation first, then a gate: (1) candidates that work on
-tokens or the AST rather than text, pinned through Bazel: PMD's CPD (token
-based, C++ supported, Java runtime, which the TLA+ tooling already pins),
-jscpd (token based, Node), Simian, and clang's own `clang-query` for the
-structural near-duplicates CPD misses (two functions whose statement
-sequences match modulo identifiers), plus the LLVM `llvm-cov`-independent
-option of a small AST hash per function (a clang tool built in the
-toolchain we pin); shell is in scope too (26.18 shrinks it, but what
-remains is where copies hide); (2) measure each on the tree: the known
-duplicates as the labelled set (the three fork/exec copies in fsck.cc,
-backing_capture.cc and umount_helper.cc that 26.22 noted; the xattr
-reopen branch 25.11 removes; the two size helpers 26.17a merged; the
-`uptime_ms` copies 26.20 merged; the private `loop()` in
-sqlite_durability.sh that 26.17a folded) and the false-positive rate on
-honest repetition (BUILD files, the fault scripts' check blocks); (3) the
-gate: a `small` test with a baseline that only shrinks (the shape every
-other check has), failing on a new duplicate above the threshold and
-naming both sites, so the author sees it before the reviewer does; a
-report of existing duplicates ordered by size as the backlog. Owner:
-dcfs-investigator. Not before the reset.
+duplicate." The 2026-10-11 plan was a single investigation and gate. It is
+superseded by the split below (2026-10-19).
+
+russ, 2026-10-19: "I'd like to be maximalist here. Parallel types, identical
+function bodies, copied _expressions_ (whitespace doesn't matter), etc. Open to
+more ideas too."
+
+Scope: C++ only, that is `dcfs/` and the C++ test and tooling code. russ,
+2026-10-19: "No. We don't care about style for languages we don't ship. This
+is why I demanded that the test and tooling code be written in C++. Python is
+a bit of a wart, but I may call for a rewrite there too eventually." So shell,
+Python, Starlark, TLA+ and docs are out of scope.
+
+Evidence (backlog analysis, 2026-10-19): production C++ copied-line duplication
+is 0.4%. The leak is reinvented helpers: 10 of 342 findings. So the detectors
+target reinvention and parallel shapes as well as copied lines.
+
+Split by detector, one review round each. The gate: a `small` test whose
+baseline only shrinks. New clones fail it and name both sites; existing ones
+go on a shrink-only allowlist. Fuzzy detectors are advisory until they are
+precise enough to gate. The threshold and the allowlist come back to russ
+before commit.
+
+- **25.27-0 Prior art (read-only, first).** russ, 2026-10-19: "is there prior
+  art we can reuse?" Run on Gemini via foreman `--single --read-only` once
+  25.48 lands. Already enabled in `.clang-tidy`: `abseil-*`, `modernize-*`,
+  `bugprone-branch-clone`, `misc-redundant-expression`. Evaluate:
+  1. Clang's `alpha.clone.CloneChecker` (static analyzer, in the pinned clang
+     22.1.8, off; marked "Enable only for development"): AST subtree hashing,
+     renamed clones, suspicious copy-paste. Its findings and false-positive
+     rate on dcfs.
+  2. PMD CPD and jscpd as C++ token-clone options, measured against
+     CloneChecker: runtime and packaging cost (CPD needs Java, which the TLA+
+     tooling already pins; jscpd needs Node).
+  3. `readability-magic-numbers` and `cppcoreguidelines-avoid-magic-numbers`
+     (in the pinned clang-tidy, off because of the syscall layer): counts
+     outside the syscall layer; candidate: on there, through a per-directory
+     `.clang-tidy`.
+
+  Output: which of 25.27a-d reuses what, and what remains custom (header-
+  constant literals, one wrapper per syscall, per-diff similar-symbol
+  suggestions).
+- **25.27a AST engine.** libclang from the pinned LLVM toolchain, hermetic in
+  Bazel. Hash the AST subtrees of expressions and statements above a size
+  threshold: exact, and with identifiers and literals abstracted (copied
+  `_expressions_`, whitespace does not matter). Identical or near-identical
+  function bodies after local renaming, and gapped clones (a copy with
+  statements inserted or changed).
+- **25.27b Constants and literals.** Numeric literals equal to a system-header
+  constant (`kBtrfsMagic`); repeated literals without a named constant;
+  equal-valued, similarly named constants; duplicate string literals.
+- **25.27c Parallel types and reinvented helpers.** Same-shape structs; wrappers
+  of the same resource (`Fd` and `FileDescriptor`); identical strong types;
+  more than one wrapper per syscall; clang-tidy `abseil-*` and relevant
+  `modernize-*` checks, plus matchers for hand-rolled `StrJoin`, `c_find` and
+  `StrSplit` (the swaps in `docs/abseil-utilities.md`); test bodies that differ
+  only in literals (parameterize them).
+- **25.27d Per-diff advisory.** For each new function or type in a diff, the
+  three most similar existing ones, shown to the author and the fact-check
+  reviewer. Advisory, not a gate.
+
+Owner: Gemini via foreman for 25.27-0; not assigned for a-d (the orchestrator
+chooses). Dependencies: 25.48 for 25.27-0. Not before the reset.
 Reassigned (russ, 2026-10-17: "Sure"): to Gemini through agy, in lane-8
 after 25.32b and the dashboard's SLOC tool, under process.md rule 4
 (write work, reviewed by the orchestrator); the gate's threshold and any
@@ -2127,6 +2170,8 @@ This replaces the research mode this section described earlier on 2026-10-19
    rounds.
 3. `--read-only` combines with `--single` only: agy plan mode, no branch
    setup, and the worker's final text is saved as `report.md`.
+4. Foreman records its session in `tokens.json` and adds the ledger row
+   (25.49d).
 
 Owner: not yet assigned (the orchestrator chooses). Dependencies: none.
 
@@ -2166,8 +2211,9 @@ Owner: not yet assigned (the orchestrator chooses). Dependencies: 25.45 item 2
 
 ## 25.49 Subagents delegate down
 
-Partly done: 25.49a merged 8779ff6d (2026-10-19); items 2 to 4 are queued
-after 25.48. russ, 2026-10-19: "I'd like it if
+Partly done: 25.49a merged 8779ff6d (2026-10-19); items 2 and 3 are queued
+after 25.48; item 4 is partly done by 25.49d (merged 2026-10-19, 17e1a466 and
+da80d74e). russ, 2026-10-19: "I'd like it if
 our subagents started doing this too, and themselves leveraging dumber
 agents for more of the menial work"
 
@@ -2182,8 +2228,13 @@ agents for more of the menial work"
 4. Measure in the ledger: parent tokens with and without delegation.
 
 Status: item 1 (the rule, `rule-delegate-down`, and the agent definitions)
-and the `dcfs-foreman` skill are done by 25.49a. Items 2 (`delegate.py`),
-3 (briefs and the report line's check) and 4 (measurement) remain.
+and the `dcfs-foreman` skill are done by 25.49a. Items 2 (`delegate.py`) and
+3 (briefs and the report line's check) remain.
+
+Item 4 (measure) is partly done by 25.49d (merged 2026-10-19, 17e1a466 and
+da80d74e): foreman writes `tokens.json` and one ledger row per run, with
+tokens = total + cache_read, as Claude rows count them. Gemini subagent tokens
+are inside the session total and not attributable to a subagent.
 
 Owner: not yet assigned (the orchestrator chooses). Dependencies: 25.48.
 
