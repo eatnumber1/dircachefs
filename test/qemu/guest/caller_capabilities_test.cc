@@ -246,9 +246,9 @@ TEST(CallerCapabilitiesTest, ANonOwnersChownStripsTheCapabilityThenFails) {
 // set. A caller's groups come from its /proc status file, which anyone may
 // read, so alice still reaches a directory through group 2000. Its
 // /proc/<pid>/ns links need ptrace access (proc_ns_get_link,
-// fs/proc/namespaces.c:63 (Linux v7.3-rc7)), which a reader without
-// CAP_SYS_PTRACE lacks for a process holding a capability the reader does not
-// (cap_ptrace_access_check, security/commoncap.c:164 (Linux v7.3-rc7)):
+// fs/proc/namespaces.c:63), which a reader without CAP_SYS_PTRACE lacks for a
+// process holding a capability the reader does not (cap_ptrace_access_check,
+// security/commoncap.c:164 (Linux v7.3-rc7)):
 // root's write of a setuid file with security.capability then clears setuid
 // where the native filesystem keeps it, the safe side.
 TEST(CallerCapabilitiesTest, ADaemonWithoutCapSysPtraceReadsGroupsButNotCaps) {
@@ -317,17 +317,11 @@ TEST(CallerCapabilitiesTest, MountDcfsRefusesADaemonWithoutCapFsetid) {
 
 // The root of a user namespace that maps a file's owner (0) and group (2000),
 // outside that group, holds CAP_FSETID there but not in the init namespace.
-// Natively its truncate and write keep setgid: setattr_should_drop_sgid asks
-// in_group_or_capable (fs/attr.c:42), whose capable_wrt_inode_uidgid
-// (fs/inode.c:3040) is ns_capable in the caller's own namespace with the
-// inode's ids mapped there (kernel/capability.c:493-496); setuid goes, as
-// setattr_should_drop_suidgid's capable() asks the init one (fs/attr.c:75).
-// The FUSE side asks capable() too (a truncate's FATTR_KILL_SUIDGID,
-// fs/fuse/dir.c:2241-2243; a write's removal, which also clears setuid, as
-// natively), and dcfs, which learns no more than that the caller lacks
-// CAP_FSETID in the init namespace, clears setgid as for a caller outside the
-// group (all Linux v7.3-rc7): a price on the safe side (docs/design.md,
-// "Caller credentials").
+// Natively its truncate and write keep setgid (in_group_or_capable's
+// capable_wrt_inode_uidgid, fs/attr.c:42 and fs/inode.c:3040 (Linux
+// v7.3-rc7)) and lose setuid; through dcfs, which learns only that it lacks
+// CAP_FSETID in the init namespace, they lose both: a price on the safe side
+// (docs/design.md, "Caller credentials", the truncate's FATTR_KILL_SUIDGID).
 TEST(CallerCapabilitiesTest, ANamespacedCapFsetidHolderLosesSetgidThroughDcfs) {
   for (std::string_view dir : {std::string_view(Native()), kMnt}) {
     ASSERT_THAT(MakeFile(Path(dir, "userns-truncate"), 0, 2000, 02666), IsOk());

@@ -630,8 +630,8 @@ TEST(SyscallsCredentialsTest, CapsetRaisesOnlyAPermittedCapability) {
 // What each refuses (the calls themselves are irreversible for the process,
 // so test/qemu/guest/caller_capabilities_test makes them in children): a
 // capability past CAP_LAST_CAP (cap_prctl_drop's cap_valid,
-// security/commoncap.c:1276 (Linux v7.3-rc7)), and a flag unshare(2) does
-// not know (check_unshare_flags, kernel/fork.c:3168-3171 (Linux v7.3-rc7)).
+// security/commoncap.c:1276), and a flag unshare(2) does not know
+// (check_unshare_flags, kernel/fork.c:3168-3171 (Linux v7.3-rc7)).
 TEST(SyscallsCredentialsTest, PrctlAndUnshareRefuseWhatTheKernelDoes) {
   EXPECT_EQ(StatusToErrno(syscalls::prctl<PR_CAPBSET_DROP>(CAP_LAST_CAP + 1)),
             EINVAL);
