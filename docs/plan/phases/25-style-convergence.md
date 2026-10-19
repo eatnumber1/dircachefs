@@ -2233,7 +2233,7 @@ proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
 - **25.47c** scripts (merge lane, quota, census).
 - **25.47d** metrics.
 
-## 25.48 Foreman single mode (russ, 2026-10-19; done-pending-merge)
+## 25.48 Foreman single mode (russ, 2026-10-19; done, fa037f4a..1565b72d)
 
 russ, 2026-10-19: "foreman's purpose was to have an orchestrator in Gemini
 as well. Maybe we should have both an in-gemini orchestrator and a
@@ -2322,6 +2322,11 @@ Item 4 (measure) is partly done by 25.49d (merged 2026-10-19, 17e1a466 and
 da80d74e): foreman writes `tokens.json` and one ledger row per run, with
 tokens = total + cache_read, as Claude rows count them. Gemini subagent tokens
 are inside the session total and not attributable to a subagent.
+
+Process note (2026-10-19, from the slice 2 review): slice 2's four added tests
+pinned existing behaviour, so none fails on the old code first. Slice 1's
+fixes: all of their tests other than the 14.5% case also passed on the old
+code.
 
 Owner: not yet assigned (the orchestrator chooses). Dependencies: 25.48.
 

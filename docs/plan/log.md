@@ -4433,3 +4433,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   - Splits added as notes under their parents with prerequisites: 12.16a/b,
     12.20a/b/c, 25.10a/b/c, 26.40a/b/c, 22.7a-e, 23.13a/b/c, 25.39a-d,
     25.46a/b/c, 26.41 and 26.43 by item, 25.28c/d/f model-then-code.
+  - 2026-10-19, clerk batch 39: 25.48 foreman single mode merged
+    fa037f4a..1565b72d (heading resolved against batch 38); slice reviews
+    of 25.48 and 25.49 slices 1 and 2 recorded in review-findings.tsv;
+    review-findings line 344 (25.49d) repaired to 11 fields.
