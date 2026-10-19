@@ -502,6 +502,9 @@ bazel run //tools:test_first_tool -- --first=REV --last=REV \
     [--bazel_flag=FLAG[,FLAG...]] [--workspace=DIR]
 ```
 
+`bazel run` takes no `--config=fast` here (it is not defined for `run`); pass
+it to the inner `bazel test` with `--bazel_flag=--config=fast`.
+
 - `--first=REV`: the slice's first commit, the one that adds or changes only
   tests. `--last=REV`: the slice's last commit. Both are explicit because the
   implementer's slice report already names them.

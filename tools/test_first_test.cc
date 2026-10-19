@@ -537,6 +537,14 @@ TEST(BuildRuleViolationsTest, NewTestsAndTheirTestonlyPartsAreAllowed) {
   EXPECT_THAT(BuildRuleViolations("", after), IsEmpty());
 }
 
+TEST(BuildRuleViolationsTest, AChangedTestSuiteIsAllowed) {
+  EXPECT_THAT(BuildRuleViolations(
+                  BuildRule("test_suite", "every_test", "  tests = [],\n"),
+                  BuildRule("test_suite", "every_test",
+                            "  tests = [\":foo_test\"],\n")),
+              IsEmpty());
+}
+
 TEST(BuildRuleViolationsTest, ANewLibraryThatIsNotTestonlyIsRefused) {
   EXPECT_THAT(BuildRuleViolations("", BuildRule("cc_library", "helper")),
               ElementsAre(HasSubstr("helper")));
