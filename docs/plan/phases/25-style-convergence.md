@@ -2713,3 +2713,28 @@ Dependencies: 25.53 merged; 25.41 follows it.
 the door guard; the poisoned-door test refuses every `backing::` function;
 the new check fails on a backing-layer call of a thin function with a twin and
 passes with the allowlist; the existing suites pass unchanged.
+
+**docs/style.md to update when this lands**
+
+- 1.1, `rule-mechanize-rules` (about line 139): the wording about the
+  golden test of `syscalls_backing.h`'s dependents.
+- 1.5 (about line 533): "named for its manpage in lower case"; "Anything else
+  is a helper in `backing.cc` built on the plain wrappers"; "Nothing that is
+  not a wrapper lives in `dcfs::syscalls`"; the "Why three libraries" sentence
+  saying `syscalls_backing.h` is its own target; the `syscalls_process.h`
+  description.
+- 1.6, "Decision, no Backing class" (about line 672): "the one door ..."
+  (`syscalls_backing`, enforced by the build graph).
+- 1.6, the door paragraph (about lines 936 to 966): "every backing syscall is
+  made by a wrapper of `syscalls_backing.h`, whose dependents ..."; "dcfs's own
+  files ... use `syscalls.h`'s by-path calls"; "every wrapper then refuses";
+  the sentences naming `backing_door_guard.query` and
+  `SyscallsBackingTest.EveryWrapperRefusesOnceTheDoorIsPoisoned`.
+- 1.8 (about lines 1262 to 1272): "the backing-reaching wrappers are
+  `//dcfs:syscalls_backing` ..."; "`//tools:syscalls_backing_users_test`
+  compares ..."; "That is why the wrappers are three libraries".
+- `rule-no-raw-syscalls` (about line 599): "Syscalls go through
+  `dcfs/syscalls.h` and `dcfs/syscalls_backing.h`"; "outside `dcfs/syscalls.cc`,
+  `dcfs/syscalls_backing.cc` and `dcfs/syscalls_process.cc`".
+- The `docs/rules/index-*.md` lines for those rules, where their wording
+  names the old layering.
