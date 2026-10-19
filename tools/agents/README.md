@@ -365,12 +365,11 @@ bazel run //tools/agents:foreman -- STEP LANE BRANCH PROMPT_FILE [--model M] [--
 ### Token counts
 
 Every agy session (worker, each fix, each review) is recorded as one entry of
-`tokens.json` in `--out`: `role` (`worker`, `fix`, `review`; `single` is
-reserved for single mode, 25.48, which adds its session with
-`add_session(sessions, "single", ...)` and needs no schema change), `name`
+`tokens.json` in `--out`: `role` (`worker`, `fix`, `review`), `name`
 (`worker`, `fix1`, `review1`), `model`, `usage` (`input_tokens`,
-`output_tokens`, `thinking_tokens`, `cache_read_tokens`, `total_tokens`) and
-`subagent_calls`; plus `total` and `usage_scope`. Stream sessions take the
+`output_tokens`, `thinking_tokens`, `cache_read_tokens`, `total_tokens`),
+`subagent_calls` and `duration_s`; plus `total`. `thinking_tokens` is part of
+`output_tokens`, not added to it. Stream sessions take the
 counts from the `result` event's `usage` (the sum of the `step_update` usage
 fields if agy died before a result), review sessions from the JSON object's
 `usage`. The model is `init.model` for stream sessions and `--review-model`
@@ -389,11 +388,13 @@ tool calls so a session that used subagents is visible. If a subagent ever
 shows as events with another `conversation_id`, attribute it then.
 
 The ledger row (`dashboard_lanes.py ledger add`, run by foreman against
-`$DCFS_MAIN_REPO`) has `agent=agy`, the worker model, `tokens` the total, the
-`input_tokens`, `output_tokens` and `cache_read_tokens` sums, `rounds` the
-review rounds run, and in `notes` `foreman mode=orchestrator;` then each
-session as `name=total_tokens` (`; failed` when the run failed). Thinking
-tokens have no ledger column: they are in `tokens.json`.
+`$DCFS_MAIN_REPO`) has `agent=agy`, the worker model, `tokens` the
+`total_tokens + cache_read_tokens` sum (as the Claude rows count their
+tokens), `duration_s` the summed session durations, the `input_tokens`,
+`output_tokens` and `cache_read_tokens` sums, `rounds` the review rounds run,
+and in `notes` `foreman mode=orchestrator;` then each session as
+`name=total_tokens` (`; failed` when the run failed). Thinking tokens have no
+ledger column: they are in `tokens.json`.
 
 Known issue (2026-10-18): foreman hangs on a non-JSON `AGY_ERROR` line, such as
 agy's 429 `RESOURCE_EXHAUSTED` ("undecodable agy event"), and can leave the lane

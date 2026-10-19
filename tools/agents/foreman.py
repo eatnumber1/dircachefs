@@ -26,6 +26,7 @@ COMPLETION_INSTRUCTION = (
     "back, print the line JOB-COMPLETE as the last thing you say."
 )
 
+# thinking_tokens is part of output_tokens, not an addition to it.
 COUNT_KEYS = (
     "input_tokens",
     "output_tokens",
@@ -34,18 +35,8 @@ COUNT_KEYS = (
     "total_tokens",
 )
 
-# Tools through which a Gemini session can start a subagent (init.tools of
-# every recorded session lists them; none of the recorded sessions called
-# one).
+# Tools through which a Gemini session starts a subagent; see README.
 SUBAGENT_TOOLS = ("invoke_subagent", "browser_subagent")
-
-USAGE_SCOPE = (
-    "Each session's counts are agy's result.usage, the session total: in "
-    "every recorded session it equals the sum of the step_update.usage "
-    "fields and all events carry one conversation_id, so subagent work, if "
-    "any, is inside it and is not attributed separately. subagent_calls "
-    "counts invoke_subagent/browser_subagent tool calls."
-)
 
 
 @dataclasses.dataclass
@@ -57,6 +48,7 @@ class SessionUsage:
       default_factory=lambda: {k: 0 for k in COUNT_KEYS}
   )
   subagent_calls: int = 0
+  duration_s: float = 0.0
 
 
 def parse_stream_usage(jsonl_path):
@@ -78,7 +70,9 @@ def parse_stream_usage(jsonl_path):
       if event == "init":
         usage.model = data.get("init", {}).get("model", "")
       elif event == "result":
-        result_usage = data.get("result", {}).get("usage")
+        result = data.get("result", {})
+        result_usage = result.get("usage")
+        usage.duration_s = float(result.get("duration_seconds") or 0)
       elif event == "step_update":
         su = data.get("step_update", {})
         if su.get("tool_name") in SUBAGENT_TOOLS:
@@ -91,30 +85,23 @@ def parse_stream_usage(jsonl_path):
 
 
 def parse_review_json(text):
-  """Returns the JSON object agy printed in text, or None.
-
-  agy -p --output-format json prints one object on one line; stderr noise
-  may precede it.
-  """
-  for line in reversed(text.splitlines()):
-    line = line.strip()
-    if line.startswith("{"):
-      try:
-        parsed = json.loads(line)
-      except json.JSONDecodeError:
-        return None
-      return parsed if isinstance(parsed, dict) else None
-  return None
+  """Returns the JSON object agy printed in text, or None."""
+  try:
+    parsed = json.loads(text)
+  except ValueError:
+    return None
+  return parsed if isinstance(parsed, dict) else None
 
 
 def add_session(sessions, role, name, model, usage):
-  """Appends one session record; role is worker, fix, review or single."""
+  """Appends one session record; role is worker, fix or review."""
   sessions.append({
       "role": role,
       "name": name,
       "model": usage.model or model,
       "usage": dict(usage.counts),
       "subagent_calls": usage.subagent_calls,
+      "duration_s": usage.duration_s,
   })
 
 
@@ -125,7 +112,6 @@ def build_tokens(sessions):
     for k in COUNT_KEYS:
       total[k] += s["usage"][k]
   return {
-      "usage_scope": USAGE_SCOPE,
       "sessions": sessions,
       "total": total,
   }
@@ -170,22 +156,21 @@ def record_ledger_row(step, model, mode, tokens, rounds, error, environ):
       f"step={step}",
       "agent=agy",
       f"model={model}",
-      f"tokens={total['total_tokens']}",
+      # As the Claude rows count: cache reads are part of tokens.
+      f"tokens={total['total_tokens'] + total['cache_read_tokens']}",
+      f"duration_s={round(sum(s['duration_s'] for s in tokens['sessions']))}",
       f"input_tokens={total['input_tokens']}",
       f"output_tokens={total['output_tokens']}",
       f"cache_read_tokens={total['cache_read_tokens']}",
       f"rounds={rounds}",
       f"notes={notes}",
   ]
-  res = subprocess.run(
-      cmd,
-      env=environ,
-      stdout=subprocess.PIPE,
-      stderr=subprocess.PIPE,
-      text=True,
-  )
-  if res.stderr:
-    print(f"foreman: ledger: {res.stderr.strip()}", file=sys.stderr)
+  res = subprocess.run(cmd, env=environ, capture_output=True, text=True)
+  if res.returncode != 0 or res.stderr:
+    print(
+        f"foreman: ledger: exit {res.returncode}: {res.stderr.strip()}",
+        file=sys.stderr,
+    )
 
 
 def default_out_dir(step, environ=os.environ):
@@ -427,22 +412,14 @@ def run_review(
         False,
         usage,
     )
-  text = parsed.get("response") or ""
+  text = parsed["response"]
   with open(out_review_path, "w", encoding="utf-8") as f:
     f.write(text if text.endswith("\n") else text + "\n")
-  counts = parsed.get("usage") or {}
-  usage.counts = {k: int(counts.get(k, 0)) for k in COUNT_KEYS}
-  if parsed.get("status") == "ERROR":
-    return (
-        False,
-        f"review ERROR: {parsed.get('error') or 'ERROR status'}",
-        text,
-        False,
-        usage,
-    )
-  if res.returncode != 0:
-    code = res.returncode
-    return False, f"review exited with code {code}", text, False, usage
+  counts = parsed["usage"]
+  usage.counts = {k: int(counts[k]) for k in COUNT_KEYS}
+  usage.duration_s = float(parsed["duration_seconds"])
+  if parsed["status"] == "ERROR":
+    return False, f"review ERROR: {parsed['error']}", text, False, usage
   is_clean = any(line.strip() == "NONE" for line in text.splitlines())
   return True, None, text, is_clean, usage
 

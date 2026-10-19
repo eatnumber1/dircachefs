@@ -60,17 +60,22 @@ if "--mode" in args and "plan" in args:
     os.remove(defects_file)
   else:
     content = "NONE"
-  if os.environ.get("FAKE_AGY_REVIEW_MODE") == "error":
-    sys.stderr.write("AGY_ERROR: {}\\n")
+  review_mode = os.environ.get("FAKE_AGY_REVIEW_MODE")
+  if review_mode == "garbage":
+    sys.stdout.write("agy crashed\\n")
+    sys.exit(1)
+  error = None
+  status = "SUCCESS"
+  if review_mode == "error":
     content = ""
     status = "ERROR"
-  else:
-    status = "SUCCESS"
+    error = "quota gone"
   sys.stdout.write(
       json.dumps({
           "conversation_id": "review-conv",
           "status": status,
           "response": content,
+          "error": error,
           "duration_seconds": 1.0,
           "num_turns": 1,
           "usage": {
@@ -227,6 +232,7 @@ if "--input-format" in args and "stream-json" in args:
                   "Starting background job.\\nWork is done.\\nJOB-COMPLETE\\n"
               ),
               "num_turns": 1,
+              "duration_seconds": 3.0,
               "usage": {
                   "input_tokens": 2000,
                   "output_tokens": 200,
@@ -583,7 +589,6 @@ class ForemanTest(unittest.TestCase):
     self.assertEqual(tokens["sessions"][1]["usage"]["total_tokens"], 1100)
     self.assertEqual(tokens["total"]["total_tokens"], 2 * 2200 + 2 * 1100)
     self.assertEqual(tokens["total"]["input_tokens"], 2 * 2000 + 2 * 1000)
-    self.assertIn("session total", tokens["usage_scope"])
 
   def test_summary_has_token_table(self):
     self.assertEqual(self._run(), 0)
@@ -604,8 +609,19 @@ class ForemanTest(unittest.TestCase):
     self.assertEqual(
         [s["role"] for s in tokens["sessions"]], ["worker", "review"]
     )
+    with open(
+        os.path.join(self.out_dir, "summary.md"), "r", encoding="utf-8"
+    ) as f:
+      self.assertIn("review ERROR: quota gone", f.read())
 
-  def test_failed_worker_records_partial_usage(self):
+  def test_review_that_prints_no_json_fails_the_run(self):
+    self.assertEqual(self._run(env={"FAKE_AGY_REVIEW_MODE": "garbage"}), 1)
+    with open(
+        os.path.join(self.out_dir, "summary.md"), "r", encoding="utf-8"
+    ) as f:
+      self.assertIn("review output is not JSON (code 1)", f.read())
+
+  def test_worker_that_dies_before_a_result_records_zero_tokens(self):
     self.assertEqual(self._run(env={"FAKE_AGY_STREAM_MODE": "exit_early"}), 1)
     tokens = self._tokens()
     self.assertEqual([s["role"] for s in tokens["sessions"]], ["worker"])
@@ -620,30 +636,22 @@ class ForemanTest(unittest.TestCase):
     self.assertEqual(row["agent"], "agy")
     self.assertEqual(row["model"], "gemini-3.8-flash")
     self.assertEqual(row["effort"], "low")
-    self.assertEqual(row["tokens"], str(2200 + 1100))
+    # total_tokens plus cache reads, as the Claude rows count.
+    self.assertEqual(row["tokens"], str(2200 + 1100 + 9000 + 5000))
+    self.assertEqual(row["duration_s"], "4")
     self.assertEqual(row["input_tokens"], str(2000 + 1000))
     self.assertEqual(row["output_tokens"], str(200 + 100))
     self.assertEqual(row["cache_read_tokens"], str(9000 + 5000))
     self.assertEqual(row["rounds"], "1")
-    self.assertIn("mode=orchestrator", row["notes"])
-    self.assertIn("worker=2200", row["notes"])
-    self.assertIn("review1=1100", row["notes"])
+    self.assertEqual(
+        row["notes"], "foreman mode=orchestrator; worker=2200; review1=1100"
+    )
 
   def test_ledger_row_written_when_run_fails(self):
     self.assertEqual(self._run(env={"FAKE_AGY_STREAM_MODE": "exit_early"}), 1)
     rows = self._ledger_rows()
     self.assertEqual(len(rows), 1)
     self.assertIn("failed", rows[0]["notes"])
-
-  def test_single_session_gets_its_own_role(self):
-    usage = foreman.parse_stream_usage(
-        os.path.join(TESTDATA, "gemini_worker_excerpt.jsonl")
-    )
-    sessions = []
-    foreman.add_session(sessions, "single", "single", "m", usage)
-    tokens = foreman.build_tokens(sessions)
-    self.assertEqual(tokens["sessions"][0]["role"], "single")
-    self.assertEqual(tokens["total"]["total_tokens"], 243278)
 
   def test_parse_stream_usage_recorded_session(self):
     usage = foreman.parse_stream_usage(
@@ -689,10 +697,22 @@ class ForemanTest(unittest.TestCase):
     self.assertEqual(parsed["status"], "ERROR")
     self.assertEqual(parsed["usage"]["total_tokens"], 0)
 
-  def test_parse_review_json_ignores_stderr_noise(self):
-    text = 'error: noise\n{"status":"SUCCESS","response":"NONE"}\n'
-    self.assertEqual(foreman.parse_review_json(text)["response"], "NONE")
+  def test_parse_review_json_success_recording(self):
+    with open(
+        os.path.join(TESTDATA, "agy_review_success.json"), "r",
+        encoding="utf-8",
+    ) as f:
+      parsed = foreman.parse_review_json(f.read())
+    self.assertEqual(parsed["status"], "SUCCESS")
+    self.assertEqual(parsed["response"], "NONE\n")
+    self.assertEqual(parsed["usage"]["input_tokens"], 44152)
+    self.assertEqual(parsed["usage"]["output_tokens"], 800)
+    self.assertEqual(parsed["usage"]["thinking_tokens"], 594)
+    self.assertEqual(parsed["usage"]["total_tokens"], 44952)
+
+  def test_parse_review_json_rejects_non_objects(self):
     self.assertIsNone(foreman.parse_review_json("not json\n"))
+    self.assertIsNone(foreman.parse_review_json("[1]"))
 
   def test_custom_models_passed(self):
     log_file = os.path.join(self.root, "agy_args.log")

@@ -46,10 +46,10 @@ delegate and say so in your report.
        STEP LANE BRANCH PROMPT_FILE --out DIR
    ```
 5. **Read the result.** Under `--out`: `worker.out` (the report),
-   `review*.out`, `summary.md` (with a token table), `tokens.json` (per-session
-   Gemini token counts), `usage.before` and `usage.after`. Foreman adds the
-   run's dispatch-ledger row itself. Verify
-   its claims before you use them: grep or read what it cites.
+   `review*.out`, `summary.md` (with a token table), `tokens.json`
+   (per-session Gemini token counts), `usage.before` and `usage.after`.
+   Foreman adds the run's dispatch-ledger row itself. Verify its claims
+   before you use them: grep or read what it cites.
 6. **Check the lane** with `git status`: a non-JSON `AGY_ERROR` or 429
    makes foreman hang and can leave the lane mid-rebase (README, known
    issue); abort any rebase.
