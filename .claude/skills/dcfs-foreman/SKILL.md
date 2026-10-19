@@ -38,8 +38,11 @@ crash handling, reviews (Flash is lenient), or design that needs judgement
 4. **Run it with the Bash tool in the background**
    (`run_in_background: true`), never in the foreground and never behind a
    polling loop; you are told when it exits:
-   `cd YOUR_LANE && python3 -I tools/agents/foreman.py STEP LANE BRANCH
-   PROMPT_FILE --out DIR`.
+
+   ```bash
+   cd YOUR_LANE && python3 -I tools/agents/foreman.py \
+       STEP LANE BRANCH PROMPT_FILE --out DIR
+   ```
 5. **Read the result.** Under `--out`: `worker.out` (the report),
    `review*.out`, `summary.md`, `usage.before` and `usage.after`. Verify
    its claims before you use them: grep or read what it cites.
@@ -48,9 +51,12 @@ crash handling, reviews (Flash is lenient), or design that needs judgement
    issue); abort any rebase.
 7. **Read-only jobs cost extra today**: an empty-diff review round and a
    throwaway branch, until 25.48 adds `--read-only`. Ignore the branch.
-8. **Record it.** `python3 -I tools/agents/dashboard_lanes.py ledger add
-   step=PARENT_STEP agent=agy model=MODEL notes=QUOTA_DELTA` from the main
-   checkout, naming the parent step.
+8. **Record it**, from the main checkout, naming the parent step:
+
+   ```bash
+   python3 -I tools/agents/dashboard_lanes.py ledger add \
+       step=PARENT_STEP agent=agy model=MODEL notes=QUOTA_DELTA
+   ```
 9. **Report it.** Your step report gets a line
    `Delegated: WHAT, to Gemini, job output DIR, verified by HOW` (or
    `Delegated: none`).
