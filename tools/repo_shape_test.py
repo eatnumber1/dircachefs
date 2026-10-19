@@ -17,53 +17,10 @@ ROOT = {}
 
 class RepoShapeTest(unittest.TestCase):
 
-    def test_every_third_party_directory_has_a_readme(self):
-        self.assertEqual([], repo_shape.third_party_readmes(ROOT["root"]))
-
-    def test_every_guest_script_is_used_by_a_test(self):
-        self.assertEqual([], repo_shape.guest_scripts_used(ROOT["root"]))
-
-    def test_no_guest_script_waits_on_a_timer(self):
-        self.assertEqual([], repo_shape.guest_sleeps(ROOT["root"]))
-
-    def test_no_new_guest_shell(self):
-        self.assertEqual([], repo_shape.no_new_guest_shell(ROOT["root"]))
-
-    def test_local_buffers_sized_once_are_fixed_arrays(self):
-        self.assertEqual([], repo_shape.fixed_arrays(ROOT["root"]))
-
-    def test_status_macros_are_the_short_names(self):
-        self.assertEqual([], repo_shape.absl_prefixed_status_macros(ROOT["root"]))
-
-    def test_no_nodiscard_on_a_status_return(self):
-        self.assertEqual([], repo_shape.nodiscard_on_status(ROOT["root"]))
-
-    def test_no_identifier_begins_with_the_project_name(self):
-        self.assertEqual([], repo_shape.project_prefix(ROOT["root"]))
-
-    def test_every_disabled_check_is_in_the_limitations(self):
-        self.assertEqual([], repo_shape.disabled_checks_listed(ROOT["root"]))
-
-    def test_no_production_comment_gives_tests_as_the_reason(self):
-        self.assertEqual([], repo_shape.no_test_only_comments(ROOT["root"]))
-
-    def test_no_production_class_befriends_a_testonly_class(self):
-        self.assertEqual([], repo_shape.no_testonly_friends(ROOT["root"]))
-
-    def test_every_ratified_rule_is_in_exactly_one_index(self):
-        self.assertEqual([], repo_shape.rule_index(ROOT["root"]))
-
-    def test_agent_files_do_not_restate_attributed_rules(self):
-        self.assertEqual([], repo_shape.agent_file_attributions(ROOT["root"]))
-
-    def test_every_source_file_has_an_spdx_licence(self):
-        self.assertEqual([], repo_shape.spdx_licenses(ROOT["root"]))
-
-    def test_no_new_line_over_80_columns(self):
-        self.assertEqual([], repo_shape.long_lines(ROOT["root"]))
-
-    def test_no_markdown_code_span_is_split_across_lines(self):
-        self.assertEqual([], repo_shape.split_code_spans(ROOT["root"]))
+    def test_every_check_is_clean(self):
+        for check in repo_shape.CHECKS:
+            with self.subTest(check=check.__name__):
+                self.assertEqual([], check(ROOT["root"]))
 
 
 def main():

@@ -46,12 +46,17 @@ Each function takes the root of a source tree and returns a list of problems
   (it renders with a space), except those counted in
   tools/repo_shape_split_spans.txt, a list that only shrinks.
 
+`python3 -I tools/repo_shape.py [root]` prints the problems of every rule
+above (the same list, `CHECKS`, as //tools:repo_shape_test) and exits 1 if
+there are any (step 25.51).
+
 (The fourth rule, commit subjects, needs git: .github/ci/commit_subjects.sh.)
 """
 
 import os
 import re
 import subprocess
+import sys
 
 NOT_TESTS = frozenset({
     "lib.sh", "pjdfstest_lib.sh", "init", "systemd_install.sh",
@@ -876,16 +881,35 @@ def split_code_spans(root, tracked=None):
                           "split code span(s)")
 
 
+# The rules that read git's list of tracked files.
+TRACKED_CHECKS = (spdx_licenses, long_lines, split_code_spans)
+
+# Every rule, once: `all_problems` runs them, `//tools:repo_shape_test`
+# asserts each is clean and the command line (`python3 -I
+# tools/repo_shape.py`) prints their problems, so the three cannot differ
+# (step 25.51).
+CHECKS = (
+    third_party_readmes, guest_scripts_used, guest_sleeps,
+    no_new_guest_shell, fixed_arrays, absl_prefixed_status_macros,
+    nodiscard_on_status, project_prefix, disabled_checks_listed,
+    no_test_only_comments, no_testonly_friends, rule_index,
+    agent_file_attributions) + TRACKED_CHECKS
+
+
 def all_problems(root):
-    return (third_party_readmes(root) + guest_scripts_used(root) +
-            guest_sleeps(root) + no_new_guest_shell(root) +
-            disabled_checks_listed(root) +
-            no_test_only_comments(root) + no_testonly_friends(root) +
-            fixed_arrays(root) + project_prefix(root) +
-            absl_prefixed_status_macros(root) + nodiscard_on_status(root) +
-            rule_index(root) + agent_file_attributions(root))
+    return [problem for check in CHECKS for problem in check(root)]
 
 
-def tracked_problems(root):
-    """The rules that read git's list of tracked files."""
-    return long_lines(root) + split_code_spans(root)
+def main(argv):
+    """Print every problem of the tree at argv[1] (default: the one this
+    file is in); exit status 1 if there are any."""
+    root = (argv[1] if len(argv) > 1 else os.path.dirname(
+        os.path.dirname(os.path.realpath(__file__))))
+    problems = all_problems(root)
+    for problem in problems:
+        print(problem)
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

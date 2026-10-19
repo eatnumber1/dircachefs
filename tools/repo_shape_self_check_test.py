@@ -6,7 +6,10 @@ DISABLED_ check and a bare sleep: each rule must report it; a good tree
 reports nothing.
 """
 
+import contextlib
+import io
 import os
+import subprocess
 import tempfile
 import unittest
 
@@ -87,7 +90,9 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
         self.dir.cleanup()
 
     def test_good_tree_has_no_problems(self):
-        self.assertEqual([], repo_shape.all_problems(self.root))
+        for check in repo_shape.CHECKS:
+            if check not in repo_shape.TRACKED_CHECKS:
+                self.assertEqual([], check(self.root), check.__name__)
 
     def test_a_rule_in_no_index_is_reported(self):
         write(self.root, "docs/design.md",
@@ -588,6 +593,73 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
         self.assertEqual([], self.split_problems(files, "docs/a.md 1\n"))
         problems = self.split_problems({"docs/a.md": "ok\n"}, "docs/a.md 1\n")
         self.assertEqual(1, len(problems), problems)
+
+
+class RepoShapeCliTest(unittest.TestCase):
+    """`python3 -I tools/repo_shape.py` runs every check the test does,
+    including the ones that read git's tracked files (step 25.51)."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.root = self.dir.name
+        good_tree(self.root)
+        write(self.root, "tools/repo_shape_long_lines.txt", "# known\n")
+        write(self.root, "tools/repo_shape_split_spans.txt", "# known\n")
+        write(self.root, "tools/licenses_allowed.txt", "MIT\n")
+        write(self.root, "tools/third_party_files.txt", "# none\n")
+        for path in sorted(self.files()):
+            if repo_shape.spdx_wanted(path):
+                with open(os.path.join(self.root, path), "r+") as f:
+                    text = f.read()
+                    f.seek(0)
+                    f.write("# SPDX-License-Identifier: MIT\n" + text)
+
+    def files(self):
+        for base, _, names in os.walk(self.root):
+            for name in names:
+                yield os.path.relpath(os.path.join(base, name), self.root)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def run_cli(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = repo_shape.main(["repo_shape.py", self.root])
+        return code, out.getvalue()
+
+    def test_a_good_tree_exits_zero(self):
+        code, out = self.run_cli()
+        self.assertEqual((0, ""), (code, out))
+
+    def test_a_new_long_line_in_a_tracked_md_file_fails(self):
+        write(self.root, "docs/a.md", "word " * 17 + "\n")
+        code, out = self.run_cli()
+        self.assertEqual(1, code)
+        self.assertIn("docs/a.md has 1 line(s) over 80 columns", out)
+
+    def test_an_allowlist_count_above_the_actual_fails(self):
+        write(self.root, "docs/a.md", "short\n")
+        write(self.root, "tools/repo_shape_long_lines.txt",
+              "# known\ndocs/a.md 2\n")
+        code, out = self.run_cli()
+        self.assertEqual(1, code)
+        self.assertIn("lists 2 for docs/a.md, which has 0", out)
+
+    def test_a_split_backtick_span_fails(self):
+        write(self.root, "docs/a.md", "Use `foo\nbar` here.\n")
+        code, out = self.run_cli()
+        self.assertEqual(1, code)
+        self.assertIn("docs/a.md has 1 split code span(s)", out)
+
+    def test_the_cli_and_the_test_run_the_one_list_of_checks(self):
+        names = [f.__name__ for f in repo_shape.CHECKS]
+        self.assertIn("long_lines", names)
+        self.assertIn("split_code_spans", names)
+        self.assertIn("spdx_licenses", names)
+        self.assertEqual(len(names), len(set(names)))
 
 
 if __name__ == "__main__":
