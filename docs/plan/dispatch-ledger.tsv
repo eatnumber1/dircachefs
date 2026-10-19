@@ -232,3 +232,5 @@ aca2a3a472f2e3307	2026-10-19T06:32:12Z	25.49	style-review	dcfs-style-reviewer	cl
 a0be9a0ddf195c813	2026-10-19T06:35:46Z	25.49	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	182391	45								12	61	153314	29004
 adac41cf3c707da70	2026-10-19T06:38:28Z	25.49	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	238422	48								12	72	195284	43054
 a22e37d2023f29e50	2026-10-19T06:38:45Z	Clerk batch 39	mechanical	dcfs-mechanical	claude-haiku-5-5	low	585977	77								28	5659	527400	52890
+afeed4654ba53cea6	2026-10-19T06:40:57Z	main-check	mechanical	dcfs-mechanical	haiku	low	68464	11								6	40	50773	17645
+a405e690071ca5c21	2026-10-19T06:41:33Z	Clerk batch 40	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1492639	135								50	9832	1408930	73827
