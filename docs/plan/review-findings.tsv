@@ -333,3 +333,11 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-19	23.16	1	dcfs-reviewer	nit	docs	style 1.9	dcfs/protocol_events.h:722	stale backing::ReadFile and fallback write references (style.md:1241, caller_capabilities_test.cc:306)	could	moot: step cancelled 2026-10-18
 2026-10-19	23.16	1	dcfs-reviewer	nit	style-other	abseil 3.1; style 1.6	dcfs/dir_cache_fs.cc:1929	stub messages built with StrCat inside ProducedErrnoToStatus; use StatusBuilder	checked	moot: step cancelled 2026-10-18
 2026-10-19	23.16	1	dcfs-reviewer	nit	docs	process	docs/plan/phases/23-semantics-gaps.md:1115	23.15 now moot like 23.17	no	moot: step cancelled 2026-10-18
+2026-10-19	25.49a	1	dcfs-style-reviewer/sonnet/high	blocker	contract-claim	-	-	read-only reviewers pointed at a skill that checks out lanes	no	fixed/merged 8779ff6d
+2026-10-19	25.49a	1	dcfs-style-reviewer/sonnet/high	should	docs	-	-	Delegated: line scope	no	fixed/merged 8779ff6d
+2026-10-19	25.49a	1	dcfs-style-reviewer/sonnet/high	should	docs	-	-	/quota vs /usage	no	fixed/merged 8779ff6d
+2026-10-19	25.49a	1	dcfs-style-reviewer/sonnet/high	should	docs	-	-	rule 10 background wording	no	fixed/merged 8779ff6d
+2026-10-19	25.49a	1	dcfs-style-reviewer/sonnet/high	should	docs	-	-	rule 6 vs rule 9 routing reference	no	fixed/merged 8779ff6d
+2026-10-19	25.49a	1	dcfs-style-reviewer/sonnet/high	nit	docs	-	-	skill restates rule 12	no	fixed/merged 8779ff6d
+2026-10-19	25.49a	1	dcfs-style-reviewer/sonnet/high	nit	style-other	-	-	blank line in the rule list	could	fixed/merged 8779ff6d
+2026-10-19	25.49a	1	dcfs-style-reviewer/sonnet/high	nit	style-other	-	-	pointer-line wrapping	checked	fixed/merged 8779ff6d

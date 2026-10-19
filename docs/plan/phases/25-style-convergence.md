@@ -2112,26 +2112,62 @@ attribution check covers them). Scripts under `tools/agents/` come with tests.
 
 *Test:* the scripts come with tests under `tools/agents/`.
 
-## 25.48 Foreman research mode
+## 25.48 Foreman single mode (russ, 2026-10-19; queued, not started)
 
-russ, 2026-10-19: "Use the foreman script instead of calling agy
-directly". Queued, not started.
+russ, 2026-10-19: "foreman's purpose was to have an orchestrator in Gemini
+as well. Maybe we should have both an in-gemini orchestrator and a
+non-orchestrator mode? foreman.py also was extended to not be subject to the
+30 minute timeout, so we do need to keep using it."
 
-A `--read-only` flag on the foreman script. Today every read-only job pays an
-empty-diff review and a throwaway branch.
+This replaces the research mode this section described earlier on 2026-10-19
+(a `--read-only` flag alone). `tools/agents/foreman.py` gets two modes:
 
-1. `--read-only` runs the worker in agy plan mode.
-2. No branch setup.
-3. No review round when the diff is empty.
-4. The worker's final text is saved as `report.md`.
+1. Orchestrator mode, the default: today's worker, plus review and fix rounds.
+2. `--single`: one held-open worker session, with no review and no fix
+   rounds.
+3. `--read-only` combines with `--single` only: agy plan mode, no branch
+   setup, and the worker's final text is saved as `report.md`.
 
 Owner: not yet assigned (the orchestrator chooses). Dependencies: none.
 
-*Test:* the foreman script's tests under `tools/` cover the flag.
+*Test:* `//tools/agents:foreman_test` covers both modes and the
+`--single --read-only` combination.
+
+## 25.50 `clerk-queue add` rejects flags (batch 35, 2026-10-19; queued)
+
+`clerk-queue add --help` queued the literal item `--help`, which reached
+clerk batch 34 (orchestrator's queue, 2026-10-19).
+
+1. `clerk-queue add` in `tools/agents/dashboard_lanes.py` rejects any
+   argument that starts with `-` and prints its usage line,
+   `clerk-queue add TEXT...`.
+2. A test in `tools/agents/dashboard_lanes_test.py` fails on the current code
+   first, then passes.
+
+Owner: not yet assigned (the orchestrator chooses). Dependencies: none.
+
+*Test:* `dashboard_lanes_test.py` covers the refused flag.
+
+## 25.51 `repo_shape` CLI runs its test's checks (batch 35, 2026-10-19; queued)
+
+`python3 -I tools/repo_shape.py` does not run `tracked_problems` (long_lines,
+split_code_spans), which `//tools:repo_shape_test` runs. Clerk batch 34
+passed the CLI with 84 long lines and turned main's tools tier red
+(2026-10-19).
+
+1. The CLI runs the same checks as `//tools:repo_shape_test`.
+2. A test in `tools/repo_shape_test.py` fails on the current code first: a
+   long line makes the CLI exit nonzero.
+
+Owner: not yet assigned (the orchestrator chooses). Dependencies: 25.45 item 2
+(merged b1349d6e).
+
+*Test:* a long line fails the CLI.
 
 ## 25.49 Subagents delegate down
 
-Queued; after 25.48 (25.49a is done). russ, 2026-10-19: "I'd like it if
+Partly done: 25.49a merged 8779ff6d (2026-10-19); items 2 to 4 are queued
+after 25.48. russ, 2026-10-19: "I'd like it if
 our subagents started doing this too, and themselves leveraging dumber
 agents for more of the menial work"
 

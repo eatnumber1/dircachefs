@@ -314,6 +314,8 @@ the README go to 14.10b below. What was settled:
 
 ## 14.10b Network backings: the implementation
 
+Moved from M3 to M4 (russ, 2026-10-19: "Network backings can move to M4.").
+
 Owner: dcfs-protocol. After the error-handling rework of dcfs/ that was in
 flight on 2026-10-16 (it touches device_id.cc and main.cc). Test first
 throughout; the design is docs/design.md "Backings without a filesystem
