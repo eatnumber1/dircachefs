@@ -49,7 +49,7 @@ docs/plan/phases/23-semantics-gaps.md 6
 docs/plan/phases/25-style-convergence.md 11
 docs/plan/phases/26-bumpers.md 7
 docs/plan/phases/27-in-memory-cache.md 1
-docs/plan/process.md 7
+docs/plan/process.md 6
 docs/plan/review-fixes.md 2
 docs/style.md 30
 docs/testing.md 2
