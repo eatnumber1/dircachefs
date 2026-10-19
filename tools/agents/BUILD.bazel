@@ -108,7 +108,10 @@ py_test(
     srcs = ["foreman_test.py"],
     data = glob(["testdata/*"]),
     target_compatible_with = HOST_ONLY_COMPATIBLE,
-    deps = [":foreman_lib"],
+    deps = [
+        ":dashboard_lanes_lib",
+        ":foreman_lib",
+    ],
 )
 
 # Review findings ledger and summary tool.

@@ -13,6 +13,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dashboard_lanes
 import foreman
 
 TESTDATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata")
@@ -751,10 +752,13 @@ class ForemanTest(unittest.TestCase):
     self.assertEqual(
         row["notes"], "foreman mode=single; parent=25.49; worker=2200"
     )
+    self.assertEqual(dashboard_lanes.ledger_parent(row), "25.49")
 
   def test_no_parent_leaves_notes_unchanged(self):
     self.assertEqual(self._run(single=True), 0)
-    self.assertNotIn("parent=", self._ledger_rows()[0]["notes"])
+    row = self._ledger_rows()[0]
+    self.assertNotIn("parent=", row["notes"])
+    self.assertEqual(dashboard_lanes.ledger_parent(row), "")
 
   def test_low_weekly_pool_refuses_before_any_work(self):
     log_file = os.path.join(self.root, "agy_args.log")

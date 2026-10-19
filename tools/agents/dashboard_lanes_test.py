@@ -1235,15 +1235,39 @@ class DispatchLedgerTest(Fixture):
             "26.1\t400\t0\t0\t0.0",
         ])
 
-    def test_ledger_by_parent_round_trips_foreman_notes(self):
-        notes = "foreman mode=orchestrator; parent=25.49; worker=1; review1=2"
-        self.run_cmd(["ledger", "add", "step=x", "tokens=7",
-                      "notes=" + notes])
-        row = self.ledger_rows()[0]
-        self.assertEqual(dashboard_lanes.ledger_parent(row), "25.49")
+    def test_ledger_parent_ignores_lookalikes(self):
+        self.assertEqual(
+            dashboard_lanes.ledger_parent(
+                {"notes": "foreman mode=orchestrator; parent=25.49; w=1"}),
+            "25.49")
         self.assertEqual(dashboard_lanes.ledger_parent({"notes": "a; b"}), "")
         self.assertEqual(
             dashboard_lanes.ledger_parent({"notes": "noparent=3"}), "")
+
+    def test_ledger_by_parent_delegated_only_step(self):
+        self.run_cmd(["ledger", "add", "step=a", "tokens=50",
+                      "notes=foreman mode=single; parent=7.7"])
+        out, _ = self.run_cmd(["ledger", "by-parent"])
+        self.assertEqual(out.splitlines()[1:], ["7.7\t0\t50\t1\t100.0"])
+
+    def test_ledger_by_parent_step_argument_filters(self):
+        self.run_cmd(["ledger", "add", "step=1.1", "tokens=5"])
+        self.run_cmd(["ledger", "add", "step=2.2", "tokens=6"])
+        out, _ = self.run_cmd(["ledger", "by-parent", "2.2"])
+        self.assertEqual(out.splitlines()[1:], ["2.2\t6\t0\t0\t0.0"])
+
+    def test_ledger_by_parent_rejects_two_arguments(self):
+        out, err = io.StringIO(), io.StringIO()
+        dashboard_lanes.main(["ledger", "by-parent", "a", "b"],
+                             stdin=io.StringIO(""), stdout=out, stderr=err,
+                             env=self.env)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("usage: ledger by-parent [STEP]", err.getvalue())
+
+    def test_ledger_by_parent_empty_tokens_count_zero(self):
+        self.run_cmd(["ledger", "add", "step=3.3"])
+        out, _ = self.run_cmd(["ledger", "by-parent"])
+        self.assertEqual(out.splitlines()[1:], ["3.3\t0\t0\t0\t0.0"])
 
     def test_ledger_by_parent_one_step_lists_it_even_without_rows(self):
         self.run_cmd(["ledger", "add", "step=1.1", "tokens=5"])
