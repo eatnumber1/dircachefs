@@ -13,8 +13,9 @@ description: >-
 
 Foreman has two modes. **Orchestrator mode** (today's default) runs a
 worker plus review/fix rounds and leaves a merge-ready branch: a whole step
-on Gemini. **Single mode** (from 25.48: one worker session, no review
-round, `--read-only` for plan mode and no branch) is for bounded chunks.
+on Gemini. **Single mode** (`--single`: one worker session, no review
+round; add `--read-only` for plan mode, no git and a saved `report.md`) is
+for bounded chunks.
 Foreman holds the session past agy's 30-minute print timeout, which is why
 every agy job goes through it.
 
@@ -33,7 +34,8 @@ delegate and say so in your report.
    the pool left; with little left, choose a small job that is safe to
    abandon.
 2. **Lane and branch.** Use the lane your brief names and a new branch
-   name, such as `delegate-STEP-WHAT`.
+   name, such as `delegate-STEP-WHAT`. A `--read-only` survey needs no
+   branch and changes nothing in the lane.
 3. **Prompt file.** Self-contained, per mode: see
    [prompts.md](prompts.md) for the checklist (orchestrator mode) and the
    template (single mode).
@@ -43,9 +45,16 @@ delegate and say so in your report.
 
    ```bash
    cd YOUR_LANE && python3 -I tools/agents/foreman.py \
-       STEP LANE BRANCH PROMPT_FILE --out DIR
+       STEP LANE BRANCH PROMPT_FILE --single --out DIR
+   cd YOUR_LANE && python3 -I tools/agents/foreman.py \
+       STEP DIR PROMPT_FILE --single --read-only --out DIR
    ```
-5. **Read the result.** Under `--out`: `worker.out` (the report),
+
+   The first is a write chunk; the second a survey (no branch, `DIR` is only
+   the working directory). Omit `--single` for a whole step with review
+   rounds.
+5. **Read the result.** Under `--out`: `report.md` (read-only mode: the
+   report) or `worker.out`,
    `review*.out`, `summary.md` (with a token table), `tokens.json`
    (per-session Gemini token counts), `usage.before` and `usage.after`.
    Foreman adds the run's dispatch-ledger row itself. Verify its claims
@@ -53,8 +62,8 @@ delegate and say so in your report.
 6. **Check the lane** with `git status`: a non-JSON `AGY_ERROR` or 429
    makes foreman hang and can leave the lane mid-rebase (README, known
    issue); abort any rebase.
-7. **Bounded chunks cost extra until 25.48**: orchestrator mode only, so
-   an empty-diff review round and a throwaway branch. Ignore the branch.
+7. **Bounded chunks use `--single`**: no review round. A write chunk still
+   gets a throwaway branch; ignore it.
 8. **The ledger row is foreman's.** It adds one row for the run (step as
    you passed it, `agent=agy`, tokens, per-session breakdown in `notes`);
    pass the parent step as `STEP` so it is attributed. Add a second row

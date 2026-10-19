@@ -744,11 +744,11 @@ reading. Not for writing code, nor for subtle protocol judgement.
    extended to not be subject to the 30 minute timeout, so we do need to keep
    using it." So foreman has an orchestrator mode (a worker plus review/fix
    rounds and a merge-ready branch: a whole step on Gemini) and, from 25.48,
-   a single mode (one worker session, no review round; `--read-only` adds
-   plan mode and no branch) for bounded chunks; until 25.48 lands a chunk
-   uses orchestrator mode and pays the extra review round. Every agent hands
-   a bounded chunk that needs labour rather than judgement (surveys, greps
-   across trees, doc passes, test boilerplate, warning-fix batches) to Gemini
+   a single mode (`--single`: one worker session, no review round;
+   `--read-only` adds plan mode and no branch) for bounded chunks.
+   Every agent hands a bounded chunk that needs labour rather than judgement
+   (surveys, greps across trees, doc passes, test boilerplate, warning-fix
+   batches) to Gemini
    through `tools/agents/foreman.py`, by the `dcfs-foreman` skill
    (`.claude/skills/dcfs-foreman/SKILL.md`); rule 9 (routing) decides what
    may go, and rule 6 only the model and effort. It reconciles rule 10: every
@@ -757,8 +757,8 @@ reading. Not for writing code, nor for subtle protocol judgement.
    and the Claude quota it would have spent stays for judgement work. A
    subagent delegates only into a lane its brief names as its delegation
    lane; with none named it does not delegate and says so in its report. The
-   reviewers (`dcfs-reviewer`, `dcfs-style-reviewer`) do not delegate until
-   25.48's `--read-only` lands. The delegating agent reads the pool first,
+   reviewers (`dcfs-reviewer`, `dcfs-style-reviewer`) delegate only read-only
+   surveys (`--single --read-only`). The delegating agent reads the pool first,
    reviews the result before using it, and records a ledger row naming its
    parent step. The step report of an implementer, mechanical, investigator
    or protocol agent carries a `Delegated:` line (`none` if nothing was); a

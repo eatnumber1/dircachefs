@@ -2233,7 +2233,7 @@ proposal 2 as a whole."; `process.md` `rule-reviewed-slices`).**
 - **25.47c** scripts (merge lane, quota, census).
 - **25.47d** metrics.
 
-## 25.48 Foreman single mode (russ, 2026-10-19; queued, not started)
+## 25.48 Foreman single mode (russ, 2026-10-19; done-pending-merge)
 
 russ, 2026-10-19: "foreman's purpose was to have an orchestrator in Gemini
 as well. Maybe we should have both an in-gemini orchestrator and a

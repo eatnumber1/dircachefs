@@ -303,7 +303,10 @@ It runs directly with `python3 -I`, no Bazel needed; the tests are
 ## foreman
 
 Drives a queued development step end to end on Gemini in a lane, running worker
-and review/fix rounds, and leaving a merge-ready branch plus `summary.md`.
+and review/fix rounds, and leaving a merge-ready branch plus `summary.md`
+(orchestrator mode, the default). `--single` runs one worker session only, for a
+bounded chunk; `--read-only` with it runs a survey in plan mode and saves a
+report (below). Both hold the session open past agy's 30-minute print timeout.
 
 How to use it as an agent (when, quota, prompt, ledger, report) is the
 `dcfs-foreman` skill, `.claude/skills/dcfs-foreman/SKILL.md`.
@@ -320,6 +323,15 @@ Or via Bazel:
 bazel run //tools/agents:foreman -- STEP LANE BRANCH PROMPT_FILE [--model M] [--review-model M] [--out DIR]
 ```
 
+Single mode and read-only mode:
+
+```bash
+python3 -I tools/agents/foreman.py STEP LANE BRANCH PROMPT_FILE --single \
+    [--model M] [--out DIR]
+python3 -I tools/agents/foreman.py STEP DIR PROMPT_FILE --single --read-only \
+    [--model M] [--out DIR]
+```
+
 - `STEP` (required): name of the step (e.g. `25.33`).
 - `LANE` (required): lane repository directory.
 - `BRANCH` (required): branch name to check out from `FETCH_HEAD` of main.
@@ -327,6 +339,17 @@ bazel run //tools/agents:foreman -- STEP LANE BRANCH PROMPT_FILE [--model M] [--
 - `--model M`: model for worker and fix sessions (default:
   `gemini-3.8-flash-medium`).
 - `--review-model M`: model for review sessions (default: same as `--model`).
+- `--single`: one worker session, no review or fix rounds. The branch is set up
+  as in orchestrator mode. `tokens.json` records the session with role
+  `single`; the ledger row says `mode=single` and `rounds=0`; `summary.md` has
+  no "last review" section. With `--single`, `--review-model` is refused.
+- `--read-only` (requires `--single`; refused without it): agy plan mode, and
+  no git at all: nothing is fetched or checked out and `DIR` (the second
+  argument) is only the working directory. There is no `BRANCH` argument, so
+  the form is `STEP DIR PROMPT_FILE`. The worker's text, minus its
+  `JOB-COMPLETE` line, is saved as `report.md` in `--out`. `summary.md` says
+  "read-only run in DIR" and has no commit sections; the ledger row says
+  `mode=read-only`.
 - `--out DIR`: output directory where `.jsonl`, `.out`, usage readings, and
   `summary.md` are saved (default: scratchpad foreman directory or
   `/tmp/foreman/<step>`).
@@ -365,7 +388,7 @@ bazel run //tools/agents:foreman -- STEP LANE BRANCH PROMPT_FILE [--model M] [--
 ### Token counts
 
 Every agy session (worker, each fix, each review) is recorded as one entry of
-`tokens.json` in `--out`: `role` (`worker`, `fix`, `review`), `name`
+`tokens.json` in `--out`: `role` (`worker`, `fix`, `review`, `single`), `name`
 (`worker`, `fix1`, `review1`), `model`, `usage` (`input_tokens`,
 `output_tokens`, `thinking_tokens`, `cache_read_tokens`, `total_tokens`),
 `subagent_calls` and `duration_s`; plus `total`. `thinking_tokens` is part of
@@ -392,9 +415,9 @@ The ledger row (`dashboard_lanes.py ledger add`, run by foreman against
 `total_tokens + cache_read_tokens` sum (as the Claude rows count their
 tokens), `duration_s` the summed session durations, the `input_tokens`,
 `output_tokens` and `cache_read_tokens` sums, `rounds` the review rounds run,
-and in `notes` `foreman mode=orchestrator;` then each session as
-`name=total_tokens` (`; failed` when the run failed). Thinking tokens have no
-ledger column: they are in `tokens.json`.
+and in `notes` `foreman mode=orchestrator;` (`single`, `read-only`) then each
+session as `name=total_tokens` (`; failed` when the run failed). Thinking
+tokens have no ledger column: they are in `tokens.json`.
 
 Known issue (2026-10-18): foreman hangs on a non-JSON `AGY_ERROR` line, such as
 agy's 429 `RESOURCE_EXHAUSTED` ("undecodable agy event"), and can leave the lane

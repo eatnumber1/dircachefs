@@ -14,7 +14,7 @@ documented field picks a subagent's model, so you cannot require one. What
 you do choose is the session's own model with `--model`; the cheap ids are
 `gemini-3.8-flash-low`, `gemini-3.8-flash-medium` and
 `gemini-3.8-flash-high` (`agy models` lists the rest). To keep a menial
-chunk cheap, run it as its own single-mode job on a cheap model, rather
+chunk cheap, run it as its own `--single` job on a cheap model, rather
 than hoping the orchestrator session picks one.
 
 ## Orchestrator mode (a whole step on Gemini)
@@ -38,6 +38,9 @@ Checklist for the prompt file:
    deviation and design decision, then the line `JOB-COMPLETE`.
 
 ## Single mode (a bounded chunk)
+
+Run it with `--single`; a survey that edits nothing also takes `--read-only`
+(plan mode, no branch), and its final answer is saved as `report.md`.
 
 Template (fill the capitals; keep it under one screen):
 
