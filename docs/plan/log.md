@@ -4651,3 +4651,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   methods, with the syscall-wrapper exception mechanical. Added to 25.41's
   docs/style.md list the index-code.md 1.5 bullet ("one thin wrapper per
   syscall") that changes with 1.5.
+- 2026-10-19, 25.54 merged as 05008e7f (the dcfs-dashboard-upload skill
+  uploads assets one at a time; a denial stops further uploads without a
+  workaround, the batch write and mark-uploaded run for the datasets that
+  uploaded, and the denied names are reported). Written by Gemini 3.8 Flash
+  via foreman orchestrator mode (`--parent 25.54`, about 270k Gemini
+  tokens). The Gemini review died on quota; the orchestrator reviewed it
+  with no findings (review-findings.tsv, 25.54). No code under `tools/`
+  changed: mark-uploaded already accepted a subset. The foreman known-issue
+  note in `tools/agents/README.md` now records that the 429 was reported and
+  foreman exited 1 instead of hanging. Clerk batch 50.

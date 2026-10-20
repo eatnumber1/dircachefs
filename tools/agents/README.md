@@ -443,10 +443,11 @@ and in `notes` `foreman mode=orchestrator;` (`single`, `read-only`) then each
 session as `name=total_tokens` (`; failed` when the run failed). Thinking
 tokens have no ledger column: they are in `tokens.json`.
 
-Known issue (2026-10-18): foreman hangs on a non-JSON `AGY_ERROR` line, such as
-agy's 429 `RESOURCE_EXHAUSTED` ("undecodable agy event"), and can leave the lane
-mid-rebase. Until it is fixed, check the lane (`git status`) after a foreman
-failure and abort any rebase.
+Known issue (2026-10-18): foreman hung on a non-JSON `AGY_ERROR` line, such as
+agy's 429 `RESOURCE_EXHAUSTED` ("undecodable agy event"), and could leave the
+lane mid-rebase. On 2026-10-19 (25.54) a 429 was reported as an error and
+foreman exited 1 instead. After any foreman failure, check the lane
+(`git status`) and abort any rebase.
 
 The tests are `//tools/agents:foreman_test`.
 

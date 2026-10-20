@@ -2716,7 +2716,7 @@ Gemini Flash-low survey (117k tokens); its claims held. `test_first_tool`
 rejected the first split (the tests-only commit added the production
 `//dcfs:subprocess` library and changed `//dcfs:fsck`), which led to the fixes.
 
-## 25.54 Denied dashboard asset (orchestrator's proposal, 2026-10-19; queued)
+## 25.54 Denied dashboard asset (orchestrator's proposal, done 2026-10-19)
 
 Orchestrator's proposal, not russ's words. Source: the 2026-10-19 dashboard
 upload. The auto-mode classifier denied some asset uploads intermittently
@@ -2735,6 +2735,14 @@ orchestrator chooses). Dependencies: none.
 
 *Test:* a run with one injected denial writes and marks the other datasets
 and names the denied one.
+
+Done 2026-10-19 (05008e7f). The `dcfs-dashboard-upload` skill uploads assets
+one at a time; a denial stops further uploads without working around it,
+the batch write and mark-uploaded still run for the datasets that uploaded,
+and the denied names are reported. Written by Gemini 3.8 Flash via foreman
+(orchestrator mode, `--parent 25.54`); the orchestrator reviewed it (the
+Gemini review hit a quota error) and found no findings. `mark-uploaded`
+already accepted a subset, so no code under `tools/` changed.
 
 ## 25.55 Own fds read door-free (orchestrator's proposal, 2026-10-19; folded into 25.57)
 
