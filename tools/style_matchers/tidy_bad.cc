@@ -139,3 +139,8 @@ int BadLocalConstant() {
 struct PublicMember {
   int BadPublic;  // HIT readability-identifier-naming
 };
+
+// No new macros (docs/style.md 1.2): one that is not granted is reported, and
+// so is a granted kind of macro that lacks the DCFS_ prefix.
+#define DCFS_UNGRANTED 7  // HIT cppcoreguidelines-macro-usage
+#define BAD_MACRO 1  // HIT readability-identifier-naming

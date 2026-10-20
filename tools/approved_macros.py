@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: MIT
+"""The approved macros (tools/approved_macros.txt) and the .clang-tidy that
+checks them (plan step 25.58, docs/style.md 1.2 rule-macros-discouraged).
+
+clang-tidy's cppcoreguidelines-macro-usage reports every macro its
+AllowedRegexp does not name, and readability-identifier-naming wants the
+DCFS_ prefix on every macro its MacroDefinitionIgnoredRegexp does not name.
+Both regexes come from the one list: `bazel run //tools:approved_macros --
+--write` rewrites them in .clang-tidy, and //tools:approved_macros_test fails
+when they differ from what the list gives.
+"""
+
+import os
+import re
+import sys
+
+ALLOWED_KEY = "cppcoreguidelines-macro-usage.AllowedRegexp"
+IGNORED_KEY = "readability-identifier-naming.MacroDefinitionIgnoredRegexp"
+# Header guards are exempt from the prefix and case rule in general (clang's
+# cppcoreguidelines-macro-usage already skips them), so no list entry names one.
+GUARDS = "[A-Z][A-Z0-9_]*_H_"
+KINDS = ("prefixed", "exempt", "third_party")
+IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def parse(text):
+    """[(name, prefix, date, grant)] of the list; raises ValueError."""
+    entries, seen = [], set()
+    for number, line in enumerate(text.splitlines(), 1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        parts = line.split("|", 3)
+        if len(parts) != 4:
+            raise ValueError("line %d: want name|prefix|date|grant" % number)
+        name, prefix, date, grant = parts
+        if not IDENTIFIER.match(name):
+            raise ValueError("line %d: %r is not an identifier"
+                             % (number, name))
+        if prefix not in KINDS:
+            raise ValueError("line %d: kind is one of %s"
+                             % (number, ", ".join(KINDS)))
+        if prefix == "prefixed" and not name.startswith("DCFS_"):
+            raise ValueError("line %d: %s is marked prefixed but does not "
+                             "start with DCFS_" % (number, name))
+        if not re.fullmatch(r"\d{4}-\d\d-\d\d", date) or not grant.strip():
+            raise ValueError("line %d: want a date and russ's words" % number)
+        if name in seen:
+            raise ValueError("line %d: %s is listed twice" % (number, name))
+        seen.add(name)
+        entries.append((name, prefix, date, grant))
+    return entries
+
+
+def alternation(names):
+    return "'^(%s)$'" % "|".join(sorted(names))
+
+
+def options(entries):
+    """{key: value} of the two options the list determines."""
+    return {
+        ALLOWED_KEY: alternation(e[0] for e in entries),
+        IGNORED_KEY: alternation([GUARDS] + [e[0] for e in entries
+                                             if e[1] != "prefixed"]),
+    }
+
+
+def current(config_text):
+    """{key: value} of the same two options in .clang-tidy."""
+    found = {}
+    for line in config_text.splitlines():
+        for key in (ALLOWED_KEY, IGNORED_KEY):
+            if line.strip().startswith(key + ": "):
+                found[key] = line.strip()[len(key) + 2:]
+    return found
+
+
+def problems(entries, config_text):
+    want, have = options(entries), current(config_text)
+    return ["%s: .clang-tidy has %s, tools/approved_macros.txt gives %s; run "
+            "`bazel run //tools:approved_macros -- --write`"
+            % (key, have.get(key, "nothing"), want[key])
+            for key in want if have.get(key) != want[key]]
+
+
+def write(entries, config_text):
+    want = options(entries)
+    lines = []
+    for line in config_text.splitlines():
+        for key, value in want.items():
+            if line.strip().startswith(key + ": "):
+                line = "  %s: %s" % (key, value)
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+def main(argv):
+    root = os.environ.get("BUILD_WORKSPACE_DIRECTORY")
+    if argv[1:] != ["--write"] or root is None:
+        print("usage: bazel run //tools:approved_macros -- --write")
+        return 2
+    with open(os.path.join(root, "tools/approved_macros.txt")) as f:
+        entries = parse(f.read())
+    path = os.path.join(root, ".clang-tidy")
+    with open(path) as f:
+        text = f.read()
+    with open(path, "w") as f:
+        f.write(write(entries, text))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

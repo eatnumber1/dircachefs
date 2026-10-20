@@ -217,9 +217,7 @@ use it as design guidance rather than firm rules."
     namespaces and enumerators are checked by `readability-identifier-naming`
     (`.clang-tidy`). `clang-tidy` cannot tell class statics from struct
     statics, so a struct's static data member is also `name_` (Google's
-    Struct Data Members says no underscore); none exist. Google's project
-    prefix for macros is not enforced yet; `RET_CHECK`, `RETURN_IF_ERROR` and
-    the other unprefixed macros are a question to russ (2026-10-19).
+    Struct Data Members says no underscore); none exist.
   - The typed signatures stay: a call looks like
     `ctx.syscalls().write(fd, buf)` with `buf` a
     `std::span<const std::byte>`, not `(fd, buf, n)`; names are
@@ -337,6 +335,43 @@ use it as design guidance rather than firm rules."
   `fuse_ops.cc`, `fuse_request.cc`), whose own entries are allowlisted
   and only shrink (25.24; 67 sites outside syscalls today, 15 of them in
   fuse_ops.cc).
+- <a id="rule-macros-discouraged"></a>
+  **Macros are discouraged** (Google's guide says the same; russ,
+  2026-10-19: "maybe I spoke too strongly. I'm not looking to fully ban all
+  propositions of a macro. Sometimes it's a significant improvement to have
+  one (for example, ASSIGN_OR_RETURN and RETURN_IF_ERROR are significant
+  readability improvements). But they're discouraged."). A new macro is
+  justified only by a significant improvement and needs russ's approval,
+  which also settles its name: the `DCFS_` prefix Google's guide asks for by
+  default, or a name he chooses ("if I'm granting an exception I'll likely
+  want to exercise control over the name it's given, so may choose to exempt
+  the prefix rule too"). Names that mirror Google-internal macros stay
+  unprefixed (russ: "Unprefixed names are allowed if they mirror Google
+  internal names. RET_CHECK (and friends like RET_CHECK_EQ), RETURN_IF_ERROR,
+  ASSIGN_OR_RETURN, etc., all mirror Google internal names."; then "All the
+  google-internal names you just listed are approved."). Header guards need no
+  approval (russ: "Header guards are all approved. You'll need a general way
+  to exempt them from needing to appear in the allowlist at all."), and
+  third-party macro names (FUSE_USE_VERSION, CHECK, LOG, ...) are exempt from
+  the rule and the prefix (russ: "Third-party macros (such as
+  FUSE_USE_VERSION, CHECK, LOG, etc.) are all exempt from the rule"): the
+  list marks them `third_party` and names the library, and the check never
+  fires on a macro defined in a third-party header. A helper used only to
+  implement an approved macro may be approved by the orchestrator (russ:
+  "Internal helpers are something you have my permission to approve on your
+  own without asking me"); any other new macro needs russ. The approved
+  macros are `tools/approved_macros.txt`, one name per line with the date and
+  who approved it, and it changes only by such a ruling (a merge gate for
+  such files is queued separately). `cppcoreguidelines-macro-usage`
+  (`CheckCapsOnly` false, so a lower-case macro is caught too) reports every
+  macro not on the list, and it also says when a macro could be a `constexpr`
+  constant or function; `readability-identifier-naming` wants the `DCFS_`
+  prefix on every macro the list does not mark `exempt` or `third_party`.
+  Both regexes in
+  `.clang-tidy` are generated from the list by
+  `bazel run //tools:approved_macros -- --write`, and
+  `//tools:approved_macros_test` fails if they disagree. A new macro needs
+  russ's approval: report it instead of adding it to the list.
 - <a id="rule-locals-non-const"></a>
   **Locals are non-const by default** (russ, 2026-10-11, on `const struct
   rlimit limit = *current;`): "no const on local scalars (unless needed).

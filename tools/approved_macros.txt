@@ -1,0 +1,66 @@
+# Macros dcfs may define (docs/style.md 1.2, rule-macros-discouraged).
+#
+# Macros are discouraged. A new one is justified only by a significant
+# improvement, needs russ's approval, and he settles its name: DCFS_ by
+# default, or a name he chooses. A new macro needs russ's approval: report it
+# instead of adding it to this file. This file changes only by his ruling.
+#
+# russ, 2026-10-19: "maybe I spoke too strongly. I'm not looking to fully ban
+# all propositions of a macro. Sometimes it's a significant improvement to
+# have one (for example, ASSIGN_OR_RETURN and RETURN_IF_ERROR are significant
+# readability improvements). But they're discouraged." and "if I'm granting an
+# exception I'll likely want to exercise control over the name it's given, so
+# may choose to exempt the prefix rule too."
+#
+# From this file `bazel run //tools:approved_macros -- --write` writes
+# .clang-tidy's cppcoreguidelines-macro-usage.AllowedRegexp (every name here)
+# and readability-identifier-naming.MacroDefinitionIgnoredRegexp (the names
+# not marked prefixed); //tools:approved_macros_test fails when they disagree. The
+# check only reads C++; the macros of the .c files are not listed.
+#
+# FORMAT: name|kind|date|grant
+#   name   an identifier
+#   kind   `prefixed` (the name starts with DCFS_), `exempt` (exempt from the
+#          prefix and case rule: a Google-internal mirror, or a private
+#          helper that ends in an underscore) or `third_party` (the name is
+#          owned by a library, which the grant names)
+#   grant  russ's words, who approved it (an internal helper of an approved
+#          macro may be approved by the orchestrator), or `existing, pending
+#          25.63 review`; for third_party, the library
+# Header guards need no entry: they are exempt in general. Macros defined in
+# third-party headers are never reported (clang-tidy's header filter).
+# Lines marked "candidate" look like ones to remove: russ decides.
+RET_CHECK|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RET_CHECK_EQ|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RET_CHECK_GE|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RET_CHECK_GT|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RET_CHECK_LE|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RET_CHECK_LT|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RET_CHECK_NE|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RET_CHECK_OK|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RETURN_IF_ERROR|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+ASSIGN_OR_RETURN|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+ASSERT_OK_AND_ASSIGN|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+DCFS_RET_CHECK_OP_|exempt|2026-10-19|orchestrator, under russ 2026-10-19 (internal helper of RET_CHECK_EQ and the others; the trailing underscore marks it private, which UPPER_CASE refuses)
+DCFS_RET_CHECK_ELSE_BLOCKER_|exempt|2026-10-19|orchestrator, under russ 2026-10-19 (internal helper of RET_CHECK; the trailing underscore marks it private, which UPPER_CASE refuses)
+DCFS_ASSERT_OK_AND_ASSIGN_IMPL|prefixed|2026-10-19|orchestrator, under russ 2026-10-19 (internal helper of ASSERT_OK_AND_ASSIGN)
+DCFS_TEST_CONCAT|prefixed|2026-10-19|orchestrator, under russ 2026-10-19 (internal helper of ASSERT_OK_AND_ASSIGN)
+DCFS_TEST_CONCAT_INNER|prefixed|2026-10-19|orchestrator, under russ 2026-10-19 (internal helper of ASSERT_OK_AND_ASSIGN)
+FUSE_USE_VERSION|third_party|2026-10-19|libfuse (reads the name before its headers)
+DCFS_ATTR_ASSIGNMENTS|prefixed|2026-10-19|existing, pending 25.63 review: candidate (a constexpr string would do)
+DCFS_ATTR_COLUMNS|prefixed|2026-10-19|existing, pending 25.63 review: candidate (a constexpr string would do)
+DCFS_ATTR_NULLS|prefixed|2026-10-19|existing, pending 25.63 review: candidate (a constexpr string would do)
+DCFS_ATTR_PLACEHOLDERS|prefixed|2026-10-19|existing, pending 25.63 review: candidate (a constexpr string would do)
+DCFS_ATTR_VALUES|prefixed|2026-10-19|existing, pending 25.63 review: candidate (a constexpr string would do)
+DCFS_KEEP_STAMP|prefixed|2026-10-19|existing, pending 25.63 review: candidate (a constexpr string would do)
+DCFS_ATTR_MISSING|prefixed|2026-10-19|existing, pending 25.63 review: candidate (testonly invariant_checker.cc)
+DCFS_CHECKER_SQL|prefixed|2026-10-19|existing, pending 25.63 review: candidate (testonly invariant_checker.cc)
+DCFS_BACKSTOP|prefixed|2026-10-19|existing, pending 25.63 review: candidate (dir_cache_fs_test.cc, test-local)
+DCFS_INJECT|prefixed|2026-10-19|existing, pending 25.63 review: candidate (dir_cache_fs_test.cc, test-local)
+DCFS_SETGROUPS|prefixed|2026-10-19|existing, pending 25.63 review: candidate (dir_cache_fs_test.cc, test-local)
+EXPECT_KEPT_UNKNOWN|exempt|2026-10-19|existing, pending 25.63 review: candidate (dir_cache_fs_test.cc, test-local, unprefixed)
+EXPECT_HELPER|exempt|2026-10-19|existing, pending 25.63 review: candidate (status_test.cc, test-local, unprefixed)
+E|exempt|2026-10-19|existing, pending 25.63 review: candidate (errno.cc, a local X-macro, unprefixed)
+F|exempt|2026-10-19|existing, pending 25.63 review: candidate (log_open_flags.h, a local X-macro, unprefixed)
+CHECK|third_party|2026-10-19|absl (tools/mutation/fixture.cc stands in for it)
+LOG|third_party|2026-10-19|absl (tools/mutation/fixture.cc stands in for it)

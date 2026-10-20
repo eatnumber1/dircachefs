@@ -1,5 +1,9 @@
 // Known-good input of .clang-tidy: no check of the configuration finds
-// anything here.
+// anything here. The file is wrapped in a header guard that
+// tools/approved_macros.txt does not list: guards are exempt in general.
+#ifndef DCFS_TIDY_GOOD_GUARD_H_
+#define DCFS_TIDY_GOOD_GUARD_H_
+
 namespace {
 
 [[maybe_unused]] int ReturnsEarly(int x) {
@@ -96,16 +100,19 @@ class ClassMembers {
 
 int ClassMembers::pool_ = 0;
 
-// The name of a header guard and of ordinary macros.
-#define GOOD_MACRO 1
+// Granted macros: a header guard, a private helper, a name that mirrors a
+// Google-internal macro.
 #define DCFS_FIXTURE_H_
-#define DCFS_RET_CHECK_FIXTURE_ 2
+#define DCFS_RET_CHECK_OP_(left, right) ((left) == (right))
+#define RET_CHECK(condition) (condition)
 
 [[maybe_unused]] int UsesAll() {
-  return kGlobal + kGlobalConst + GOOD_MACRO +
+  return kGlobal + kGlobalConst + RET_CHECK(true) + DCFS_RET_CHECK_OP_(1, 1) +
          GoodTemplate<GoodAlias>{1}.member + GoodUnion{2}.member +
          ClassMembers::kClassConstant + ClassMembers().Value();
 }
 
 }  // namespace good_namespace
 }  // namespace
+
+#endif  // DCFS_TIDY_GOOD_GUARD_H_

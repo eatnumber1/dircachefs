@@ -745,6 +745,37 @@ py_test(
     deps = [":style_checks_lib"],
 )
 
+# The approved macros (docs/style.md 1.2, rule-macros-discouraged): the list
+# and the two .clang-tidy regexes made from it.
+py_library(
+    name = "approved_macros_lib",
+    srcs = ["approved_macros.py"],
+    imports = ["."],
+)
+
+py_binary(
+    name = "approved_macros",
+    srcs = ["approved_macros.py"],
+    main = "approved_macros.py",
+)
+
+py_test(
+    name = "approved_macros_test",
+    size = "small",
+    srcs = ["approved_macros_test.py"],
+    args = [
+        "$(rootpath approved_macros.txt)",
+        "$(rootpath //:.clang-tidy)",
+    ],
+    data = [
+        "approved_macros.txt",
+        "//:.clang-tidy",
+    ],
+    main = "approved_macros_test.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":approved_macros_lib"],
+)
+
 # Self-check of style_checks.py over canned outputs.
 py_test(
     name = "style_checks_self_check_test",
