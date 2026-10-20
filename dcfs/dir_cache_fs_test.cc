@@ -321,7 +321,7 @@ int InjectedFault(const char *call) {
 // A wrap fails with the sweep's errno when it says so (step 26.6): sets errno
 // and returns true, and the wrap returns -1.
 bool FailInjected(const char *call) {
-  const int injected = InjectedFault(call);
+  int injected = InjectedFault(call);
   if (injected == 0) return false;
   errno = injected;
   return true;

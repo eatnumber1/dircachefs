@@ -26,8 +26,9 @@
 # FORMAT: name|kind|date|allowance|grant
 #   name       an identifier
 #   kind       `prefixed` (the name starts with DCFS_), `exempt` (exempt from
-#              the prefix and case rule: a Google-internal mirror, or a
-#              private helper that ends in an underscore) or `third_party`
+#              the prefix and case rule: a Google-internal mirror, a
+#              private helper that ends in an underscore, or a name russ
+#              chose, CONCAT) or `third_party`
 #              (the name is owned by a library, which the grant names)
 #   date       of the grant
 #   allowance  empty, or why no other language feature can express the macro

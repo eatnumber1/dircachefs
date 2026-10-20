@@ -929,11 +929,14 @@ def scan_covers_cxx(root):
                 group = build[where:build.find("\n)", where)] if where >= 0 \
                     else ""
                 nested = os.path.dirname(rel) != package
+                pattern = "*" + os.path.splitext(rel)[1]
                 if where < 0:
                     why = "its package defines no %s group" % SCAN_GROUP
                 elif nested and "**" not in group:
                     why = "the glob of %s has no ** for its subdirectory" \
                         % label
+                elif pattern not in group:
+                    why = "the glob of %s has no %s" % (label, pattern)
                 elif label not in reader and not (
                         package == "tools" and '":%s"' % SCAN_GROUP in reader):
                     why = "//tools:approved_macros_test does not read %s" \

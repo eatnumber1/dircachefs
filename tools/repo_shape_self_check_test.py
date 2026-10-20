@@ -709,6 +709,14 @@ class ScanSourcesTest(unittest.TestCase):
         self.assertEqual(1, len(problems), problems)
         self.assertIn("//test/qemu:all_cxx_sources", problems[0])
 
+    def test_a_glob_that_misses_the_extension_is_reported(self):
+        write(self.root, "bench/BUILD.bazel", GROUP % '["*.cc"]')
+        write(self.root, "bench/only.h")
+        problems = repo_shape.scan_covers_cxx(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("bench/only.h", problems[0])
+        self.assertIn("*.h", problems[0])
+
     def test_the_matchers_fixtures_are_not_scanned(self):
         write(self.root, "tools/style_matchers/BUILD.bazel", "")
         write(self.root, "tools/style_matchers/x_bad.cc")

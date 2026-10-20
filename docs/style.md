@@ -370,26 +370,27 @@ use it as design guidance rather than firm rules."
   date and who approved it, and it changes only by such a ruling (a merge gate
   for such files is queued separately). The approval is enforced by a scan:
   `//tools:approved_macros_test` reads every C++ source of `dcfs/`, `bench/`,
-  `test/qemu/guest/` and `tools/` (not the matchers' deliberately bad fixtures)
-  and fails on a macro that is neither on the list nor a header guard
-  (`#ifndef N` then `#define N`, the file's first directives), and on a list
-  entry nothing defines. That is the approval policy, one check;
-  `cppcoreguidelines-macro-usage` is another and does not depend on it (russ:
-  "I knew cppcoreguidelines-macro-usage only covers some kinds of macros. That
-  one likely should go un-exempted, as it's calling out macros that can be
-  implemented using other language features instead ... but also I want
-  cppcoreguidelines-macro-usage in addition, with only obvious allowances
-  (third-party macros, etc.), so likely a much smaller or zero-sized
-  allowlist."). It reports a function-like, variadic or all-literal macro (not
-  one with `#` or `##` in its body, nor a non-literal constant, nor an empty
-  one), so a macro that `constexpr`, `consteval`, a function, a template or
-  `std::source_location` can express is converted, not approved. Its
-  `AllowedRegexp` holds only the names the list gives an allowance (a field
-  naming why no other language feature can express the macro); a grant does not
-  imply one. `CheckCapsOnly` is false, without which `AllowedRegexp` is not
-  consulted at all. `readability-identifier-naming` wants the `DCFS_` prefix on
-  every macro the list does not mark `exempt` or `third_party`. Both regexes in
-  `.clang-tidy` are generated from the list by
+  `test/qemu/` and `tools/` (not the matchers' deliberately bad fixtures) and
+  fails on a macro that is neither on the list nor a header guard (`#ifndef N`
+  then `#define N` with no body as the file's first directives, closed by the
+  file's last `#endif`), and on a list entry nothing defines. `scan_covers_cxx`
+  in `tools/repo_shape.py` keeps every package in the scan. That is the
+  approval policy, one check; `cppcoreguidelines-macro-usage` is another and
+  does not depend on it (russ: "I knew cppcoreguidelines-macro-usage only
+  covers some kinds of macros. That one likely should go un-exempted, as it's
+  calling out macros that can be implemented using other language features
+  instead ... but also I want cppcoreguidelines-macro-usage in addition, with
+  only obvious allowances (third-party macros, etc.), so likely a much smaller
+  or zero-sized allowlist."). It reports a function-like, variadic or
+  all-literal macro (not one with `#` or `##` in its body, nor a non-literal
+  constant, nor an empty one), so a macro that `constexpr`, `consteval`, a
+  function, a template or `std::source_location` can express is converted, not
+  approved. Its `AllowedRegexp` holds only the names the list gives an
+  allowance (a field naming why no other language feature can express the
+  macro); a grant does not imply one. `CheckCapsOnly` is false, without which
+  `AllowedRegexp` is not consulted at all. `readability-identifier-naming`
+  wants the `DCFS_` prefix on every macro the list does not mark `exempt` or
+  `third_party`. Both regexes in `.clang-tidy` are generated from the list by
   `bazel run //tools:approved_macros -- --write`, and the test fails if they
   disagree. A new macro needs russ's approval: report it instead of adding it
   to the list.

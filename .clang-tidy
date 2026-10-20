@@ -125,7 +125,7 @@ CheckOptions:
   # in structure, so no other macro hides behind the pattern) and, generated
   # from tools/approved_macros.txt, every exempt and third_party name (the
   # Google-internal mirrors, the private helpers that end in an underscore,
-  # libraries' names).
+  # names russ chose such as CONCAT, libraries' names).
   readability-identifier-naming.MacroDefinitionPrefix: DCFS_
   readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
   readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^(ASSERT_OK_AND_ASSIGN|CHECK|CONCAT|DCFS_RET_CHECK_ELSE_BLOCKER_|DCFS_RET_CHECK_OP_|E|F|FUSE_USE_VERSION|LOG|RETURN_IF_ERROR|RET_CHECK|RET_CHECK_EQ|RET_CHECK_GE|RET_CHECK_GT|RET_CHECK_LE|RET_CHECK_LT|RET_CHECK_NE|RET_CHECK_OK|[A-Z][A-Z0-9_]*_H_)$'

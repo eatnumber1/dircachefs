@@ -68,6 +68,7 @@ style_findings_here()
 # Every C++ source of this package, for //tools:approved_macros_test (the
 # scan of macro definitions); tools/repo_shape.py checks that no package
 # with C++ lacks this group.
+# Matches cxx_sources on purpose: repo_shape keys on the uniform name.
 filegroup(
     name = "all_cxx_sources",
     srcs = glob(["*.cc", "*.h"]),
