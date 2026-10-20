@@ -21,6 +21,7 @@
 #include "absl/types/source_location.h"
 #include "dcfs/context.h"
 #include "dcfs/escape.h"
+#include "dcfs/fixed_string.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
@@ -34,7 +35,7 @@ namespace {
 
 // The prefix of every statement the checker runs (InvariantChecker::
 // kSqlMarker, which the cost counter leaves out).
-#define DCFS_CHECKER_SQL "/*invariant-checker*/ "
+inline constexpr auto kCheckerSql = FixedString("/*invariant-checker*/ ");
 
 // The invariants' names, as a violation reports them (see the header).
 constexpr std::string_view kNoTransactionAtBackingCall =
@@ -50,14 +51,13 @@ constexpr std::string_view kLookupCount = "lookup-count";
 constexpr std::string_view kHeldFds = "held-fds";
 constexpr std::string_view kRemovedRecord = "removed-record";
 
-// "Some attribute column is NULL", for an inodes row. A macro, as
-// metadata_cache.cc's DCFS_ATTR_COLUMNS, so that it splices into a literal.
-#define DCFS_ATTR_MISSING                                                 \
-  "(mode IS NULL OR nlink IS NULL OR uid IS NULL OR gid IS NULL OR "      \
-  "rdev IS NULL OR size IS NULL OR blocks IS NULL OR blksize IS NULL OR " \
-  "atime_s IS NULL OR atime_ns IS NULL OR mtime_s IS NULL OR "            \
-  "mtime_ns IS NULL OR ctime_s IS NULL OR ctime_ns IS NULL OR "           \
-  "btime_s IS NULL OR btime_ns IS NULL)"
+// "Some attribute column is NULL", for an inodes row.
+inline constexpr auto kAttrMissing = FixedString(
+    "(mode IS NULL OR nlink IS NULL OR uid IS NULL OR gid IS NULL OR "
+    "rdev IS NULL OR size IS NULL OR blocks IS NULL OR blksize IS NULL OR "
+    "atime_s IS NULL OR atime_ns IS NULL OR mtime_s IS NULL OR "
+    "mtime_ns IS NULL OR ctime_s IS NULL OR ctime_ns IS NULL OR "
+    "btime_s IS NULL OR btime_ns IS NULL)");
 
 // A violation of `invariant`: its name, then what was found.
 template <typename... Args>
@@ -69,7 +69,8 @@ absl::Status Violation(std::string_view invariant, const Args &...what) {
 absl::StatusOr<bool> HasDirtyRow(Context &ctx, InodeId id) {
   ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
-      ctx.db.Prepared(DCFS_CHECKER_SQL "SELECT 1 FROM dirty WHERE inode = ?"));
+      ctx.db.Prepared(kCheckerSql +
+                      FixedString("SELECT 1 FROM dirty WHERE inode = ?")));
   RETURN_IF_ERROR(stmt->Bind(1, id));
   bool found = false;
   RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
@@ -83,8 +84,9 @@ absl::StatusOr<bool> HasDirtyRow(Context &ctx, InodeId id) {
 absl::StatusOr<bool> HasMutationRow(Context &ctx, InodeId id) {
   ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
-      ctx.db.Prepared(DCFS_CHECKER_SQL "SELECT 1 FROM dirty "
-                                       "WHERE inode = ? AND atime_only = 0"));
+      ctx.db.Prepared(kCheckerSql +
+                      FixedString("SELECT 1 FROM dirty "
+                                  "WHERE inode = ? AND atime_only = 0")));
   RETURN_IF_ERROR(stmt->Bind(1, id));
   bool found = false;
   RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
@@ -149,8 +151,9 @@ absl::Status NoneDirtyUnlessAny(Context &ctx) {
     if (flag) continue;
     ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
-        ctx.db.Prepared(DCFS_CHECKER_SQL
-                        "SELECT 1 FROM dirty WHERE atime_only = ? LIMIT 1"));
+        ctx.db.Prepared(
+            kCheckerSql +
+            FixedString("SELECT 1 FROM dirty WHERE atime_only = ? LIMIT 1")));
     RETURN_IF_ERROR(stmt->Bind(1, atime_only));
     bool found = false;
     RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
@@ -436,10 +439,11 @@ void InvariantChecker::CheckDestroyed(Context &ctx,
 
 absl::Status InvariantChecker::SeeEveryDirtyDelete(Context &ctx) {
   if (no_truncate_) return absl::OkStatus();
-  ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
-                   ctx.db.Prepared(DCFS_CHECKER_SQL
-                                   "SELECT 1 FROM sqlite_master "
-                                   "WHERE type = 'table' AND name = 'dirty'"));
+  ASSIGN_OR_RETURN(
+      sqlite3::Statement * stmt,
+      ctx.db.Prepared(kCheckerSql +
+                      FixedString("SELECT 1 FROM sqlite_master "
+                                  "WHERE type = 'table' AND name = 'dirty'")));
   bool exists = false;
   RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
     exists = true;
@@ -447,9 +451,10 @@ absl::Status InvariantChecker::SeeEveryDirtyDelete(Context &ctx) {
   }));
   if (!exists) return absl::OkStatus();  // Before Migrate.
   RETURN_IF_ERROR(ctx.db.Exec(
-      DCFS_CHECKER_SQL
-      "CREATE TEMP TRIGGER IF NOT EXISTS dcfs_invariant_checks_no_truncate "
-      "AFTER DELETE ON main.dirty BEGIN SELECT 1; END"));
+      kCheckerSql +
+      FixedString(
+          "CREATE TEMP TRIGGER IF NOT EXISTS dcfs_invariant_checks_no_truncate "
+          "AFTER DELETE ON main.dirty BEGIN SELECT 1; END")));
   no_truncate_ = true;
   return absl::OkStatus();
 }
@@ -494,8 +499,8 @@ absl::Status InvariantChecker::CheckChanged(Context &ctx,
   for (int64_t rowid : xattrs) {
     ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
-        ctx.db.Prepared(DCFS_CHECKER_SQL "SELECT inode FROM xattrs "
-                                         "WHERE rowid = ?"));
+        ctx.db.Prepared(kCheckerSql + FixedString("SELECT inode FROM xattrs "
+                                                  "WHERE rowid = ?")));
     RETURN_IF_ERROR(stmt->Bind(1, rowid));
     RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
       interest.insert(row.Column<int64_t>(0));
@@ -537,9 +542,9 @@ absl::Status InvariantChecker::CheckEverything(Context &ctx,
     ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
         ctx.db.Prepared(
-            DCFS_CHECKER_SQL
-            "SELECT id, attrs_valid, fuse_gen, nlink, " DCFS_ATTR_MISSING
-            " FROM inodes"));
+            kCheckerSql +
+            FixedString("SELECT id, attrs_valid, fuse_gen, nlink, ") +
+            kAttrMissing + FixedString(" FROM inodes")));
     absl::Status found;
     RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
       if (found.ok()) found = CheckInodeRow(ctx, fs, row);
@@ -553,12 +558,15 @@ absl::Status InvariantChecker::CheckEverything(Context &ctx,
     ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
         ctx.db.Prepared(
-            DCFS_CHECKER_SQL
-            "SELECT rowid FROM dentries AS d WHERE (d.state = 'refused') > "
-            "EXISTS (SELECT 1 FROM stubs AS s WHERE s.parent = d.parent AND "
-            "s.name = d.name) OR (d.state IN ('present', 'absent') AND "
-            "EXISTS (SELECT 1 FROM stubs AS s WHERE s.parent = d.parent AND "
-            "s.name = d.name))"));
+            kCheckerSql +
+            FixedString(
+                "SELECT rowid FROM dentries AS d WHERE (d.state = 'refused') > "
+                "EXISTS (SELECT 1 FROM stubs AS s WHERE s.parent = d.parent "
+                "AND "
+                "s.name = d.name) OR (d.state IN ('present', 'absent') AND "
+                "EXISTS (SELECT 1 FROM stubs AS s WHERE s.parent = d.parent "
+                "AND "
+                "s.name = d.name))")));
     std::vector<int64_t> rowids;
     RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
       rowids.push_back(row.Column<int64_t>(0));
@@ -570,8 +578,9 @@ absl::Status InvariantChecker::CheckEverything(Context &ctx,
     }
   }
   {
-    ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
-                     ctx.db.Prepared(DCFS_CHECKER_SQL "SELECT id FROM stubs"));
+    ASSIGN_OR_RETURN(
+        sqlite3::Statement * stmt,
+        ctx.db.Prepared(kCheckerSql + FixedString("SELECT id FROM stubs")));
     std::vector<int64_t> ids;
     RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
       ids.push_back(row.Column<int64_t>(0));
@@ -608,9 +617,9 @@ absl::Status InvariantChecker::CheckInode(Context &ctx,
     ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
         ctx.db.Prepared(
-            DCFS_CHECKER_SQL
-            "SELECT id, attrs_valid, fuse_gen, nlink, " DCFS_ATTR_MISSING
-            " FROM inodes WHERE id = ?"));
+            kCheckerSql +
+            FixedString("SELECT id, attrs_valid, fuse_gen, nlink, ") +
+            kAttrMissing + FixedString(" FROM inodes WHERE id = ?")));
     RETURN_IF_ERROR(stmt->Bind(1, id));
     absl::Status found;
     RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
@@ -684,11 +693,12 @@ absl::Status InvariantChecker::CheckDentry(
     Context &ctx, int64_t rowid, absl::flat_hash_set<InodeId> &interest) {
   ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
-      ctx.db.Prepared(DCFS_CHECKER_SQL
-                      "SELECT d.parent, d.name, d.state, d.inode, EXISTS "
+      ctx.db.Prepared(
+          kCheckerSql +
+          FixedString("SELECT d.parent, d.name, d.state, d.inode, EXISTS "
                       "(SELECT 1 FROM stubs AS s WHERE s.parent = d.parent "
                       "AND s.name = d.name) FROM dentries AS d "
-                      "WHERE d.rowid = ?"));
+                      "WHERE d.rowid = ?")));
   RETURN_IF_ERROR(stmt->Bind(1, rowid));
   absl::Status found;
   RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
@@ -717,10 +727,11 @@ absl::Status InvariantChecker::CheckDentry(
 absl::Status InvariantChecker::CheckStub(Context &ctx, int64_t id) {
   ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
-      ctx.db.Prepared(DCFS_CHECKER_SQL
-                      "SELECT s.parent, s.name, d.state FROM stubs AS s "
+      ctx.db.Prepared(
+          kCheckerSql +
+          FixedString("SELECT s.parent, s.name, d.state FROM stubs AS s "
                       "LEFT JOIN dentries AS d ON d.parent = s.parent AND "
-                      "d.name = s.name WHERE s.id = ?"));
+                      "d.name = s.name WHERE s.id = ?")));
   RETURN_IF_ERROR(stmt->Bind(1, id));
   absl::Status found;
   RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {

@@ -233,6 +233,7 @@ cc_library(
         ":fake_bookkeeping",
         "//dcfs:context",
         "//dcfs:escape",
+        "//dcfs:fixed_string",
         "//dcfs:metadata_cache",
         "//dcfs:protocol_events",
         "//dcfs:sqlite",

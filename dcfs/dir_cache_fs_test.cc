@@ -523,16 +523,15 @@ SetgroupsFault &Setgroups() {
 }  // namespace
 
 // dcfs::syscalls::setgroups(std::span<const gid_t>), mangled (as BUILD.bazel's
-// SETGROUPS).
-#define DCFS_SETGROUPS \
-  "_ZN4dcfs8syscalls9setgroupsENSt3__14spanIKjLm18446744073709551615EEE"
-
+// SETGROUPS): an asm label takes a string literal, so the name is spelled out.
 absl::Status RealSetgroups(std::span<const gid_t> groups) asm(
-    "__real_" DCFS_SETGROUPS);
+    "__real__ZN4dcfs8syscalls9setgroupsENSt3__"
+    "14spanIKjLm18446744073709551615EEE");
 // External linkage is the point: the linker resolves the wrapped calls to it.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 absl::Status WrapSetgroups(std::span<const gid_t> groups) asm(
-    "__wrap_" DCFS_SETGROUPS);
+    "__wrap__ZN4dcfs8syscalls9setgroupsENSt3__"
+    "14spanIKjLm18446744073709551615EEE");
 absl::Status WrapSetgroups(std::span<const gid_t> groups) {
   SetgroupsFault &fault = Setgroups();
   if (++fault.calls != fault.fail_at) return RealSetgroups(groups);
@@ -2575,14 +2574,14 @@ TEST_F(DirCacheFSTest, CreateWhoseRefreshFailsIsRepliedFromTheRow) {
 
 // A getattr of `id` whose cached attributes are unknown: the request that
 // reopens it by handle (FreshAttr) and, failing, refreshes nothing.
-#define EXPECT_KEPT_UNKNOWN(id, dir, name)                                     \
-  do {                                                                         \
-    absl::StatusOr<cache::CachedAttr> kept = cache::GetAttr(ctx_, id);         \
-    EXPECT_THAT(                                                               \
-        kept, IsOkAndHolds(testing::Field(&cache::CachedAttr::valid, false))); \
-    EXPECT_THAT(cache::Lookup(ctx_, dir, name),                                \
-                IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));           \
-  } while (false)
+void ExpectKeptUnknown(Context &ctx, InodeId id, InodeId dir,
+                       std::string_view name) {
+  absl::StatusOr<cache::CachedAttr> kept = cache::GetAttr(ctx, id);
+  EXPECT_THAT(kept,
+              IsOkAndHolds(testing::Field(&cache::CachedAttr::valid, false)));
+  EXPECT_THAT(cache::Lookup(ctx, dir, name),
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
+}
 
 TEST_F(DirCacheFSTest, EstaleWithTheNameStillThereRepliesEio) {
   WriteFile(Path("f"));
@@ -2591,7 +2590,7 @@ TEST_F(DirCacheFSTest, EstaleWithTheNameStillThereRepliesEio) {
   ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, f), IsOk());
   OpenByHandleFailures() = {ESTALE};
   EXPECT_EQ(Getattr(f).first.error, -EIO);
-  EXPECT_KEPT_UNKNOWN(f, kRootInode, "f");
+  ExpectKeptUnknown(ctx_, f, kRootInode, "f");
   EXPECT_EQ(Getattr(f).first.error, 0);  // The device reads again.
 }
 
@@ -2603,7 +2602,7 @@ TEST_F(DirCacheFSTest, EstaleWithTheNameCheckFailingRepliesEio) {
   OpenByHandleFailures() = {ESTALE};
   NameToHandleFailure() = EIO;  // The name check's handle read.
   EXPECT_EQ(Getattr(f).first.error, -EIO);
-  EXPECT_KEPT_UNKNOWN(f, kRootInode, "f");
+  ExpectKeptUnknown(ctx_, f, kRootInode, "f");
 }
 
 TEST_F(DirCacheFSTest, EstaleWithTheNameGoneForgetsTheRow) {
@@ -2664,7 +2663,7 @@ TEST_F(EstaleParentTest, ParentStillThereRepliesEio) {
   SetUpTree();
   OpenByHandleFailures() = {ESTALE, ESTALE};
   EXPECT_EQ(Getattr(f_).first.error, -EIO);
-  EXPECT_KEPT_UNKNOWN(f_, d_, "f");
+  ExpectKeptUnknown(ctx_, f_, d_, "f");
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "d"),
               IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
 }
@@ -2674,7 +2673,7 @@ TEST_F(EstaleParentTest, ParentUnreadableRepliesEio) {
   SetUpTree();
   OpenByHandleFailures() = {ESTALE, EIO};
   EXPECT_EQ(Getattr(f_).first.error, -EIO);
-  EXPECT_KEPT_UNKNOWN(f_, d_, "f");
+  ExpectKeptUnknown(ctx_, f_, d_, "f");
 }
 
 // An object whose only name a failed mutation left unknown (an unknown

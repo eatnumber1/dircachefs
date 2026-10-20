@@ -6,41 +6,50 @@
 #include <span>
 #include <string_view>
 
+#include "dcfs/fixed_string.h"
+
 namespace dcfs {
 
-// Macro fragments for attribute columns, matching the order BindAttrs binds
-// them.
-#define DCFS_ATTR_VALUES                                                \
-  "mode = ?, nlink = ?, uid = ?, gid = ?, rdev = ?, "                   \
-  "size = ?, blocks = ?, blksize = ?, atime_s = ?, atime_ns = ?, "      \
-  "mtime_s = ?, mtime_ns = ?, ctime_s = ?, ctime_ns = ?, btime_s = ?, " \
-  "btime_ns = ?"
+// Fragments for attribute columns, matching the order BindAttrs binds them,
+// joined into the statements below at compile time.
+inline constexpr auto kAttrValues = FixedString(
+    "mode = ?, nlink = ?, uid = ?, gid = ?, rdev = ?, "
+    "size = ?, blocks = ?, blksize = ?, atime_s = ?, atime_ns = ?, "
+    "mtime_s = ?, mtime_ns = ?, ctime_s = ?, ctime_ns = ?, btime_s = ?, "
+    "btime_ns = ?");
 
-#define DCFS_KEEP_STAMP                                                    \
-  "(mode & 61440) IN (16384, 40960) AND (mode & 61440) = (:mode & 61440) " \
-  "AND (atime_s > :atime_s OR (atime_s = :atime_s AND atime_ns > :atime_ns))"
+inline constexpr auto kKeepStamp = FixedString(
+    "(mode & 61440) IN (16384, 40960) AND (mode & 61440) = (:mode & 61440) "
+    "AND (atime_s > :atime_s OR (atime_s = :atime_s AND atime_ns > "
+    ":atime_ns))");
 
-#define DCFS_ATTR_ASSIGNMENTS                                           \
-  "attrs_valid = 1, "                                                   \
-  "mode = :mode, nlink = ?, uid = ?, gid = ?, rdev = ?, "               \
-  "size = ?, blocks = ?, blksize = ?, "                                 \
-  "atime_s = CASE WHEN " DCFS_KEEP_STAMP                                \
-  " THEN atime_s ELSE :atime_s END, "                                   \
-  "atime_ns = CASE WHEN " DCFS_KEEP_STAMP                               \
-  " THEN atime_ns ELSE :atime_ns "                                      \
-  "END, "                                                               \
-  "mtime_s = ?, mtime_ns = ?, ctime_s = ?, ctime_ns = ?, btime_s = ?, " \
-  "btime_ns = ?"
+inline constexpr auto kAttrAssignments =
+    FixedString(
+        "attrs_valid = 1, "
+        "mode = :mode, nlink = ?, uid = ?, gid = ?, rdev = ?, "
+        "size = ?, blocks = ?, blksize = ?, "
+        "atime_s = CASE WHEN ") +
+    kKeepStamp +
+    FixedString(
+        " THEN atime_s ELSE :atime_s END, "
+        "atime_ns = CASE WHEN ") +
+    kKeepStamp +
+    FixedString(
+        " THEN atime_ns ELSE :atime_ns "
+        "END, "
+        "mtime_s = ?, mtime_ns = ?, ctime_s = ?, ctime_ns = ?, btime_s = ?, "
+        "btime_ns = ?");
 
-#define DCFS_ATTR_COLUMNS                                                   \
-  "mode, nlink, uid, gid, rdev, size, blocks, blksize, atime_s, atime_ns, " \
-  "mtime_s, mtime_ns, ctime_s, ctime_ns, btime_s, btime_ns"
+inline constexpr auto kAttrColumns = FixedString(
+    "mode, nlink, uid, gid, rdev, size, blocks, blksize, atime_s, atime_ns, "
+    "mtime_s, mtime_ns, ctime_s, ctime_ns, btime_s, btime_ns");
 
-#define DCFS_ATTR_NULLS                                                      \
-  "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, " \
-  "NULL, NULL, NULL, NULL"
+inline constexpr auto kAttrNulls = FixedString(
+    "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, "
+    "NULL, NULL, NULL, NULL");
 
-#define DCFS_ATTR_PLACEHOLDERS "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
+inline constexpr auto kAttrPlaceholders =
+    FixedString("?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?");
 
 inline constexpr int kNumAttrColumns = 16;
 
@@ -57,28 +66,39 @@ inline constexpr std::string_view kSqlLookup =
     "LEFT JOIN stubs s ON s.parent = d.parent AND s.name = d.name "
     "WHERE d.parent = ? AND d.name = ?";
 
-inline constexpr std::string_view kSqlGetAttr =
-    "SELECT attrs_valid, fuse_gen, device_id, backing_ino, "
-    "backing_gen, " DCFS_ATTR_COLUMNS " FROM inodes WHERE id = ?";
+inline constexpr auto kSqlGetAttrText =
+    FixedString(
+        "SELECT attrs_valid, fuse_gen, device_id, backing_ino, "
+        "backing_gen, ") +
+    kAttrColumns + FixedString(" FROM inodes WHERE id = ?");
+inline constexpr std::string_view kSqlGetAttr = kSqlGetAttrText;
 
-inline constexpr std::string_view kSqlGetStub =
-    "SELECT parent, name, fuse_gen, " DCFS_ATTR_COLUMNS
-    " FROM stubs WHERE id = ?";
+inline constexpr auto kSqlGetStubText =
+    FixedString("SELECT parent, name, fuse_gen, ") + kAttrColumns +
+    FixedString(" FROM stubs WHERE id = ?");
+inline constexpr std::string_view kSqlGetStub = kSqlGetStubText;
 
 inline constexpr std::string_view kSqlGetGeneration =
     "SELECT fuse_gen FROM inodes WHERE id = ?";
 
-inline constexpr std::string_view kSqlListDir =
-    "SELECT d.rowid, d.name, d.inode, i.attrs_valid, i.fuse_gen, "
-    "i.device_id, i.backing_ino, i.backing_gen, " DCFS_ATTR_COLUMNS
-    " FROM dentries d JOIN inodes i ON i.id = d.inode "
-    "WHERE d.parent = ?1 AND d.rowid > ?2 AND d.state = 'present' "
-    "UNION ALL "
-    "SELECT d.rowid, d.name, s.id, NULL, NULL, NULL, NULL, "
-    "NULL, " DCFS_ATTR_NULLS
-    " FROM dentries d JOIN stubs s ON s.parent = d.parent AND s.name = d.name "
-    "WHERE d.parent = ?1 AND d.rowid > ?2 AND d.state = 'refused' "
-    "ORDER BY 1 LIMIT ?3";
+inline constexpr auto kSqlListDirText =
+    FixedString(
+        "SELECT d.rowid, d.name, d.inode, i.attrs_valid, i.fuse_gen, "
+        "i.device_id, i.backing_ino, i.backing_gen, ") +
+    kAttrColumns +
+    FixedString(
+        " FROM dentries d JOIN inodes i ON i.id = d.inode "
+        "WHERE d.parent = ?1 AND d.rowid > ?2 AND d.state = 'present' "
+        "UNION ALL "
+        "SELECT d.rowid, d.name, s.id, NULL, NULL, NULL, NULL, "
+        "NULL, ") +
+    kAttrNulls +
+    FixedString(
+        " FROM dentries d JOIN stubs s ON s.parent = d.parent AND s.name = "
+        "d.name "
+        "WHERE d.parent = ?1 AND d.rowid > ?2 AND d.state = 'refused' "
+        "ORDER BY 1 LIMIT ?3");
+inline constexpr std::string_view kSqlListDir = kSqlListDirText;
 
 inline constexpr std::string_view kSqlChildrenComplete =
     "SELECT children_complete FROM directories WHERE inode = ?";
@@ -134,21 +154,31 @@ inline constexpr std::string_view kSqlFindMatchingInodes =
     "btime_s, btime_ns FROM inodes "
     "WHERE device_id = ? AND backing_ino = ?";
 
+inline constexpr auto kSqlUpdateMatchingRowText =
+    FixedString(
+        "UPDATE inodes SET handle_type = ?, handle = "
+        "?, ") +
+    kAttrAssignments + FixedString(" WHERE id = ?");
 inline constexpr std::string_view kSqlUpdateMatchingRow =
-    "UPDATE inodes SET handle_type = ?, handle = "
-    "?, " DCFS_ATTR_ASSIGNMENTS " WHERE id = ?";
+    kSqlUpdateMatchingRowText;
 
-inline constexpr std::string_view kSqlInsertNewRow =
-    "INSERT INTO inodes (device_id, backing_ino, "
-    "backing_gen, fuse_gen, handle_type, handle, "
-    "attrs_valid, " DCFS_ATTR_COLUMNS
-    ") VALUES (?, ?, ?, ?, ?, ?, 1, " DCFS_ATTR_PLACEHOLDERS ")";
+inline constexpr auto kSqlInsertNewRowText =
+    FixedString(
+        "INSERT INTO inodes (device_id, backing_ino, "
+        "backing_gen, fuse_gen, handle_type, handle, "
+        "attrs_valid, ") +
+    kAttrColumns + FixedString(") VALUES (?, ?, ?, ?, ?, ?, 1, ") +
+    kAttrPlaceholders + FixedString(")");
+inline constexpr std::string_view kSqlInsertNewRow = kSqlInsertNewRowText;
 
-inline constexpr std::string_view kSqlReinstateInode =
-    "INSERT INTO inodes (id, device_id, backing_ino, "
-    "backing_gen, fuse_gen, handle_type, handle, "
-    "attrs_valid, " DCFS_ATTR_COLUMNS
-    ") VALUES (?, ?, ?, ?, ?, ?, ?, 1, " DCFS_ATTR_PLACEHOLDERS ")";
+inline constexpr auto kSqlReinstateInodeText =
+    FixedString(
+        "INSERT INTO inodes (id, device_id, backing_ino, "
+        "backing_gen, fuse_gen, handle_type, handle, "
+        "attrs_valid, ") +
+    kAttrColumns + FixedString(") VALUES (?, ?, ?, ?, ?, ?, ?, 1, ") +
+    kAttrPlaceholders + FixedString(")");
+inline constexpr std::string_view kSqlReinstateInode = kSqlReinstateInodeText;
 
 inline constexpr std::string_view kSqlFilesystemExists =
     "SELECT 1 FROM filesystems WHERE device_id = ?";
@@ -157,9 +187,12 @@ inline constexpr std::string_view kSqlFindStaleRootInodes =
     "SELECT id FROM inodes "
     "WHERE device_id = ? AND backing_ino = ? AND id != ?";
 
-inline constexpr std::string_view kSqlUpdateRoot =
-    "UPDATE inodes SET backing_ino = ?, backing_gen = ?, "
-    "handle_type = ?, handle = ?, " DCFS_ATTR_ASSIGNMENTS " WHERE id = ?";
+inline constexpr auto kSqlUpdateRootText =
+    FixedString(
+        "UPDATE inodes SET backing_ino = ?, backing_gen = ?, "
+        "handle_type = ?, handle = ?, ") +
+    kAttrAssignments + FixedString(" WHERE id = ?");
+inline constexpr std::string_view kSqlUpdateRoot = kSqlUpdateRootText;
 
 inline constexpr std::string_view kSqlPutDentry =
     "INSERT INTO dentries (parent, name, state, inode) "
@@ -170,8 +203,10 @@ inline constexpr std::string_view kSqlPutDentry =
 inline constexpr std::string_view kSqlFindStub =
     "SELECT id FROM stubs WHERE parent = ? AND name = ?";
 
-inline constexpr std::string_view kSqlUpdateStubAttr =
-    "UPDATE stubs SET " DCFS_ATTR_VALUES " WHERE id = ?";
+inline constexpr auto kSqlUpdateStubAttrText =
+    FixedString("UPDATE stubs SET ") + kAttrValues +
+    FixedString(" WHERE id = ?");
+inline constexpr std::string_view kSqlUpdateStubAttr = kSqlUpdateStubAttrText;
 
 inline constexpr std::string_view kSqlGetLastStubId =
     "SELECT last_stub_id FROM cache_state WHERE id = 1";
@@ -179,9 +214,11 @@ inline constexpr std::string_view kSqlGetLastStubId =
 inline constexpr std::string_view kSqlSetLastStubId =
     "UPDATE cache_state SET last_stub_id = ? WHERE id = 1";
 
-inline constexpr std::string_view kSqlInsertStub =
-    "INSERT INTO stubs (id, parent, name, fuse_gen, " DCFS_ATTR_COLUMNS
-    ") VALUES (?, ?, ?, ?, " DCFS_ATTR_PLACEHOLDERS ")";
+inline constexpr auto kSqlInsertStubText =
+    FixedString("INSERT INTO stubs (id, parent, name, fuse_gen, ") +
+    kAttrColumns + FixedString(") VALUES (?, ?, ?, ?, ") + kAttrPlaceholders +
+    FixedString(")");
+inline constexpr std::string_view kSqlInsertStub = kSqlInsertStubText;
 
 inline constexpr std::string_view kSqlMarkDirComplete =
     "INSERT INTO directories (inode, children_complete) "
@@ -212,8 +249,10 @@ inline constexpr std::string_view kSqlRefusedDentriesToUnknown =
 inline constexpr std::string_view kSqlInvalidateAttr =
     "UPDATE inodes SET attrs_valid = 0 WHERE id = ?";
 
-inline constexpr std::string_view kSqlUpdateAttr =
-    "UPDATE inodes SET " DCFS_ATTR_ASSIGNMENTS " WHERE id = ?";
+inline constexpr auto kSqlUpdateAttrText = FixedString("UPDATE inodes SET ") +
+                                           kAttrAssignments +
+                                           FixedString(" WHERE id = ?");
+inline constexpr std::string_view kSqlUpdateAttr = kSqlUpdateAttrText;
 
 inline constexpr std::string_view kSqlDropAtimeStamp =
     "UPDATE inodes SET atime_s = ?, atime_ns = 0 "

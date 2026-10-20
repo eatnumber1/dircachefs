@@ -110,7 +110,7 @@ absl::Status MarkIncomplete(Context &ctx, InodeId dir) {
 }
 
 // Binds `stx`'s attributes to parameters first..first+15, in
-// DCFS_ATTR_COLUMNS order. Everything is converted to int64 explicitly:
+// kAttrColumns order. Everything is converted to int64 explicitly:
 // SQLite integers are signed 64-bit, and the statx field types (__u32,
 // __s64 = long long, ...) would otherwise be ambiguous among Bind()'s
 // overloads. The unsigned 64-bit fields keep their bit pattern.
@@ -194,7 +194,7 @@ absl::StatusOr<LookupResult> Lookup(Context &ctx, InodeId parent,
 }
 
 // Decodes attrs_valid, fuse_gen, device_id, backing_ino, backing_gen and
-// DCFS_ATTR_COLUMNS, starting at column `base` of `row`, into `attr`.
+// kAttrColumns, starting at column `base` of `row`, into `attr`.
 absl::Status DecodeAttr(Statement &row, int base, CachedAttr &attr) {
   attr.valid = row.Column<bool>(base);
   attr.fuse_gen = static_cast<uint32_t>(row.Column<int64_t>(base + 1));

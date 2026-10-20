@@ -1793,10 +1793,18 @@ cc_library(
     hdrs = ["schema.h"],
 )
 
+# A string literal as a value, joined at compile time (no macro splices one).
+cc_library(
+    name = "fixed_string",
+    hdrs = ["fixed_string.h"],
+    visibility = ["//dcfs/testonly:__pkg__"],
+)
+
 # Step 26.41: all SQL statement string constants dcfs prepares.
 cc_library(
     name = "sql_statements",
     hdrs = ["sql_statements.h"],
+    deps = [":fixed_string"],
 )
 
 cc_library(
