@@ -49,12 +49,12 @@ class ApprovedMacrosTest(unittest.TestCase):
 
     def test_third_party_names_need_no_prefix_and_name_their_library(self):
         entries = approved_macros.parse(
-            "NAME|third_party|2026-10-19|libfuse")
+            "NAME|third_party|2026-10-19||libfuse")
         options = approved_macros.options(entries)
         self.assertIn("NAME", options[approved_macros.IGNORED_KEY])
-        self.assertIn("NAME", options[approved_macros.ALLOWED_KEY])
+        self.assertNotIn("NAME", options[approved_macros.ALLOWED_KEY])
         with self.assertRaises(ValueError):
-            approved_macros.parse("NAME|third_party|2026-10-19| ")
+            approved_macros.parse("NAME|third_party|2026-10-19|| ")
         kinds = {e[0]: e[1] for e in approved_macros.parse(read(PATHS["list"]))}
         for name in ("FUSE_USE_VERSION", "CHECK", "LOG"):
             self.assertEqual("third_party", kinds[name])
@@ -64,14 +64,34 @@ class ApprovedMacrosTest(unittest.TestCase):
         self.assertNotIn("ASSERT_OK_AND_ASSIGN_IMPL", kinds)
         self.assertEqual("prefixed", kinds["DCFS_ASSERT_OK_AND_ASSIGN_IMPL"])
 
+    def test_macro_usage_allows_only_the_names_with_an_allowance(self):
+        entries = approved_macros.parse(
+            "KEPT|exempt|2026-10-19|returns from its caller|russ\n"
+            "DCFS_GRANTED|prefixed|2026-10-19||russ\n")
+        options = approved_macros.options(entries)
+        self.assertEqual("'^(KEPT)$'", options[approved_macros.ALLOWED_KEY])
+        self.assertIn("KEPT", options[approved_macros.IGNORED_KEY])
+
+    def test_the_names_the_check_cannot_see_have_no_allowance(self):
+        # macro-usage skips a body with # or ## and a non-literal constant, so
+        # an allowance for these would be one the check never needs.
+        by_name = {e[0]: e[3] for e in approved_macros.parse(
+            read(PATHS["list"]))}
+        for name in ("RET_CHECK", "DCFS_RET_CHECK_OP_",
+                     "DCFS_RET_CHECK_ELSE_BLOCKER_",
+                     "DCFS_TEST_CONCAT_INNER"):
+            self.assertEqual("", by_name[name], name)
+        for name in ("RET_CHECK_EQ", "ASSERT_OK_AND_ASSIGN", "DCFS_INJECT"):
+            self.assertNotEqual("", by_name[name], name)
+
     def test_bad_lists_are_refused(self):
-        for line in ("NAME|prefixed|2026-10-19|words", "x y|exempt|2026-10-19|w",
-                     "NAME|exempt|today|words", "NAME|exempt|2026-10-19|",
-                     "NAME|exempt"):
+        for line in ("NAME|prefixed|2026-10-19||words", "x y|exempt|2026-10-19||w",
+                     "NAME|exempt|today||words", "NAME|exempt|2026-10-19||",
+                     "NAME|exempt|2026-10-19|words", "NAME|exempt"):
             with self.assertRaises(ValueError, msg=line):
                 approved_macros.parse(line)
         with self.assertRaises(ValueError):
-            approved_macros.parse("A|exempt|2026-10-19|w\nA|exempt|2026-10-19|w")
+            approved_macros.parse("A|exempt|2026-10-19||w\nA|exempt|2026-10-19||w")
 
 
 class MainTest(unittest.TestCase):
@@ -80,13 +100,13 @@ class MainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             os.makedirs(os.path.join(root, "tools"))
             with open(os.path.join(root, "tools/approved_macros.txt"), "w") as f:
-                f.write("NAME|exempt|2026-10-19|russ\n")
+                f.write("NAME|exempt|2026-10-19||russ\n")
             config = os.path.join(root, ".clang-tidy")
             with open(config, "w") as f:
                 f.write("Checks: '-*'\n  %s: 'drifted'\n  %s: 'drifted'\n"
                         % (approved_macros.ALLOWED_KEY,
                            approved_macros.IGNORED_KEY))
-            entries = approved_macros.parse("NAME|exempt|2026-10-19|russ\n")
+            entries = approved_macros.parse("NAME|exempt|2026-10-19||russ\n")
             self.assertTrue(approved_macros.problems(entries, read(config)))
             with mock.patch.dict(os.environ,
                                  {"BUILD_WORKSPACE_DIRECTORY": root}):
@@ -98,7 +118,7 @@ class MainTest(unittest.TestCase):
 
 
 LIST = approved_macros.parse(
-    "KNOWN|exempt|2026-10-19|russ\nSTALE|exempt|2026-10-19|russ\n")
+    "KNOWN|exempt|2026-10-19||russ\nSTALE|exempt|2026-10-19||russ\n")
 
 
 def scan(**files):

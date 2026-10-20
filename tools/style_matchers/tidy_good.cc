@@ -100,13 +100,14 @@ class ClassMembers {
 
 int ClassMembers::pool_ = 0;
 
-// Approved macros: a private helper, a name that mirrors a Google-internal
-// macro (the file's own header guard is exempt without a list entry).
-#define DCFS_RET_CHECK_OP_(left, right) ((left) == (right))
-#define RET_CHECK(condition) (condition)
+// Approved macros that macro-usage allows (a name that mirrors a
+// Google-internal one, a helper that pastes) and the file's own header guard,
+// which is exempt without a list entry.
+#define DCFS_TEST_CONCAT(left, right) ((left) + (right))
+#define RET_CHECK_EQ(left, right) ((left) == (right))
 
 [[maybe_unused]] int UsesAll() {
-  return kGlobal + kGlobalConst + RET_CHECK(true) + DCFS_RET_CHECK_OP_(1, 1) +
+  return kGlobal + kGlobalConst + RET_CHECK_EQ(1, 1) + DCFS_TEST_CONCAT(1, 1) +
          GoodTemplate<GoodAlias>{1}.member + GoodUnion{2}.member +
          ClassMembers::kClassConstant + ClassMembers().Value();
 }

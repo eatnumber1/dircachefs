@@ -29,15 +29,16 @@ IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def parse(text):
-    """[(name, prefix, date, grant)] of the list; raises ValueError."""
+    """[(name, kind, date, allowance, grant)] of the list; ValueError."""
     entries, seen = [], set()
     for number, line in enumerate(text.splitlines(), 1):
         if not line.strip() or line.startswith("#"):
             continue
-        parts = line.split("|", 3)
-        if len(parts) != 4:
-            raise ValueError("line %d: want name|prefix|date|grant" % number)
-        name, prefix, date, grant = parts
+        parts = line.split("|", 4)
+        if len(parts) != 5:
+            raise ValueError("line %d: want name|kind|date|allowance|grant"
+                             % number)
+        name, prefix, date, allowance, grant = parts
         if not IDENTIFIER.match(name):
             raise ValueError("line %d: %r is not an identifier"
                              % (number, name))
@@ -52,7 +53,7 @@ def parse(text):
         if name in seen:
             raise ValueError("line %d: %s is listed twice" % (number, name))
         seen.add(name)
-        entries.append((name, prefix, date, grant))
+        entries.append((name, prefix, date, allowance, grant))
     return entries
 
 
@@ -63,7 +64,7 @@ def alternation(names):
 def options(entries):
     """{key: value} of the two options the list determines."""
     return {
-        ALLOWED_KEY: alternation(e[0] for e in entries),
+        ALLOWED_KEY: alternation(e[0] for e in entries if e[3]),
         IGNORED_KEY: alternation([GUARDS] + [e[0] for e in entries
                                              if e[1] != "prefixed"]),
     }

@@ -144,3 +144,7 @@ struct PublicMember {
 // so is a granted kind of macro that lacks the DCFS_ prefix.
 #define DCFS_UNGRANTED 7  // HIT cppcoreguidelines-macro-usage
 #define BAD_MACRO 1  // HIT readability-identifier-naming
+
+// A macro on the approved list is not allowed by macro-usage because of it:
+// a constant is reported unless it has its own allowance.
+#define DCFS_BACKSTOP 8  // HIT cppcoreguidelines-macro-usage

@@ -15,45 +15,53 @@
 # may choose to exempt the prefix rule too."
 #
 # From this file `bazel run //tools:approved_macros -- --write` writes
-# .clang-tidy's cppcoreguidelines-macro-usage.AllowedRegexp (every name here)
+# .clang-tidy's cppcoreguidelines-macro-usage.AllowedRegexp (the names with an
+# allowance)
 # and readability-identifier-naming.MacroDefinitionIgnoredRegexp (the names
 # not marked prefixed); //tools:approved_macros_test fails when they disagree,
 # when a C++ source defines a macro that is neither a header guard nor listed
 # here, and when a name here is defined nowhere. The check only reads C++; the
 # macros of the .c files are not listed.
 #
-# FORMAT: name|kind|date|grant
-#   name   an identifier
-#   kind   `prefixed` (the name starts with DCFS_), `exempt` (exempt from the
-#          prefix and case rule: a Google-internal mirror, or a private
-#          helper that ends in an underscore) or `third_party` (the name is
-#          owned by a library, which the grant names)
-#   grant  russ's words, who approved it (an internal helper of an approved
-#          macro may be approved by the orchestrator), or `existing, pending
-#          25.63 review`; for third_party, the library
+# FORMAT: name|kind|date|allowance|grant
+#   name       an identifier
+#   kind       `prefixed` (the name starts with DCFS_), `exempt` (exempt from
+#              the prefix and case rule: a Google-internal mirror, or a
+#              private helper that ends in an underscore) or `third_party`
+#              (the name is owned by a library, which the grant names)
+#   date       of the grant
+#   allowance  empty, or why no other language feature can express the macro
+#              (russ, 2026-10-19: cppcoreguidelines-macro-usage "should go
+#              un-exempted, as it's calling out macros that can be
+#              implemented using other language features instead"); only
+#              names with an allowance are in AllowedRegexp. A grant does not
+#              imply one, and a name the check never reports needs none.
+#   grant      russ's words, who approved it (an internal helper of an
+#              approved macro may be approved by the orchestrator), or
+#              `existing, pending 25.63 review`; for third_party, the library
 # Header guards need no entry: they are exempt in general. Macros defined in
 # third-party headers are never reported (clang-tidy's header filter).
 # Lines marked "candidate" look like ones to remove: russ decides.
-RET_CHECK|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
-RET_CHECK_EQ|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
-RET_CHECK_GE|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
-RET_CHECK_GT|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
-RET_CHECK_LE|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
-RET_CHECK_LT|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
-RET_CHECK_NE|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
-RET_CHECK_OK|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
-RETURN_IF_ERROR|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
-ASSERT_OK_AND_ASSIGN|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
-DCFS_RET_CHECK_OP_|exempt|2026-10-19|orchestrator, under russ 2026-10-19 (internal helper of RET_CHECK_EQ and the others; the trailing underscore marks it private, which UPPER_CASE refuses)
-DCFS_RET_CHECK_ELSE_BLOCKER_|exempt|2026-10-19|orchestrator, under russ 2026-10-19 (internal helper of RET_CHECK; the trailing underscore marks it private, which UPPER_CASE refuses)
-DCFS_ASSERT_OK_AND_ASSIGN_IMPL|prefixed|2026-10-19|orchestrator, under russ 2026-10-19 (internal helper of ASSERT_OK_AND_ASSIGN)
-DCFS_TEST_CONCAT|prefixed|2026-10-19|orchestrator, under russ 2026-10-19 (internal helper of ASSERT_OK_AND_ASSIGN)
-DCFS_TEST_CONCAT_INNER|prefixed|2026-10-19|orchestrator, under russ 2026-10-19 (internal helper of ASSERT_OK_AND_ASSIGN)
-FUSE_USE_VERSION|third_party|2026-10-19|libfuse (reads the name before its headers)
-DCFS_BACKSTOP|prefixed|2026-10-19|existing, pending 25.63 review: candidate (dir_cache_fs_test.cc, test-local)
-DCFS_INJECT|prefixed|2026-10-19|existing, pending 25.63 review: candidate (dir_cache_fs_test.cc, test-local)
-EXPECT_HELPER|exempt|2026-10-19|existing, pending 25.63 review: candidate (status_test.cc, test-local, unprefixed)
-E|exempt|2026-10-19|existing, pending 25.63 review: candidate (errno.cc, a local X-macro, unprefixed)
-F|exempt|2026-10-19|existing, pending 25.63 review: candidate (log_open_flags.h, a local X-macro, unprefixed)
-CHECK|third_party|2026-10-19|absl (tools/mutation/fixture.cc stands in for it)
-LOG|third_party|2026-10-19|absl (tools/mutation/fixture.cc stands in for it)
+RET_CHECK|exempt|2026-10-19||russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RET_CHECK_EQ|exempt|2026-10-19|returns from its caller, which streams a message onto the returned builder|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RET_CHECK_GE|exempt|2026-10-19|returns from its caller, which streams a message onto the returned builder|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RET_CHECK_GT|exempt|2026-10-19|returns from its caller, which streams a message onto the returned builder|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RET_CHECK_LE|exempt|2026-10-19|returns from its caller, which streams a message onto the returned builder|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RET_CHECK_LT|exempt|2026-10-19|returns from its caller, which streams a message onto the returned builder|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RET_CHECK_NE|exempt|2026-10-19|returns from its caller, which streams a message onto the returned builder|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RET_CHECK_OK|exempt|2026-10-19||russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+RETURN_IF_ERROR|exempt|2026-10-19||russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+ASSERT_OK_AND_ASSIGN|exempt|2026-10-19|declares a name in its caller's scope and returns from the test body on failure|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
+DCFS_RET_CHECK_OP_|exempt|2026-10-19||orchestrator, under russ 2026-10-19 (internal helper of RET_CHECK_EQ and the others; the trailing underscore marks it private, which UPPER_CASE refuses)
+DCFS_RET_CHECK_ELSE_BLOCKER_|exempt|2026-10-19||orchestrator, under russ 2026-10-19 (internal helper of RET_CHECK; the trailing underscore marks it private, which UPPER_CASE refuses)
+DCFS_ASSERT_OK_AND_ASSIGN_IMPL|prefixed|2026-10-19|declares a name in its caller's scope and returns from the test body on failure|orchestrator, under russ 2026-10-19 (internal helper of ASSERT_OK_AND_ASSIGN)
+DCFS_TEST_CONCAT|prefixed|2026-10-19|pastes tokens after __LINE__ is expanded, which only a macro can|orchestrator, under russ 2026-10-19 (internal helper of ASSERT_OK_AND_ASSIGN)
+DCFS_TEST_CONCAT_INNER|prefixed|2026-10-19||orchestrator, under russ 2026-10-19 (internal helper of ASSERT_OK_AND_ASSIGN)
+FUSE_USE_VERSION|third_party|2026-10-19||libfuse (reads the name before its headers)
+DCFS_BACKSTOP|prefixed|2026-10-19||existing, pending 25.63 review: candidate (dir_cache_fs_test.cc, test-local)
+DCFS_INJECT|prefixed|2026-10-19|returns from its caller, a link-time wrap, with errno set|existing, pending 25.63 review: candidate (dir_cache_fs_test.cc, test-local)
+EXPECT_HELPER|exempt|2026-10-19|the test is that a helper's default source_location captures the line of its call; only a macro puts that call on the caller's line|existing, pending 25.63 review: candidate (status_test.cc, test-local, unprefixed)
+E|exempt|2026-10-19||existing, pending 25.63 review: candidate (errno.cc, a local X-macro, unprefixed)
+F|exempt|2026-10-19||existing, pending 25.63 review: candidate (log_open_flags.h, a local X-macro, unprefixed)
+CHECK|third_party|2026-10-19||absl (tools/mutation/fixture.cc stands in for it)
+LOG|third_party|2026-10-19||absl (tools/mutation/fixture.cc stands in for it)

@@ -128,15 +128,19 @@ CheckOptions:
   readability-identifier-naming.MacroDefinitionPrefix: DCFS_
   readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
   readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^(ASSERT_OK_AND_ASSIGN|CHECK|DCFS_RET_CHECK_ELSE_BLOCKER_|DCFS_RET_CHECK_OP_|E|EXPECT_HELPER|F|FUSE_USE_VERSION|LOG|RETURN_IF_ERROR|RET_CHECK|RET_CHECK_EQ|RET_CHECK_GE|RET_CHECK_GT|RET_CHECK_LE|RET_CHECK_LT|RET_CHECK_NE|RET_CHECK_OK|[A-Z][A-Z0-9_]*_H_)$'
-  # Macros are discouraged (docs/style.md 1.2, rule-macros-discouraged). The
-  # approved ones are tools/approved_macros.txt; the ignore regex above and the
-  # AllowedRegexp below are generated from it (bazel run
-  # //tools:approved_macros -- --write). The approval of every macro is
-  # enforced by the source scan of //tools:approved_macros_test, because this
-  # check reports only function-like, variadic and all-literal macros. It is
-  # kept for its constexpr and inline-function advice; a finding of it also
-  # means: a new macro needs russ's approval; report it instead of adding it
-  # to tools/approved_macros.txt. CheckCapsOnly is false, without which
-  # AllowedRegexp is not consulted at all.
+  # Macros are discouraged (docs/style.md 1.2, rule-macros-discouraged). Two
+  # independent checks. The approval policy is the source scan of
+  # //tools:approved_macros_test against tools/approved_macros.txt: it sees
+  # every macro, which this check does not (it reports only function-like,
+  # variadic and all-literal macros). This check is kept for what it says, a
+  # macro that another language feature could express (russ, 2026-10-19: it
+  # "likely should go un-exempted, as it's calling out macros that can be
+  # implemented using other language features instead"), so AllowedRegexp
+  # holds only the names the list gives an allowance, generated from it (bazel
+  # run //tools:approved_macros -- --write), not every approved name. A
+  # finding means: convert the macro, or a new macro needs russ's approval;
+  # report it instead of adding it to tools/approved_macros.txt.
+  # CheckCapsOnly is false, without which AllowedRegexp is not consulted at
+  # all.
   cppcoreguidelines-macro-usage.CheckCapsOnly: false
-  cppcoreguidelines-macro-usage.AllowedRegexp: '^(ASSERT_OK_AND_ASSIGN|CHECK|DCFS_ASSERT_OK_AND_ASSIGN_IMPL|DCFS_BACKSTOP|DCFS_INJECT|DCFS_RET_CHECK_ELSE_BLOCKER_|DCFS_RET_CHECK_OP_|DCFS_TEST_CONCAT|DCFS_TEST_CONCAT_INNER|E|EXPECT_HELPER|F|FUSE_USE_VERSION|LOG|RETURN_IF_ERROR|RET_CHECK|RET_CHECK_EQ|RET_CHECK_GE|RET_CHECK_GT|RET_CHECK_LE|RET_CHECK_LT|RET_CHECK_NE|RET_CHECK_OK)$'
+  cppcoreguidelines-macro-usage.AllowedRegexp: '^(ASSERT_OK_AND_ASSIGN|DCFS_ASSERT_OK_AND_ASSIGN_IMPL|DCFS_INJECT|DCFS_TEST_CONCAT|EXPECT_HELPER|RET_CHECK_EQ|RET_CHECK_GE|RET_CHECK_GT|RET_CHECK_LE|RET_CHECK_LT|RET_CHECK_NE)$'
