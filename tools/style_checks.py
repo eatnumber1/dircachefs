@@ -2,7 +2,8 @@
 """Reads the clang-tidy and clang-query outputs of //tools:style_checks_test.
 
 //tools:style_checks.bzl runs the two tools over our C++ as Bazel actions and
-writes `<file>.tidy.txt` and `<file>.query.txt` per source file. This module
+writes `<file>.tidy.txt` and `<file>.query.txt` per source file (and
+`<file>.macros.txt`, see below). This module
 turns them into findings, each keyed by (file, function, check) -- never by
 line, so an edit above a finding does not disturb the list -- and compares the
 keys with tools/style_checks_allow.txt:
@@ -31,6 +32,11 @@ Every `NOLINT`, `NOLINTNEXTLINE` and `NOLINTBEGIN` in our sources names its
 check(s) in parentheses and carries a reason (25.30, `suppression_problems`):
 a deliberate exception is an apology at the site, never a bare suppression.
 
+An allowance in tools/approved_macros.txt that cppcoreguidelines-macro-usage
+no longer reports is stale and fails too (25.64, `stale_allowances`): the
+`<file>.macros.txt` outputs are the check run with nothing allowed, and
+`macro_names` reads the macro names from their diagnostics.
+
 A tool that could not parse a file is a failure, and so is a
 `clang-diagnostic-*` finding: the file does not compile cleanly under the
 flags the build uses.
@@ -38,6 +44,8 @@ flags the build uses.
 
 import collections
 import re
+
+import approved_macros
 
 OURS = re.compile(r"^(dcfs|tools|bench|test/qemu/guest)/")
 FILE_SCOPE = "<file scope>"
@@ -155,6 +163,18 @@ def enclosing_function(functions, path, line):
             if best is None or first >= best[0]:
                 best = (first, name)
     return best[1] if best else FILE_SCOPE
+
+
+MACRO_NAME_RE = re.compile(r"macro '(\w+)'")
+
+
+def macro_names(text):
+    """The macros cppcoreguidelines-macro-usage reports in one clang-tidy
+    output, named as the diagnostic names them (25.64)."""
+    findings, _ = parse_tidy(text)
+    return {MACRO_NAME_RE.search(f.message).group(1) for f in findings
+            if f.rule == "cppcoreguidelines-macro-usage" and
+            OURS.match(f.file) and MACRO_NAME_RE.search(f.message)}
 
 
 def read_outputs(paths):
@@ -414,14 +434,23 @@ def tidy_denials(text):
     return problems
 
 
-def run(output_paths, allowlist_text, tidy_config_text, sources=None):
-    """(problems, report lines). `sources` is {path: text} of our C++."""
+def run(output_paths, allowlist_text, tidy_config_text, sources, macros_text):
+    """(problems, report lines). `sources` is {path: text} of our C++;
+    `macros_text` is tools/approved_macros.txt (25.64)."""
+    reported = set()
+    for path in output_paths:
+        if path.endswith(".macros.txt"):
+            with open(path, encoding="utf-8", errors="replace") as f:
+                reported |= macro_names(f.read())
+    output_paths = [p for p in output_paths if not p.endswith(".macros.txt")]
     findings, functions, failures = read_outputs(output_paths)
     counts = keyed(findings, functions)
     enforced, report = split_report_only(counts)
     problems = (failures + tidy_denials(tidy_config_text) +
-                suppression_problems(sources or {}) +
+                suppression_problems(sources) +
                 compare(enforced, parse_allowlist(allowlist_text)))
+    problems += approved_macros.stale_allowances(
+        approved_macros.parse(macros_text), reported)
     per_rule = collections.Counter()
     for key, count in counts.items():
         per_rule[key[2]] += count

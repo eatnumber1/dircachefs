@@ -53,8 +53,9 @@ def main():
     for arg in sys.argv[1:]:
         if arg.endswith((".tidy.txt", ".query.txt")):
             ARGS["outputs"].append(arg)
-        elif arg.endswith(".flags.txt"):
-            # The compile flags of each file, for tools/style_fix.py (25.23).
+        elif arg.endswith((".flags.txt", ".macros.txt")):
+            # The compile flags of each file, for tools/style_fix.py (25.23),
+            # and macro-usage's output (25.64): not this test's.
             continue
         elif arg.endswith(".query"):
             ARGS["queries"].append(arg)

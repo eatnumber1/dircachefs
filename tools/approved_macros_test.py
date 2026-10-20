@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: MIT
 """The approved macros list and .clang-tidy agree (plan step 25.58).
 
-Arguments: the list (tools/approved_macros.txt) and .clang-tidy.
+Arguments: the list (tools/approved_macros.txt), .clang-tidy and
+tools/style_checks.bzl.
 """
 
 import contextlib
 import io
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -86,6 +88,33 @@ class ApprovedMacrosTest(unittest.TestCase):
         # What a function can express is not a macro: no list entry at all.
         for name in ("DCFS_INJECT", "EXPECT_HELPER"):
             self.assertNotIn(name, by_name)
+
+    def test_an_allowance_the_check_never_reports_is_stale(self):
+        # `reported` is what macro-usage says with no allowance at all.
+        entries = approved_macros.parse(
+            "NEEDED|exempt|2026-10-19|returns from its caller|russ\n"
+            "STALE|exempt|2026-10-19|a reason|russ\n"
+            "NONE|exempt|2026-10-19||russ\n")
+        problems = approved_macros.stale_allowances(entries, {"NEEDED"})
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("STALE", problems[0])
+        self.assertIn("rule-macros-discouraged", problems[0])
+        self.assertIn("--write", problems[0])
+        self.assertEqual(
+            [], approved_macros.stale_allowances(entries, {"NEEDED", "STALE"}))
+
+    def test_the_unallowing_run_has_the_options_of_clang_tidy(self):
+        # style_checks.bzl runs macro-usage again with the same options but
+        # an AllowedRegexp that matches nothing.
+        bzl = read(PATHS["bzl"])
+        config = read(PATHS["config"])
+        filter_bzl = re.search(r'"HeaderFilterRegex": "(.*)",', bzl)
+        filter_yaml = re.search(r"^HeaderFilterRegex: '(.*)'$", config, re.M)
+        self.assertEqual(filter_yaml.group(1),
+                         filter_bzl.group(1).replace("\\\\", "\\"))
+        caps = "cppcoreguidelines-macro-usage.CheckCapsOnly"
+        self.assertIn('"%s": "false"' % caps, bzl)
+        self.assertIn("%s: false" % caps, config)
 
     def test_bad_lists_are_refused(self):
         for line in ("NAME|prefixed|2026-10-19||words", "x y|exempt|2026-10-19||w",
@@ -182,6 +211,8 @@ def main():
     for arg in sys.argv[1:]:
         if arg.endswith(".txt"):
             PATHS["list"] = arg
+        elif arg.endswith(".bzl"):
+            PATHS["bzl"] = arg
         elif arg.endswith(".clang-tidy"):
             PATHS["config"] = arg
         elif arg.endswith((".cc", ".h")):

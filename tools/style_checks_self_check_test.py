@@ -42,7 +42,26 @@ Match #3:
 """
 
 
+MACRO_USAGE = "[cppcoreguidelines-macro-usage]"
+MACROS = "\n".join([
+    "./dcfs/a.h:3:9: warning: function-like macro 'RET_CHECK_EQ' used; "
+    "consider a 'constexpr' template function " + MACRO_USAGE,
+    "./dcfs/a.h:4:9: warning: variadic macro 'LOG_ALL' used; consider using "
+    "a 'constexpr' variadic template function " + MACRO_USAGE,
+    "./dcfs/a.h:5:9: warning: macro 'kLimit' used to declare a constant; "
+    "consider using a 'constexpr' constant " + MACRO_USAGE,
+    "./dcfs/a.h:6:9: warning: not a macro finding [misc-a]",
+    "external/abseil-cpp+/absl/x.h:1:1: warning: function-like macro 'THEIRS' "
+    "used; consider a 'constexpr' template function " + MACRO_USAGE,
+]) + "\n"
+
+
 class ParsingTest(unittest.TestCase):
+
+    def test_macro_names_come_from_the_diagnostics(self):
+        self.assertEqual({"RET_CHECK_EQ", "LOG_ALL", "kLimit"},
+                         style_checks.macro_names(MACROS))
+        self.assertEqual(set(), style_checks.macro_names(TIDY))
 
     def test_tidy_findings_are_split_per_check_and_drop_the_error_marker(self):
         findings, failures = style_checks.parse_tidy(TIDY)
@@ -269,8 +288,27 @@ class FixtureTest(unittest.TestCase):
     def test_run_reports_suppression_problems(self):
         problems, _ = style_checks.run(
             [], "", "Checks: 'misc-a'\nWarningsAsErrors: '*'\n",
-            {"dcfs/b.cc": "int a;  // NOLINT\n"})
+            {"dcfs/b.cc": "int a;  // NOLINT\n"}, "")
         self.assertEqual(1, len([p for p in problems if "NOLINT" in p]))
+
+    def test_run_reports_a_stale_allowance_and_reads_macros_apart(self):
+        listed = ("RET_CHECK_EQ|exempt|2026-10-19|r|russ\n"
+                  "STALE|exempt|2026-10-19|r|russ\n"
+                  "NONE|exempt|2026-10-19||russ\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            macros = os.path.join(tmp, "a.h.macros.txt")
+            tidy = os.path.join(tmp, "a.h.tidy.txt")
+            for path, text in ((macros, MACROS), (tidy, TIDY)):
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(text)
+            problems, report = style_checks.run(
+                [macros, tidy], "dcfs/a.cc|a.cc|readability-else-after-return"
+                "|1\ndcfs/a.h|<file scope>|misc-a|1\n", "", {}, listed)
+        stale = [p for p in problems if "stale" in p and "allowance" in p]
+        self.assertEqual(1, len(stale), problems)
+        self.assertIn("STALE", stale[0])
+        # The macro-usage findings are not tidy findings.
+        self.assertFalse([r for r in report if "macro-usage" in r], report)
 
 
 if __name__ == "__main__":

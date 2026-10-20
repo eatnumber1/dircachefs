@@ -685,6 +685,7 @@ py_library(
     name = "style_checks_lib",
     srcs = ["style_checks.py"],
     imports = ["."],
+    deps = [":approved_macros_lib"],
 )
 
 # clang-tidy (//:.clang-tidy) and the clang-query matchers
@@ -701,6 +702,7 @@ py_test(
     srcs = ["style_checks_test.py"],
     args = [
         "allowlist=$(rootpath style_checks_allow.txt)",
+        "macros=$(rootpath approved_macros.txt)",
         "tidy_config=$(rootpath //:.clang-tidy)",
         "$(rootpaths //dcfs:style_findings)",
         "$(rootpaths //dcfs/testonly:style_findings)",
@@ -709,6 +711,7 @@ py_test(
         "$(rootpaths :style_findings)",
     ],
     data = [
+        "approved_macros.txt",
         "style_checks_allow.txt",
         "//:.clang-tidy",
         "//bench:style_findings",
@@ -773,6 +776,7 @@ py_test(
     args = [
         "$(rootpath approved_macros.txt)",
         "$(rootpath //:.clang-tidy)",
+        "$(rootpath style_checks.bzl)",
         "$(locations //bench:all_cxx_sources)",
         "$(locations //dcfs:all_cxx_sources)",
         "$(locations //dcfs/testonly:all_cxx_sources)",
@@ -782,6 +786,7 @@ py_test(
     ],
     data = [
         "approved_macros.txt",
+        "style_checks.bzl",
         ":all_cxx_sources",
         "//:.clang-tidy",
         "//bench:all_cxx_sources",

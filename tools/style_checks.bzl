@@ -5,8 +5,12 @@
 cc_binary and cc_test in `targets` (only those targets, not their deps) and
 runs, for every .cc file and for the headers of a target with no .cc file,
 
-- clang-tidy with the checked-in //:.clang-tidy, and
-- clang-query with every matcher file of //tools/style_matchers:matchers,
+- clang-tidy with the checked-in //:.clang-tidy,
+- clang-query with every matcher file of //tools/style_matchers:matchers, and
+- clang-tidy again with cppcoreguidelines-macro-usage alone and nothing
+  allowed (`.macros.txt`, 25.64): the macros it reports are the ones that
+  need an allowance in tools/approved_macros.txt, and style_checks.py fails
+  on an allowance the output does not show,
 
 as ordinary Bazel actions: the pinned LLVM (@dcfs_llvm) is the tool, the
 inputs are the file, its transitive headers and the toolchain's files, and
@@ -15,8 +19,8 @@ the --copt flags, the rule's copts, includes and defines). So the result is
 sandboxed, hermetic and cached per file, and `bazel test --config=fast
 //tools:style_checks_test` reruns only what a change touched.
 
-The outputs are `<package>/_style/<target>/<file>.tidy.txt` and
-`.query.txt`; //tools:style_checks.py reads them (see its docstring). The
+The outputs are `<package>/_style/<target>/<file>.tidy.txt`, `.query.txt`
+and `.macros.txt`; //tools:style_checks.py reads them (see its docstring). The
 actions never fail on a finding: the test decides, against the allowlist
 tools/style_checks_allow.txt.
 
@@ -34,6 +38,17 @@ StyleInfo = provider(
     doc = "The clang-tidy and clang-query outputs of a target.",
     fields = {"outputs": "depset of File"},
 )
+
+# cppcoreguidelines-macro-usage with an AllowedRegexp that matches nothing and
+# the options .clang-tidy gives it otherwise (25.64).
+_MACRO_USAGE_CONFIG = json.encode({
+    "Checks": "-*,cppcoreguidelines-macro-usage",
+    "HeaderFilterRegex": "^(\\./)?(dcfs|tools|bench|test/qemu/guest)/",
+    "CheckOptions": {
+        "cppcoreguidelines-macro-usage.CheckCapsOnly": "false",
+        "cppcoreguidelines-macro-usage.AllowedRegexp": "^$",
+    },
+})
 
 _KINDS = ("cc_library", "cc_binary", "cc_test")
 
@@ -62,6 +77,27 @@ def _flags(ctx, target, cc_toolchain, feature_configuration):
         variables = variables,
     )
     return flags
+
+def _tidy_action(ctx, source, flags, inputs, tools, output, config, mnemonic, message):
+    """clang-tidy over `source` into `output`: it exits 1 for a finding and
+    for a file it cannot parse (style_checks.py tells the two apart in the
+    output); any other status is a crash."""
+    ctx.actions.run_shell(
+        outputs = [output],
+        inputs = inputs,
+        tools = tools,
+        command = ('"$@" > %s 2>&1; status=$?; ' +
+                   '[ $status -le 1 ] || exit $status') % output.path,
+        arguments = [ctx.actions.args()
+            .add(ctx.file._tidy)
+            .add("--quiet")
+            .add_all(config)
+            .add(source)
+            .add("--")
+            .add_all(flags)],
+        mnemonic = mnemonic,
+        progress_message = "%s %s" % (message, source.short_path),
+    )
 
 def _aspect_impl(target, ctx):
     if ctx.rule.kind not in _KINDS:
@@ -122,25 +158,19 @@ def _aspect_impl(target, ctx):
         if ctx.attr.tidy == "yes":
             tidy = ctx.actions.declare_file(stem + ".tidy.txt")
 
-            # clang-tidy exits 1 for a finding (the config makes them errors)
-            # and for a file it cannot parse; style_checks.py tells the two
-            # apart in the output. Any other status is a crash.
-            ctx.actions.run_shell(
-                outputs = [tidy],
-                inputs = inputs,
-                tools = tools,
-                command = '"$@" > %s 2>&1; status=$?; [ $status -le 1 ] || exit $status' % tidy.path,
-                arguments = [ctx.actions.args()
-                    .add(ctx.file._tidy)
-                    .add("--quiet")
-                    .add("--config-file", ctx.file._tidy_config)
-                    .add(source)
-                    .add("--")
-                    .add_all(flags_of_source)],
-                mnemonic = "StyleTidy",
-                progress_message = "clang-tidy %s" % source.short_path,
-            )
+            _tidy_action(
+                ctx, source, flags_of_source, inputs, tools, tidy,
+                ["--config-file", ctx.file._tidy_config], "StyleTidy", "clang-tidy")
             outputs.append(tidy)
+
+            # 25.64: macro-usage alone with nothing allowed, so
+            # style_checks.py can tell which allowances of
+            # tools/approved_macros.txt the check still needs.
+            macros = ctx.actions.declare_file(stem + ".macros.txt")
+            _tidy_action(
+                ctx, source, flags_of_source, inputs, tools, macros,
+                ["--config", _MACRO_USAGE_CONFIG], "StyleMacros", "macro-usage")
+            outputs.append(macros)
     return [StyleInfo(outputs = depset(outputs))]
 
 _aspect = aspect(

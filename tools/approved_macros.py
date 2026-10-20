@@ -92,6 +92,17 @@ def problems(entries, config_text):
             for key in want if have.get(key) != want[key]]
 
 
+def stale_allowances(entries, reported):
+    """Problems for the allowances whose macro `reported` (the names
+    cppcoreguidelines-macro-usage reports with nothing allowed) lacks."""
+    return ["tools/approved_macros.txt: the allowance of %s is stale: "
+            "cppcoreguidelines-macro-usage no longer reports it (converted, "
+            "or its body gained # or ##); drop the allowance field, then run "
+            "`bazel run //tools:approved_macros -- --write` "
+            "(docs/style.md rule-macros-discouraged)" % e[0]
+            for e in entries if e[3] and e[0] not in reported]
+
+
 def guard_of(text):
     """The name of the header guard of `text`: `#ifndef N` immediately
     followed by `#define N` with no body, the first two directives, and the

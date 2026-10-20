@@ -16,12 +16,13 @@
 #
 # From this file `bazel run //tools:approved_macros -- --write` writes
 # .clang-tidy's cppcoreguidelines-macro-usage.AllowedRegexp (the names with an
-# allowance)
-# and readability-identifier-naming.MacroDefinitionIgnoredRegexp (the names
-# not marked prefixed); //tools:approved_macros_test fails when they disagree,
-# when a C++ source defines a macro that is neither a header guard nor listed
-# here, and when a name here is defined nowhere. The check only reads C++; the
-# macros of the .c files are not listed.
+# allowance) and readability-identifier-naming.MacroDefinitionIgnoredRegexp
+# (the names not marked prefixed). //tools:approved_macros_test fails when they
+# disagree with this file, when a C++ source defines a macro that is neither a
+# header guard nor listed here, and when a name here is defined nowhere.
+# //tools:style_checks_test fails when an allowance names a macro that
+# cppcoreguidelines-macro-usage no longer reports. The check only reads C++;
+# the macros of the .c files are not listed.
 #
 # FORMAT: name|kind|date|allowance|grant
 #   name       an identifier
