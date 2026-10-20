@@ -459,3 +459,10 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-19	25.56	1	Sonnet	nit	test-gap	docs/style.md 2	test/qemu/refusals_test.bzl:97	initramfs, matrix and cc refusals lack accept cases	could	fixed before merge (5420d7c4)
 2026-10-19	25.56	1	Sonnet	nit	commit-hygiene	-	commit 65edf038	commit message says 15 refusals; there are 14	no	commit message corrected at merge (afe0b169..5420d7c4)
 2026-10-19	25.54	1	orchestrator	none	clean-review	-	.claude/skills/dcfs-dashboard-upload/SKILL.md	clean review (Gemini review hit quota); verdict merge	no	merged 05008e7f
+2026-10-19	25.58	1	Sonnet	should	style-other	docs/style.md 1.2	.clang-tidy	ConstexprVariable flags local constants	could	fix first
+2026-10-19	25.58	1	Sonnet	should	style-other	docs/style.md 1.2	.clang-tidy	ClassMember reverses the underscore on static members	could	fix first
+2026-10-19	25.58	1	Sonnet	should	style-other	docs/style.md 1.2	.clang-tidy	MacroDefinitionCase should be enableable	could	fix first
+2026-10-19	25.58	1	Sonnet	should	style-other	docs/style.md 1.2	tools/style_matchers/function_names.query:16	INSTANTIATE_TEST_SUITE_P over-reported; use isExpandedFromMacro	could	fix first
+2026-10-19	25.58	1	Sonnet	should	style-other	docs/style.md 1.2	tools/style_matchers/function_names.query	overrides should be exempt	could	fix first
+2026-10-19	25.58	1	Sonnet	should	docs	docs/style.md 1.2	docs/style.md:157	accessors: awaiting russ	no	russ ruled 2026-10-19: lower-case getters and setters permitted; style.md edit in 25.58
+2026-10-19	25.58	1	Sonnet	nit	test-gap	docs/style.md 2	tools/style_matchers	fixtures leave gaps in coverage	could	fix first

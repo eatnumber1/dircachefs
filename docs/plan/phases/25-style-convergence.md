@@ -2744,6 +2744,11 @@ and the denied names are reported. Written by Gemini 3.8 Flash via foreman
 Gemini review hit a quota error) and found no findings. `mark-uploaded`
 already accepted a subset, so no code under `tools/` changed.
 
+Follow-ups (clerk batch 51, 2026-10-19). The skill's partial-upload path
+worked on its first real use: the `lanes` upload was denied as
+`[Data Exfiltration]`; the skill stopped, wrote nothing and reported. The
+other finding is queued as 25.59.
+
 ## 25.55 Own fds read door-free (orchestrator's proposal, 2026-10-19; folded into 25.57)
 
 Folded into 25.57 (clerk batch 47, 2026-10-19): the door moves to `backing::`,
@@ -2823,6 +2828,47 @@ Owner: not yet assigned. Dependencies: none.
 *Test:* a fixture with a lower-case function outside the exception fails the
 check (test first, on the current config); the current tree passes with
 whatever the allowlist records.
+
+Record (clerk batch 51, 2026-10-19). Slice 1's review (Sonnet, fix first;
+ran the pinned clang-tidy and clang-query 22.1.8 on probes) is in
+`review-findings.tsv`. russ's ruling on accessors (2026-10-19): "Google's
+style guide stands. Lowerecase getters and setters are permitted." So
+accessors and mutators may be lower-case: a getter is a member function
+with no parameters, a setter is `set_x` with one parameter, as the
+`function_names` matcher recognizes them. `docs/style.md`
+`rule-function-names` says so; this step's branch makes that edit, not the
+clerk.
+
+## 25.59 Dashboard plan.json (orchestrator proposal, 2026-10-19; queued)
+
+Orchestrator's proposal, not russ's words (clerk batch 51). Source: the
+2026-10-19 dashboard upload. `~/.cache/dcfs-dashboard/plan.json` (the "Plan
+steps in order" data) is not in `dashboard_lanes.py`'s `DATASETS` list, so
+the normal upload never includes it, and the step-order data rewritten on
+2026-10-19 never reached the dashboard.
+
+1. Add it to `DATASETS`, with whatever change and upload hashing the other
+   datasets have.
+
+Owner: not yet assigned. Dependencies: none.
+
+*Test:* a changed `plan.json` is reported as changed and is marked uploaded
+(fails first, on the current list).
+
+## 25.60 Matcher fixtures count as tests (orchestrator proposal, 2026-10-19)
+
+Orchestrator's proposal, not russ's words (clerk batch 51). Source: 25.58
+slice 1. `test_first_tool`'s test-file table (`tools/test_first.cc`) does
+not count clang-query and clang-tidy fixtures (`tools/style_matchers/*_bad.cc`,
+`*_good.cc` and similar) as test files, so it rejects every matcher step's
+tests-only commit. A 25.52 follow-up.
+
+1. Add the fixture pattern to the table.
+
+Owner: not yet assigned. Dependencies: 25.52 merged.
+
+*Test:* a commit touching only a `*_bad.cc` fixture counts as tests-only
+(fails first, on the current table).
 
 ## 25.57 The door moves to `backing::`; one `Syscalls` interface (russ, 2026-10-19; queued)
 

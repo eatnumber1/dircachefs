@@ -10,6 +10,10 @@ that holds its reasoning. `AGENTS.md` says which indexes to read for which task.
   guides, then Abseil's Tips of the Week as guidance (russ, 2026-10-09).
   [style](/docs/style.md#rule-precedence-abseil-tips),
   [style 1.2](/docs/style.md#rule-reach-for-abseil)
+- Google's style rulings, when unambiguous and not overruled by our style
+  guide, are law; judgement only where the guides are ambiguous (obvious
+  cases you settle, otherwise ask russ) (russ, 2026-10-19).
+  [style](/docs/style.md#rule-google-is-law)
 - Format with the repository's `.clang-format`; clang-tidy and the clang-query
   matchers run on our code and their findings are errors.
   [style 1.1](/docs/style.md#rule-formatting-enforced),

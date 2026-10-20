@@ -4661,3 +4661,19 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   changed: mark-uploaded already accepted a subset. The foreman known-issue
   note in `tools/agents/README.md` now records that the 429 was reported and
   foreman exited 1 instead of hanging. Clerk batch 50.
+- 2026-10-19, clerk batch 51: russ ratified `rule-google-is-law`
+  (`docs/style.md`, top; indexed in `index-style.md`): Google's rulings are
+  law when unambiguous and not overruled locally; ambiguity is the only
+  place for judgement, and non-obvious cases go to him. His ruling on
+  25.58's accessor question (2026-10-19): "Google's style guide stands.
+  Lowerecase getters and setters are permitted." Accessors and mutators may
+  be lower-case (a getter: a member function with no parameters; a setter:
+  `set_x` with one parameter, as the `function_names` matcher recognizes
+  them); `rule-function-names` says so, edited in step 25.58. 25.58 slice 1
+  review rows (Sonnet, fix first) appended to `review-findings.tsv`; gaps
+  noted, no action: `ConceptCase` and `ValueTemplateParameter` unset,
+  public data members, the `kAndroid8_0_0` form. Queued (orchestrator's
+  proposals): 25.59 (`plan.json` missing from the dashboard upload's
+  `DATASETS`; the 25.54 skill's partial-upload path worked on first real
+  use, `lanes` denied as `[Data Exfiltration]`, nothing written, reported)
+  and 25.60 (`test_first_tool` counts matcher fixtures as test files).

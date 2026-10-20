@@ -11,6 +11,16 @@ A pinned local copy of all four, rendered to Markdown, is built by
 `bazel-bin/third_party/google_styleguide/{cpp,python,shell,markdown}.md`
 (`third_party/google_styleguide/README.md`); reviewers and agents read the
 relevant section there rather than rely on memory, and need no network.
+<a id="rule-google-is-law"></a>
+**Google's rulings are law** (russ, 2026-10-19: "For future reference, the
+Google style guide's rulings, when unambiguous and not overruled by our
+local style guide, are law. The only time when judgement plays a role is
+when the style guides are ambiguous, in which case obvious cases you can
+disambiguate yourself, otherwise come to me."). An agent or reviewer does
+not weigh a Google ruling against taste; only a rule here overrules it, and
+where the guides are ambiguous a clear case is settled by the agent and any
+other goes to russ.
+
 Bazel files follow Bazel's BUILD style guide as buildifier enforces it. A
 section here says only what adds to or narrows Google's rules, or covers
 what Google does not (tests, Bazel, docs, commits). Where the tree breaks
