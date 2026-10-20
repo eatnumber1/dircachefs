@@ -59,4 +59,7 @@ T Twice(T value) {
   return Twice(lambda(1));
 }
 
+// A declaration of a C function names it as the C library does.
+extern "C" int c_decl();
+
 int main() { return 0; }

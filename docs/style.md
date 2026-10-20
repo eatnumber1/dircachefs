@@ -181,11 +181,12 @@ use it as design guidance rather than firm rules."
   **`std::string_view`, `std::optional`**, not the `absl::` aliases (none
   left in production code).
 - <a id="rule-function-names"></a>
-  **Function names**: every function is CamelCase (`SetXattr`), with one
-  exception (russ, 2026-10-19: "Let's make the Syscalls interface use the
-  man page naming convention."): the members of the one `Syscalls`
-  interface, and so of `RealSyscalls` and the test fakes, are named for
-  their libc and manpage name in lower case: `read`, `write`, `openat`,
+  **Function names**: every function is CamelCase (`SetXattr`), with the
+  exceptions listed below. The first (russ, 2026-10-19: "Let's make the
+  Syscalls interface use the man page naming convention."): the members
+  of the one `Syscalls` interface, and so of `RealSyscalls` and the test
+  fakes, are named for their
+  libc and manpage name in lower case: `read`, `write`, `openat`,
   `fstatat`, `setxattr`, ... The thin layer over libc is those members.
   Each `RealSyscalls` member makes one libc call (`RealSyscalls::read`
   calls `::read`), with a typed signature, and nothing else. The
@@ -201,17 +202,24 @@ use it as design guidance rather than firm rules."
     name starts with a lower-case letter or an underscore is reported
     unless it is in namespace `dcfs::syscalls` in one of
     `dcfs/syscalls{,_backing,_process}.{h,cc}`, a link-time fake the linker
-    names (`__wrap_x`, `__real_x`), an override, or an accessor. Lower-case
+    names (`__wrap_x`, `__real_x`), an `extern "C"` declaration without a
+    body, an override, or an accessor. Lower-case
     accessors and mutators are permitted, as Google's guide allows (russ,
     2026-10-19: "Google's style guide stands. Lowerecase getters and
     setters are permitted."); the matcher recognizes them mechanically: a
-    non-static member function with no parameter (a getter, const or not),
+    non-static member function with no parameter that does not return void (a
+    getter, const or not; the shape is all it can see, so a non-void
+    no-parameter method passes even if it is not an accessor),
     or one named `set_x` with exactly one parameter (a setter). Other
     lower-case methods, static ones and free functions are reported. Step
     25.41 moves the syscall exception to the members of `Syscalls` and its
     implementations. Classes, constants (`kName`), members (`name_`),
     namespaces and enumerators are checked by `readability-identifier-naming`
-    (`.clang-tidy`).
+    (`.clang-tidy`). `clang-tidy` cannot tell class statics from struct
+    statics, so a struct's static data member is also `name_` (Google's
+    Struct Data Members says no underscore); none exist. Google's project
+    prefix for macros is not enforced yet; `RET_CHECK`, `RETURN_IF_ERROR` and
+    the other unprefixed macros are a question to russ (2026-10-19).
   - The typed signatures stay: a call looks like
     `ctx.syscalls().write(fd, buf)` with `buf` a
     `std::span<const std::byte>`, not `(fd, buf, n)`; names are

@@ -13,8 +13,10 @@
 # INSTANTIATE_TEST_SUITE_P expands to, the link-time fakes the linker names
 # (__wrap_x, __real_x), and an accessor in Google's sense (russ, 2026-10-19:
 # "Google's style guide stands. Lowerecase getters and setters are
-# permitted."): a non-static member function with no parameter, or named
-# set_x with one parameter.
+# permitted."): a non-static member function with no parameter that does not
+# return void (a getter), or named set_x with one parameter (a setter). The
+# shape is all clang-query can see, so a non-accessor of that shape passes.
+# An extern "C" declaration without a body names a C function.
 # A function whose name begins with a lower-case letter or an underscore,
 # outside the exception.
-match functionDecl(isExpansionInFileMatching("(^|/)(dcfs|tools|bench|test/qemu/guest)/"), matchesName("(^|::)[a-z_][A-Za-z0-9_]*$"), unless(anyOf(isImplicit(), isMain(), matchesName("(^|::)__(wrap|real)_"), cxxMethodDecl(isOverride()), cxxMethodDecl(unless(isStaticStorageClass()), anyOf(parameterCountIs(0), allOf(matchesName("(^|::)set_[a-z0-9_]*$"), parameterCountIs(1)))), isExpandedFromMacro("INSTANTIATE_TEST_SUITE_P"), cxxConstructorDecl(), cxxDestructorDecl(), cxxConversionDecl(), isTemplateInstantiation(), allOf(hasDeclContext(namespaceDecl(hasName("::dcfs::syscalls"))), isExpansionInFileMatching("(^|/)(dcfs/syscalls(_backing|_process)?[.](cc|h)|tools/style_matchers/function_names_good[.]cc)$"))))).bind("function_names")
+match functionDecl(isExpansionInFileMatching("(^|/)(dcfs|tools|bench|test/qemu/guest)/"), matchesName("(^|::)[a-z_][A-Za-z0-9_]*$"), unless(anyOf(isImplicit(), isMain(), matchesName("(^|::)__(wrap|real)_"), cxxMethodDecl(isOverride()), cxxMethodDecl(unless(isStaticStorageClass()), anyOf(allOf(parameterCountIs(0), unless(returns(voidType()))), allOf(matchesName("(^|::)set_[a-z0-9_]*$"), parameterCountIs(1)))), isExpandedFromMacro("INSTANTIATE_TEST_SUITE_P"), allOf(isExternC(), unless(isDefinition())), cxxConstructorDecl(), cxxDestructorDecl(), cxxConversionDecl(), isTemplateInstantiation(), allOf(hasDeclContext(namespaceDecl(hasName("::dcfs::syscalls"))), isExpansionInFileMatching("(^|/)(dcfs/syscalls(_backing|_process)?[.](cc|h)|tools/style_matchers/function_names_good[.]cc)$"))))).bind("function_names")

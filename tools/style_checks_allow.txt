@@ -257,8 +257,6 @@ dcfs/syscalls.cc|poll|google-runtime-int|3
 dcfs/syscalls.cc|realpath|misc-include-cleaner|1
 dcfs/syscalls.cc|setfsgid|modernize-use-integer-sign-comparison|1
 dcfs/syscalls.cc|setfsuid|modernize-use-integer-sign-comparison|1
-# extern "C" capget and capset: declarations of glibc's own names, outside dcfs::syscalls.
-dcfs/syscalls.cc|<file scope>|function_names|2
 dcfs/syscalls.h|<file scope>|google-runtime-int|2
 dcfs/syscalls_backing.cc|mount|google-runtime-int|1
 dcfs/syscalls_backing.cc|renameat2|misc-include-cleaner|1
@@ -344,5 +342,3 @@ tools/banned_symbols_fixture.cc|main|misc-include-cleaner|1
 tools/banned_symbols_fixture.cc|main|readability-implicit-bool-conversion|1
 # the fixture defines the banned libc symbol by its name on purpose.
 tools/banned_symbols_fixture.cc|nftw64|function_names|1
-# C test helpers (watch_pid, cmd_waitexit) with C naming, shared with testutil.c.
-tools/testutil.h|<file scope>|function_names|2

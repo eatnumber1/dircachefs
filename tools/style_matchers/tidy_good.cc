@@ -99,6 +99,7 @@ int ClassMembers::pool_ = 0;
 // The name of a header guard and of ordinary macros.
 #define GOOD_MACRO 1
 #define DCFS_FIXTURE_H_
+#define DCFS_RET_CHECK_FIXTURE_ 2
 
 [[maybe_unused]] int UsesAll() {
   return kGlobal + kGlobalConst + GOOD_MACRO +

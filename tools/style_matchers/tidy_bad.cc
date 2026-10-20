@@ -133,3 +133,9 @@ int BadLocalConstant() {
 }
 
 #define bad_macro 5  // HIT readability-identifier-naming
+
+#define BAD_TRAILING_ 6  // HIT readability-identifier-naming
+
+struct PublicMember {
+  int BadPublic;  // HIT readability-identifier-naming
+};

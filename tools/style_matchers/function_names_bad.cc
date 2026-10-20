@@ -11,6 +11,7 @@ class Widget {
   static int lower_static() { return 3; }  // HIT
   int CamelMethod() const { return 4; }
   int compute(int x) { return x; }  // HIT
+  void stop() {}  // HIT
   void set_two(int, int) {}  // HIT
   static int static_getter() { return 3; }  // HIT
   int out_lower(int x) const;  // HIT
@@ -46,3 +47,5 @@ int read() { return 6; }  // HIT
 }  // namespace other
 
 }  // namespace dcfs
+
+extern "C" int c_def() { return 0; }  // HIT
