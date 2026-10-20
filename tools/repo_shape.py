@@ -880,6 +880,74 @@ def split_code_spans(root, tracked=None):
                           "split code span(s)")
 
 
+SCAN_DIRS = ("dcfs", "tools", "bench", "test/qemu")
+SCAN_GROUP = "all_cxx_sources"
+
+
+def nearest_package(root, rel):
+    """The directory (relative to root, "" for root) of the nearest
+    BUILD.bazel at or above the file `rel`, or None."""
+    directory = os.path.dirname(rel)
+    while True:
+        if os.path.exists(os.path.join(root, directory, "BUILD.bazel")):
+            return directory
+        if not directory:
+            return None
+        directory = os.path.dirname(directory)
+
+
+def scan_covers_cxx(root):
+    """Every C++ file of dcfs/, tools/, bench/ and test/qemu/ (the matchers'
+    fixtures, which hold deliberately bad macros, excepted) is read by
+    //tools:approved_macros_test: its package defines the group
+    all_cxx_sources, with a glob that reaches the file's subdirectory, and
+    the test reads that group. Without this a new package would drop out of
+    the macro scan silently (docs/style.md 1.2, rule-macros-discouraged)."""
+    problems = []
+    tools_build = ""
+    path = os.path.join(root, "tools", "BUILD.bazel")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            tools_build = f.read()
+    start = tools_build.find('name = "approved_macros_test"')
+    reader = tools_build[start:tools_build.find("\n)\n", start)]
+    for top in SCAN_DIRS:
+        for dirpath, dirnames, names in os.walk(os.path.join(root, top)):
+            dirnames[:] = sorted(d for d in dirnames if d != "style_matchers")
+            for name in sorted(names):
+                if not name.endswith((".h", ".cc")):
+                    continue
+                rel = os.path.relpath(os.path.join(dirpath, name), root)
+                package = nearest_package(root, rel)
+                if package is None:
+                    continue
+                with open(os.path.join(root, package, "BUILD.bazel"),
+                          encoding="utf-8") as f:
+                    build = f.read()
+                label = "//%s:%s" % (package, SCAN_GROUP)
+                where = build.find('name = "%s"' % SCAN_GROUP)
+                group = build[where:build.find("\n)", where)] if where >= 0 \
+                    else ""
+                nested = os.path.dirname(rel) != package
+                if where < 0:
+                    why = "its package defines no %s group" % SCAN_GROUP
+                elif nested and "**" not in group:
+                    why = "the glob of %s has no ** for its subdirectory" \
+                        % label
+                elif label not in reader and not (
+                        package == "tools" and '":%s"' % SCAN_GROUP in reader):
+                    why = "//tools:approved_macros_test does not read %s" \
+                        % label
+                else:
+                    continue
+                problems.append(
+                    "%s: %s, so the macro scan of "
+                    "//tools:approved_macros_test would not see it "
+                    "(docs/style.md 1.2, rule-macros-discouraged)"
+                    % (rel, why))
+    return sorted(set(problems))
+
+
 # Every rule, once: `all_problems` runs them, `//tools:repo_shape_test`
 # asserts each is clean and the command line (`python3 -I
 # tools/repo_shape.py`) prints their problems, so the three cannot differ
@@ -889,7 +957,8 @@ CHECKS = (
     no_new_guest_shell, fixed_arrays, absl_prefixed_status_macros,
     nodiscard_on_status, project_prefix, disabled_checks_listed,
     no_test_only_comments, no_testonly_friends, rule_index,
-    agent_file_attributions, spdx_licenses, long_lines, split_code_spans)
+    agent_file_attributions, spdx_licenses, long_lines, split_code_spans,
+    scan_covers_cxx)
 
 
 def all_problems(root):

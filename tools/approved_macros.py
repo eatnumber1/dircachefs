@@ -2,12 +2,16 @@
 """The approved macros (tools/approved_macros.txt) and the .clang-tidy that
 checks them (plan step 25.58, docs/style.md 1.2 rule-macros-discouraged).
 
-clang-tidy's cppcoreguidelines-macro-usage reports every macro its
-AllowedRegexp does not name, and readability-identifier-naming wants the
-DCFS_ prefix on every macro its MacroDefinitionIgnoredRegexp does not name.
-Both regexes come from the one list: `bazel run //tools:approved_macros --
---write` rewrites them in .clang-tidy, and //tools:approved_macros_test fails
-when they differ from what the list gives.
+Two checks, independent of each other. The approval policy is the scan of the
+C++ sources (scan_problems): every macro they define is a structural header
+guard or on the list, and every list entry is defined somewhere. clang-tidy's
+cppcoreguidelines-macro-usage reports only the macros another language
+feature could express, so its AllowedRegexp holds just the names with an
+allowance (the list's fourth field), and readability-identifier-naming wants
+the DCFS_ prefix on every macro its MacroDefinitionIgnoredRegexp does not
+name. Both regexes come from the one list: `bazel run //tools:approved_macros
+-- --write` rewrites them in .clang-tidy, and //tools:approved_macros_test
+fails when they differ from what the list gives.
 """
 
 import os
@@ -23,7 +27,7 @@ IGNORED_KEY = "readability-identifier-naming.MacroDefinitionIgnoredRegexp"
 # non-guard name ending in _H_ out.
 GUARDS = "[A-Z][A-Z0-9_]*_H_"
 DEFINE = re.compile(r"^\s*#\s*define\s+(\w+)", re.MULTILINE)
-DIRECTIVE = re.compile(r"^\s*#\s*(\w+)\s*(\w*)", re.MULTILINE)
+DIRECTIVE = re.compile(r"^[ \t]*#[ \t]*(\w+)[ \t]*(\w*)([^\n]*)", re.MULTILINE)
 KINDS = ("prefixed", "exempt", "third_party")
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -90,11 +94,16 @@ def problems(entries, config_text):
 
 def guard_of(text):
     """The name of the header guard of `text`: `#ifndef N` immediately
-    followed by `#define N`, the first two directives; else None."""
-    first = DIRECTIVE.findall(text)[:2]
-    if (len(first) == 2 and first[0][0] == "ifndef"
-            and first[1][0] == "define" and first[0][1] == first[1][1]):
-        return first[0][1]
+    followed by `#define N` with no body, the first two directives, and the
+    last directive an `#endif`; else None."""
+    found = DIRECTIVE.findall(text)
+    if len(found) < 3 or found[-1][0] != "endif":
+        return None
+    first, name, _ = found[0]
+    second, defined, rest = found[1]
+    if first == "ifndef" and second == "define" and defined == name \
+            and not rest.split("//")[0].split("/*")[0].strip():
+        return name
     return None
 
 

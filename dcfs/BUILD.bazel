@@ -1793,11 +1793,30 @@ cc_library(
     hdrs = ["schema.h"],
 )
 
+# CONCAT: pastes two tokens, after expanding them (docs/style.md
+# rule-macros-discouraged).
+cc_library(
+    name = "concat",
+    hdrs = ["concat.h"],
+    visibility = ["//dcfs:__subpackages__"],
+)
+
 # A string literal as a value, joined at compile time (no macro splices one).
 cc_library(
     name = "fixed_string",
     hdrs = ["fixed_string.h"],
     visibility = ["//dcfs/testonly:__pkg__"],
+)
+
+qemu_cc_test(
+    name = "fixed_string_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["fixed_string_test.cc"],
+    deps = [
+      ":fixed_string",
+      "@googletest//:gtest_main",
+    ],
 )
 
 # Step 26.41: all SQL statement string constants dcfs prepares.
@@ -2283,3 +2302,12 @@ flags_test(
 )
 
 style_findings_here()
+
+# Every C++ source of this package, for //tools:approved_macros_test (the
+# scan of macro definitions); tools/repo_shape.py checks that no package
+# with C++ lacks this group.
+filegroup(
+    name = "all_cxx_sources",
+    srcs = glob(["*.cc", "*.h"]),
+    visibility = ["//tools:__pkg__"],
+)

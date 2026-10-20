@@ -318,15 +318,17 @@ int InjectedFault(const char *call) {
   return f.err;
 }
 
+// A wrap fails with the sweep's errno when it says so (step 26.6): sets errno
+// and returns true, and the wrap returns -1.
+bool FailInjected(const char *call) {
+  const int injected = InjectedFault(call);
+  if (injected == 0) return false;
+  errno = injected;
+  return true;
+}
+
 }  // namespace
 }  // namespace dcfs
-
-// A wrap fails with the sweep's errno when it says so (step 26.6).
-#define DCFS_INJECT(call, failed)                                \
-  if (int injected = dcfs::InjectedFault(call); injected != 0) { \
-    errno = injected;                                            \
-    return failed;                                               \
-  }
 
 extern "C" {
 int __real_fuse_passthrough_open(fuse_req_t req, int fd);
@@ -351,7 +353,7 @@ int __real_open_by_handle_at(int mount_fd, struct file_handle *handle,
 int __wrap_open_by_handle_at(int mount_fd, struct file_handle *handle,
                              int flags) {
   dcfs::NoTransactionAt("open_by_handle_at");
-  DCFS_INJECT("open_by_handle_at", -1)
+  if (dcfs::FailInjected("open_by_handle_at")) return -1;
   absl::AnyInvocable<void()> hook = std::exchange(dcfs::OpenByHandleHook(), {});
   if (hook) hook();
   if (!dcfs::OpenByHandleFailures().empty()) {
@@ -371,7 +373,7 @@ int __wrap_name_to_handle_at(int dirfd, const char *pathname,
                              struct file_handle *handle, int *mount_id,
                              int flags) {
   dcfs::NoTransactionAt("name_to_handle_at");
-  DCFS_INJECT("name_to_handle_at", -1)
+  if (dcfs::FailInjected("name_to_handle_at")) return -1;
   absl::AnyInvocable<void()> hook = std::exchange(dcfs::NameToHandleHook(), {});
   if (hook) hook();
   if (int err = std::exchange(dcfs::NameToHandleFailure(), 0); err != 0) {
@@ -389,7 +391,7 @@ int __wrap_statx(int dirfd, const char *path, int flags, unsigned int mask,
       hook) {
     hook();
   }
-  DCFS_INJECT("statx", -1)
+  if (dcfs::FailInjected("statx")) return -1;
   if (int err = std::exchange(dcfs::StatxFailure(), 0); err != 0) {
     errno = err;
     return -1;
@@ -404,7 +406,7 @@ int __wrap_statx(int dirfd, const char *path, int flags, unsigned int mask,
 int __real_syncfs(int fd);
 int __wrap_syncfs(int fd) {
   dcfs::NoTransactionAt("syncfs");
-  DCFS_INJECT("syncfs", -1)
+  if (dcfs::FailInjected("syncfs")) return -1;
   absl::AnyInvocable<void()> hook = std::exchange(dcfs::SyncfsHook(), {});
   if (hook) hook();
   return __real_syncfs(fd);
@@ -429,7 +431,7 @@ int __wrap_fsync(int fd) {
   ret __real_##name params;                    \
   ret __wrap_##name params {                   \
     dcfs::NoTransactionAt(#name);              \
-    DCFS_INJECT(#name, -1)                     \
+    if (dcfs::FailInjected(#name)) return -1;  \
     return __real_##name args;                 \
   }
 DCFS_BACKSTOP(int, unlinkat, (int d, const char *p, int f), (d, p, f))
@@ -473,7 +475,7 @@ DCFS_BACKSTOP(int, fstatfs64, (int d, struct statfs64 *b), (d, b))
 int __real_fstatvfs64(int d, struct statvfs64 *b);
 int __wrap_fstatvfs64(int d, struct statvfs64 *b) {
   dcfs::NoTransactionAt("fstatvfs64");
-  DCFS_INJECT("fstatvfs64", -1)
+  if (dcfs::FailInjected("fstatvfs64")) return -1;
   int ret = __real_fstatvfs64(d, b);
   if (ret == 0 && dcfs::StatvfsReadOnly()) b->f_flag |= ST_RDONLY;
   return ret;
@@ -489,7 +491,7 @@ DCFS_BACKSTOP(ssize_t, copy_file_range,
 int __real_openat64(int dirfd, const char *path, int flags, ...);
 int __wrap_openat64(int dirfd, const char *path, int flags, ...) {
   dcfs::NoTransactionAt("openat");
-  DCFS_INJECT("openat", -1)
+  if (dcfs::FailInjected("openat")) return -1;
   mode_t mode = 0;
   if ((flags & O_CREAT) != 0 || (flags & O_TMPFILE) == O_TMPFILE) {
     va_list ap;

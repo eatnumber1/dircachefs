@@ -8,6 +8,11 @@
 
 namespace dcfs {
 
+// Declared, never defined, and not constexpr: a consteval FixedString that
+// reaches it does not compile, which is how an array that is not a NUL-
+// terminated string is refused.
+void FixedStringNeedsANulTerminatedArray();
+
 // A string literal as a value, so that fragments of a constant string, such
 // as the SQL of dcfs/sql_statements.h, are named constants joined at compile
 // time (docs/style.md rule-macros-discouraged: no macro splices a literal):
@@ -20,6 +25,7 @@ template <std::size_t N>
 struct FixedString {
   // NOLINTNEXTLINE(google-explicit-constructor): a literal is a FixedString.
   consteval FixedString(const char (&text)[N + 1]) {
+    if (text[N] != '\0') FixedStringNeedsANulTerminatedArray();
     std::copy_n(text, N + 1, chars);
   }
   consteval FixedString() = default;

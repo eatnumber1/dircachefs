@@ -336,58 +336,63 @@ use it as design guidance rather than firm rules."
   and only shrink (25.24; 67 sites outside syscalls today, 15 of them in
   fuse_ops.cc).
 - <a id="rule-macros-discouraged"></a>
-  **Macros are discouraged** (Google's guide says the same; russ,
-  2026-10-19: "maybe I spoke too strongly. I'm not looking to fully ban all
-  propositions of a macro. Sometimes it's a significant improvement to have
-  one (for example, ASSIGN_OR_RETURN and RETURN_IF_ERROR are significant
-  readability improvements). But they're discouraged."). A new macro is
-  justified only by a significant improvement and needs russ's approval,
-  which also settles its name: the `DCFS_` prefix Google's guide asks for by
-  default, or a name he chooses ("if I'm granting an exception I'll likely
-  want to exercise control over the name it's given, so may choose to exempt
-  the prefix rule too"). Names that mirror Google-internal macros stay
-  unprefixed (russ: "Unprefixed names are allowed if they mirror Google
-  internal names. RET_CHECK (and friends like RET_CHECK_EQ), RETURN_IF_ERROR,
-  ASSIGN_OR_RETURN, etc., all mirror Google internal names."; then "All the
-  google-internal names you just listed are approved."). Header guards need no
-  approval (russ: "Header guards are all approved. You'll need a general way
-  to exempt them from needing to appear in the allowlist at all."), and
-  third-party macro names (FUSE_USE_VERSION, CHECK, LOG, ...) are exempt from
-  the rule and the prefix (russ: "Third-party macros (such as
-  FUSE_USE_VERSION, CHECK, LOG, etc.) are all exempt from the rule"): the
-  list marks them `third_party` and names the library, and the check never
+  **Macros are discouraged** (Google's guide says the same; russ, 2026-10-19:
+  "maybe I spoke too strongly. I'm not looking to fully ban all propositions of
+  a macro. Sometimes it's a significant improvement to have one (for example,
+  ASSIGN_OR_RETURN and RETURN_IF_ERROR are significant readability
+  improvements). But they're discouraged."). A new macro is justified only by a
+  significant improvement and needs russ's approval, which also settles its
+  name: the `DCFS_` prefix Google's guide asks for by default, or a name he
+  chooses ("if I'm granting an exception I'll likely want to exercise control
+  over the name it's given, so may choose to exempt the prefix rule too").
+  Names that mirror Google-internal macros stay unprefixed (russ: "Unprefixed
+  names are allowed if they mirror Google internal names. RET_CHECK (and
+  friends like RET_CHECK_EQ), RETURN_IF_ERROR, ASSIGN_OR_RETURN, etc., all
+  mirror Google internal names."; then "All the google-internal names you just
+  listed are approved."). Header guards need no approval (russ: "Header guards
+  are all approved. You'll need a general way to exempt them from needing to
+  appear in the allowlist at all."), and `CONCAT` (dcfs/concat.h) stands on its
+  own (russ: "preprocessor concatenation is useful for many macros (maybe we
+  only have one, but it is generally useful). So maybe it should stand on its
+  own and get an exemption? I'd actually exempt it from the DCFS_ rule too and
+  just call it CONCAT"), and third-party macro names (FUSE_USE_VERSION, CHECK,
+  LOG, ...) are exempt from the rule and the prefix (russ: "Third-party macros
+  (such as FUSE_USE_VERSION, CHECK, LOG, etc.) are all exempt from the rule"):
+  the list marks them `third_party` and names the library, and the check never
   fires on a macro defined in a third-party header. A helper used only to
   implement an approved macro may be approved by the orchestrator (russ:
-  "Internal helpers are something you have my permission to approve on your
-  own without asking me"); any other new macro needs russ. The approved
-  macros are `tools/approved_macros.txt`, one name per line with the date and
-  who approved it, and it changes only by such a ruling (a merge gate for
-  such files is queued separately). The approval is enforced by a scan:
-  `//tools:approved_macros_test` reads every C++ source of `dcfs/`,
-  `bench/`, `test/qemu/guest/` and `tools/` (not the matchers' deliberately
-  bad fixtures) and fails on a macro that is neither on the list nor a
-  header guard (`#ifndef N` then `#define N`, the file's first directives),
-  and on a list entry nothing defines. That is the approval policy, one check;
-  `cppcoreguidelines-macro-usage` is another and does not depend on it
-  (russ: "I knew cppcoreguidelines-macro-usage only covers some kinds of
-  macros. That one likely should go un-exempted, as it's calling out macros
-  that can be implemented using other language features instead ... but also
-  I want cppcoreguidelines-macro-usage in addition, with only obvious
-  allowances (third-party macros, etc.), so likely a much smaller or
-  zero-sized allowlist."). It reports a function-like, variadic or
-  all-literal macro (not one with `#` or `##` in its body, nor a
-  non-literal constant), so a macro that `constexpr`, `consteval`, a
-  function, a template or `std::source_location` can express is converted,
-  not approved. Its `AllowedRegexp` holds only the names the list gives an
-  allowance (a field naming why no other language feature can express the
-  macro); a grant does not imply one. `CheckCapsOnly` is false, without
-  which `AllowedRegexp` is not consulted at all.
-  `readability-identifier-naming` wants the `DCFS_` prefix on every macro the
-  list does not mark `exempt` or `third_party`. Both regexes in `.clang-tidy`
-  are generated from the list by
+  "Internal helpers are something you have my permission to approve on your own
+  without asking me"); any other new macro needs russ. Approving an existing
+  macro reviews it like a new one: its name must fit its current home and
+  audience, and a generally useful macro stands on its own (as `CONCAT` does)
+  rather than hiding in one user's header (russ, 2026-10-19: "Agreed"). The
+  approved macros are `tools/approved_macros.txt`, one name per line with the
+  date and who approved it, and it changes only by such a ruling (a merge gate
+  for such files is queued separately). The approval is enforced by a scan:
+  `//tools:approved_macros_test` reads every C++ source of `dcfs/`, `bench/`,
+  `test/qemu/guest/` and `tools/` (not the matchers' deliberately bad fixtures)
+  and fails on a macro that is neither on the list nor a header guard
+  (`#ifndef N` then `#define N`, the file's first directives), and on a list
+  entry nothing defines. That is the approval policy, one check;
+  `cppcoreguidelines-macro-usage` is another and does not depend on it (russ:
+  "I knew cppcoreguidelines-macro-usage only covers some kinds of macros. That
+  one likely should go un-exempted, as it's calling out macros that can be
+  implemented using other language features instead ... but also I want
+  cppcoreguidelines-macro-usage in addition, with only obvious allowances
+  (third-party macros, etc.), so likely a much smaller or zero-sized
+  allowlist."). It reports a function-like, variadic or all-literal macro (not
+  one with `#` or `##` in its body, nor a non-literal constant, nor an empty
+  one), so a macro that `constexpr`, `consteval`, a function, a template or
+  `std::source_location` can express is converted, not approved. Its
+  `AllowedRegexp` holds only the names the list gives an allowance (a field
+  naming why no other language feature can express the macro); a grant does not
+  imply one. `CheckCapsOnly` is false, without which `AllowedRegexp` is not
+  consulted at all. `readability-identifier-naming` wants the `DCFS_` prefix on
+  every macro the list does not mark `exempt` or `third_party`. Both regexes in
+  `.clang-tidy` are generated from the list by
   `bazel run //tools:approved_macros -- --write`, and the test fails if they
-  disagree. A new macro needs russ's approval: report it instead of adding
-  it to the list.
+  disagree. A new macro needs russ's approval: report it instead of adding it
+  to the list.
 - <a id="rule-locals-non-const"></a>
   **Locals are non-const by default** (russ, 2026-10-11, on `const struct
   rlimit limit = *current;`): "no const on local scalars (unless needed).

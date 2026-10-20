@@ -10,6 +10,8 @@
 
 namespace dcfs {
 
+namespace internal {
+
 // Fragments for attribute columns, matching the order BindAttrs binds them,
 // joined into the statements below at compile time.
 inline constexpr auto kAttrValues = FixedString(
@@ -51,6 +53,8 @@ inline constexpr auto kAttrNulls = FixedString(
 inline constexpr auto kAttrPlaceholders =
     FixedString("?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?");
 
+}  // namespace internal
+
 inline constexpr int kNumAttrColumns = 16;
 
 // SQL statements prepared by dcfs/metadata_cache.cc.
@@ -66,21 +70,28 @@ inline constexpr std::string_view kSqlLookup =
     "LEFT JOIN stubs s ON s.parent = d.parent AND s.name = d.name "
     "WHERE d.parent = ? AND d.name = ?";
 
+namespace internal {
 inline constexpr auto kSqlGetAttrText =
     FixedString(
         "SELECT attrs_valid, fuse_gen, device_id, backing_ino, "
         "backing_gen, ") +
     kAttrColumns + FixedString(" FROM inodes WHERE id = ?");
-inline constexpr std::string_view kSqlGetAttr = kSqlGetAttrText;
+}  // namespace internal
 
+inline constexpr std::string_view kSqlGetAttr = internal::kSqlGetAttrText;
+
+namespace internal {
 inline constexpr auto kSqlGetStubText =
     FixedString("SELECT parent, name, fuse_gen, ") + kAttrColumns +
     FixedString(" FROM stubs WHERE id = ?");
-inline constexpr std::string_view kSqlGetStub = kSqlGetStubText;
+}  // namespace internal
+
+inline constexpr std::string_view kSqlGetStub = internal::kSqlGetStubText;
 
 inline constexpr std::string_view kSqlGetGeneration =
     "SELECT fuse_gen FROM inodes WHERE id = ?";
 
+namespace internal {
 inline constexpr auto kSqlListDirText =
     FixedString(
         "SELECT d.rowid, d.name, d.inode, i.attrs_valid, i.fuse_gen, "
@@ -98,7 +109,9 @@ inline constexpr auto kSqlListDirText =
         "d.name "
         "WHERE d.parent = ?1 AND d.rowid > ?2 AND d.state = 'refused' "
         "ORDER BY 1 LIMIT ?3");
-inline constexpr std::string_view kSqlListDir = kSqlListDirText;
+}  // namespace internal
+
+inline constexpr std::string_view kSqlListDir = internal::kSqlListDirText;
 
 inline constexpr std::string_view kSqlChildrenComplete =
     "SELECT children_complete FROM directories WHERE inode = ?";
@@ -154,14 +167,18 @@ inline constexpr std::string_view kSqlFindMatchingInodes =
     "btime_s, btime_ns FROM inodes "
     "WHERE device_id = ? AND backing_ino = ?";
 
+namespace internal {
 inline constexpr auto kSqlUpdateMatchingRowText =
     FixedString(
         "UPDATE inodes SET handle_type = ?, handle = "
         "?, ") +
     kAttrAssignments + FixedString(" WHERE id = ?");
-inline constexpr std::string_view kSqlUpdateMatchingRow =
-    kSqlUpdateMatchingRowText;
+}  // namespace internal
 
+inline constexpr std::string_view kSqlUpdateMatchingRow =
+    internal::kSqlUpdateMatchingRowText;
+
+namespace internal {
 inline constexpr auto kSqlInsertNewRowText =
     FixedString(
         "INSERT INTO inodes (device_id, backing_ino, "
@@ -169,8 +186,12 @@ inline constexpr auto kSqlInsertNewRowText =
         "attrs_valid, ") +
     kAttrColumns + FixedString(") VALUES (?, ?, ?, ?, ?, ?, 1, ") +
     kAttrPlaceholders + FixedString(")");
-inline constexpr std::string_view kSqlInsertNewRow = kSqlInsertNewRowText;
+}  // namespace internal
 
+inline constexpr std::string_view kSqlInsertNewRow =
+    internal::kSqlInsertNewRowText;
+
+namespace internal {
 inline constexpr auto kSqlReinstateInodeText =
     FixedString(
         "INSERT INTO inodes (id, device_id, backing_ino, "
@@ -178,7 +199,10 @@ inline constexpr auto kSqlReinstateInodeText =
         "attrs_valid, ") +
     kAttrColumns + FixedString(") VALUES (?, ?, ?, ?, ?, ?, ?, 1, ") +
     kAttrPlaceholders + FixedString(")");
-inline constexpr std::string_view kSqlReinstateInode = kSqlReinstateInodeText;
+}  // namespace internal
+
+inline constexpr std::string_view kSqlReinstateInode =
+    internal::kSqlReinstateInodeText;
 
 inline constexpr std::string_view kSqlFilesystemExists =
     "SELECT 1 FROM filesystems WHERE device_id = ?";
@@ -187,12 +211,15 @@ inline constexpr std::string_view kSqlFindStaleRootInodes =
     "SELECT id FROM inodes "
     "WHERE device_id = ? AND backing_ino = ? AND id != ?";
 
+namespace internal {
 inline constexpr auto kSqlUpdateRootText =
     FixedString(
         "UPDATE inodes SET backing_ino = ?, backing_gen = ?, "
         "handle_type = ?, handle = ?, ") +
     kAttrAssignments + FixedString(" WHERE id = ?");
-inline constexpr std::string_view kSqlUpdateRoot = kSqlUpdateRootText;
+}  // namespace internal
+
+inline constexpr std::string_view kSqlUpdateRoot = internal::kSqlUpdateRootText;
 
 inline constexpr std::string_view kSqlPutDentry =
     "INSERT INTO dentries (parent, name, state, inode) "
@@ -203,10 +230,14 @@ inline constexpr std::string_view kSqlPutDentry =
 inline constexpr std::string_view kSqlFindStub =
     "SELECT id FROM stubs WHERE parent = ? AND name = ?";
 
+namespace internal {
 inline constexpr auto kSqlUpdateStubAttrText =
     FixedString("UPDATE stubs SET ") + kAttrValues +
     FixedString(" WHERE id = ?");
-inline constexpr std::string_view kSqlUpdateStubAttr = kSqlUpdateStubAttrText;
+}  // namespace internal
+
+inline constexpr std::string_view kSqlUpdateStubAttr =
+    internal::kSqlUpdateStubAttrText;
 
 inline constexpr std::string_view kSqlGetLastStubId =
     "SELECT last_stub_id FROM cache_state WHERE id = 1";
@@ -214,11 +245,14 @@ inline constexpr std::string_view kSqlGetLastStubId =
 inline constexpr std::string_view kSqlSetLastStubId =
     "UPDATE cache_state SET last_stub_id = ? WHERE id = 1";
 
+namespace internal {
 inline constexpr auto kSqlInsertStubText =
     FixedString("INSERT INTO stubs (id, parent, name, fuse_gen, ") +
     kAttrColumns + FixedString(") VALUES (?, ?, ?, ?, ") + kAttrPlaceholders +
     FixedString(")");
-inline constexpr std::string_view kSqlInsertStub = kSqlInsertStubText;
+}  // namespace internal
+
+inline constexpr std::string_view kSqlInsertStub = internal::kSqlInsertStubText;
 
 inline constexpr std::string_view kSqlMarkDirComplete =
     "INSERT INTO directories (inode, children_complete) "
@@ -249,10 +283,13 @@ inline constexpr std::string_view kSqlRefusedDentriesToUnknown =
 inline constexpr std::string_view kSqlInvalidateAttr =
     "UPDATE inodes SET attrs_valid = 0 WHERE id = ?";
 
+namespace internal {
 inline constexpr auto kSqlUpdateAttrText = FixedString("UPDATE inodes SET ") +
                                            kAttrAssignments +
                                            FixedString(" WHERE id = ?");
-inline constexpr std::string_view kSqlUpdateAttr = kSqlUpdateAttrText;
+}  // namespace internal
+
+inline constexpr std::string_view kSqlUpdateAttr = internal::kSqlUpdateAttrText;
 
 inline constexpr std::string_view kSqlDropAtimeStamp =
     "UPDATE inodes SET atime_s = ?, atime_ns = 0 "

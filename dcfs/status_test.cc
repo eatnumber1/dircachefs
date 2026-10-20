@@ -103,35 +103,34 @@ TEST(ProducedByDcfsTest, ProducedErrnoToStatusKeepsTheErrno) {
   EXPECT_TRUE(ProducedByDcfs(with_context));
 }
 
-// The builder is made on the line of the macro call, so its recorded source
-// location must be that line.
-#define EXPECT_HELPER(helper, expected_code)                             \
-  do {                                                                   \
-    absl::StatusBuilder builder = helper();                              \
-    EXPECT_EQ(builder.source_location().line(), __LINE__);               \
-    EXPECT_NE(std::string(builder.source_location().file_name())         \
-                  .find("status_test.cc"),                               \
-              std::string::npos);                                        \
-    absl::Status status = std::move(builder) << "went wrong: " << 42;    \
-    EXPECT_THAT(status, StatusIs(expected_code, "went wrong: 42"));      \
-    /* The Status itself records the call site, not only the builder. */ \
-    ASSERT_FALSE(status.GetSourceLocations().empty());                   \
-    EXPECT_EQ(status.GetSourceLocations().front().line(), __LINE__);     \
-    EXPECT_FALSE(status.GetPayload(kErrnoTypeUrl).has_value());          \
-  } while (0)
+// The builder is made on the line of the call, so its recorded source
+// location must be that line: `call` is the default argument, evaluated at the
+// call site of ExpectHelper, as the helper's own default is evaluated at its.
+void ExpectHelper(absl::StatusBuilder builder, absl::StatusCode expected_code,
+                  absl::SourceLocation call = absl::SourceLocation::current()) {
+  EXPECT_EQ(builder.source_location().line(), call.line());
+  EXPECT_EQ(std::string_view(builder.source_location().file_name()),
+            std::string_view(call.file_name()));
+  absl::Status status = std::move(builder) << "went wrong: " << 42;
+  EXPECT_THAT(status, StatusIs(expected_code, "went wrong: 42"));
+  // The Status itself records the call site, not only the builder.
+  ASSERT_FALSE(status.GetSourceLocations().empty());
+  EXPECT_EQ(status.GetSourceLocations().front().line(), call.line());
+  EXPECT_FALSE(status.GetPayload(kErrnoTypeUrl).has_value());
+}
 
 TEST(ErrorBuilderTest, EachHelperHasItsCodeMessageAndCallerLine) {
-  EXPECT_HELPER(InternalErrorBuilder, absl::StatusCode::kInternal);
-  EXPECT_HELPER(FailedPreconditionErrorBuilder,
-                absl::StatusCode::kFailedPrecondition);
-  EXPECT_HELPER(NotFoundErrorBuilder, absl::StatusCode::kNotFound);
-  EXPECT_HELPER(InvalidArgumentErrorBuilder,
-                absl::StatusCode::kInvalidArgument);
-  EXPECT_HELPER(AbortedErrorBuilder, absl::StatusCode::kAborted);
-  EXPECT_HELPER(UnimplementedErrorBuilder, absl::StatusCode::kUnimplemented);
-  EXPECT_HELPER(AlreadyExistsErrorBuilder, absl::StatusCode::kAlreadyExists);
-  EXPECT_HELPER(ResourceExhaustedErrorBuilder,
-                absl::StatusCode::kResourceExhausted);
+  ExpectHelper(InternalErrorBuilder(), absl::StatusCode::kInternal);
+  ExpectHelper(FailedPreconditionErrorBuilder(),
+               absl::StatusCode::kFailedPrecondition);
+  ExpectHelper(NotFoundErrorBuilder(), absl::StatusCode::kNotFound);
+  ExpectHelper(InvalidArgumentErrorBuilder(),
+               absl::StatusCode::kInvalidArgument);
+  ExpectHelper(AbortedErrorBuilder(), absl::StatusCode::kAborted);
+  ExpectHelper(UnimplementedErrorBuilder(), absl::StatusCode::kUnimplemented);
+  ExpectHelper(AlreadyExistsErrorBuilder(), absl::StatusCode::kAlreadyExists);
+  ExpectHelper(ResourceExhaustedErrorBuilder(),
+               absl::StatusCode::kResourceExhausted);
 }
 
 TEST(ErrorBuilderTest, ConvertsToStatusOrAndKeepsAnExplicitLocation) {

@@ -655,5 +655,65 @@ class RepoShapeCliTest(unittest.TestCase):
                          (code, out.splitlines()))
 
 
+GROUP = ('filegroup(name = "all_cxx_sources", srcs = glob(%s))\n')
+TOOLS_BUILD = ('py_test(\n    name = "approved_macros_test",\n    data = [\n'
+               '%s    ],\n)\n')
+
+
+class ScanSourcesTest(unittest.TestCase):
+    """The scan of macro definitions (//tools:approved_macros_test) reads the
+    C++ of every package through its all_cxx_sources group."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.root = self.dir.name
+        good_tree(self.root)
+        write(self.root, "dcfs/BUILD.bazel", GROUP % '["**/*.cc", "**/*.h"]')
+        write(self.root, "tools/BUILD.bazel",
+              TOOLS_BUILD % '        "//dcfs:all_cxx_sources",\n'
+              '        "//bench:all_cxx_sources",\n')
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_a_covered_tree_is_good(self):
+        self.assertEqual([], repo_shape.scan_covers_cxx(self.root))
+
+    def test_a_package_without_the_group_is_reported(self):
+        write(self.root, "bench/BUILD.bazel", "")
+        write(self.root, "bench/b.cc")
+        problems = repo_shape.scan_covers_cxx(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("bench/b.cc", problems[0])
+        self.assertIn("all_cxx_sources", problems[0])
+
+    def test_a_new_subpackage_is_reported(self):
+        write(self.root, "dcfs/sub/BUILD.bazel", "")
+        write(self.root, "dcfs/sub/c.h")
+        problems = repo_shape.scan_covers_cxx(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("dcfs/sub/c.h", problems[0])
+
+    def test_a_subdirectory_the_glob_does_not_reach_is_reported(self):
+        write(self.root, "bench/BUILD.bazel", GROUP % '["*.cc"]')
+        write(self.root, "bench/inner/d.cc")
+        problems = repo_shape.scan_covers_cxx(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("bench/inner/d.cc", problems[0])
+        self.assertIn("**", problems[0])
+
+    def test_a_group_the_test_does_not_read_is_reported(self):
+        write(self.root, "test/qemu/BUILD.bazel", GROUP % '["*.cc"]')
+        write(self.root, "test/qemu/t.cc")
+        problems = repo_shape.scan_covers_cxx(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("//test/qemu:all_cxx_sources", problems[0])
+
+    def test_the_matchers_fixtures_are_not_scanned(self):
+        write(self.root, "tools/style_matchers/BUILD.bazel", "")
+        write(self.root, "tools/style_matchers/x_bad.cc")
+        self.assertEqual([], repo_shape.scan_covers_cxx(self.root))
+
+
 if __name__ == "__main__":
     unittest.main()

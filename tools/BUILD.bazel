@@ -750,7 +750,7 @@ py_test(
 # The C++ sources of tools/ itself (the matchers' fixtures, which hold
 # deliberately bad macros, are not scanned), for :approved_macros_test.
 filegroup(
-    name = "cxx_sources",
+    name = "all_cxx_sources",
     srcs = glob(["*.cc", "*.h"]),
 )
 
@@ -773,22 +773,22 @@ py_test(
     args = [
         "$(rootpath approved_macros.txt)",
         "$(rootpath //:.clang-tidy)",
-        "$(locations //bench:cxx_sources)",
-        "$(locations //dcfs:cxx_sources)",
-        "$(locations //dcfs/testonly:cxx_sources)",
-        "$(locations //test/qemu:cxx_sources)",
-        "$(locations //tools/mutation:cxx_sources)",
-        "$(locations :cxx_sources)",
+        "$(locations //bench:all_cxx_sources)",
+        "$(locations //dcfs:all_cxx_sources)",
+        "$(locations //dcfs/testonly:all_cxx_sources)",
+        "$(locations //test/qemu:all_cxx_sources)",
+        "$(locations //tools/mutation:all_cxx_sources)",
+        "$(locations :all_cxx_sources)",
     ],
     data = [
         "approved_macros.txt",
-        ":cxx_sources",
+        ":all_cxx_sources",
         "//:.clang-tidy",
-        "//bench:cxx_sources",
-        "//dcfs:cxx_sources",
-        "//dcfs/testonly:cxx_sources",
-        "//test/qemu:cxx_sources",
-        "//tools/mutation:cxx_sources",
+        "//bench:all_cxx_sources",
+        "//dcfs:all_cxx_sources",
+        "//dcfs/testonly:all_cxx_sources",
+        "//test/qemu:all_cxx_sources",
+        "//tools/mutation:all_cxx_sources",
     ],
     main = "approved_macros_test.py",
     target_compatible_with = HOST_ONLY_COMPATIBLE,

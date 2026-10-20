@@ -12,8 +12,9 @@
 # Abseil rules of docs/style.md 1.2 (abseil-*), and the correctness and
 # readability groups of step 7.5. Not enabled: cppcoreguidelines-* (not our
 # guide) except cppcoreguidelines-macro-usage (docs/style.md
-# rule-macros-discouraged), llvm-*, fuchsia-*, hicpp-*, altera-*, android-*, boost-*, mpi-*,
-# objc-*, openmp-*, zircon-*, linuxkernel-* (other projects' rules), and
+# rule-macros-discouraged), llvm-*, fuchsia-*, hicpp-*, altera-*, android-*,
+# boost-*, mpi-*, objc-*, openmp-*, zircon-*, linuxkernel-* (other projects'
+# rules), and
 # clang-analyzer-*: the path-sensitive analyzer takes minutes per test file
 # (fsck_test.cc: 120 s of 140 s, dir_cache_fs_test.cc over 20 min), which does
 # not belong in a test of tier small.
@@ -127,7 +128,7 @@ CheckOptions:
   # libraries' names).
   readability-identifier-naming.MacroDefinitionPrefix: DCFS_
   readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
-  readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^(ASSERT_OK_AND_ASSIGN|CHECK|DCFS_RET_CHECK_ELSE_BLOCKER_|DCFS_RET_CHECK_OP_|E|EXPECT_HELPER|F|FUSE_USE_VERSION|LOG|RETURN_IF_ERROR|RET_CHECK|RET_CHECK_EQ|RET_CHECK_GE|RET_CHECK_GT|RET_CHECK_LE|RET_CHECK_LT|RET_CHECK_NE|RET_CHECK_OK|[A-Z][A-Z0-9_]*_H_)$'
+  readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^(ASSERT_OK_AND_ASSIGN|CHECK|CONCAT|DCFS_RET_CHECK_ELSE_BLOCKER_|DCFS_RET_CHECK_OP_|E|F|FUSE_USE_VERSION|LOG|RETURN_IF_ERROR|RET_CHECK|RET_CHECK_EQ|RET_CHECK_GE|RET_CHECK_GT|RET_CHECK_LE|RET_CHECK_LT|RET_CHECK_NE|RET_CHECK_OK|[A-Z][A-Z0-9_]*_H_)$'
   # Macros are discouraged (docs/style.md 1.2, rule-macros-discouraged). Two
   # independent checks. The approval policy is the source scan of
   # //tools:approved_macros_test against tools/approved_macros.txt: it sees
@@ -143,4 +144,4 @@ CheckOptions:
   # CheckCapsOnly is false, without which AllowedRegexp is not consulted at
   # all.
   cppcoreguidelines-macro-usage.CheckCapsOnly: false
-  cppcoreguidelines-macro-usage.AllowedRegexp: '^(ASSERT_OK_AND_ASSIGN|DCFS_ASSERT_OK_AND_ASSIGN_IMPL|DCFS_INJECT|DCFS_TEST_CONCAT|EXPECT_HELPER|RET_CHECK_EQ|RET_CHECK_GE|RET_CHECK_GT|RET_CHECK_LE|RET_CHECK_LT|RET_CHECK_NE)$'
+  cppcoreguidelines-macro-usage.AllowedRegexp: '^(ASSERT_OK_AND_ASSIGN|CONCAT|DCFS_ASSERT_OK_AND_ASSIGN_IMPL|RET_CHECK_EQ|RET_CHECK_GE|RET_CHECK_GT|RET_CHECK_LE|RET_CHECK_LT|RET_CHECK_NE)$'

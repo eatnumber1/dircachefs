@@ -56,7 +56,7 @@ class ApprovedMacrosTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             approved_macros.parse("NAME|third_party|2026-10-19|| ")
         kinds = {e[0]: e[1] for e in approved_macros.parse(read(PATHS["list"]))}
-        for name in ("FUSE_USE_VERSION", "CHECK", "LOG"):
+        for name in ("FUSE_USE_VERSION", "CHECK", "LOG", "RETURN_IF_ERROR"):
             self.assertEqual("third_party", kinds[name])
 
     def test_the_private_helper_of_assert_ok_and_assign_has_the_prefix(self):
@@ -79,10 +79,13 @@ class ApprovedMacrosTest(unittest.TestCase):
             read(PATHS["list"]))}
         for name in ("RET_CHECK", "DCFS_RET_CHECK_OP_",
                      "DCFS_RET_CHECK_ELSE_BLOCKER_",
-                     "DCFS_TEST_CONCAT_INNER"):
+                     "DCFS_CONCAT_INNER"):
             self.assertEqual("", by_name[name], name)
-        for name in ("RET_CHECK_EQ", "ASSERT_OK_AND_ASSIGN", "DCFS_INJECT"):
+        for name in ("RET_CHECK_EQ", "ASSERT_OK_AND_ASSIGN"):
             self.assertNotEqual("", by_name[name], name)
+        # What a function can express is not a macro: no list entry at all.
+        for name in ("DCFS_INJECT", "EXPECT_HELPER"):
+            self.assertNotIn(name, by_name)
 
     def test_bad_lists_are_refused(self):
         for line in ("NAME|prefixed|2026-10-19||words", "x y|exempt|2026-10-19||w",
@@ -156,6 +159,15 @@ class ScanTest(unittest.TestCase):
         for text in (not_first, mismatch, lone):
             problems = scan(**{"a.h": text})
             self.assertTrue(any("_H_" in p for p in problems), text)
+
+    def test_a_guard_with_a_body_or_no_closing_endif_is_reported(self):
+        body = ("#ifndef DCFS_X\n#define DCFS_X 4096\n#define KNOWN 1\n"
+                "#define STALE 1\n#endif\n")
+        open_ended = ("#ifndef DCFS_Y_H_\n#define DCFS_Y_H_\n#define KNOWN 1\n"
+                      "#define STALE 1\n#include <x>\n")
+        for text, name in ((body, "DCFS_X"), (open_ended, "DCFS_Y_H_")):
+            problems = scan(**{"a.h": text})
+            self.assertTrue(any(name in p for p in problems), text)
 
     def test_the_tree_defines_what_the_list_names(self):
         files = {path: read(path) for path in PATHS["sources"]}
