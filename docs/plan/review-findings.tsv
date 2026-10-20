@@ -498,3 +498,12 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-19	25.58	5	Opus	nit	style-other	docs/style.md 1.2	BUILD	indent	no	fixed/merged
 2026-10-19	25.58	5	Opus	nit	style-other	docs/style.md 1.2	tools/approved_macros.py	const local	no	fixed/merged
 2026-10-19	25.58	5	Opus	nit	style-other	docs/style.md 1.2	tools/BUILD.bazel	cxx_sources and all_cxx_sources duplicate	no	fixed (comment)
+2026-10-20	12.28	1	dcfs-style-reviewer/sonnet/high	should	style-other	docs/style.md	third_party/tlaplus/tlc_test_runner_test.py:41,44,56	open without encoding utf-8	no	fixed/merged aeac8fa1
+2026-10-20	12.28	1	dcfs-style-reviewer/sonnet/high	should	commit-hygiene	docs/style.md	commits cfeefd1c and 12120050	empty commit bodies, no Failing first line	no	fixed/merged aeac8fa1
+2026-10-20	12.28	1	dcfs-style-reviewer/sonnet/high	should	style-other	docs/style.md	third_party/tlaplus/tlc_test_runner_test.py:16	argv popped at import time	no	fixed/merged aeac8fa1
+2026-10-20	12.28	1	dcfs-style-reviewer/sonnet/high	should	style-other	docs/style.md	third_party/tlaplus/tlc_test_runner_test.py:87-89	98 columns, broken wrap, misleading FIFO name	no	fixed/merged aeac8fa1
+2026-10-20	12.28	1	dcfs-style-reviewer/sonnet/high	nit	hygiene	-	third_party/tlaplus/tlc_test_runner_test.py	proc.stdout left unclosed	no	fixed/merged aeac8fa1
+2026-10-20	12.28	1	dcfs-style-reviewer/sonnet/high	nit	docs	-	third_party/tlaplus/tlc_test_runner_test.py:38,68	echo docstrings	no	fixed/merged aeac8fa1
+2026-10-20	12.28	1	dcfs-style-reviewer/sonnet/high	nit	style-other	-	third_party/tlaplus/BUILD.bazel:16	rootpath where location is the rule	could	fixed/merged aeac8fa1
+2026-10-20	12.28	1	dcfs-style-reviewer/sonnet/high	none	test-shape	rule-load-agnostic-tests; docs/style.md 1.11	third_party/tlaplus/tlc_test_runner_test.py:18-20	question: in-test hang guard; kept as a hang guard that cleans up its process group, with a justification comment	no	decided
+2026-10-20	12.28	1	dcfs-style-reviewer/sonnet/high	none	style-other	docs/style.md section 3	third_party/tlaplus/BUILD.bazel:10	question: step number in a test target comment; kept per style section 3	no	decided

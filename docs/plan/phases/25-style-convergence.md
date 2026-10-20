@@ -3141,3 +3141,33 @@ passes with the allowlist; the existing suites pass unchanged.
   names the old layering.
 - `rule-function-names`: already updated on 2026-10-19, ahead of this step;
   nothing to do.
+
+## 25.66 Build all C++ with -fno-exceptions (russ, 2026-10-20; queued)
+
+russ, 2026-10-20: "I want to disable exceptions in C++. There's a compiler
+flag for it." Queued after the Claude reset of Fri 2026-10-23 (clerk batch
+55).
+
+Google's guide already bans exceptions ("We do not use C++ exceptions";
+`docs/style.md` cites it, `rule-google-is-law`). The flag makes the compiler
+enforce the ban, per `rule-authoritative-model`. Facts at queue time: no
+`-fno-exceptions` anywhere in the tree, and no `try`, `catch` or `throw` in
+`dcfs/`, `bench/`, `test/qemu/` or `tools/` `.cc` and `.h` files.
+
+Scope:
+- (a) Set the flag once for the whole build: a toolchain feature or a
+  `.bazelrc` copt, the step picks which per `rule-survey-and-name-mechanism`.
+  No target can opt out silently. Add a check that it holds.
+- (b) Third-party C++ (absl, googletest with `GTEST_HAS_EXCEPTIONS=0`, and
+  the others) builds with it.
+- (c) Audit our calls to throwing std APIs: `at()`, `stoi`/`stol`, the
+  `std::filesystem` overloads without an `error_code`, throwing `new`,
+  `std::function`'s `bad_function_call`, `optional::value`, variant `get`.
+  Under `-fno-exceptions` each of those failure paths aborts, against
+  `rule-no-intentional-crashes`, so replace them with non-throwing forms
+  (`from_chars`, `error_code` overloads, checked access). Test first where
+  behaviour changes.
+- (d) `docs/style.md`: a short rule that names the flag and cites Google,
+  with its index line. The step writes that rule; the clerk does not.
+
+Owner: not yet assigned. Dependencies: none.

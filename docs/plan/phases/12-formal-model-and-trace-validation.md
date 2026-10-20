@@ -358,6 +358,64 @@ dm-log-writes replay, oracle "dcfs view equals the backing after
 recovery"; SibylFS's scripts (ISC) as a differential trace diff of dcfs
 against the backing only if pjdfstest, fsx and fsstress leave gaps.
 
+## 12.13c SANY-based TLA+ mutator (clerk batch 55, 2026-10-20; queued)
+
+russ approved 2026-10-20: "Yes". After the Claude reset of Fri 2026-10-23.
+12.13's TLA+ mode (`tools/mutation/mutate.py --lang tla`) is a
+conjunct-aware token scanner, not a parser. Rebuild it on SANY, the parser in
+`tla2tools.jar` that we already ship, per `docs/style.md`
+`rule-authoritative-model` and `rule-survey-and-name-mechanism`.
+
+0. Survey first: existing TLA+ or Apalache mutation tools, and SANY's AST
+   and semantic API. Report what each would cost; the step names the
+   mechanism it picks.
+1. Same operators and report shape as today (negate, drop-guard,
+   drop-conjunct, drop-disjunct, swap-junction, relational, constant,
+   durability, drop-step, swap-step; arid rules and `equivalent.txt`).
+   Tests first.
+2. The scanner's unreachable cases become reachable: mixed-precedence
+   chains and definitions not at column 0.
+
+Owner: dcfs-implementer. Dependencies: none; 12.13b follows it.
+
+## 12.13b model-mutation survivor sweep (clerk batch 55, 2026-10-20; queued)
+
+russ approved 2026-10-20; after 12.13c. Run the full sweep (small and
+medium tiers, `Trace*.tla` in scope). Each survivor gets a property or
+config that kills it, or an entry in
+`formal/equivalent.txt` with the reason. Start from the first run's nine
+survivors listed in 12.13: TypeOK swap-junction (241), Serve swap-junction
+(517), RDFromCode drop-step PD_read->PD_commit (651), S2 durability
+FALSE->TRUE (1060), FBehind drop-conjunct `d.fAttr # b.f` (1503), Recover
+durability FALSE->TRUE (1568), Next drop-disjunct UnlinkSyscall (1707) and
+AttrChangeSyscall (1712), FileExactStrict drop-conjunct `mode = "up"` (1826).
+The weekly `mutation-tla` job then fails on an unexplained survivor instead
+of only reporting it.
+
+Owner: dcfs-protocol. Dependencies: 12.13c.
+
+## 12.28 TLC output streams to test.log (clerk batch 55, 2026-10-20)
+
+Small tooling, M0; queued, then done. `third_party/tlaplus/` runner
+`tlc_test_runner.sh.tpl` (lines 40 to 45) sends TLC's output to `$log` and
+cats it only after TLC exits, so when Bazel times out a test, `test.log` is
+empty. That happened in CI run 39380803978 on
+79beb5fd: `//formal:interrupt_nolock_test` hit TIMEOUT at 3600 s with no
+output, after passing in 160 s on 15676f30 and in 188 s locally on
+79beb5fd, with no `formal/` change between those runs. The cause of the
+hang cannot be found from the log.
+
+1. Test first: a runner test whose TLC run is killed mid-run still leaves
+   its progress lines in `test.log`. It fails on the current runner.
+2. Fix: tee TLC's output to `$log` while it streams, keeping TLC's exit
+   status (`pipefail` or `PIPESTATUS`).
+
+Owner: dcfs-implementer. Dependencies: none.
+
+Done 2026-10-20 (aeac8fa1, squashed from 72dbf108 and 66acb253; clerk batch
+55): `test_first_tool` ACCEPTED; tools tier 51/51. The hang is logged in
+`docs/plan/log.md` as a one-off runner hang, local rerun green.
+
 ## 12.3 done (2026-10-07, 2c3d79c)
 
 `formal/reval.tla` (not `fds.tla`: the widened revalidation model), with
@@ -1053,7 +1111,8 @@ in `tla2tools.jar`). Items 1 to 3 come first.
    violation.
 5. Spec mutation testing: drop a conjunct, weaken a guard, or drop an
    `UNCHANGED` entry, and require some config to fail (like the weekly code
-   mutation run).
+   mutation run). Covered by 12.13b (the survivor sweep) and 12.13c (the
+   SANY-based mutator), clerk batch 55, 2026-10-20.
 6. Every disjunct reachable: extend `formal/coverage` to branches and fail on
    zero hits.
 7. Model-code name agreement: `InterruptPcs` against the code's

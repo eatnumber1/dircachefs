@@ -4733,3 +4733,37 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   that are more broad, that's ok too." Two rules: `docs/style.md`
   `rule-authoritative-model` and `process.md` `rule-survey-and-name-mechanism`
   (with a reviewer question in the review checklist).
+- 2026-10-20, clerk batch 55: russ approved 12.13c (rebuild the TLA+ mutator
+  on SANY, the parser in `tla2tools.jar`, with a survey of prior art and
+  SANY's API first; same operators and report shape) and 12.13b (the full
+  survivor sweep, small and medium tiers, `Trace*.tla` in scope, each
+  survivor killed or entered in `formal/equivalent.txt`; the weekly
+  `mutation-tla` job then fails on an unexplained survivor): "Yes". Queued in
+  phase 12 and in M0 as 11a and 11b, after the Claude reset of Fri 2026-10-23.
+  12.27 item 5 (spec mutation) is noted as covered by 12.13b and 12.13c.
+- 2026-10-20, clerk batch 55: 12.28 added to phase 12 (TLC output streams to
+  `test.log`) and merged to main as aeac8fa1 (squashed from 72dbf108 and
+  66acb253; `test_first_tool` ACCEPTED; tools tier 51/51). Its M0 queue
+  position, 11c, is the clerk's choice: the batch named M0 and no slot.
+- 2026-10-20, one-off runner hang, not a regression: CI run 39380803978 on
+  79beb5fd, `//formal:interrupt_nolock_test` hit TIMEOUT at 3600 s with an
+  empty `test.log`, after passing in 160 s on 15676f30 and in 188 s locally on
+  79beb5fd, with no `formal/` change between those runs. The runner sent
+  TLC's output to `$log` and printed it only after TLC exited, so the log
+  showed nothing; 12.28 fixes that. The hang's cause is not found. The local
+  rerun is green; no further action beyond watching for a recurrence.
+- 2026-10-20, clerk batch 55: 12.28's style review (dcfs-style-reviewer,
+  sonnet, high, round 1): nine rows in review-findings.tsv, seven fixed at
+  merge, two decided without style text (the in-test hang guard, kept under
+  `rule-load-agnostic-tests` and style 1.11 with a justification comment; the
+  step number in a test target comment, kept per style section 3). The
+  batch's "test.py" is read as `third_party/tlaplus/tlc_test_runner_test.py`,
+  the only test file the step changed.
+- 2026-10-20, clerk batch 55: russ on C++ exceptions: "I want to disable
+  exceptions in C++. There's a compiler flag for it." Queued 25.66 in phase
+  25 and in M0 as 11d, after the Claude reset of Fri 2026-10-23: one flag for
+  the whole build with a check that it holds, third-party C++ built with it,
+  an audit of throwing std calls (`at()`, `stoi`/`stol`, filesystem overloads
+  without `error_code`, throwing `new`, `bad_function_call`, `optional::value`,
+  variant `get`) replaced by non-throwing forms, and a `docs/style.md` rule
+  written by the step itself.
