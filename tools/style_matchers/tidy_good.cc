@@ -57,5 +57,54 @@ constexpr int kGoodConstant = 1;
   return good_local + GoodClass(good_struct.plain_member).Value();
 }
 
+constexpr int kGlobal = 1;
+const int kGlobalConst = 2;
+
+// Automatic variables, const or constexpr, are lower_case or kName.
+[[maybe_unused]] int Automatics() {
+  constexpr int local_constexpr = 1;
+  const int local_const = 2;
+  const int kLocalConst = 3;
+  static const int kStaticLocal = 4;
+  return local_constexpr + local_const + kLocalConst + kStaticLocal;
+}
+
+// NOLINTNEXTLINE(modernize-use-using): a typedef exercises TypedefCase
+typedef int GoodTypedef;
+using GoodAlias = GoodTypedef;
+
+union GoodUnion {
+  int member;
+};
+
+template <typename ElementType>
+struct GoodTemplate {
+  ElementType member;
+};
+
+class ClassMembers {
+ public:
+  static constexpr int kClassConstant = 3;
+  [[nodiscard]] int Value() const { return protected_ + pool_; }
+
+ protected:
+  int protected_ = 0;
+
+ private:
+  static int pool_;
+};
+
+int ClassMembers::pool_ = 0;
+
+// The name of a header guard and of ordinary macros.
+#define GOOD_MACRO 1
+#define DCFS_FIXTURE_H_
+
+[[maybe_unused]] int UsesAll() {
+  return kGlobal + kGlobalConst + GOOD_MACRO +
+         GoodTemplate<GoodAlias>{1}.member + GoodUnion{2}.member +
+         ClassMembers::kClassConstant + ClassMembers().Value();
+}
+
 }  // namespace good_namespace
 }  // namespace

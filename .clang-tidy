@@ -103,11 +103,21 @@ CheckOptions:
   readability-identifier-naming.ProtectedMemberSuffix: _
   readability-identifier-naming.EnumConstantCase: CamelCase
   readability-identifier-naming.EnumConstantPrefix: k
-  readability-identifier-naming.ConstexprVariableCase: CamelCase
-  readability-identifier-naming.ConstexprVariablePrefix: k
   readability-identifier-naming.GlobalConstantCase: CamelCase
   readability-identifier-naming.GlobalConstantPrefix: k
+  # Google makes kName optional for automatic constants: lower_case, or kName.
+  readability-identifier-naming.LocalConstantCase: lower_case
+  readability-identifier-naming.LocalConstantIgnoredRegexp: '^k[A-Z][A-Za-z0-9]*$'
   readability-identifier-naming.StaticConstantCase: CamelCase
   readability-identifier-naming.StaticConstantPrefix: k
+  # Static data members of a class take the name_ form, as the other members
+  # do. Google gives a struct's statics no underscore; none exist here.
+  readability-identifier-naming.ClassMemberCase: lower_case
+  readability-identifier-naming.ClassMemberSuffix: _
   readability-identifier-naming.ClassConstantCase: CamelCase
   readability-identifier-naming.ClassConstantPrefix: k
+  # Header guards (DCFS_NAME_H_), the private helper macros that end in an
+  # underscore (DCFS_RET_CHECK_OP_) and _GNU_SOURCE are the only macros that
+  # are not UPPER_CASE.
+  readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
+  readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^([A-Z][A-Z0-9_]*_|_GNU_SOURCE)$'

@@ -153,8 +153,6 @@ dcfs/dir_cache_fs_test.cc|TestBody|misc-override-with-different-visibility|2
 dcfs/dir_cache_fs_test.cc|WithinBounds|capturing_mutating_lambda|1
 dcfs/dir_cache_fs_test.cc|WithinBounds|readability-math-missing-parentheses|1
 dcfs/dir_cache_fs_test.cc|class FakeInterrupts final : public Interrupts {|misc-include-cleaner|1
-dcfs/dir_cache_fs_test.cc|<file scope>|readability-identifier-naming|1
-dcfs/dir_cache_fs_test.cc|INSTANTIATE_TEST_SUITE_P|function_names|1
 dcfs/errno.cc|ErrnoToErrorName|misc-include-cleaner|1
 dcfs/errno.cc|NameToErrnoTable|misc-include-cleaner|5
 dcfs/escape.cc|AppendUnescapedBytes|readability-function-cognitive-complexity|1
@@ -257,13 +255,11 @@ dcfs/sqlite_test.cc|TEST|capturing_mutating_lambda|4
 dcfs/sqlite_test.cc|TEST|misc-include-cleaner|1
 dcfs/sqlite_test.cc|TEST_F|bugprone-unchecked-optional-access|1
 dcfs/sqlite_test.cc|TestTmpFile|concurrency-mt-unsafe|1
-dcfs/sqlite_test.cc|TEST_F|readability-identifier-naming|1
 dcfs/startup_channel.cc|AwaitReportAndExit|misc-include-cleaner|1
 dcfs/startup_channel.cc|DescribeWaitStatus|misc-include-cleaner|3
 dcfs/startup_channel.h|pending|function_names|1
 dcfs/status.cc|StatusCodeToErrno|misc-include-cleaner|1
 dcfs/status_test.cc|TEST|misc-include-cleaner|2
-dcfs/status_test.cc|TEST|readability-identifier-naming|1
 dcfs/syscalls.cc|clock_gettime|misc-include-cleaner|2
 dcfs/syscalls.cc|mkdtemp|misc-include-cleaner|1
 dcfs/syscalls.cc|mkstemp|misc-include-cleaner|1

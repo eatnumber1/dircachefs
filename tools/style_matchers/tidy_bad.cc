@@ -95,3 +95,41 @@ int BadVariable(int BadParameter) {  // HIT readability-identifier-naming
   int BadLocal = BadParameter;  // HIT readability-identifier-naming
   return BadLocal;
 }
+
+typedef int bad_typedef;  // HIT readability-identifier-naming
+
+using bad_alias = int;  // HIT readability-identifier-naming
+
+union bad_union {  // HIT readability-identifier-naming
+  int member;
+};
+
+template <typename t>  // HIT readability-identifier-naming
+struct TemplateParameter {
+  t member;
+};
+
+class ProtectedMember {
+ public:
+  [[nodiscard]] int Value() const { return prot; }
+
+ protected:
+  int prot = 0;  // HIT readability-identifier-naming
+};
+
+[[maybe_unused]] const int bad_global = 1;  // HIT readability-identifier-naming
+
+[[maybe_unused]] static const int bad_static = 2;  // HIT readability-identifier-naming
+
+class ClassMembers {
+ public:
+  static constexpr int bad_class_constant = 3;  // HIT readability-identifier-naming
+  static int pool;  // HIT readability-identifier-naming
+};
+
+int BadLocalConstant() {
+  const int BadLocal = 4;  // HIT readability-identifier-naming
+  return BadLocal;
+}
+
+#define bad_macro 5  // HIT readability-identifier-naming

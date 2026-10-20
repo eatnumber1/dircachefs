@@ -3,6 +3,8 @@
 // conversions, main), and the lower-case man-page names of the wrappers in
 // dcfs::syscalls, which this fixture stands in a syscalls file for, and the
 // link-time fakes the linker's --wrap names (__wrap_open).
+#include <exception>
+
 namespace dcfs {
 
 int CamelFree() { return 1; }
@@ -27,5 +29,26 @@ int openat() { return 5; }
 }  // namespace dcfs
 
 int __wrap_open() { return 6; }
+int __real_open() { return 7; }
+
+// gtest names what INSTANTIATE_TEST_SUITE_P expands to.
+#define INSTANTIATE_TEST_SUITE_P(name) \
+  int registered_##name() { return 8; }
+INSTANTIATE_TEST_SUITE_P(Suite)
+
+// An override of an external virtual is not ours to name.
+struct Failure : std::exception {
+  [[nodiscard]] const char *what() const noexcept override { return "x"; }
+};
+
+template <typename T>
+T Twice(T value) {
+  return value + value;
+}
+
+[[maybe_unused]] int Uses() {
+  auto lambda = [](int x) { return x; };
+  return Twice(lambda(1));
+}
 
 int main() { return 0; }
