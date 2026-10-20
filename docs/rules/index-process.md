@@ -131,3 +131,11 @@ reasoning. `AGENTS.md` says which indexes to read for which task.
   the first question is which check, script, type or skill stops it recurring
   (russ, 2026-10-18, "prioritize mechanical first"; the orchestrator's reading,
   not yet ratified). [process](/docs/plan/process.md#rule-mechanical-first)
+- A new tool or check starts with a survey of prior art, and its brief and plan
+  entry name the mechanism and why more authoritative options do not fit
+  (russ, 2026-10-19: "If you want to come up with fewer rules that are more
+  broad, that's ok too").
+  [process](/docs/plan/process.md#rule-survey-and-name-mechanism)
+- Review checks that each name moved to a new home or a wider audience still
+  fits it (russ, 2026-10-19: "Agreed").
+  [process](/docs/plan/process.md#rule-moved-names-redecided)

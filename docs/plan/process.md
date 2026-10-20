@@ -37,6 +37,15 @@ process (its waves and file ownership table) is in `history.md`.
   by hand a second time becomes a script or skill; a manual fix without a
   queued mechanism says why none is possible. The queued mechanisms are in
   25.47 items 7 to 9 and 25.45.
+- <a id="rule-survey-and-name-mechanism"></a>
+  **A new tool or check starts with a survey of prior art** (russ,
+  2026-10-19: "If you want to come up with fewer rules that are more broad,
+  that's ok too"): native checks, upstream tools and the authoritative
+  model's own extension points. Its brief and plan entry name the chosen
+  mechanism and why the more authoritative options do not fit
+  ([`rule-authoritative-model`](/docs/style.md#rule-authoritative-model)).
+  Reviewers check both; a sign of re-deriving the model sends the step back
+  to design, not to a patch.
 
 ## A step, start to finish
 
@@ -133,10 +142,23 @@ process (its waves and file ownership table) is in `history.md`.
    - a change to start-up or shutdown is tested in `main.cc`'s order
      (the harness fixture's order hid 12.4b's probe running before the
      mount fds existed; one shared `backing::Startup()` for both);
+   - for a new tool or check, the brief and plan entry name the mechanism
+     and why the more authoritative options do not fit; a sign of
+     re-deriving the model sends the step back to design
+     ([`rule-survey-and-name-mechanism`](#rule-survey-and-name-mechanism));
+   - for a refactor slice (consolidation, extraction), that each name
+     moved to a new home or a wider audience still fits it
+     ([`rule-moved-names-redecided`](#rule-moved-names-redecided));
    - every gate the step adds (a test or check whose job is to reject
      something) has a committed self-check with a known-bad fixture
      (Phase 26.1; `test/qemu/README.md` "Gates and their self-checks");
      a gate without one is a review finding.
+   <a id="rule-moved-names-redecided"></a>
+   **Moved names are re-decided** (russ, 2026-10-19: "Agreed"): when code
+   moves to a new home or a wider audience, the review checks that each
+   moved name still fits there. `DCFS_TEST_CONCAT` was born file-local in 1.3,
+   was pasted into six more test files through 12.2b, moved verbatim into
+   `dcfs/testonly` in 25.1 and was approved as-is in 25.58.
    Fixes go back to the same agent with `SendMessage` (it keeps its
    context, which is cheaper than a new agent). Steps 5 and 6 describe one
    review and one merge per step; for any step larger than a slice,

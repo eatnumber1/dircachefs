@@ -4711,3 +4711,25 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   inside 25.58, which takes in 25.63's removal-candidate conversions. 25.63
   (carried third-party copies, russ's rule) and 25.64 (stale macro-usage
   allowances) queued after 25.58 in M0.
+- 2026-10-19, clerk batch 54: 25.58 merged to main 2026-10-19, 10 squashed
+  commits 57bb615e..99fdde5c (tools tier 50/50). Review-findings: the re-review
+  (13 rows) and the third final round (6 rows) appended, `final` rounds
+  renumbered 3 to 5, all open 25.58 rows set fixed. `test_first_tool` at
+  merge: group 10 ACCEPTED; groups 6, 8 and 9 REJECTED only for non-test
+  filegroups or tidy fixtures, added to 25.60's scope.
+- 2026-10-19, clerk batch 54: russ on the `DCFS_TEST_CONCAT` history (born
+  file-local in 1.3, pasted into six more test files through 12.2b, moved
+  verbatim into `dcfs/testonly` by 25.1, approved as-is in 25.58): 25.27-0..d
+  (duplicate-code detection) moved earlier in M0, right after 25.58, 25.63 and
+  25.64: "move the general duplicate-code detection earlier. No need for the
+  bespoke macro one since it will be subsumed by the general one. ... just make
+  sure the general one covers macros too." 25.27a now covers macros. New
+  `process.md` rule `rule-moved-names-redecided` (russ: "Agreed"): review
+  checks that moved names still fit their new home.
+- 2026-10-19, clerk batch 54: russ on 25.58's brittle macro scan: "I don't want
+  brittle tools though, so let's schedule a follow-up (doesn't have to be soon)
+  to reimplement it as a proper clang-tidy plugin." Queued 25.65 (M1 or later).
+- 2026-10-19, clerk batch 54: russ: "If you want to come up with fewer rules
+  that are more broad, that's ok too." Two rules: `docs/style.md`
+  `rule-authoritative-model` and `process.md` `rule-survey-and-name-mechanism`
+  (with a reviewer question in the review checklist).

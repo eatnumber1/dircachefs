@@ -973,8 +973,16 @@ go on a shrink-only allowlist. Fuzzy detectors are advisory until they are
 precise enough to gate. The threshold and the allowlist come back to russ
 before commit.
 
-Backlog slot (2026-10-19): M0, after 25.48 and 25.49, in the order 25.27-0,
-25.27a, 25.27b, 25.27c, 25.27d; the pool resets 2026-10-23 20:07 PDT.
+Backlog slot (2026-10-19): M0, in the order 25.27-0, 25.27a, 25.27b, 25.27c,
+25.27d, moved earlier on 2026-10-19 to right after 25.58, 25.63 and 25.64
+(russ: "move the general duplicate-code detection earlier. No need for the
+bespoke macro one since it will be subsumed by the general one. ... just make
+sure the general one covers macros too."). The pool resets 2026-10-23 20:07
+PDT. Requirement added to 25.27a: detection covers macros. Preprocessor
+definitions are compared before expansion, so a `#define` pasted into a
+second file is reported (the history: `DCFS_TEST_CONCAT` was born file-local
+in 1.3, pasted into six more test files through 12.2b, moved verbatim into
+`dcfs/testonly` by 25.1 and approved as-is in 25.58).
 
 - **25.27-0 Prior art (read-only, first).** russ, 2026-10-19: "is there prior
   art we can reuse?" Run on Gemini via foreman `--single --read-only` once
@@ -2802,7 +2810,7 @@ Review by Sonnet at merge: four nits (review-findings.tsv, 25.56), three
 test gaps closed before merge and one commit-message count corrected at
 merge.
 
-## 25.58 CamelCase function names (orchestrator's proposal, 2026-10-19; queued)
+## 25.58 CamelCase function names (orchestrator's proposal; done 2026-10-19)
 
 Orchestrator's proposal, not russ's words (clerk batch 49). Source:
 `docs/style.md` `rule-function-names` (CamelCase functions and methods;
@@ -2870,6 +2878,14 @@ and macros no language feature can express, each with a reason. Replaceable
 macros are converted in this step, which takes in 25.63's removal-candidate
 conversions. Follow-up: 25.64.
 
+Merged to main 2026-10-19 as 10 squashed commits, 57bb615e..99fdde5c (tools
+tier 50/50 on main after the merge). Review-findings rows: rounds 1 to 5, all
+fixed (the rows' `final` rounds renumbered 3 to 5). `test_first_tool` verdicts
+at merge: group 10 ACCEPTED; groups 6, 8 and 9 REJECTED only because their
+tests-first commits add non-test filegroups (`cxx_sources`, `all_cxx_sources`)
+or edit tidy fixtures (25.60 covers both). Follow-up: 25.65 replaces the
+macro scan with a native clang-tidy check.
+
 ## 25.63 Carried third-party copies (russ, 2026-10-19; queued)
 
 russ, 2026-10-19: "unmodified third-party code we carry copies of (like
@@ -2913,6 +2929,29 @@ Owner: not yet assigned. Dependencies: 25.58.
 *Test:* an allowance that matches no macro fails the test (fails first, on
 the current tree with a seeded stale entry).
 
+## 25.65 Macro approval as a clang-tidy plugin (russ, 2026-10-19; queued)
+
+russ, 2026-10-19: "I don't want brittle tools though, so let's schedule a
+follow-up (doesn't have to be soon) to reimplement it as a proper clang-tidy
+plugin." Applies `docs/style.md` `rule-authoritative-model`: 25.58's macro
+approval scan (`tools/approved_macros.py` `scan_problems` and `guard_of`, and
+`repo_shape` `scan_covers_cxx`) matches text where clang has the answer.
+
+0. Feasibility probe first: can the pinned LLVM toolchain build and load a
+   clang-tidy plugin (headers and libs in `@dcfs_llvm`, `-load`)? If not,
+   report what it would cost and stop.
+1. A dcfs module plugin hooking `PPCallbacks::MacroDefined` that reads
+   `tools/approved_macros.txt`. Header guards and third-party headers come
+   from clang, not text matching.
+2. The text scan and the coverage rule are deleted.
+3. The preprocessor does not see inactive `#if` branches; the step decides
+   how to handle that.
+
+Owner: not yet assigned. Dependencies: 25.58, 25.64.
+
+*Test:* an unapproved macro in a fixture is reported, an approved one, a
+header guard and a third-party macro are not (each fails first).
+
 ## 25.59 Dashboard plan.json (orchestrator proposal, 2026-10-19; queued)
 
 Orchestrator's proposal, not russ's words (clerk batch 51). Source: the
@@ -2938,11 +2977,15 @@ not count clang-query and clang-tidy fixtures (`tools/style_matchers/*_bad.cc`,
 tests-only commit. A 25.52 follow-up.
 
 1. Add the fixture pattern to the table.
+2. (Added at 25.58's merge, 2026-10-19.) `test_first_tool` accepts a
+   tests-first commit that adds a filegroup used only as test data, and
+   judges tidy and matcher fixtures as tests.
 
 Owner: not yet assigned. Dependencies: 25.52 merged.
 
 *Test:* a commit touching only a `*_bad.cc` fixture counts as tests-only
-(fails first, on the current table).
+(fails first, on the current table); a tests-first commit that also adds a
+test-data-only filegroup is accepted (fails first).
 
 ## 25.61 The style guide as a directory of rule files (russ, 2026-10-19; queued)
 

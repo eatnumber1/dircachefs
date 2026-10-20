@@ -98,6 +98,18 @@ use it as design guidance rather than firm rules."
   breaking the guide, and it stays at the site). A bare `NOLINT`, a wildcard
   and a check name with no reason fail `//tools:style_checks_test`. The
   allowlist is legacy backlog only: it shrinks and never gains a line.
+- <a id="rule-authoritative-model"></a>
+  **A tool or check works from the authoritative model of its input** (russ,
+  2026-10-19: "If you want to come up with fewer rules that are more broad,
+  that's ok too", after 25.58's macro scan matched text where clang had the
+  answer): the compiler (AST matchers, clang-tidy checks and plugins,
+  preprocessor callbacks) for C++, `bazel query`, `cquery` and aspects for
+  the build graph, git plumbing for history, a real parser for each file
+  format. Text matching over an input with such a model is allowed only where
+  the model cannot answer, with the reason written beside the code. Signs of
+  re-deriving the model: the tool carries its own parser of the language
+  (header-guard detection, include parsing), or needs a meta-check to keep
+  its input list complete.
 - <a id="rule-include-what-you-use"></a>
   **Include what you use, enforced**: a target includes only headers of its
   direct deps (`layering_check`) and clang-tidy's `misc-include-cleaner`

@@ -469,13 +469,32 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-19	25.58	2	Sonnet	should	style-other	docs/style.md 1.2	.clang-tidy:119	macro ignore regex hid any UPPER macro ending in _; narrowed	no	fixed/merged
 2026-10-19	25.58	2	Sonnet	should	style-other	docs/style.md 1.2	tools/style_matchers/function_names.query:20	void no-parameter methods passed as getters; tightened (reviewer also proposed requiring void setters; declined, Google does not require it)	no	fixed/merged
 2026-10-19	25.58	2	Sonnet	nit	style-other	docs/style.md 1.2	tools/style_checks_allow.txt:347	extern "C" declarations exempted in the matcher instead of allowlisted	no	fixed/merged
-2026-10-19	25.58	final	Opus	blocker	test-gap	docs/style.md rule-macros-discouraged	docs/style.md:339	macro-usage is silent on empty, non-literal object-like and #/## macros; add the source scan	could	open
-2026-10-19	25.58	final	Opus	should	style-other	docs/style.md 1.2	.clang-tidy:130	CheckCapsOnly reason is wrong	no	open
-2026-10-19	25.58	final	Opus	should	docs	docs/style.md 1.2	docs/rules/index-style.md:28	accessor ruling missing from the index line	no	open
-2026-10-19	25.58	final	Opus	nit	style-other	docs/style.md 1.2	tools/approved_macros.py:21	the _H_ regex is broad	no	open
-2026-10-19	25.58	final	Opus	nit	comment-accuracy	docs/style.md 1.9	.clang-tidy:13,120,126	comments need fixing	no	open
-2026-10-19	25.58	final	Opus	nit	style-other	docs/style.md 1.2	tools/style_matchers/tidy_good.cc:105	a fake guard	no	open
-2026-10-19	25.58	final	Opus	nit	docs	docs/style.md rule-macros-discouraged	tools/approved_macros.txt:6	header contradicts itself	no	open
-2026-10-19	25.58	final	Opus	nit	test-gap	tools/approved_macros.py	tools/approved_macros.py:96	main is untested	could	open
-2026-10-19	25.58	final	Opus	nit	hygiene	commit hygiene	commit 252b32c2	subject says 'ban'; the test landed in the code commit; fixed by the squash	no	open
-2026-10-19	25.58	final	Opus	nit	docs	docs/plan/phases/25-style-convergence.md	25.58 plan record	the record names rule-macro-prefix but the anchor is rule-macros-discouraged; fix at merge	no	open
+2026-10-19	25.58	3	Opus	blocker	test-gap	docs/style.md rule-macros-discouraged	docs/style.md:339	macro-usage is silent on empty, non-literal object-like and #/## macros; add the source scan	could	fixed/merged
+2026-10-19	25.58	3	Opus	should	style-other	docs/style.md 1.2	.clang-tidy:130	CheckCapsOnly reason is wrong	no	fixed/merged
+2026-10-19	25.58	3	Opus	should	docs	docs/style.md 1.2	docs/rules/index-style.md:28	accessor ruling missing from the index line	no	fixed/merged
+2026-10-19	25.58	3	Opus	nit	style-other	docs/style.md 1.2	tools/approved_macros.py:21	the _H_ regex is broad	no	fixed/merged
+2026-10-19	25.58	3	Opus	nit	comment-accuracy	docs/style.md 1.9	.clang-tidy:13,120,126	comments need fixing	no	fixed/merged
+2026-10-19	25.58	3	Opus	nit	style-other	docs/style.md 1.2	tools/style_matchers/tidy_good.cc:105	a fake guard	no	fixed/merged
+2026-10-19	25.58	3	Opus	nit	docs	docs/style.md rule-macros-discouraged	tools/approved_macros.txt:6	header contradicts itself	no	fixed/merged
+2026-10-19	25.58	3	Opus	nit	test-gap	tools/approved_macros.py	tools/approved_macros.py:96	main is untested	could	fixed/merged
+2026-10-19	25.58	3	Opus	nit	hygiene	commit hygiene	commit 252b32c2	subject says 'ban'; the test landed in the code commit; fixed by the squash	no	fixed
+2026-10-19	25.58	3	Opus	nit	docs	docs/plan/phases/25-style-convergence.md	25.58 plan record	the record names rule-macro-prefix but the anchor is rule-macros-discouraged; fix at merge	no	fixed/merged
+2026-10-19	25.58	4	Opus	blocker	test-gap	docs/style.md rule-macros-discouraged	dcfs/dir_cache_fs_test.cc:325	DCFS_INJECT is expressible as a function	no	fixed/merged
+2026-10-19	25.58	4	Opus	blocker	test-gap	docs/style.md rule-macros-discouraged	dcfs/status_test.cc:105	EXPECT_HELPER is expressible with a default SourceLocation	no	fixed/merged
+2026-10-19	25.58	4	Opus	should	test-gap	docs/style.md rule-macros-discouraged	test/qemu/BUILD.bazel:2439	the scan misses files; add a completeness check	could	fixed/merged
+2026-10-19	25.58	4	Opus	should	test-gap	tools/approved_macros.py	tools/approved_macros.py:guard_of	a default-value macro passes as a guard	no	fixed/merged
+2026-10-19	25.58	4	Opus	should	test-gap	docs/style.md 2	dcfs/fixed_string.h:1	no static_assert test	no	fixed/merged
+2026-10-19	25.58	4	Opus	nit	style-other	docs/style.md 1.2	dcfs/fixed_string.h:22	unterminated array accepted	no	fixed/merged
+2026-10-19	25.58	4	Opus	nit	comment-accuracy	docs/style.md 1.9	tools/approved_macros.py:5	stale docstring	no	fixed/merged
+2026-10-19	25.58	4	Opus	nit	docs	docs/style.md rule-macros-discouraged	tools/approved_macros.txt:34	quote drops 'likely'	no	fixed/merged
+2026-10-19	25.58	4	Opus	nit	docs	docs/style.md rule-macros-discouraged	docs/style.md:352	empty-macro shape missing	no	fixed/merged
+2026-10-19	25.58	4	Opus	nit	docs	docs/style.md 1.2	docs/rules/index-style.md:28	text outside the link	no	fixed/merged
+2026-10-19	25.58	4	Opus	nit	style-other	docs/style.md 1.2	.clang-tidy:15	92 columns	no	fixed/merged
+2026-10-19	25.58	4	Opus	nit	docs	docs/style.md rule-macros-discouraged	tools/approved_macros.txt	RETURN_IF_ERROR should be third_party	no	fixed/merged
+2026-10-19	25.58	4	Opus	nit	style-other	docs/style.md 1.2	dcfs/sql_statements.h:69	two public names	no	fixed/merged
+2026-10-19	25.58	5	Opus	should	test-gap	docs/style.md rule-macros-discouraged	tools/repo_shape.py scan_covers_cxx	ignored glob extensions	could	fixed/merged
+2026-10-19	25.58	5	Opus	nit	docs	docs/style.md rule-macros-discouraged	docs/style.md:349	stale text	no	fixed/merged
+2026-10-19	25.58	5	Opus	nit	test-gap	docs/style.md rule-macros-discouraged	tools/approved_macros.py	exempt text missed CONCAT	no	fixed/merged
+2026-10-19	25.58	5	Opus	nit	style-other	docs/style.md 1.2	BUILD	indent	no	fixed/merged
+2026-10-19	25.58	5	Opus	nit	style-other	docs/style.md 1.2	tools/approved_macros.py	const local	no	fixed/merged
+2026-10-19	25.58	5	Opus	nit	style-other	docs/style.md 1.2	tools/BUILD.bazel	cxx_sources and all_cxx_sources duplicate	no	fixed (comment)

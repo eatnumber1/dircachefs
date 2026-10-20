@@ -72,3 +72,8 @@ indexes to read for which task.
 - Mechanize every rule you can, and move logic to compile time (russ, 2026-10-09
   and 2026-10-17). [style 1.1](/docs/style.md#rule-mechanize-rules),
   [style 1.1](/docs/style.md#rule-compile-time-logic)
+- A tool or check works from the authoritative model of its input (the
+  compiler, `bazel query`, git plumbing, a real parser); text matching only
+  where the model cannot answer, with the reason beside it (russ, 2026-10-19:
+  "If you want to come up with fewer rules that are more broad, that's ok
+  too"). [style 1.1](/docs/style.md#rule-authoritative-model)
