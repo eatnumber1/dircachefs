@@ -36,13 +36,15 @@ log="$work/tlc.log"
 status=0
 # -workers: the test's `workers` attribute (auto: as many workers as
 # cores). -cleanup: drop state files of earlier runs. -metadir: keep state
-# files out of the inputs' directory.
+# files out of the inputs' directory. TLC's output goes to stdout as it is
+# produced (so test.log has it even if Bazel kills the test at its timeout)
+# and to $log, which the checks below read; pipefail makes the pipeline's
+# status TLC's own, as tee does not fail.
 "$java" -XX:+UseParallelGC -Xss4m \
   -Djava.io.tmpdir="$TEST_TMPDIR/tmp" -jar "$jar" \
   -workers @@WORKERS@@ -cleanup -metadir "$work/states" \
   -config "$(basename "$config")" @@TLC_ARGS@@ "$module" \
-  >"$log" 2>&1 || status=$?
-cat "$log"
+  2>&1 | tee "$log" || status=$?
 echo "tlc_test: TLC exited with status $status"
 
 # With a committed coverage report (tlc.bzl's `coverage`): the actions TLC's

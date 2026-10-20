@@ -2,8 +2,20 @@
 # The TLA+ tools: see README.md. The jar itself is @tla2tools//file
 # (MODULE.bazel); tlc.bzl defines tlc_test.
 
+load("@rules_python//python:py_test.bzl", "py_test")
+
 exports_files(["tlc_test_runner.sh.tpl"])
 
+
+# Step 12.28: the runner template, expanded with a fake java.
+py_test(
+    name = "tlc_test_runner_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["tlc_test_runner_test.py"],
+    args = ["$(location tlc_test_runner.sh.tpl)"],
+    data = ["tlc_test_runner.sh.tpl"],
+)
 
 # Phase 12.2: trace validation (formal/Trace.tla) reads traces with the
 # CommunityModules' Json module (@tla_community_modules). TLC loads the
