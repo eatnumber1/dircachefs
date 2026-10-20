@@ -1845,6 +1845,16 @@ necessary, but if you think one is necessary, come to me."
   The exception is Alpine's packages (Phase 24), which have no sha256 and no
   Pin section: they are pinned to a stable release branch and verified by
   Alpine's signatures, and `third_party/alpine/README.md` says how.
+- <a id="rule-carried-third-party"></a>
+  Unmodified third-party code we carry copies of (like `fhtest.c`) is exempt
+  from all of our rules. If we modify it at all, all of it must be changed to
+  match our rules, including TDD testing (russ, 2026-10-19: "unmodified
+  third-party code we carry copies of (like fhtest.c) is exempt from all of
+  our rules. However, if we need to modify the code at all, it must all be
+  changed to match our rules (including TDD testing!!!!)."). Each carried copy
+  is recorded with its upstream source, pin, sha256 and whether it is modified,
+  and a mechanical check holds the unmodified ones to their recorded hash
+  (plan 25.63).
 - `MODULE.bazel`: a comment above a pin says what it is for and where its
   README is (7 of 13 `http_archive`s, 4 of 14 `bazel_dep`s; the others are
   self-evident). `MODULE.bazel.lock` is never rewritten silently

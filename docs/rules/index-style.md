@@ -88,6 +88,11 @@ that holds its reasoning. `AGENTS.md` says which indexes to read for which task.
   [style 3](/docs/style.md#rule-bazel-style),
   [style 3](/docs/style.md#rule-everything-through-bazel),
   [style 3](/docs/style.md#rule-third-party-by-bazel)
+- Unmodified third-party code we carry copies of is exempt from our rules; if
+  we modify it, all of it matches our rules, with TDD (russ, 2026-10-19:
+  "However, if we need to modify the code at all, it must all be changed to
+  match our rules (including TDD testing!!!!).").
+  [style 3](/docs/style.md#rule-carried-third-party)
 - Minimize shell: new tools are C++ (russ, 2026-10-11/17); host scripts are bash
   and guest scripts busybox sh. [style 4](/docs/style.md#rule-cpp-over-shell),
   [style 4](/docs/style.md#rule-host-scripts-bash),

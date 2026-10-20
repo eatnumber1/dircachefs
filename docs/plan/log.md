@@ -4692,3 +4692,22 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   slices, after 25.58, next to 25.47) and 25.62 (russ approved: "ok"; the
   russ-gated files and a merge gate, after 25.58). 25.59 and 25.60 placed in
   the README queue (25.60 before 25.57).
+- 2026-10-19, clerk batch 53: russ's macro rulings for 25.58 (2026-10-19):
+  header guards are approved and exempt in general, outside the list; the
+  Google-internal mirrors are approved; the orchestrator may approve internal
+  helpers of approved macros ("you have my permission to approve on your own
+  without asking me"); macro names owned by a third-party library are exempt
+  from approval and the prefix. The 25.58 implementer writes these into
+  `docs/style.md` `rule-macros-discouraged`. Recorded in the 25.58 entry.
+- 2026-10-19, clerk batch 53: russ on 25.58's macro checks: "I knew
+  cppcoreguidelines-macro-usage only covers some kinds of macros. That one
+  likely should go un-exempted, as it's calling out macros that can be
+  implemented using other language features instead. ... but also I want
+  cppcoreguidelines-macro-usage in addition, with only obvious allowances
+  (third-party macros, etc.), so likely a much smaller or zero-sized
+  allowlist." The orchestrator's design is two checks: a source scan for
+  approval of every macro, and macro-usage with only third-party names and
+  macros no language feature can express. Replaceable macros are converted
+  inside 25.58, which takes in 25.63's removal-candidate conversions. 25.63
+  (carried third-party copies, russ's rule) and 25.64 (stale macro-usage
+  allowances) queued after 25.58 in M0.

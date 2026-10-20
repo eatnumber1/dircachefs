@@ -469,3 +469,13 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-19	25.58	2	Sonnet	should	style-other	docs/style.md 1.2	.clang-tidy:119	macro ignore regex hid any UPPER macro ending in _; narrowed	no	fixed/merged
 2026-10-19	25.58	2	Sonnet	should	style-other	docs/style.md 1.2	tools/style_matchers/function_names.query:20	void no-parameter methods passed as getters; tightened (reviewer also proposed requiring void setters; declined, Google does not require it)	no	fixed/merged
 2026-10-19	25.58	2	Sonnet	nit	style-other	docs/style.md 1.2	tools/style_checks_allow.txt:347	extern "C" declarations exempted in the matcher instead of allowlisted	no	fixed/merged
+2026-10-19	25.58	final	Opus	blocker	test-gap	docs/style.md rule-macros-discouraged	docs/style.md:339	macro-usage is silent on empty, non-literal object-like and #/## macros; add the source scan	could	open
+2026-10-19	25.58	final	Opus	should	style-other	docs/style.md 1.2	.clang-tidy:130	CheckCapsOnly reason is wrong	no	open
+2026-10-19	25.58	final	Opus	should	docs	docs/style.md 1.2	docs/rules/index-style.md:28	accessor ruling missing from the index line	no	open
+2026-10-19	25.58	final	Opus	nit	style-other	docs/style.md 1.2	tools/approved_macros.py:21	the _H_ regex is broad	no	open
+2026-10-19	25.58	final	Opus	nit	comment-accuracy	docs/style.md 1.9	.clang-tidy:13,120,126	comments need fixing	no	open
+2026-10-19	25.58	final	Opus	nit	style-other	docs/style.md 1.2	tools/style_matchers/tidy_good.cc:105	a fake guard	no	open
+2026-10-19	25.58	final	Opus	nit	docs	docs/style.md rule-macros-discouraged	tools/approved_macros.txt:6	header contradicts itself	no	open
+2026-10-19	25.58	final	Opus	nit	test-gap	tools/approved_macros.py	tools/approved_macros.py:96	main is untested	could	open
+2026-10-19	25.58	final	Opus	nit	hygiene	commit hygiene	commit 252b32c2	subject says 'ban'; the test landed in the code commit; fixed by the squash	no	open
+2026-10-19	25.58	final	Opus	nit	docs	docs/plan/phases/25-style-convergence.md	25.58 plan record	the record names rule-macro-prefix but the anchor is rule-macros-discouraged; fix at merge	no	open

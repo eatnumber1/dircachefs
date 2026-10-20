@@ -2843,10 +2843,75 @@ Ruling (russ, 2026-10-19, clerk batch 52): "I'll pass a rule that overrides
 the Google style guide. Unprefixed names are allowed if they mirror
 Google-internal names. RET_CHECK (and friends like RET_CHECK_EQ),
 RETURN_IF_ERROR, ASSIGN_OR_RETURN, etc., all mirror Google internal names."
-Implemented in this step as `docs/style.md` `rule-macro-prefix`: the `DCFS_`
-prefix is enforced by clang-tidy, and the mirrored names are exempt by the
-config's ignore regex. Round 2 (same Sonnet reviewer, merge after fixes) is
+Implemented in this step as `docs/style.md` `rule-macros-discouraged`: the
+`DCFS_` prefix is enforced by clang-tidy, and the mirrored names are exempt by
+the config's ignore regex. Round 2 (same Sonnet reviewer, merge after fixes) is
 in `review-findings.tsv`.
+
+Macro rulings (russ, 2026-10-19, clerk batch 53): header guards are approved
+and exempt in general, outside the list. The Google-internal mirrors are
+approved. The orchestrator may approve internal helpers of approved macros
+(russ: "you have my permission to approve on your own without asking me").
+Macro names owned by a third-party library are exempt from approval and the
+prefix.
+
+Macro checks (russ, 2026-10-19, clerk batch 53, on
+`cppcoreguidelines-macro-usage`: "I knew cppcoreguidelines-macro-usage only
+covers some kinds of macros. That one likely should go un-exempted, as it's
+calling out macros that can be implemented using other language features
+instead. ... I'd been expecting a new check to get implemented (or some
+different, more strict one) for our policy. ... but also I want
+cppcoreguidelines-macro-usage in addition, with only obvious allowances
+(third-party macros, etc.), so likely a much smaller or zero-sized
+allowlist."). Two checks: (A) a source scan enforces approval for every
+macro, recognizes header guards by their structure, and reports stale
+entries; (B) `cppcoreguidelines-macro-usage` allows only third-party names
+and macros no language feature can express, each with a reason. Replaceable
+macros are converted in this step, which takes in 25.63's removal-candidate
+conversions. Follow-up: 25.64.
+
+## 25.63 Carried third-party copies (russ, 2026-10-19; queued)
+
+russ, 2026-10-19: "unmodified third-party code we carry copies of (like
+fhtest.c) is exempt from all of our rules. However, if we need to modify the
+code at all, it must all be changed to match our rules (including TDD
+testing!!!!)." The rule is `docs/style.md` `rule-carried-third-party`.
+
+1. Inventory every carried third-party copy: `fhtest.c`, the other `.c` files
+   under `tools/` and `test/qemu/`, and anything under `third_party/`. Record
+   each copy's upstream source, pin, sha256 and whether it is modified (in a
+   README or a table the check reads; the step picks the form).
+2. A mechanical check: an unmodified copy matches its recorded upstream hash,
+   and every check skips it. A modified copy is listed as ours and gets every
+   check.
+3. Removal candidates (superseded, clerk batch 53): the review of 25.58's
+   removal candidates against Google's "prefer constants and functions to
+   macros" moved into 25.58, which converts the replaceable macros itself
+   (`DCFS_BACKSTOP`, `DCFS_INJECT`, `DCFS_SETGROUPS`, `EXPECT_KEPT_UNKNOWN`,
+   `EXPECT_HELPER`, the E and F X-macros, and the constants in
+   `sql_statements.h` and `invariant_checker.cc`). Nothing here.
+
+Owner: not yet assigned. Dependencies: none.
+
+*Test:* an unmodified copy with one changed byte fails the hash check; a
+modified copy with a seeded style violation fails the style check (each fails
+first, with no check).
+
+## 25.64 Unneeded macro allowances (orchestrator proposal, 2026-10-19; queued)
+
+Orchestrator's proposal, not russ's words (clerk batch 53). Follow-up to 25.58
+(M0, small, after it), from the macro checks above: a stale allowance is one
+no macro needs.
+
+1. `style_checks_test`, which already runs clang-tidy, also runs
+   `cppcoreguidelines-macro-usage` once with an empty `AllowedRegexp`.
+2. It fails when an allowance in `tools/approved_macros.txt` is never
+   reported, a stale allowance.
+
+Owner: not yet assigned. Dependencies: 25.58.
+
+*Test:* an allowance that matches no macro fails the test (fails first, on
+the current tree with a seeded stale entry).
 
 ## 25.59 Dashboard plan.json (orchestrator proposal, 2026-10-19; queued)
 
