@@ -65,3 +65,33 @@ struct Converting {
   Converting(int value);  // HIT google-explicit-constructor
   int value;
 };
+
+// docs/style.md 1.2 (Google's naming): types and enumerators and constants
+// are CamelCase and kName, variables and parameters lower_case, data members
+// of a class name_, namespaces lower_case.
+class bad_class {};  // HIT readability-identifier-naming
+
+struct bad_struct {};  // HIT readability-identifier-naming
+
+enum class BadEnum {
+  bad_enumerator,  // HIT readability-identifier-naming
+};
+
+enum class bad_enum { kOnly };  // HIT readability-identifier-naming
+
+[[maybe_unused]] constexpr int BadConstant = 1;  // HIT readability-identifier-naming
+
+namespace BadNamespace {}  // HIT readability-identifier-naming
+
+class BadMember {
+ public:
+  [[nodiscard]] int Value() const { return value; }
+
+ private:
+  int value = 0;  // HIT readability-identifier-naming
+};
+
+int BadVariable(int BadParameter) {  // HIT readability-identifier-naming
+  int BadLocal = BadParameter;  // HIT readability-identifier-naming
+  return BadLocal;
+}

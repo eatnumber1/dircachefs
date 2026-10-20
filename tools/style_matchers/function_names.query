@@ -1,0 +1,16 @@
+# docs/style.md 1.2 (rule-function-names): every function and method is
+# CamelCase, with one exception, the lower-case libc and manpage names of the
+# thin syscall wrappers: functions of namespace dcfs::syscalls defined in
+# dcfs/syscalls.h, syscalls_backing.{h,cc}, syscalls_process.{h,cc} and
+# syscalls.cc (or, for this rule's good fixture, standing in for one). Step
+# 25.41 moves the exception to the members of the Syscalls interface and its
+# implementations. clang-tidy cannot scope an exception to a namespace, so
+# readability-identifier-naming does not check functions (.clang-tidy) and
+# this matcher does. Not reported: the names the language gives, that is
+# constructors, destructors, conversion functions, operators (whose names
+# the regex does not match), main, implicit functions and instantiations of
+# templates, and the link-time fakes the linker names __wrap_x and __real_x
+# (--wrap).
+# A function whose name begins with a lower-case letter or an underscore,
+# outside the exception.
+match functionDecl(isExpansionInFileMatching("(^|/)(dcfs|tools|bench|test/qemu/guest)/"), matchesName("(^|::)[a-z_][A-Za-z0-9_]*$"), unless(anyOf(isImplicit(), isMain(), matchesName("(^|::)__(wrap|real)_"), cxxConstructorDecl(), cxxDestructorDecl(), cxxConversionDecl(), isTemplateInstantiation(), allOf(hasDeclContext(namespaceDecl(hasName("::dcfs::syscalls"))), isExpansionInFileMatching("(^|/)(dcfs/syscalls(_backing|_process)?[.](cc|h)|tools/style_matchers/function_names_good[.]cc)$"))))).bind("function_names")

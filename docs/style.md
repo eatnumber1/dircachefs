@@ -193,13 +193,18 @@ use it as design guidance rather than firm rules."
   25.57) sit above the seam, are not thin, and so are ordinary CamelCase
   functions in `backing::`. The lower-case names again mark exactly the
   thin kernel boundary.
-  - Enforcing the exception: `readability-identifier-naming` in
-    `.clang-tidy` must accept lower_case methods on `Syscalls` and its
-    implementations only. Step 25.41 decides how (a per-class naming
-    configuration if clang-tidy supports one, a `NOLINT` region around
-    the interface with the reason, or a small clang-query check that
-    lower-case methods occur only in `Syscalls` implementations), and
-    this rule says which once it is chosen.
+  - Enforcing the exception (step 25.58): clang-tidy's
+    `readability-identifier-naming` cannot scope a lower-case exception to
+    a namespace or class (`FunctionIgnoredRegexp` is global), so it checks
+    no function names, and the clang-query matcher
+    `tools/style_matchers/function_names.query` does: a function whose
+    name starts with a lower-case letter or an underscore is reported
+    unless it is in namespace `dcfs::syscalls` in one of the `syscalls*`
+    files, or a link-time fake the linker names (`__wrap_x`). Step 25.41
+    moves the exception to the members of `Syscalls` and its
+    implementations. Classes, constants (`kName`), members (`name_`),
+    namespaces and enumerators are checked by `readability-identifier-naming`
+    (`.clang-tidy`).
   - The typed signatures stay: a call looks like
     `ctx.syscalls().write(fd, buf)` with `buf` a
     `std::span<const std::byte>`, not `(fd, buf, n)`; names are

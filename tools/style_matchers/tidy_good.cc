@@ -29,3 +29,33 @@ class Explicit {
 [[maybe_unused]] int UsesExplicit() { return Explicit(1).Value(); }
 
 }  // namespace
+
+namespace {
+namespace good_namespace {
+
+class GoodClass {
+ public:
+  explicit GoodClass(int value) : value_(value) {}
+  [[nodiscard]] int Value() const { return value_; }
+
+ private:
+  int value_;
+};
+
+struct GoodStruct {
+  int plain_member = 0;
+};
+
+enum class GoodEnum { kFirst, kSecond };
+
+constexpr int kGoodConstant = 1;
+
+[[maybe_unused]] int GoodFunction(int good_parameter) {
+  int good_local = good_parameter + kGoodConstant;
+  GoodStruct good_struct;
+  good_struct.plain_member = static_cast<int>(GoodEnum::kSecond);
+  return good_local + GoodClass(good_struct.plain_member).Value();
+}
+
+}  // namespace good_namespace
+}  // namespace

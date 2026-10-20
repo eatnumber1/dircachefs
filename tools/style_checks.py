@@ -58,6 +58,7 @@ MATCHER_RULES = (
     "capturing_mutating_lambda",
     "check_in_production",
     "dcfs_qualified_inside_dcfs",
+    "function_names",
     "happy_path_nested",
     "iterator_pair_algorithm",
     "pointer_without_nullability",
