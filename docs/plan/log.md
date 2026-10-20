@@ -4677,3 +4677,18 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   `DATASETS`; the 25.54 skill's partial-upload path worked on first real
   use, `lanes` denied as `[Data Exfiltration]`, nothing written, reported)
   and 25.60 (`test_first_tool` counts matcher fixtures as test files).
+- 2026-10-19, clerk batch 52: russ ruled on 25.58's macro names
+  (2026-10-19): "I'll pass a rule that overrides the Google style guide.
+  Unprefixed names are allowed if they mirror Google-internal names.
+  RET_CHECK (and friends like RET_CHECK_EQ), RETURN_IF_ERROR,
+  ASSIGN_OR_RETURN, etc., all mirror Google internal names." Implemented in
+  25.58 as `docs/style.md` `rule-macro-prefix` (the `DCFS_` prefix enforced
+  by clang-tidy; mirrored names exempt by the config's ignore regex). 25.58
+  round 2 rows appended (the macro ignore regex narrowed, the getter
+  matcher tightened; the reviewer's proposal to require void setters
+  declined by the orchestrator because Google does not require it). Queued
+  25.61 (russ approved: "Approved, with your suggestion to split it into
+  three slices."; the style guide as a directory of rule files, three
+  slices, after 25.58, next to 25.47) and 25.62 (russ approved: "ok"; the
+  russ-gated files and a merge gate, after 25.58). 25.59 and 25.60 placed in
+  the README queue (25.60 before 25.57).

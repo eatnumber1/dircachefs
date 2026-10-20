@@ -71,7 +71,7 @@ final hardware check (Phase 21.2).
 
 | | Milestone | Steps | Done when |
 |---|---|---|---|
-| M0 | Gates | 5.18 (done 2026-10-19, 37c2990a..9957121c), 25.48 and 25.49 items 2-4 (done 2026-10-19), 25.56 (done 2026-10-19, afe0b169..5420d7c4), 25.58 (queued 2026-10-19), 25.57 (the door moves to `backing::`, russ 2026-10-19; before 25.41), 25.52 and 25.53 (done 2026-10-19), 25.54 (done 2026-10-19, 05008e7f), 25.55, 25.50 (done 2026-10-19), 25.51, 25.45 items 4-6, 12.27 items 1-3, 25.39a/b, 24.2, 25.45 item 1 (kernel-citation checker, after 24.2), 25.47 (three review passes, scoped style check), 25.44, 25.27-0 and 25.27a to d (C++ only), 12.25 | diff coverage and mutation run on changed code as Bazel targets, the kernel-citation checker and the model unit tests pass on main, a review brief names the three passes, and 24.2's minimum-kernel tier is green |
+| M0 | Gates | 5.18 (done 2026-10-19, 37c2990a..9957121c), 25.48 and 25.49 items 2-4 (done 2026-10-19), 25.56 (done 2026-10-19, afe0b169..5420d7c4), 25.58 (queued 2026-10-19), 25.62, 25.60, 25.57 (the door moves to `backing::`, russ 2026-10-19; before 25.41), 25.52 and 25.53 (done 2026-10-19), 25.54 (done 2026-10-19, 05008e7f), 25.59, 25.55, 25.50 (done 2026-10-19), 25.51, 25.45 items 4-6, 12.27 items 1-3, 25.39a/b, 24.2, 25.45 item 1 (kernel-citation checker, after 24.2), 25.61, 25.47 (three review passes, scoped style check), 25.44, 25.27-0 and 25.27a to d (C++ only), 12.25 | diff coverage and mutation run on changed code as Bazel targets, the kernel-citation checker and the model unit tests pass on main, a review brief names the three passes, and 24.2's minimum-kernel tier is green |
 | M1 | Gaps proved, then closed | 25.28b, 22.5, 17.2e (done), 12.24, then in this order: 12.16a, 25.10a/b/c, 12.19, 12.21, 12.20a/b, 17.2f and 17.2g, 25.28d, 25.28f, 25.28c, 26.40a/b/c, 22.7a to e, 25.28e (after 25.28d), 26.39, 23.19 | every user-visible promise in the README has a test and, where it is the protocol, a model property; the expected-red configs are all retired into the model (none left on main) |
 | M2 | CI you can trust | 26.41 and 26.43 (load-agnostic to zero, russ 2026-10-18; holds 26.36's follow-ups and the write_test_ext4 budget; split by item), 25.41 (approved 2026-10-19) and the type chain: 25.42, 25.35, 25.36, 25.37, 25.38 (module by module, about 800 lines per round), 25.39c/d, 25.46a/b/c, 12.26, 12.27 rest, 12.16b, 7.6b, 25.33b, the shell ports (boot.sh first), the 5.x hygiene steps, 17.5, 25.40 (support FUSE_STATX, russ 2026-10-17), 26.42 (warn about FUSE request timeouts at start, russ 2026-10-18) | main stays green through a week of normal merges with no budget re-measure |
 | M2.5 | In-memory cache (the database on tmpfs) | 27.1, 27.2 | the guest suites pass with the cache on tmpfs, restart and reboot behave as documented, and the kernel-cache interplay is measured and decided |
@@ -126,6 +126,9 @@ M0, gates (about a week, lane T; nothing here needs a feature):
     datasets whose assets succeeded are still batch-written and marked
     uploaded, and the denied ones are reported. Done 2026-10-19 (05008e7f,
     by Gemini via foreman; orchestrator review, no findings).
+2c1. 25.59 `plan.json` in `dashboard_lanes.py`'s `DATASETS` (orchestrator's
+    proposal, 2026-10-19, not russ's words): the step-order dataset never
+    reached the dashboard. After 25.54's position; none. Queued.
 2d. 25.55 non-backing fds read door-free (orchestrator's proposal, 2026-10-19,
     not russ's words): the 25.53 review's question. Folded into 25.57
     (2f); do not start it on its own.
@@ -143,6 +146,20 @@ M0, gates (about a week, lane T; nothing here needs a feature):
     exception is mechanical, and existing violations are fixed or
     shrink-only allowlisted. Before 25.57, so its renames land under
     enforcement. Not started.
+2e2. 25.60 `test_first_tool` counts matcher fixtures as tests (orchestrator's
+    proposal, 2026-10-19, not russ's words): before 25.57, whose slices touch
+    matcher fixtures; 25.52. Queued.
+2e3. 25.62 files that change only by russ's ruling (russ approved 2026-10-19:
+    "ok", to the orchestrator's proposal): a `process.md` rule listing the
+    russ-gated files, starting with `tools/approved_macros.txt`, and a merge
+    gate that fails a branch touching one unless the merge record cites his
+    approval with date and quote. After 25.58 (which creates the file).
+    Queued.
+2e4. 25.61 the style guide as a directory of rule files (russ, 2026-10-19:
+    "Approved, with your suggestion to split it into three slices."): one file
+    per rule with front matter, every index generated from it (authors', one
+    per reviewer kind, the mechanized table); three slices. Next to 25.47,
+    which it serves; after 25.58. Queued.
 3. 25.50 done 2026-10-19 (cef83075..626595ad); 25.51 keeps main green
    (repo_shape CLI checks); none.
 4. 25.45 items 4-6: step numbers in comments, const locals, bazel pipes leave

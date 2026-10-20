@@ -2839,6 +2839,15 @@ with no parameters, a setter is `set_x` with one parameter, as the
 `rule-function-names` says so; this step's branch makes that edit, not the
 clerk.
 
+Ruling (russ, 2026-10-19, clerk batch 52): "I'll pass a rule that overrides
+the Google style guide. Unprefixed names are allowed if they mirror
+Google-internal names. RET_CHECK (and friends like RET_CHECK_EQ),
+RETURN_IF_ERROR, ASSIGN_OR_RETURN, etc., all mirror Google internal names."
+Implemented in this step as `docs/style.md` `rule-macro-prefix`: the `DCFS_`
+prefix is enforced by clang-tidy, and the mirrored names are exempt by the
+config's ignore regex. Round 2 (same Sonnet reviewer, merge after fixes) is
+in `review-findings.tsv`.
+
 ## 25.59 Dashboard plan.json (orchestrator proposal, 2026-10-19; queued)
 
 Orchestrator's proposal, not russ's words (clerk batch 51). Source: the
@@ -2869,6 +2878,70 @@ Owner: not yet assigned. Dependencies: 25.52 merged.
 
 *Test:* a commit touching only a `*_bad.cc` fixture counts as tests-only
 (fails first, on the current table).
+
+## 25.61 The style guide as a directory of rule files (russ, 2026-10-19; queued)
+
+russ approved 2026-10-19: "Approved, with your suggestion to split it into
+three slices." Origin: "Is it worth keeping style guide rulings on things
+that are enforced mechanically? ... maybe we split the style guide in two?
+One for authors, and one for reviewers?", then "split the style guide into a
+directory with a separate file per rule. Then each of the author and
+reviewer gets their own index into the directory as their guide ... a
+different index to each kind of reviewer", and on external guides "This works
+until / unless we decide to shard the Google Style Guide amongst reviewers."
+Serves 25.47 (focused review passes); after 25.58.
+
+Design: one file per rule under `docs/rules/` with front matter: `id`;
+`kind` (local, enforces, overrides or law); `source` (an anchor in a pinned
+external guide, for stubs); `mechanized` (the check target, or none);
+`audience` (author, style-review, fact-check, correctness, protocol, ...);
+`strength` (rule or guidance). Every index is generated from the front
+matter: the authors' guide (also as one generated page in section order),
+one index per reviewer kind holding only its non-mechanized rules, and the
+mechanized table (rule to check). External guides stay single-sourced in
+their pinned copies (`third_party/google_styleguide`; the Abseil Tips of the
+Week to be pinned after a licence check). A generator writes one stub per
+Google section (no copied text); audience tags are assigned once by hand (a
+reviewer agent drafts them for russ to skim); a small extractor prints one
+pinned section for a reviewer; TotW stubs carry `strength: guidance`.
+`repo_shape` fails on: a rule file without front matter, a `mechanized:`
+naming no real check, a `source:` anchor missing from the pinned copy, a
+stub without an audience after a re-pin, a rule in no index, a stale
+generated index.
+
+Slices:
+
+1. Local rule files plus generated indexes: the mechanical split of
+   `docs/style.md` and the other rule docs into files, link rewrites. On
+   Gemini after Thursday's reset, Claude review.
+2. The Google stub generator, the extractor and the section tags.
+3. The reviewer agents and `AGENTS.md` pointed at their generated indexes.
+
+Owner: not yet assigned. Dependencies: 25.58.
+
+*Test:* each `repo_shape` failure above has a fixture that fails first.
+
+## 25.62 Files that change only by russ's ruling (russ, 2026-10-19; queued)
+
+russ approved 2026-10-19: "ok", to the orchestrator's proposal, after he
+asked "should we also have a separate check for the introduction of new
+macros at all, to force authors to come to you with a request to be added to
+the allowlist?"
+
+1. A `process.md` rule, with anchor and index line, listing the russ-gated
+   files, starting with `tools/approved_macros.txt` (created by 25.58).
+   Candidates to add: the coverage baseline (`dcfs/coverage_baseline.txt`,
+   which may only rise) and any exception lists russ owns.
+2. A merge gate in the orchestrator's merge flow (a tool like
+   `test_first_tool`, C++ preferred): it fails a branch whose diff touches a
+   russ-gated file unless the merge record cites russ's approval with its
+   date and quote; the orchestrator then asks russ before merging. Not
+   CODEOWNERS (there are no pull requests).
+
+Owner: not yet assigned. Dependencies: 25.58.
+
+*Test:* a diff touching a gated file without a cited approval fails; with
+one, it passes (fails first, with no gate).
 
 ## 25.57 The door moves to `backing::`; one `Syscalls` interface (russ, 2026-10-19; queued)
 

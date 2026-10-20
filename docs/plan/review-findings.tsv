@@ -466,3 +466,6 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-19	25.58	1	Sonnet	should	style-other	docs/style.md 1.2	tools/style_matchers/function_names.query	overrides should be exempt	could	fix first
 2026-10-19	25.58	1	Sonnet	should	docs	docs/style.md 1.2	docs/style.md:157	accessors: awaiting russ	no	russ ruled 2026-10-19: lower-case getters and setters permitted; style.md edit in 25.58
 2026-10-19	25.58	1	Sonnet	nit	test-gap	docs/style.md 2	tools/style_matchers	fixtures leave gaps in coverage	could	fix first
+2026-10-19	25.58	2	Sonnet	should	style-other	docs/style.md 1.2	.clang-tidy:119	macro ignore regex hid any UPPER macro ending in _; narrowed	no	fixed/merged
+2026-10-19	25.58	2	Sonnet	should	style-other	docs/style.md 1.2	tools/style_matchers/function_names.query:20	void no-parameter methods passed as getters; tightened (reviewer also proposed requiring void setters; declined, Google does not require it)	no	fixed/merged
+2026-10-19	25.58	2	Sonnet	nit	style-other	docs/style.md 1.2	tools/style_checks_allow.txt:347	extern "C" declarations exempted in the matcher instead of allowlisted	no	fixed/merged
