@@ -277,6 +277,11 @@ a0bdf786e8fe941ba	2026-10-19T21:46:11Z	25.56	style-review	dcfs-style-reviewer	cl
 a5056db8559f0d2d9	2026-10-19T21:49:25Z	25.56	mechanical	dcfs-mechanical	haiku	low	93304	14								8	56	68810	24430
 afa29d4525e7ecdb1	2026-10-19T21:49:36Z	Clerk batch 49	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1345943	126								50	8296	1273028	64569
 ee95678d	2026-10-19T22:17:25Z	25.54		agy	gemini-3.8-flash	medium	2346804	362	1						foreman mode=orchestrator; parent=25.54; worker=176370; review1=93792; failed	240863	29299	2076642	
-afa012e8ba6829974	2026-10-20T01:05:25Z	main-check	implementation	dcfs-implementer	claude-sonnet-5-5	medium													
+afa012e8ba6829974	2026-10-20T01:05:25Z	main-check	implementation	dcfs-implementer	claude-sonnet-5-5	medium	7106682	5143								168	925	6406211	699378
 ab5e9d5543a28350d	2026-10-20T01:05:43Z	Dashboard upload with new skill	mechanical	dcfs-mechanical	haiku	low	342394	39								22	101	293042	49229
 ac51257517a40fbbd	2026-10-20T01:05:43Z	Clerk batch 50	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1746261	120								74	5886	1682753	57548
+a465c7711b847099e	2026-10-20T01:41:16Z	25.58	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	2127132	3098								66	1487	1959635	165944
+a6f21653d11578335	2026-10-20T02:31:26Z	25.58	mechanical	dcfs-mechanical	haiku	low	69574	18								6	16	45051	24501
+ad1074a5903b7fa4f	2026-10-20T02:32:05Z	25.58	mechanical	dcfs-mechanical	haiku	low	175484	29								14	72	154621	20777
+a2949458e17c2d1c6	2026-10-20T02:32:21Z	Clerk batch 51 incl. Google-is-law rule	implementation	dcfs-implementer	claude-sonnet-5-5	medium	429464	63								24	176	393478	35786
+a1cadfa5c4712b24e	2026-10-20T02:32:42Z	25.58	mechanical	dcfs-mechanical	haiku	low	69010	10								6	46	50980	17978
