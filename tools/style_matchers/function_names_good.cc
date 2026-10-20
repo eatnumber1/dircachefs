@@ -17,6 +17,14 @@ class Widget {
   bool operator==(const Widget &) const { return true; }
   int CamelMethod() const { return 2; }
   static int StaticMethod() { return 3; }
+  // Google's accessors: a getter takes no parameter, a setter is set_name.
+  [[nodiscard]] int size() const { return size_; }
+  [[nodiscard]] int &count() { return count_; }
+  void set_size(int value) { size_ = value; }
+
+ private:
+  int size_ = 0;
+  int count_ = 0;
 };
 
 namespace syscalls {

@@ -199,9 +199,16 @@ use it as design guidance rather than firm rules."
     no function names, and the clang-query matcher
     `tools/style_matchers/function_names.query` does: a function whose
     name starts with a lower-case letter or an underscore is reported
-    unless it is in namespace `dcfs::syscalls` in one of the `syscalls*`
-    files, or a link-time fake the linker names (`__wrap_x`). Step 25.41
-    moves the exception to the members of `Syscalls` and its
+    unless it is in namespace `dcfs::syscalls` in one of
+    `dcfs/syscalls{,_backing,_process}.{h,cc}`, a link-time fake the linker
+    names (`__wrap_x`, `__real_x`), an override, or an accessor. Lower-case
+    accessors and mutators are permitted, as Google's guide allows (russ,
+    2026-10-19: "Google's style guide stands. Lowerecase getters and
+    setters are permitted."); the matcher recognizes them mechanically: a
+    non-static member function with no parameter (a getter, const or not),
+    or one named `set_x` with exactly one parameter (a setter). Other
+    lower-case methods, static ones and free functions are reported. Step
+    25.41 moves the syscall exception to the members of `Syscalls` and its
     implementations. Classes, constants (`kName`), members (`name_`),
     namespaces and enumerators are checked by `readability-identifier-naming`
     (`.clang-tidy`).

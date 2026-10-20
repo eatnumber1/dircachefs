@@ -21,8 +21,6 @@ bench/process.cc|DropCaches|cert-err33-c|1
 bench/process.cc|IsMounted|readability-use-anyofallof|1
 bench/process.cc|SleepMicros|google-runtime-int|1
 bench/process.h|<file scope>|google-runtime-int|1
-bench/process.h|mnt|function_names|1
-bench/process.h|pid|function_names|1
 bench/tree.cc|BigPath|cert-err33-c|1
 bench/tree.cc|EntryPath|cert-err33-c|1
 bench/tree.cc|MakeTree|cert-err33-c|1
@@ -104,8 +102,6 @@ dcfs/dir_cache_fs.cc|DirCacheFS::SharedFdOf|readability-avoid-nested-conditional
 dcfs/dir_cache_fs.cc|DirCacheFS::Write|misc-unused-parameters|1
 dcfs/dir_cache_fs.cc|ErrnoName|misc-include-cleaner|1
 dcfs/dir_cache_fs.cc|XattrsChangedBySetattr|readability-implicit-bool-conversion|2
-dcfs/dir_cache_fs.h|bookkeeping|function_names|1
-dcfs/dir_cache_fs.h|context|function_names|1
 dcfs/dir_cache_fs_test.cc|<file scope>|misc-include-cleaner|2
 dcfs/dir_cache_fs_test.cc|<file scope>|misc-unused-parameters|1
 dcfs/dir_cache_fs_test.cc|BackingAtime|misc-include-cleaner|1
@@ -161,8 +157,6 @@ dcfs/escape_test.cc|TEST|capturing_mutating_lambda|1
 dcfs/escape_test.cc|TEST|readability-function-cognitive-complexity|1
 dcfs/escape_test.cc|TEST|readability-isolate-declaration|1
 dcfs/fd.cc|FileDescriptor::~FileDescriptor|bugprone-exception-escape|1
-dcfs/fd.cc|FileDescriptor::valid|function_names|1
-dcfs/fd.h|<file scope>|function_names|1
 dcfs/fd_test.cc|OpenTmpdir|concurrency-mt-unsafe|1
 dcfs/fd_test.cc|TEST|bugprone-use-after-move|2
 dcfs/file_handle_test.cc|SetUp|concurrency-mt-unsafe|1
@@ -177,8 +171,6 @@ dcfs/fuse_ops.cc|Ioctl|misc-unused-parameters|1
 dcfs/fuse_request.cc|FuseRequest::FuseRequest|performance-move-const-arg|1
 dcfs/fuse_request.cc|FuseRequest::~FuseRequest|bugprone-exception-escape|1
 dcfs/fuse_request.cc|FuseRequest::~FuseRequest|misc-include-cleaner|1
-dcfs/fuse_request.h|errno_sent|function_names|1
-dcfs/fuse_request.h|replied|function_names|1
 dcfs/fuse_request_channel_test.cc|<file scope>|misc-include-cleaner|2
 dcfs/fuse_request_channel_test.cc|FakeWritev|misc-include-cleaner|1
 dcfs/fuse_request_channel_test.cc|RunGetattr|bugprone-invalid-enum-default-initialization|2
@@ -226,7 +218,6 @@ dcfs/mount_dcfs.h|<file scope>|google-runtime-int|1
 dcfs/mount_dcfs_test.cc|ABSL_FLAG|misc-use-internal-linkage|2
 dcfs/mount_dcfs_test.cc|TEST|bugprone-unchecked-optional-access|2
 dcfs/mount_dcfs_test.cc|TEST|google-runtime-int|2
-dcfs/mount_fds.h|size|function_names|1
 dcfs/mount_options.cc|HasDefaultPermissions|readability-use-anyofallof|1
 dcfs/mount_options.cc|HasOption|readability-use-anyofallof|1
 dcfs/mounts_below.cc|HasRo|readability-use-anyofallof|1
@@ -247,9 +238,8 @@ dcfs/sqlite.cc|Connection::RunTransaction|happy_path_nested|1
 dcfs/sqlite.cc|Connection::~Connection|bugprone-exception-escape|1
 dcfs/sqlite.cc|Statement::Bind|performance-no-int-to-ptr|2
 dcfs/sqlite.cc|Statement::Step|readability-avoid-nested-conditional-operator|1
-dcfs/sqlite.cc|Connection::set_observer|function_names|1
 dcfs/sqlite.h|Statement::BindAll|capturing_mutating_lambda|1
-dcfs/sqlite.h|<file scope>|function_names|1
+# value_type: the member type name std traits expect.
 dcfs/sqlite.h|<file scope>|readability-identifier-naming|1
 dcfs/sqlite_test.cc|TEST|capturing_mutating_lambda|4
 dcfs/sqlite_test.cc|TEST|misc-include-cleaner|1
@@ -257,7 +247,6 @@ dcfs/sqlite_test.cc|TEST_F|bugprone-unchecked-optional-access|1
 dcfs/sqlite_test.cc|TestTmpFile|concurrency-mt-unsafe|1
 dcfs/startup_channel.cc|AwaitReportAndExit|misc-include-cleaner|1
 dcfs/startup_channel.cc|DescribeWaitStatus|misc-include-cleaner|3
-dcfs/startup_channel.h|pending|function_names|1
 dcfs/status.cc|StatusCodeToErrno|misc-include-cleaner|1
 dcfs/status_test.cc|TEST|misc-include-cleaner|2
 dcfs/syscalls.cc|clock_gettime|misc-include-cleaner|2
@@ -268,12 +257,14 @@ dcfs/syscalls.cc|poll|google-runtime-int|3
 dcfs/syscalls.cc|realpath|misc-include-cleaner|1
 dcfs/syscalls.cc|setfsgid|modernize-use-integer-sign-comparison|1
 dcfs/syscalls.cc|setfsuid|modernize-use-integer-sign-comparison|1
+# extern "C" capget and capset: declarations of glibc's own names, outside dcfs::syscalls.
 dcfs/syscalls.cc|<file scope>|function_names|2
 dcfs/syscalls.h|<file scope>|google-runtime-int|2
 dcfs/syscalls_backing.cc|mount|google-runtime-int|1
 dcfs/syscalls_backing.cc|renameat2|misc-include-cleaner|1
 dcfs/syscalls_backing.h|<file scope>|google-runtime-int|3
 dcfs/syscalls_backing.h|ioctl|google-runtime-int|1
+# linux_dirent64: the kernel's name for the getdents64 record, restated here.
 dcfs/syscalls_backing.h|<file scope>|readability-identifier-naming|1
 dcfs/syscalls_process.cc|<file scope>|modernize-deprecated-headers|1
 dcfs/syscalls_process_test.cc|<file scope>|modernize-deprecated-headers|1
@@ -288,7 +279,6 @@ dcfs/testonly/cost_counter.cc|CostCounter::BackingCall|misc-unused-parameters|3
 dcfs/testonly/cost_counter.cc|CostCounter::CheckRequestBegin|misc-unused-parameters|2
 dcfs/testonly/cost_counter.cc|CostCounter::CheckRequestEnd|misc-unused-parameters|3
 dcfs/testonly/cost_counter.cc|CostCounter::CheckRunStarted|misc-unused-parameters|1
-dcfs/testonly/cost_counter.h|counts|function_names|1
 dcfs/testonly/fault_syscall_before_phase1.cc|WrapUnlinkAt|misc-unused-parameters|5
 dcfs/testonly/files.h|ListTree|misc-no-recursion|1
 dcfs/testonly/invariant_checker.cc|HasDirtyRow|capturing_mutating_lambda|1
@@ -309,9 +299,7 @@ dcfs/testonly/invariant_checker.cc|InvariantChecker::OnUpdate|misc-unused-parame
 dcfs/testonly/invariant_checker.cc|InvariantChecker::SeeEveryDirtyDelete|capturing_mutating_lambda|1
 dcfs/testonly/invariant_checker.cc|InvariantChecker::Seen|bugprone-return-const-ref-from-parameter|1
 dcfs/testonly/invariant_checker.cc|NoneDirtyUnlessAny|capturing_mutating_lambda|1
-dcfs/testonly/invariant_checker.h|violations|function_names|1
 dcfs/testonly/main_recorder.cc|MainProtocolEvents|concurrency-mt-unsafe|2
-dcfs/testonly/thread_without_cap_fsetid.h|tid|function_names|1
 dcfs/testonly/trace_recorder.cc|FdJson|readability-avoid-nested-conditional-operator|2
 dcfs/testonly/trace_recorder.cc|JsonStr|cert-err33-c|1
 dcfs/testonly/trace_recorder.cc|TraceRecorder::After|readability-function-cognitive-complexity|1
@@ -351,14 +339,10 @@ dcfs/umount_helper.cc|UmountAndWait|misc-include-cleaner|2
 dcfs/umount_helper.cc|UmountAndWait|readability-function-cognitive-complexity|1
 dcfs/umount_helper_test.cc|ExpectWaitsForTheHolder|misc-include-cleaner|2
 dcfs/umount_helper_test.cc|LockDir|concurrency-mt-unsafe|1
-test/qemu/guest/caller_capabilities_test.cc|Native|readability-identifier-naming|1
-test/qemu/guest/caller_capabilities_test.cc|Src|readability-identifier-naming|1
-test/qemu/guest/kernel_facts_test.cc|Native|readability-identifier-naming|1
-test/qemu/guest/kernel_facts_test.cc|Src|readability-identifier-naming|1
 tools/banned_symbols_fixture.cc|main|concurrency-mt-unsafe|1
 tools/banned_symbols_fixture.cc|main|misc-include-cleaner|1
 tools/banned_symbols_fixture.cc|main|readability-implicit-bool-conversion|1
+# the fixture defines the banned libc symbol by its name on purpose.
 tools/banned_symbols_fixture.cc|nftw64|function_names|1
-tools/test_first.cc|name|function_names|1
-tools/test_first.cc|rule|function_names|1
+# C test helpers (watch_pid, cmd_waitexit) with C naming, shared with testutil.c.
 tools/testutil.h|<file scope>|function_names|2

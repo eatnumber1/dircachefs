@@ -53,14 +53,14 @@ constexpr std::string_view kMnt = "/mnt";
 // The backing directory (on the test's disk) and, inside it, the directory
 // dcfs never touches.
 const std::string &Src() {
-  static const absl::NoDestructor<std::string> src(
+  static const absl::NoDestructor<std::string> kSrc(
       absl::StrCat(TestTmp(), "/src"));
-  return *src;
+  return *kSrc;
 }
 const std::string &Native() {
-  static const absl::NoDestructor<std::string> native(
+  static const absl::NoDestructor<std::string> kNative(
       absl::StrCat(Src(), "/native"));
-  return *native;
+  return *kNative;
 }
 
 std::string Path(std::string_view dir, std::string_view name) {

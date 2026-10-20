@@ -7,14 +7,17 @@ int lower_free_function() { return 1; }  // HIT
 
 class Widget {
  public:
-  int lower_method() const { return 2; }  // HIT
+  int lower_method(int x) const { return x; }  // HIT
   static int lower_static() { return 3; }  // HIT
   int CamelMethod() const { return 4; }
-  int out_lower() const;  // HIT
+  int compute(int x) { return x; }  // HIT
+  void set_two(int, int) {}  // HIT
+  static int static_getter() { return 3; }  // HIT
+  int out_lower(int x) const;  // HIT
   friend int friend_lower(const Widget &) { return 7; }  // HIT
 };
 
-int Widget::out_lower() const { return 8; }  // HIT
+int Widget::out_lower(int x) const { return x; }  // HIT
 
 // A project macro does not hide a lower-case name.
 #define MINE(name) \

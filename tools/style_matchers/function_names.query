@@ -6,13 +6,15 @@
 # 25.41 moves the exception to the members of the Syscalls interface and its
 # implementations. clang-tidy cannot scope an exception to a namespace, so
 # readability-identifier-naming does not check functions (.clang-tidy) and
-# this matcher does. Not reported: the names the language gives, that is
-# constructors, destructors, conversion functions, operators (whose names
-# the regex does not match), main, implicit functions and instantiations of
-# templates, an override of a virtual (the base is checked, an external
-# one such as what() is not ours to name), what gtest's
-# INSTANTIATE_TEST_SUITE_P expands to, and the link-time fakes the linker names __wrap_x and __real_x
-# (--wrap).
+# this matcher does. Not reported: the names the language gives (constructors,
+# destructors, conversion functions, operators, main), implicit functions,
+# instantiations of templates, an override of a virtual (the base is checked;
+# an external one such as what() is not ours to name), what gtest's
+# INSTANTIATE_TEST_SUITE_P expands to, the link-time fakes the linker names
+# (__wrap_x, __real_x), and an accessor in Google's sense (russ, 2026-10-19:
+# "Google's style guide stands. Lowerecase getters and setters are
+# permitted."): a non-static member function with no parameter, or named
+# set_x with one parameter.
 # A function whose name begins with a lower-case letter or an underscore,
 # outside the exception.
-match functionDecl(isExpansionInFileMatching("(^|/)(dcfs|tools|bench|test/qemu/guest)/"), matchesName("(^|::)[a-z_][A-Za-z0-9_]*$"), unless(anyOf(isImplicit(), isMain(), matchesName("(^|::)__(wrap|real)_"), cxxMethodDecl(isOverride()), isExpandedFromMacro("INSTANTIATE_TEST_SUITE_P"), cxxConstructorDecl(), cxxDestructorDecl(), cxxConversionDecl(), isTemplateInstantiation(), allOf(hasDeclContext(namespaceDecl(hasName("::dcfs::syscalls"))), isExpansionInFileMatching("(^|/)(dcfs/syscalls(_backing|_process)?[.](cc|h)|tools/style_matchers/function_names_good[.]cc)$"))))).bind("function_names")
+match functionDecl(isExpansionInFileMatching("(^|/)(dcfs|tools|bench|test/qemu/guest)/"), matchesName("(^|::)[a-z_][A-Za-z0-9_]*$"), unless(anyOf(isImplicit(), isMain(), matchesName("(^|::)__(wrap|real)_"), cxxMethodDecl(isOverride()), cxxMethodDecl(unless(isStaticStorageClass()), anyOf(parameterCountIs(0), allOf(matchesName("(^|::)set_[a-z0-9_]*$"), parameterCountIs(1)))), isExpandedFromMacro("INSTANTIATE_TEST_SUITE_P"), cxxConstructorDecl(), cxxDestructorDecl(), cxxConversionDecl(), isTemplateInstantiation(), allOf(hasDeclContext(namespaceDecl(hasName("::dcfs::syscalls"))), isExpansionInFileMatching("(^|/)(dcfs/syscalls(_backing|_process)?[.](cc|h)|tools/style_matchers/function_names_good[.]cc)$"))))).bind("function_names")
