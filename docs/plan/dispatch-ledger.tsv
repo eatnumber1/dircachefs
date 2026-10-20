@@ -277,7 +277,7 @@ a0bdf786e8fe941ba	2026-10-19T21:46:11Z	25.56	style-review	dcfs-style-reviewer	cl
 a5056db8559f0d2d9	2026-10-19T21:49:25Z	25.56	mechanical	dcfs-mechanical	haiku	low	93304	14								8	56	68810	24430
 afa29d4525e7ecdb1	2026-10-19T21:49:36Z	Clerk batch 49	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1345943	126								50	8296	1273028	64569
 ee95678d	2026-10-19T22:17:25Z	25.54		agy	gemini-3.8-flash	medium	2346804	362	1						foreman mode=orchestrator; parent=25.54; worker=176370; review1=93792; failed	240863	29299	2076642	
-afa012e8ba6829974	2026-10-20T01:05:25Z	main-check	implementation	dcfs-implementer	claude-sonnet-5-5	medium	8058384	6122								184	1026	7213009	844165
+afa012e8ba6829974	2026-10-20T01:05:25Z	main-check	implementation	dcfs-implementer	claude-sonnet-5-5	medium	32394375	15315								402	2170	28701406	3690397
 ab5e9d5543a28350d	2026-10-20T01:05:43Z	Dashboard upload with new skill	mechanical	dcfs-mechanical	haiku	low	342394	39								22	101	293042	49229
 ac51257517a40fbbd	2026-10-20T01:05:43Z	Clerk batch 50	mechanical	dcfs-mechanical	claude-haiku-5-5	low	1746261	120								74	5886	1682753	57548
 a465c7711b847099e	2026-10-20T01:41:16Z	25.58	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	2230908	4492								70	1575	1966638	262625
@@ -287,3 +287,7 @@ a2949458e17c2d1c6	2026-10-20T02:32:21Z	Clerk batch 51 incl. Google-is-law rule	i
 a1cadfa5c4712b24e	2026-10-20T02:32:42Z	25.58	mechanical	dcfs-mechanical	haiku	low	69010	10								6	46	50980	17978
 a18a40a7efe6c98e6	2026-10-20T02:47:41Z	25.58	style-review	dcfs-style-reviewer	claude-sonnet-5-5	high	742706	703								34	265	629354	113053
 a94aba143bca182ba	2026-10-20T03:09:50Z	Clerk batch 52	implementation	dcfs-implementer	claude-sonnet-5-5	medium	153651	42								10	76	120010	33555
+ac350602c1170d8e1	2026-10-20T03:54:22Z	Dashboard upload	mechanical	dcfs-mechanical	haiku	low	491672	42								24	297	441145	50206
+a83fecceb85a1c022	2026-10-20T03:59:00Z	ledger-restore	implementation	dcfs-implementer	claude-sonnet-5-5	medium	334573	126								22	644	306664	27243
+a6c171887e7154eeb	2026-10-20T04:11:27Z	25.58	review	dcfs-reviewer	claude-opus-5-5	high	4010353	494								102	486	3881848	127917
+ac35a0245638b564a	2026-10-20T05:21:30Z	Clerk batch 53	mechanical	dcfs-mechanical	claude-haiku-5-5	low	856595	93								34	8524	787594	60443
