@@ -25,6 +25,10 @@ that holds its reasoning. `AGENTS.md` says which indexes to read for which task.
   [style 1.1](/docs/style.md#rule-no-uapi-copies),
   [style 1.1 (russ, 2026-10-18)](/docs/style.md#rule-kernel-headers-match-test-kernel)
   (its one exception: the `USER_NS_INIT_INO` `#ifndef` block, russ 2026-10-18)
+- Prefer `consteval`, or `constexpr`, whenever feasible, so bugs are emitted
+  at compile time instead of needing a test; overrides Google's "avoid
+  complexifying function definitions" only where the design is not distorted
+  (russ, 2026-10-19). [style 1.1](/docs/style.md#rule-prefer-consteval)
 - Warnings are errors: `-Werror` today, `-Weverything -Werror` from phase 7.
   [style 1.1](/docs/style.md#rule-warnings-are-errors)
 - Narrowing Google's C++ rules:

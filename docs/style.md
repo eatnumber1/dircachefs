@@ -144,6 +144,23 @@ use it as design guidance rather than firm rules."
   type system, `constexpr`, `consteval`. An operation selector known at the
   call site (fcntl's `cmd`, an ioctl request) is a template argument; a
   runtime overload exists only where the value must come from a variable.
+- <a id="rule-prefer-consteval"></a>
+  **Prefer `consteval`, or `constexpr` where the function must also run at
+  runtime, whenever feasible** (russ, 2026-10-19: "consteval (or constexpr)
+  is preferred when feasible, as that moves bugs that must be tested for to
+  being deterministically emitted at compile time."). A bug a test would
+  have to catch is instead a compile error, every time. It enables
+  `static_assert` tests of `constexpr` code and `consteval` constructors
+  that reject a bad constant (the cases under
+  [types over comments](#rule-types-over-comments)). Google's C++ guide
+  says to "avoid complexifying function definitions to enable their use
+  with `constexpr`"; this rule overrides that where the function can be
+  made constant-evaluable without distorting the design: the same
+  straightforward code, no contortions to satisfy the evaluator, no
+  weakening of an interface. Where only a contortion would do, leave the
+  function runtime and test it. Google's ban on using `constexpr` or
+  `consteval` to force inlining stands. See also
+  [move logic to compile time](#rule-compile-time-logic).
 - <a id="rule-mechanize-rules"></a>
   **Mechanize every rule you can** (russ, 2026-10-09, asked whether the three
   syscall-wrapper libraries `syscalls.h`, `syscalls_backing.h` (with a golden
