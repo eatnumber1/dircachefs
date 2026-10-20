@@ -70,8 +70,11 @@ reasoning. `AGENTS.md` says which indexes to read for which task.
   [process](/docs/plan/process.md#rule-borrowed-files-in-full)
 - Docker on this machine is production (russ, 2026-10-06).
   [CLAUDE.md](/CLAUDE.md#rule-docker-is-production)
-- No background polling loops, and no `pkill -f` of a pattern in your own
-  command line. [CLAUDE.md](/CLAUDE.md#rule-no-polling-loops),
+- Polling loops are banned only in checked-in code (russ, 2026-10-20: "Polling
+  loops are only banned in checked-in code. Agents may use polling loops while
+  working on a change."). Never leave an orphaned background loop, and no
+  `pkill -f` of a pattern in your own command line.
+  [CLAUDE.md](/CLAUDE.md#rule-no-polling-loops),
   [CLAUDE.md](/CLAUDE.md#rule-no-pkill-self)
 - zsh has `noclobber`: overwrite with `>|`; `make` and `diff` are broken
   functions. [process](/docs/plan/process.md#rule-zsh-noclobber)

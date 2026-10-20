@@ -6,7 +6,7 @@ load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 # README.md. The wrapper script is the only place those settings live. It
 # is generated so that it can name the act binary's runfiles path (a
 # binary's `env` attribute does not apply when the script is run directly
-# from bazel-bin, which is how `sg docker -c` callers run it).
+# from bazel-bin, which is how callers run it).
 genrule(
     name = "act_sh",
     srcs = [

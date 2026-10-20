@@ -31,12 +31,12 @@ bazel run //third_party/act -- -j fast          # or presubmit, full
 bazel run //third_party/act -- --list
 ```
 
-or, from a shell that is not yet in the `docker` group (and builds first,
-so the Bazel server is not started without the `kvm` group):
+or, building first (so the Bazel server is not started without the `kvm`
+group):
 
 ```
 bazel build //third_party/act
-sg docker -c 'bazel-bin/third_party/act/act -j fast'
+bazel-bin/third_party/act/act -j fast
 ```
 
 Everything after `--` goes to act. The wrapper (`act.sh.tpl`, the only place

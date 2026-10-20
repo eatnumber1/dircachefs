@@ -53,11 +53,12 @@ up one row (implementer to protocol, mechanical to implementer).
   switching: see the process index (`docs/rules/index-process.md`, "Running
   Bazel").
 - <a id="rule-no-polling-loops"></a>
-  Never leave a background polling loop (`while pgrep -f ...; do sleep`,
-  `until grep -q MARKER log; do sleep`): the pattern matches the loop's
-  own command line, or the marker never arrives once the run it waits for
-  dies. About 90 such orphans were found on 2026-10-07. Wait in the
-  foreground with the tool's timeout and rerun instead.
+  Polling loops are only banned in checked-in code. Agents may use polling
+  loops while working on a change (russ's words). What stays forbidden is
+  leaving an orphaned background loop: one that outlives its run, or whose
+  pattern matches its own command line (`while pgrep -f ...; do sleep`,
+  `until grep -q MARKER log; do sleep`), since the marker never arrives once
+  the run it waits for dies. About 90 such orphans were found on 2026-10-07.
 - <a id="rule-no-pkill-self"></a>
   Never `pkill -f` / `pgrep -f` with a pattern that also appears in your
   own command line: it matches (and kills) your own shell. Prefer
@@ -75,9 +76,7 @@ up one row (implementer to protocol, mechanical to implementer).
   prune`, `docker image prune`, `docker volume prune`, `docker network
   prune`, `docker rm/rmi` on anything not ours, or change the daemon's
   configuration. Containers we start (e.g. `act` jobs) carry a label
-  (`--label dcfs.owner=act`) and `--rm`; clean up only by that label. Run
-  Docker commands through `sg docker -c '...'` (the login session predates
-  joining the `docker` group).
+  (`--label dcfs.owner=act`) and `--rm`; clean up only by that label.
 - The shell is zsh with `noclobber` (`docs/plan/process.md`, "zsh with
   `noclobber`").
 - <a id="rule-commit-to-main"></a>

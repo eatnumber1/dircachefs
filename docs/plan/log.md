@@ -4767,3 +4767,24 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   without `error_code`, throwing `new`, `bad_function_call`, `optional::value`,
   variant `get`) replaced by non-throwing forms, and a `docs/style.md` rule
   written by the step itself.
+- 2026-10-20, clerk batch 56: CLAUDE.md `rule-no-polling-loops` reworded to
+  russ's words ("Polling loops are only banned in checked-in code. Agents may
+  use polling loops while working on a change."): what stays forbidden is an
+  orphaned background loop, or one whose pattern matches its own command
+  line. Index line in `docs/rules/index-process.md` matches. 25.62's
+  russ-gated list does not name CLAUDE.md, so no change there.
+- 2026-10-20, clerk batch 56: russ, "`sg docker` is no longer necessary
+  anywhere." Dropped from CLAUDE.md `rule-docker-is-production`, the act
+  README, `third_party/act/BUILD.bazel`, `third_party/act/act.sh.tpl`, and
+  a dated note added to `docs/plan/phases/05-ci.md` (history left as is).
+  25.67's hook list has no docker refusal. This log's 2026-10-06 entry is
+  history and stays.
+- 2026-10-20, clerk batch 56: russ approved ("Yes I agree. Also adopt the
+  other ideas ... and as you said, schedule the literature review."). Phase 25
+  gains 25.67 (pre-tool-use hooks enforce process rules, first after the
+  reset, after 25.63 and 25.64), 25.68 (remediation-prompt error messages,
+  after 25.27), 25.69 (scheduled cleanup agents after each quota reset, after
+  25.27), 25.70 (generated harness measurements, after 25.27), 25.71
+  (literature survey, Gemini Flash via foreman, Thu 2026-10-22 after 20:07 PDT,
+  in-session cron at 20:23). Queued in M0 and in the README queue as 10a,
+  11e and 11f.

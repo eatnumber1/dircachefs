@@ -6,9 +6,8 @@
 #   bazel run //third_party/act -- -j presubmit
 #   bazel run //third_party/act -- -j full
 #
-# Arguments after `--` go to act. Run it from the repository root, in a
-# shell that is in the `docker` group (`sg docker -c '...'` if the login
-# session predates the group). Docker on this machine may be a production
+# Arguments after `--` go to act. Run it from the repository root. Docker on
+# this machine may be a production
 # system: act only creates containers and volumes of its own and removes them
 # afterwards; nothing here prunes or modifies anything else.
 set -euo pipefail

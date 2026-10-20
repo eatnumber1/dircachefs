@@ -3171,3 +3171,96 @@ Scope:
   with its index line. The step writes that rule; the clerk does not.
 
 Owner: not yet assigned. Dependencies: none.
+
+## 25.67 Hooks enforce process rules (russ approved 2026-10-20; queued)
+
+russ approved 2026-10-20: "Yes I agree. Also adopt the other ideas ... and as
+you said, schedule the literature review." A rule that only lives in prose
+is missed; a hook refuses the command before it runs. Survey Claude Code's
+hook features first (`rule-survey-and-name-mechanism`, process.md), and the
+brief names the mechanism and why the alternatives do not fit.
+
+Scope: a pre-tool-use hook on Bash refuses these, and each refusal message
+cites its rule anchor and gives the fix:
+- (a) `pkill -f` and `pgrep -f` whose pattern matches their own command line
+  (`rule-no-pkill-self`); the fix is an anchored pattern or a kill by PID.
+- (b) a Bazel command run from the main checkout by a lane agent
+  (`rule-cd-into-lane`); the fix is a `cd` into the lane.
+- (c) `bazel run` with `--config=fast` (the step adds a rule anchor in
+  process.md if no existing rule names it).
+- (d) `git reset --hard` on a dirty tree (the step adds a rule anchor in
+  process.md if no existing rule names it).
+
+Not refused: polling loops (russ, 2026-10-20: polling is banned only in
+checked-in code; `rule-no-polling-loops` now says so). Not refused: Docker
+without `sg docker` (russ, 2026-10-20: "`sg docker` is no longer necessary
+anywhere.").
+
+Test first: each hook has a test with one refused and one allowed command
+per case; the refused cases fail on the current tree (no hook yet).
+
+Owner: not yet assigned. Dependencies: 25.63, 25.64.
+
+## 25.68 Errors are remediation prompts (russ approved 2026-10-20; queued)
+
+russ approved 2026-10-20: "Yes I agree. Also adopt the other ideas ...".
+Every error from `repo_shape`, `style_matchers`, `approved_macros`,
+`commit_subjects.sh` and the clang-tidy wrapper states the rule, links its
+anchor and gives a one-line fix. A meta-test asserts that each error message
+carries an anchor. Mostly mechanical.
+
+Test first: the meta-test fails on the current messages that lack an anchor,
+then each message is fixed.
+
+Owner: dcfs-mechanical (Haiku). Dependencies: 25.27.
+
+## 25.69 Scheduled cleanup agents after quota resets (russ approved 2026-10-20)
+
+russ approved 2026-10-20: "Yes I agree. Also adopt the other ideas ...".
+Three cleanup agents run just after each weekly quota reset, each reporting
+to the orchestrator:
+- (a) doc gardening: `docs/design.md`, `docs/testing.md` and the READMEs
+  against the code;
+- (b) unenforced-rule finder: rules in the `docs/rules/` indexes with no
+  check, each with a proposed enforcement;
+- (c) stale plan entries.
+
+The step decides the mechanism (in-session cron, a hook or a script) by
+survey, as `rule-survey-and-name-mechanism` requires.
+
+Test first: a seeded stale doc line, a seeded unenforced rule and a seeded
+stale plan entry each produce a report line naming them.
+
+Owner: dcfs-implementer. Dependencies: 25.27.
+
+## 25.70 Harness measurements, generated (russ approved 2026-10-20; queued)
+
+russ approved 2026-10-20: "Yes I agree. Also adopt the other ideas ...".
+A generated report (a tool under `tools/`, not hand-written) from
+`docs/plan/review-findings.tsv` and `docs/plan/dispatch-ledger.tsv` gives:
+- the first-review acceptance rate and rounds per step, by agent type,
+  model, brief shape and slice size;
+- findings by category over time;
+- tokens per merged line.
+
+Briefs are tuned from the report.
+
+Test first: a fixture ledger and findings file with known counts make the
+tool print the known rates (fails first, with no tool).
+
+Owner: dcfs-implementer. Dependencies: 25.27.
+
+## 25.71 Harness literature survey (russ approved 2026-10-20; Thu 2026-10-22)
+
+russ approved 2026-10-20: "... and as you said, schedule the literature
+review." Survey harness engineering for coding agents in industry and
+academia: OpenAI harness engineering, Anthropic long-running harnesses,
+SWE-agent's agent-computer interface, Agentless, sampling with test
+selection, and others.
+
+Run on Gemini Flash via `foreman --single --read-only`, Thu 2026-10-22 after
+20:07 PDT (an in-session cron is set for 20:23). Output to
+`docs/plan/notes/harness-survey-2026-10-22.md`, with recommendations against
+dcfs's current practice. Log it in `docs/plan/log.md`.
+
+Owner: the orchestrator, through the `dcfs-foreman` skill. Dependencies: none.
