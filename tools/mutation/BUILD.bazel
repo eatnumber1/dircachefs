@@ -187,3 +187,10 @@ py_test(
     ],
     deps = [":mutate_lib"],
 )
+
+# The C++ sources, for //tools:approved_macros_test.
+filegroup(
+    name = "cxx_sources",
+    srcs = glob(["*.cc", "*.h"]),
+    visibility = ["//tools:__pkg__"],
+)

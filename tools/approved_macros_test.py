@@ -4,8 +4,13 @@
 Arguments: the list (tools/approved_macros.txt) and .clang-tidy.
 """
 
+import contextlib
+import io
+import os
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 import approved_macros
 
@@ -69,6 +74,77 @@ class ApprovedMacrosTest(unittest.TestCase):
             approved_macros.parse("A|exempt|2026-10-19|w\nA|exempt|2026-10-19|w")
 
 
+class MainTest(unittest.TestCase):
+
+    def test_write_regenerates_the_config_and_no_flag_is_usage(self):
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, "tools"))
+            with open(os.path.join(root, "tools/approved_macros.txt"), "w") as f:
+                f.write("NAME|exempt|2026-10-19|russ\n")
+            config = os.path.join(root, ".clang-tidy")
+            with open(config, "w") as f:
+                f.write("Checks: '-*'\n  %s: 'drifted'\n  %s: 'drifted'\n"
+                        % (approved_macros.ALLOWED_KEY,
+                           approved_macros.IGNORED_KEY))
+            entries = approved_macros.parse("NAME|exempt|2026-10-19|russ\n")
+            self.assertTrue(approved_macros.problems(entries, read(config)))
+            with mock.patch.dict(os.environ,
+                                 {"BUILD_WORKSPACE_DIRECTORY": root}):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(2, approved_macros.main(["x"]))
+                self.assertEqual(0, approved_macros.main(["x", "--write"]))
+            self.assertEqual([], approved_macros.problems(entries,
+                                                          read(config)))
+
+
+LIST = approved_macros.parse(
+    "KNOWN|exempt|2026-10-19|russ\nSTALE|exempt|2026-10-19|russ\n")
+
+
+def scan(**files):
+    return approved_macros.scan_problems(files, LIST)
+
+
+class ScanTest(unittest.TestCase):
+    """The scan of the sources: clang-tidy's macro-usage is silent on many
+    macros, so every definition is compared with the list."""
+
+    def test_a_macro_the_check_does_not_see_is_reported(self):
+        for body in ("#define DCFS_PAREN (1 + 2)", "#define DCFS_EMPTY",
+                     "#define DCFS_PASTE(x, y) x##y", "#define DCFS_STR(x) #x",
+                     "#define DCFS_IDENT foo", "  #  define DCFS_TYPE long"):
+            problems = scan(**{"a.cc": body + "\n#define KNOWN\n"})
+            self.assertTrue(any("DCFS_" in p and "a.cc" in p
+                                for p in problems), body)
+
+    def test_a_stale_entry_is_reported(self):
+        problems = scan(**{"a.cc": "#define KNOWN 1\n"})
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("STALE", problems[0])
+
+    def test_a_real_guard_is_not_reported(self):
+        guard = ("// Comment.\n#ifndef DCFS_A_H_\n#define DCFS_A_H_\n"
+                 "#define KNOWN 1\n#define STALE 1\n#endif\n")
+        self.assertEqual([], scan(**{"a.h": guard}))
+
+    def test_a_name_ending_in_h_that_is_not_a_guard_is_reported(self):
+        not_first = ("#define KNOWN 1\n#define STALE 1\n#ifndef DCFS_B_H_\n"
+                     "#define DCFS_B_H_\n#endif\n")
+        mismatch = ("#ifndef DCFS_C_H_\n#define DCFS_D_H_\n#define KNOWN 1\n"
+                    "#define STALE 1\n#endif\n")
+        lone = "#define DCFS_E_H_\n#define KNOWN 1\n#define STALE 1\n"
+        for text in (not_first, mismatch, lone):
+            problems = scan(**{"a.h": text})
+            self.assertTrue(any("_H_" in p for p in problems), text)
+
+    def test_the_tree_defines_what_the_list_names(self):
+        files = {path: read(path) for path in PATHS["sources"]}
+        problems = approved_macros.scan_problems(
+            files, approved_macros.parse(read(PATHS["list"])))
+        if problems:
+            self.fail("\n" + "\n".join(problems))
+
+
 def main():
     rest = [sys.argv[0]]
     for arg in sys.argv[1:]:
@@ -76,6 +152,8 @@ def main():
             PATHS["list"] = arg
         elif arg.endswith(".clang-tidy"):
             PATHS["config"] = arg
+        elif arg.endswith((".cc", ".h")):
+            PATHS.setdefault("sources", []).append(arg)
         else:
             rest.append(arg)
     unittest.main(argv=rest)

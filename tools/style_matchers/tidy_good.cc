@@ -100,9 +100,8 @@ class ClassMembers {
 
 int ClassMembers::pool_ = 0;
 
-// Granted macros: a header guard, a private helper, a name that mirrors a
-// Google-internal macro.
-#define DCFS_FIXTURE_H_
+// Approved macros: a private helper, a name that mirrors a Google-internal
+// macro (the file's own header guard is exempt without a list entry).
 #define DCFS_RET_CHECK_OP_(left, right) ((left) == (right))
 #define RET_CHECK(condition) (condition)
 

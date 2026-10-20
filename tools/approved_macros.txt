@@ -3,7 +3,9 @@
 # Macros are discouraged. A new one is justified only by a significant
 # improvement, needs russ's approval, and he settles its name: DCFS_ by
 # default, or a name he chooses. A new macro needs russ's approval: report it
-# instead of adding it to this file. This file changes only by his ruling.
+# instead of adding it to this file. This file changes only by russ's
+# ruling, or the orchestrator's for an internal helper of an approved macro;
+# a third_party line names its library and needs no grant.
 #
 # russ, 2026-10-19: "maybe I spoke too strongly. I'm not looking to fully ban
 # all propositions of a macro. Sometimes it's a significant improvement to
@@ -15,8 +17,10 @@
 # From this file `bazel run //tools:approved_macros -- --write` writes
 # .clang-tidy's cppcoreguidelines-macro-usage.AllowedRegexp (every name here)
 # and readability-identifier-naming.MacroDefinitionIgnoredRegexp (the names
-# not marked prefixed); //tools:approved_macros_test fails when they disagree. The
-# check only reads C++; the macros of the .c files are not listed.
+# not marked prefixed); //tools:approved_macros_test fails when they disagree,
+# when a C++ source defines a macro that is neither a header guard nor listed
+# here, and when a name here is defined nowhere. The check only reads C++; the
+# macros of the .c files are not listed.
 #
 # FORMAT: name|kind|date|grant
 #   name   an identifier
@@ -39,7 +43,6 @@ RET_CHECK_LT|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names 
 RET_CHECK_NE|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
 RET_CHECK_OK|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
 RETURN_IF_ERROR|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
-ASSIGN_OR_RETURN|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
 ASSERT_OK_AND_ASSIGN|exempt|2026-10-19|russ, 2026-10-19: "All the google-internal names you just listed are approved." (mirrors a Google-internal name)
 DCFS_RET_CHECK_OP_|exempt|2026-10-19|orchestrator, under russ 2026-10-19 (internal helper of RET_CHECK_EQ and the others; the trailing underscore marks it private, which UPPER_CASE refuses)
 DCFS_RET_CHECK_ELSE_BLOCKER_|exempt|2026-10-19|orchestrator, under russ 2026-10-19 (internal helper of RET_CHECK; the trailing underscore marks it private, which UPPER_CASE refuses)

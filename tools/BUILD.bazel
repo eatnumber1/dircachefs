@@ -747,6 +747,13 @@ py_test(
 
 # The approved macros (docs/style.md 1.2, rule-macros-discouraged): the list
 # and the two .clang-tidy regexes made from it.
+# The C++ sources of tools/ itself (the matchers' fixtures, which hold
+# deliberately bad macros, are not scanned), for :approved_macros_test.
+filegroup(
+    name = "cxx_sources",
+    srcs = glob(["*.cc", "*.h"]),
+)
+
 py_library(
     name = "approved_macros_lib",
     srcs = ["approved_macros.py"],
@@ -766,10 +773,22 @@ py_test(
     args = [
         "$(rootpath approved_macros.txt)",
         "$(rootpath //:.clang-tidy)",
+        "$(locations //bench:cxx_sources)",
+        "$(locations //dcfs:cxx_sources)",
+        "$(locations //dcfs/testonly:cxx_sources)",
+        "$(locations //test/qemu:cxx_sources)",
+        "$(locations //tools/mutation:cxx_sources)",
+        "$(locations :cxx_sources)",
     ],
     data = [
         "approved_macros.txt",
+        ":cxx_sources",
         "//:.clang-tidy",
+        "//bench:cxx_sources",
+        "//dcfs:cxx_sources",
+        "//dcfs/testonly:cxx_sources",
+        "//test/qemu:cxx_sources",
+        "//tools/mutation:cxx_sources",
     ],
     main = "approved_macros_test.py",
     target_compatible_with = HOST_ONLY_COMPATIBLE,

@@ -33,7 +33,7 @@ that holds its reasoning. `AGENTS.md` says which indexes to read for which task.
   [style 1.1](/docs/style.md#rule-warnings-are-errors)
 - Narrowing Google's C++ rules:
   [optional and string_view](/docs/style.md#rule-std-optional-string-view),
-  [function names: CamelCase, except the `Syscalls` interface's members (lower-case man-page names, the thin layer in `RealSyscalls`); `Syscalls` is the only seam, owning types are RAII at creation (russ, 2026-10-19)](/docs/style.md#rule-function-names),
+  [function names: CamelCase, except the `Syscalls` interface's members (lower-case man-page names, the thin layer in `RealSyscalls`); `Syscalls` is the only seam, owning types are RAII at creation (russ, 2026-10-19)](/docs/style.md#rule-function-names); lower-case accessors and `set_x` mutators (russ, 2026-10-19: "Google's style guide stands. Lowerecase getters and setters are permitted."),
   [macros are discouraged; a new one needs russ's approval
   (russ, 2026-10-19)](/docs/style.md#rule-macros-discouraged),
   [non-const locals (russ, 2026-10-11)](/docs/style.md#rule-locals-non-const),

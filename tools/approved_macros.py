@@ -18,7 +18,12 @@ ALLOWED_KEY = "cppcoreguidelines-macro-usage.AllowedRegexp"
 IGNORED_KEY = "readability-identifier-naming.MacroDefinitionIgnoredRegexp"
 # Header guards are exempt from the prefix and case rule in general (clang's
 # cppcoreguidelines-macro-usage already skips them), so no list entry names one.
+# readability-identifier-naming needs a regex to skip them; scan_problems'
+# structural guard check (the file's first two directives) is what keeps a
+# non-guard name ending in _H_ out.
 GUARDS = "[A-Z][A-Z0-9_]*_H_"
+DEFINE = re.compile(r"^\s*#\s*define\s+(\w+)", re.MULTILINE)
+DIRECTIVE = re.compile(r"^\s*#\s*(\w+)\s*(\w*)", re.MULTILINE)
 KINDS = ("prefixed", "exempt", "third_party")
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -80,6 +85,43 @@ def problems(entries, config_text):
             "`bazel run //tools:approved_macros -- --write`"
             % (key, have.get(key, "nothing"), want[key])
             for key in want if have.get(key) != want[key]]
+
+
+def guard_of(text):
+    """The name of the header guard of `text`: `#ifndef N` immediately
+    followed by `#define N`, the first two directives; else None."""
+    first = DIRECTIVE.findall(text)[:2]
+    if (len(first) == 2 and first[0][0] == "ifndef"
+            and first[1][0] == "define" and first[0][1] == first[1][1]):
+        return first[0][1]
+    return None
+
+
+def scan_problems(files, entries):
+    """Problems of the macros {path: text} define against the list.
+
+    cppcoreguidelines-macro-usage reports only function-like, variadic and
+    all-literal macros, so this scan is what enforces approval: a definition
+    that is not a guard and not on the list is reported, and so is a list
+    entry that nothing defines."""
+    listed = {e[0] for e in entries}
+    defined = set()
+    problems = []
+    for path, text in sorted(files.items()):
+        guard = guard_of(text)
+        for name in DEFINE.findall(text):
+            if name == guard:
+                continue
+            defined.add(name)
+            if name not in listed:
+                problems.append(
+                    "%s: macro %s is not in tools/approved_macros.txt: a new "
+                    "macro needs russ's approval; report it instead of "
+                    "adding it to the list" % (path, name))
+    problems += ["tools/approved_macros.txt: %s is listed but defined "
+                 "nowhere: take it out" % name
+                 for name in sorted(listed - defined)]
+    return problems
 
 
 def write(entries, config_text):

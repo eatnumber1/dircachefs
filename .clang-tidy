@@ -11,7 +11,8 @@
 # Enabled: the groups that enforce the Google style guide (google-*), the
 # Abseil rules of docs/style.md 1.2 (abseil-*), and the correctness and
 # readability groups of step 7.5. Not enabled: cppcoreguidelines-* (not our
-# guide), llvm-*, fuchsia-*, hicpp-*, altera-*, android-*, boost-*, mpi-*,
+# guide) except cppcoreguidelines-macro-usage (docs/style.md
+# rule-macros-discouraged), llvm-*, fuchsia-*, hicpp-*, altera-*, android-*, boost-*, mpi-*,
 # objc-*, openmp-*, zircon-*, linuxkernel-* (other projects' rules), and
 # clang-analyzer-*: the path-sensitive analyzer takes minutes per test file
 # (fsck_test.cc: 120 s of 140 s, dir_cache_fs_test.cc over 20 min), which does
@@ -117,17 +118,25 @@ CheckOptions:
   readability-identifier-naming.ClassMemberSuffix: _
   readability-identifier-naming.ClassConstantCase: CamelCase
   readability-identifier-naming.ClassConstantPrefix: k
-  # Header guards (DCFS_NAME_H_) and the private helper macros that end in an
-  # underscore (DCFS_RET_CHECK_OP_, DCFS_RET_CHECK_ELSE_BLOCKER_) are the only
-  # macros that are not UPPER_CASE.
+  # Macros take the DCFS_ prefix and UPPER_CASE. The ignore regex below holds
+  # the header-guard pattern (a real guard ends in _H_; the scan of
+  # //tools:approved_macros_test checks that a name ending in _H_ is a guard
+  # in structure, so no other macro hides behind the pattern) and, generated
+  # from tools/approved_macros.txt, every exempt and third_party name (the
+  # Google-internal mirrors, the private helpers that end in an underscore,
+  # libraries' names).
   readability-identifier-naming.MacroDefinitionPrefix: DCFS_
   readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
-  readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^(ASSERT_OK_AND_ASSIGN|ASSIGN_OR_RETURN|CHECK|DCFS_RET_CHECK_ELSE_BLOCKER_|DCFS_RET_CHECK_OP_|E|EXPECT_HELPER|EXPECT_KEPT_UNKNOWN|F|FUSE_USE_VERSION|LOG|RETURN_IF_ERROR|RET_CHECK|RET_CHECK_EQ|RET_CHECK_GE|RET_CHECK_GT|RET_CHECK_LE|RET_CHECK_LT|RET_CHECK_NE|RET_CHECK_OK|[A-Z][A-Z0-9_]*_H_)$'
+  readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^(ASSERT_OK_AND_ASSIGN|CHECK|DCFS_RET_CHECK_ELSE_BLOCKER_|DCFS_RET_CHECK_OP_|E|EXPECT_HELPER|EXPECT_KEPT_UNKNOWN|F|FUSE_USE_VERSION|LOG|RETURN_IF_ERROR|RET_CHECK|RET_CHECK_EQ|RET_CHECK_GE|RET_CHECK_GT|RET_CHECK_LE|RET_CHECK_LT|RET_CHECK_NE|RET_CHECK_OK|[A-Z][A-Z0-9_]*_H_)$'
   # Macros are discouraged (docs/style.md 1.2, rule-macros-discouraged). The
-  # approved ones are tools/approved_macros.txt; the two regexes below are
-  # generated from it (bazel run //tools:approved_macros -- --write). A finding
-  # of cppcoreguidelines-macro-usage means: a new macro needs russ's approval;
-  # report it instead of adding it to tools/approved_macros.txt. CheckCapsOnly
-  # is false so that a lower-case macro is reported too.
+  # approved ones are tools/approved_macros.txt; the ignore regex above and the
+  # AllowedRegexp below are generated from it (bazel run
+  # //tools:approved_macros -- --write). The approval of every macro is
+  # enforced by the source scan of //tools:approved_macros_test, because this
+  # check reports only function-like, variadic and all-literal macros. It is
+  # kept for its constexpr and inline-function advice; a finding of it also
+  # means: a new macro needs russ's approval; report it instead of adding it
+  # to tools/approved_macros.txt. CheckCapsOnly is false, without which
+  # AllowedRegexp is not consulted at all.
   cppcoreguidelines-macro-usage.CheckCapsOnly: false
-  cppcoreguidelines-macro-usage.AllowedRegexp: '^(ASSERT_OK_AND_ASSIGN|ASSIGN_OR_RETURN|CHECK|DCFS_ASSERT_OK_AND_ASSIGN_IMPL|DCFS_ATTR_ASSIGNMENTS|DCFS_ATTR_COLUMNS|DCFS_ATTR_MISSING|DCFS_ATTR_NULLS|DCFS_ATTR_PLACEHOLDERS|DCFS_ATTR_VALUES|DCFS_BACKSTOP|DCFS_CHECKER_SQL|DCFS_INJECT|DCFS_KEEP_STAMP|DCFS_RET_CHECK_ELSE_BLOCKER_|DCFS_RET_CHECK_OP_|DCFS_SETGROUPS|DCFS_TEST_CONCAT|DCFS_TEST_CONCAT_INNER|E|EXPECT_HELPER|EXPECT_KEPT_UNKNOWN|F|FUSE_USE_VERSION|LOG|RETURN_IF_ERROR|RET_CHECK|RET_CHECK_EQ|RET_CHECK_GE|RET_CHECK_GT|RET_CHECK_LE|RET_CHECK_LT|RET_CHECK_NE|RET_CHECK_OK)$'
+  cppcoreguidelines-macro-usage.AllowedRegexp: '^(ASSERT_OK_AND_ASSIGN|CHECK|DCFS_ASSERT_OK_AND_ASSIGN_IMPL|DCFS_ATTR_ASSIGNMENTS|DCFS_ATTR_COLUMNS|DCFS_ATTR_MISSING|DCFS_ATTR_NULLS|DCFS_ATTR_PLACEHOLDERS|DCFS_ATTR_VALUES|DCFS_BACKSTOP|DCFS_CHECKER_SQL|DCFS_INJECT|DCFS_KEEP_STAMP|DCFS_RET_CHECK_ELSE_BLOCKER_|DCFS_RET_CHECK_OP_|DCFS_SETGROUPS|DCFS_TEST_CONCAT|DCFS_TEST_CONCAT_INNER|E|EXPECT_HELPER|EXPECT_KEPT_UNKNOWN|F|FUSE_USE_VERSION|LOG|RETURN_IF_ERROR|RET_CHECK|RET_CHECK_EQ|RET_CHECK_GE|RET_CHECK_GT|RET_CHECK_LE|RET_CHECK_LT|RET_CHECK_NE|RET_CHECK_OK)$'

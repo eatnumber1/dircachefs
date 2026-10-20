@@ -362,16 +362,21 @@ use it as design guidance rather than firm rules."
   own without asking me"); any other new macro needs russ. The approved
   macros are `tools/approved_macros.txt`, one name per line with the date and
   who approved it, and it changes only by such a ruling (a merge gate for
-  such files is queued separately). `cppcoreguidelines-macro-usage`
-  (`CheckCapsOnly` false, so a lower-case macro is caught too) reports every
-  macro not on the list, and it also says when a macro could be a `constexpr`
-  constant or function; `readability-identifier-naming` wants the `DCFS_`
-  prefix on every macro the list does not mark `exempt` or `third_party`.
-  Both regexes in
-  `.clang-tidy` are generated from the list by
-  `bazel run //tools:approved_macros -- --write`, and
-  `//tools:approved_macros_test` fails if they disagree. A new macro needs
-  russ's approval: report it instead of adding it to the list.
+  such files is queued separately). The approval is enforced by a scan:
+  `//tools:approved_macros_test` reads every C++ source of `dcfs/`,
+  `bench/`, `test/qemu/guest/` and `tools/` (not the matchers' deliberately
+  bad fixtures) and fails on a macro that is neither on the list nor a
+  header guard (`#ifndef N` then `#define N`, the file's first directives),
+  and on a list entry nothing defines. `cppcoreguidelines-macro-usage`
+  (`CheckCapsOnly` false, without which `AllowedRegexp` is not consulted at
+  all) adds the hint that a function-like or all-literal macro could be a
+  `constexpr` or `consteval` constant or function; it reports only those
+  macros, so it cannot enforce approval. `readability-identifier-naming`
+  wants the `DCFS_` prefix on every macro the list does not mark `exempt` or
+  `third_party`. Both regexes in `.clang-tidy` are generated from the list by
+  `bazel run //tools:approved_macros -- --write`, and the test fails if they
+  disagree. A new macro needs russ's approval: report it instead of adding
+  it to the list.
 - <a id="rule-locals-non-const"></a>
   **Locals are non-const by default** (russ, 2026-10-11, on `const struct
   rlimit limit = *current;`): "no const on local scalars (unless needed).
