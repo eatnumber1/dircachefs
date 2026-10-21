@@ -319,12 +319,17 @@ py_test(
 )
 
 # Self-check of the repo_shape checks, and of its command line, over fixture
-# trees (26.1, 25.51).
+# trees (26.1, 25.51). Its error messages are checked against the rule
+# anchors of the real docs (25.68), so it reads the workspace like
+# repo_shape_test does: `external`, never cached.
 py_test(
     name = "repo_shape_self_check_test",
     size = "small",
     srcs = ["repo_shape_self_check_test.py"],
+    args = ["anchor=$(location //:MODULE.bazel)"],
+    data = ["//:MODULE.bazel"],
     deps = [":repo_shape_lib"],
+    tags = ["external"],
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 

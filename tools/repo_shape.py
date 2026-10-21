@@ -68,6 +68,14 @@ def read(root, *parts):
         return f.read()
 
 
+def problem(path, what, fix, anchor=None):
+    """One error message: what is wrong, one imperative fix, and the anchor
+    of the rule it enforces (step 25.68). A check that enforces no named
+    rule passes no anchor."""
+    text = "%s: %s; fix: %s" % (path, what, fix)
+    return text if anchor is None else text + "; see " + anchor
+
+
 def guest_scripts(root):
     guest = os.path.join(root, "test", "qemu", "guest")
     return sorted(n for n in os.listdir(guest) if n.endswith(".sh"))
@@ -79,9 +87,13 @@ def third_party_readmes(root):
     for name in sorted(os.listdir(base)):
         if (os.path.isdir(os.path.join(base, name)) and
                 not os.path.isfile(os.path.join(base, name, "README.md"))):
-            problems.append(
-                "third_party/%s/ has no README.md (docs/style.md, Bazel: a "
-                "pin's README says what it is and how to update it)" % name)
+            problems.append(problem(
+                "third_party/%s/" % name,
+                "has no README.md (a pin's README says what it is and how "
+                "to update it)",
+                "add a README.md with a Pin section (version, URL, sha256, "
+                "how obtained, date) and an 'Updating the pin' procedure",
+                "docs/style.md#rule-third-party-by-bazel"))
     return problems
 
 
@@ -107,14 +119,17 @@ def guest_scripts_used(root):
         if (name in NOT_TESTS or name in used or name in sourced or
                 any(t.match(name) for t in templates)):
             continue
-        problems.append(
-            "test/qemu/guest/%s is used by no test in test/qemu/BUILD.bazel "
-            "(a guest_script, or a library another guest script sources)"
-            % name)
+        problems.append(problem(
+            "test/qemu/guest/" + name,
+            "is used by no test in test/qemu/BUILD.bazel (a guest_script, or "
+            "a library another guest script sources)",
+            "make it a guest_script of a test, source it from a guest "
+            "script, or delete it"))
     return problems
 
 
 SLEEPS_LIST = ("tools", "repo_shape_sleeps.txt")
+SLEEPS_LIST_PATH = "/".join(SLEEPS_LIST)
 # `sleep` as a command with an argument (a number, or an expansion or a
 # quoted one), not the word in a list of commands or in a message.
 SLEEP_RE = re.compile(r'(^|[\s;&|(`])sleep\s+["$0-9]')
@@ -166,20 +181,26 @@ def guest_sleeps(root):
     for path, count in actual.items():
         allowed = known.get(path, (0, ""))[0]
         if count > allowed:
-            problems.append(
-                "%s has %d bare sleep(s), %d known: wait on the event "
-                "(a pidfd, a lock, a blocking read on a fifo, `wait`), not on "
-                "a timer (docs/style.md, \"No timers\")" % (path, count, allowed))
+            problems.append(problem(
+                path,
+                "has %d bare sleep(s), %d known" % (count, allowed),
+                "wait on the event (a pidfd, a lock, a blocking read on a "
+                "fifo, `wait`), not on a timer",
+                "docs/style.md#rule-no-timers"))
     for path, (count, _) in known.items():
         if actual.get(path, 0) < count:
-            problems.append(
-                "tools/repo_shape_sleeps.txt lists %d sleep(s) for %s, which "
-                "has %d: lower it (the list only shrinks)" %
-                (count, path, actual.get(path, 0)))
+            problems.append(problem(
+                SLEEPS_LIST_PATH,
+                "lists %d sleep(s) for %s, which has %d (the list only "
+                "shrinks)" % (count, path, actual.get(path, 0)),
+                "set the count for %s to %d, or take the entry off" %
+                (path, actual.get(path, 0)),
+                "docs/style.md#rule-no-timers"))
     return problems
 
 
 GUEST_SHELL_LIST = ("tools", "repo_shape_guest_shell.txt")
+GUEST_SHELL_LIST_PATH = "/".join(GUEST_SHELL_LIST)
 
 
 def guest_shell_files(root):
@@ -202,15 +223,19 @@ def no_new_guest_shell(root):
     actual = set(guest_shell_files(root))
     problems = []
     for path in sorted(actual - listed):
-        problems.append(
-            "%s is new shell under test/qemu/: write the test in C++ with "
-            "the helpers of test/qemu/guest/guest.h (docs/style.md, "
-            "Shell); the list tools/repo_shape_guest_shell.txt does not "
-            "grow" % path)
+        problems.append(problem(
+            path,
+            "is new shell under test/qemu/ (the list "
+            "tools/repo_shape_guest_shell.txt does not grow)",
+            "write the test in C++ with the helpers of "
+            "test/qemu/guest/guest.h",
+            "docs/style.md#rule-cpp-over-shell"))
     for path in sorted(listed - actual):
-        problems.append(
-            "tools/repo_shape_guest_shell.txt lists %s, which is gone: take "
-            "it off (the list only shrinks)" % path)
+        problems.append(problem(
+            GUEST_SHELL_LIST_PATH,
+            "lists %s, which is gone (the list only shrinks)" % path,
+            "take that line off",
+            "docs/style.md#rule-cpp-over-shell"))
     return problems
 
 
@@ -232,8 +257,10 @@ def limitations(readme):
 def disabled_checks_listed(root):
     section = limitations(read(root, "README.md"))
     return [
-        "DISABLED_%s (test/qemu/guest) is not named in README.md's "
-        "Limitations section" % name
+        problem("README.md",
+                "DISABLED_%s (test/qemu/guest) is not named in the "
+                "Limitations section" % name,
+                "name DISABLED_%s in the Limitations section" % name)
         for name in disabled_check_names(root)
         if name not in section
     ]
@@ -317,12 +344,12 @@ def no_test_only_comments(root, allowlist=None):
                 if any(rel == path and snippet in line
                        for (path, snippet) in allowlist):
                     continue
-                problems.append(
-                    "%s:%d: %r gives tests as the reason for code "
-                    "(docs/style.md, \"No test-only things in production "
-                    "code\": make the seam a feature of the class, with a "
-                    "production default, and describe it in production "
-                    "terms)" % (rel, number, found.group(0)))
+                problems.append(problem(
+                    "%s:%d" % (rel, number),
+                    "%r gives tests as the reason for code" % found.group(0),
+                    "make the seam a feature of the class, with a production "
+                    "default, described in production terms",
+                    "docs/style.md#rule-no-test-only-things"))
     return problems
 
 
@@ -337,16 +364,18 @@ def no_testonly_friends(root):
             for number, line in enumerate(f, 1):
                 code = line.split("//", 1)[0]
                 if FRIEND_OF_TESTONLY.search(code):
-                    problems.append(
-                        "%s:%d: a production class names a testonly class as "
-                        "a friend (docs/style.md, \"No test-only things in "
-                        "production code\": expose what the test reads "
-                        "through a real feature, such as a ProtocolEvents "
-                        "hook)" % (rel, number))
+                    problems.append(problem(
+                        "%s:%d" % (rel, number),
+                        "a production class names a testonly class as a "
+                        "friend",
+                        "expose what the test reads through a real feature, "
+                        "such as a ProtocolEvents hook",
+                        "docs/style.md#rule-no-test-only-things"))
     return problems
 
 
 FIXED_ARRAYS_LIST = ("tools", "repo_shape_fixed_arrays.txt")
+FIXED_ARRAYS_LIST_PATH = "/".join(FIXED_ARRAYS_LIST)
 # `std::vector<T> name(expr);` (one argument: a comma outside brackets
 # refuses it, so iterator pairs do not match) and `std::string name(expr,
 # '\0');`. Both are a local buffer sized once (docs/style.md, 1.2).
@@ -415,16 +444,21 @@ def fixed_arrays(root):
     for path, count in actual.items():
         allowed = known.get(path, (0, ""))[0]
         if count > allowed:
-            problems.append(
-                "%s has %d local buffer(s) sized once, %d known: make it an "
-                "absl::FixedArray (docs/style.md, 1.2: a buffer whose size "
-                "is known when it is made)" % (path, count, allowed))
+            problems.append(problem(
+                path,
+                "has %d local buffer(s) sized once, %d known (a buffer whose "
+                "size is known when it is made)" % (count, allowed),
+                "make it an absl::FixedArray, then set the file's count in "
+                "%s to the buffers left, or take the entry off" %
+                FIXED_ARRAYS_LIST_PATH))
     for path, (count, _) in known.items():
         if actual.get(path, 0) != count:
-            problems.append(
-                "tools/repo_shape_fixed_arrays.txt lists %d buffer(s) for "
-                "%s, which has %d: set the count to the file's (the list "
-                "only shrinks)" % (count, path, actual.get(path, 0)))
+            problems.append(problem(
+                FIXED_ARRAYS_LIST_PATH,
+                "lists %d buffer(s) for %s, which has %d (the list only "
+                "shrinks)" % (count, path, actual.get(path, 0)),
+                "set the count for %s to %d, or take the entry off" %
+                (path, actual.get(path, 0))))
     return problems
 
 
@@ -456,17 +490,18 @@ def project_prefix(root):
                 continue
             rel = os.path.relpath(os.path.join(dirpath, name), root)
             for number in project_prefix_sites(read(root, rel)):
-                problems.append(
-                    "%s:%d: an identifier begins with `Dcfs` (docs/style.md, "
-                    "1.3: a name says what distinguishes the thing and never "
-                    "repeats the namespace; a project-name word is a contrast "
-                    "with something that is not dcfs, and is said in a "
-                    "comment)" % (rel, number))
+                problems.append(problem(
+                    "%s:%d" % (rel, number),
+                    "an identifier begins with `Dcfs` (a name says what "
+                    "distinguishes the thing and never repeats the namespace)",
+                    "rename it without the Dcfs prefix; a project-name word "
+                    "goes in a comment"))
     return problems
 
 
 ABSL_MACRO_RE = re.compile(r"\bABSL_(RETURN_IF_ERROR|ASSIGN_OR_RETURN)\(")
 ABSL_MACROS_LIST = ("tools", "repo_shape_absl_macros.txt")
+ABSL_MACROS_LIST_PATH = "/".join(ABSL_MACROS_LIST)
 
 
 def absl_macro_sites(text):
@@ -509,11 +544,14 @@ def absl_prefixed_status_macros(root):
         count = len(absl_macro_sites(read(root, path)))
         allowed = known.get(path, (0, ""))[0]
         if count != allowed:
-            problems.append(
-                "%s has %d ABSL_RETURN_IF_ERROR / ABSL_ASSIGN_OR_RETURN use(s), "
-                "%d listed in tools/repo_shape_absl_macros.txt: use the short "
-                "RETURN_IF_ERROR / ASSIGN_OR_RETURN (docs/style.md, 1.6); a "
-                "listed count must equal the file's" % (path, count, allowed))
+            problems.append(problem(
+                path,
+                "has %d ABSL_RETURN_IF_ERROR / ABSL_ASSIGN_OR_RETURN use(s), "
+                "%d listed in %s" % (count, allowed, ABSL_MACROS_LIST_PATH),
+                "use the short RETURN_IF_ERROR / ASSIGN_OR_RETURN, then set "
+                "the file's count in %s to the uses left, or take the entry "
+                "off" % ABSL_MACROS_LIST_PATH,
+                "docs/style.md#rule-propagate-with-macros"))
     return problems
 
 
@@ -530,10 +568,12 @@ def nodiscard_on_status(root):
         lines = code_only(read(root, path)).splitlines()
         for number, line in enumerate(lines, 1):
             if NODISCARD_STATUS_RE.search(line):
-                problems.append(
-                    "%s:%d: [[nodiscard]] on a function returning absl::Status "
-                    "or StatusOr is redundant (docs/style.md, 1.2: the type "
-                    "is already must-use); remove it" % (path, number))
+                problems.append(problem(
+                    "%s:%d" % (path, number),
+                    "[[nodiscard]] on a function returning absl::Status or "
+                    "StatusOr is redundant (the type is already must-use)",
+                    "remove the [[nodiscard]] attribute",
+                    "docs/style.md#rule-nodiscard"))
     return problems
 
 
@@ -595,31 +635,43 @@ def spdx_licenses(root, tracked=None):
     for path in sorted(p for p in tracked if spdx_wanted(p)):
         licence = spdx_header(read(root, path))
         if licence is None:
-            problems.append(
-                "%s has no SPDX-License-Identifier on line 1 (line 2 after a "
-                "shebang): docs/licenses.md, step 7.8" % path)
+            problems.append(problem(
+                path,
+                "has no SPDX-License-Identifier on line 1 (line 2 after a "
+                "shebang)",
+                "add the header, as docs/licenses.md (step 7.8) says"))
             continue
         if licence not in allowed:
-            problems.append(
-                "%s is under %s, which tools/licenses_allowed.txt does not "
-                "allow" % (path, licence))
+            problems.append(problem(
+                path,
+                "is under %s, which tools/licenses_allowed.txt does not "
+                "allow" % licence,
+                "list the licence in tools/licenses_allowed.txt, or change "
+                "the header"))
             continue
         if licence == "MIT":
             continue
         if path not in listed:
-            problems.append(
-                "%s is %s but is not listed in tools/third_party_files.txt" %
-                (path, licence))
+            problems.append(problem(
+                path,
+                "is %s but is not listed in tools/third_party_files.txt" %
+                licence,
+                "add a row for it to tools/third_party_files.txt"))
             continue
         listed_licence, role = listed[path]
         if listed_licence != licence:
-            problems.append(
-                "%s is %s, listed as %s in tools/third_party_files.txt" %
-                (path, licence, listed_licence))
+            problems.append(problem(
+                path,
+                "is %s, listed as %s in tools/third_party_files.txt" %
+                (licence, listed_licence),
+                "make its row in tools/third_party_files.txt say %s" %
+                licence))
         elif licence.startswith(COPYLEFT) and role != "test-only":
-            problems.append(
-                "%s is %s and must have role test-only in "
-                "tools/third_party_files.txt" % (path, licence))
+            problems.append(problem(
+                path,
+                "is %s and must have role test-only in "
+                "tools/third_party_files.txt" % licence,
+                "set its role to test-only in tools/third_party_files.txt"))
     return problems
 
 
@@ -637,44 +689,53 @@ def rule_index(root):
         for number, line in enumerate(read(root, path).splitlines(), 1):
             for name in RULE_MARKER.findall(line):
                 if (path, name) in marked:
-                    problems.append(
-                        "%s marks rule %s twice (lines %d and %d): a rule's "
-                        "marker is unique in its file" %
-                        (path, name, marked[(path, name)], number))
+                    problems.append(problem(
+                        path,
+                        "marks rule %s twice (lines %d and %d)" %
+                        (name, marked[(path, name)], number),
+                        "keep one marker for the rule (a marker is unique in "
+                        "its file)"))
                 marked[(path, name)] = number
     indexes = rule_indexes(root)
     in_indexes = {}
     for index in indexes:
         for target, name in RULE_LINK.findall(read(root, index)):
             if not target.startswith("/"):
-                problems.append(
-                    "%s links to %s#rule-%s with a relative path: use the "
-                    "repo-absolute /path" % (index, target, name))
+                problems.append(problem(
+                    index,
+                    "links to %s#rule-%s with a relative path" %
+                    (target, name),
+                    "use the repo-absolute /path of the file"))
                 continue
             path = target[1:]
             if (path, name) not in marked:
-                problems.append(
-                    "%s links to %s#rule-%s, which no file marks: fix or "
-                    "remove the entry" % (index, path, name))
+                problems.append(problem(
+                    index,
+                    "links to %s#rule-%s, which no file marks" % (path, name),
+                    "fix the link, or remove the entry"))
                 continue
             in_indexes.setdefault((path, name), set()).add(index)
     for (path, name), number in sorted(marked.items()):
         found = in_indexes.get((path, name), set())
         if not found:
-            problems.append(
-                "%s marks rule %s (line %d) but no docs/rules/index-*.md "
-                "links to it: add a line to the index it belongs to" %
-                (path, name, number))
+            problems.append(problem(
+                path,
+                "marks rule %s (line %d), which no docs/rules/index-*.md "
+                "links to" % (name, number),
+                "add a line for it to the index it belongs to"))
         elif len(found) > 1:
-            problems.append(
-                "rule %s of %s is in %d indexes (%s): a rule is in exactly "
-                "one" % (name, path, len(found), ", ".join(sorted(found))))
+            problems.append(problem(
+                path,
+                "rule %s is in %d indexes (%s)" %
+                (name, len(found), ", ".join(sorted(found))),
+                "keep it in one index: delete the other lines"))
     linked_indexes = set(RULE_INDEX_LINK.findall(read(root, "AGENTS.md")))
     for index in indexes:
         if index not in linked_indexes:
-            problems.append(
-                "%s is not linked from AGENTS.md: add it to the table of "
-                "what to read" % index)
+            problems.append(problem(
+                index,
+                "is not linked from AGENTS.md",
+                "add it to the table of what to read"))
     return problems
 
 
@@ -687,6 +748,7 @@ def rule_indexes(root):
 
 
 ATTRIBUTIONS_LIST = ("tools", "repo_shape_attributions.txt")
+ATTRIBUTIONS_LIST_PATH = "/".join(ATTRIBUTIONS_LIST)
 ATTRIBUTION_RE = re.compile(r"russ\s*[,(]\s*20\d\d-")
 
 
@@ -708,9 +770,10 @@ def agent_file_attributions(root):
         head, _, reason = line.partition("|")
         fields = head.split()
         if len(fields) != 2 or not fields[1].isdigit():
-            problems.append(
-                "tools/repo_shape_attributions.txt: cannot read %r: write "
-                "'path count | reason'" % line)
+            problems.append(problem(
+                ATTRIBUTIONS_LIST_PATH,
+                "cannot read %r" % line,
+                "write 'path count | reason'"))
             continue
         known[fields[0]] = int(fields[1])
     paths = ["CLAUDE.md"]
@@ -726,22 +789,26 @@ def agent_file_attributions(root):
             for name in sorted(names) if name.endswith(".md")
         ]
     for path in sorted(set(known) - set(paths)):
-        problems.append(
-            "tools/repo_shape_attributions.txt lists %s, which is gone: "
-            "take it off (the list only shrinks)" % path)
+        problems.append(problem(
+            ATTRIBUTIONS_LIST_PATH,
+            "lists %s, which is gone (the list only shrinks)" % path,
+            "take that line off"))
     for path in paths:
         count = len(ATTRIBUTION_RE.findall(read(root, path)))
         if count > known.get(path, 0):
-            problems.append(
-                "%s has %d 'russ, 20NN-' attribution(s), %d known: a rule "
-                "belongs in docs/style.md, docs/design.md or "
-                "docs/plan/process.md with a marker; point to it here" %
-                (path, count, known.get(path, 0)))
+            problems.append(problem(
+                path,
+                "has %d 'russ, 20NN-' attribution(s), %d known" %
+                (count, known.get(path, 0)),
+                "move the rule to docs/style.md, docs/design.md or "
+                "docs/plan/process.md with a marker, and point to it here"))
         elif count < known.get(path, 0):
-            problems.append(
-                "tools/repo_shape_attributions.txt lists %d for %s, which "
-                "has %d: set the count to the file's (the list only "
-                "shrinks)" % (known[path], path, count))
+            problems.append(problem(
+                ATTRIBUTIONS_LIST_PATH,
+                "lists %d for %s, which has %d (the list only shrinks)" %
+                (known[path], path, count),
+                "set the count for %s to %d, or take the entry off" %
+                (path, count)))
     return problems
 
 
@@ -812,21 +879,41 @@ def known_counts(root, parts):
     return known
 
 
-def compare_counts(actual, known, list_name, what):
+def compare_counts(actual, known, list_name, what, fix, anchor):
+    """`anchor` maps a path to the anchor of its rule."""
     problems = []
     for path in sorted(actual):
         allowed = known.get(path, 0)
         if actual[path] > allowed:
-            problems.append("%s has %d %s, %d known: fix them (the list %s "
-                            "does not grow)" %
-                            (path, actual[path], what, allowed, list_name))
+            problems.append(problem(
+                path,
+                "has %d %s, %d known (the list %s does not grow)" %
+                (actual[path], what, allowed, list_name),
+                fix, anchor(path)))
     for path in sorted(known):
         if actual.get(path, 0) < known[path]:
-            problems.append(
-                "%s lists %d for %s, which has %d: lower it or take the "
-                "entry off (the list only shrinks)" %
-                (list_name, known[path], path, actual.get(path, 0)))
+            problems.append(problem(
+                list_name,
+                "lists %d for %s, which has %d (the list only shrinks)" %
+                (known[path], path, actual.get(path, 0)),
+                "set the count for %s to %d, or take the entry off" %
+                (path, actual.get(path, 0)),
+                anchor(path)))
     return problems
+
+
+def long_line_rule(path):
+    """The anchor of the 80-column rule for a file. docs/style.md states the
+    limit per file type, so the anchor depends on the file's type."""
+    if path.endswith(".md"):
+        return "docs/style.md#rule-markdown-style"
+    if path.endswith(".py"):
+        return "docs/style.md#rule-python-style"
+    if path.endswith(".sh"):
+        if path.startswith("test/qemu/guest/"):
+            return "docs/style.md#rule-guest-scripts-busybox-sh"
+        return "docs/style.md#rule-host-scripts-bash"
+    return "docs/style.md#rule-bazel-style"
 
 
 def long_lines(root, tracked=None):
@@ -842,7 +929,9 @@ def long_lines(root, tracked=None):
             actual[path] = count
     return compare_counts(actual, known_counts(root, LONG_LINES_LIST),
                           "tools/repo_shape_long_lines.txt",
-                          "line(s) over 80 columns")
+                          "line(s) over 80 columns",
+                          "wrap the long lines to 80 columns",
+                          long_line_rule)
 
 
 def split_span_lines(text):
@@ -877,7 +966,9 @@ def split_code_spans(root, tracked=None):
             actual[path] = count
     return compare_counts(actual, known_counts(root, SPLIT_SPANS_LIST),
                           "tools/repo_shape_split_spans.txt",
-                          "split code span(s)")
+                          "split code span(s)",
+                          "join each code span onto one line",
+                          lambda path: "docs/style.md#rule-markdown-style")
 
 
 SCAN_DIRS = ("dcfs", "tools", "bench", "test/qemu")
@@ -943,11 +1034,14 @@ def scan_covers_cxx(root):
                         % label
                 else:
                     continue
-                problems.append(
-                    "%s: %s, so the macro scan of "
-                    "//tools:approved_macros_test would not see it "
-                    "(docs/style.md 1.2, rule-macros-discouraged)"
-                    % (rel, why))
+                problems.append(problem(
+                    rel,
+                    "%s, so the macro scan of //tools:approved_macros_test "
+                    "would not see it" % why,
+                    "give the package's all_cxx_sources group a glob that "
+                    "reaches the file, and have //tools:approved_macros_test "
+                    "read the group",
+                    "docs/style.md#rule-macros-discouraged"))
     return sorted(set(problems))
 
 
@@ -974,8 +1068,8 @@ def main(argv):
     root = (argv[1] if len(argv) > 1 else os.path.dirname(
         os.path.dirname(os.path.realpath(__file__))))
     problems = all_problems(root)
-    for problem in problems:
-        print(problem)
+    for message in problems:
+        print(message)
     return 1 if problems else 0
 
 

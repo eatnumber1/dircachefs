@@ -3,10 +3,14 @@
 
 Fixture trees with a missing README, an unreferenced script, an unlisted
 DISABLED_ check and a bare sleep: each rule must report it; a good tree
-reports nothing.
+reports nothing. ErrorMessageTest checks that every check's messages give a
+fix and name a rule anchor that exists in the real docs (step 25.68), and
+that the anchors and fixes written in repo_shape.py itself are well formed.
 """
 
+import ast
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -94,8 +98,8 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
               '### Bounded memory\n')
         problems = repo_shape.rule_index(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("docs/design.md marks rule bounded-memory", problems[0])
-        self.assertIn("no docs/rules/index-*.md links to it", problems[0])
+        self.assertIn("docs/design.md: marks rule bounded-memory", problems[0])
+        self.assertIn("which no docs/rules/index-*.md links to", problems[0])
 
     def test_a_rule_in_two_indexes_is_reported(self):
         write(self.root, "docs/rules/index-code.md",
@@ -104,7 +108,7 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
               "[a](docs/rules/index-style.md) [b](docs/rules/index-code.md)\n")
         problems = repo_shape.rule_index(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("rule test-first of docs/style.md is in 2 indexes",
+        self.assertIn("docs/style.md: rule test-first is in 2 indexes",
                       problems[0])
 
     def test_an_index_entry_for_a_rule_that_is_gone_is_reported(self):
@@ -114,14 +118,14 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
               "- Gone. [process](/docs/plan/process.md#rule-gone)\n")
         problems = repo_shape.rule_index(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("docs/rules/index-style.md links to "
+        self.assertIn("docs/rules/index-style.md: links to "
                       "docs/plan/process.md#rule-gone", problems[0])
 
     def test_an_index_that_agents_md_does_not_link_is_reported(self):
         write(self.root, "docs/rules/index-code.md", "Nothing yet.\n")
         problems = repo_shape.rule_index(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("docs/rules/index-code.md is not linked from AGENTS.md",
+        self.assertIn("docs/rules/index-code.md: is not linked from AGENTS.md",
                       problems[0])
 
     def test_an_index_only_mentioned_in_agents_md_is_reported(self):
@@ -130,7 +134,7 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
               "[a](docs/rules/index-style.md) docs/rules/index-code.md\n")
         problems = repo_shape.rule_index(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("docs/rules/index-code.md is not linked from AGENTS.md",
+        self.assertIn("docs/rules/index-code.md: is not linked from AGENTS.md",
                       problems[0])
 
     def test_a_relative_index_link_is_reported(self):
@@ -139,7 +143,7 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
               "- Test first. [style](/docs/style.md#rule-test-first)\n")
         problems = repo_shape.rule_index(self.root)
         self.assertEqual(2, len(problems), problems)
-        self.assertIn("docs/rules/index-style.md links to ../style.md"
+        self.assertIn("docs/rules/index-style.md: links to ../style.md"
                       "#rule-no-timers with a relative path", problems[0])
 
     def test_a_restated_attribution_in_an_agent_file_is_reported(self):
@@ -147,20 +151,20 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
               "No timers (russ,\n2026-10-09: wait on the event).\n")
         problems = repo_shape.agent_file_attributions(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn(".claude/agents/dcfs-x.md has 1", problems[0])
+        self.assertIn(".claude/agents/dcfs-x.md: has 1", problems[0])
 
     def test_a_restated_attribution_in_a_skill_is_reported(self):
         write(self.root, ".claude/skills/x/SKILL.md",
               "A rule (russ, 2026-10-06).\n")
         problems = repo_shape.agent_file_attributions(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn(".claude/skills/x/SKILL.md has 1", problems[0])
+        self.assertIn(".claude/skills/x/SKILL.md: has 1", problems[0])
 
     def test_claude_md_attributions_are_counted_too(self):
         write(self.root, "CLAUDE.md", "A rule (russ, 2026-10-06).\n")
         problems = repo_shape.agent_file_attributions(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("CLAUDE.md has 1", problems[0])
+        self.assertIn("CLAUDE.md: has 1", problems[0])
 
     def test_a_listed_attribution_count_must_match(self):
         write(self.root, ".claude/agents/dcfs-known.md", "No attribution.\n")
@@ -198,13 +202,13 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
               "[b](/docs/style.md#rule-test-first) [c](/CLAUDE.md#rule-x)\n")
         problems = repo_shape.rule_index(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("CLAUDE.md marks rule x twice", problems[0])
+        self.assertIn("CLAUDE.md: marks rule x twice", problems[0])
 
     def test_new_guest_shell_is_reported(self):
         write(self.root, "test/qemu/guest/new.sh", "echo hi\n")
         problems = repo_shape.no_new_guest_shell(self.root)
         self.assertEqual(1, len(problems))
-        self.assertIn("test/qemu/guest/new.sh is new shell", problems[0])
+        self.assertIn("test/qemu/guest/new.sh: is new shell", problems[0])
 
     def test_new_shell_beside_the_guests_is_reported(self):
         write(self.root, "test/qemu/scripts/new.sh", "echo hi\n")
@@ -228,7 +232,7 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
               "absl::Status f() {\n  ABSL_RETURN_IF_ERROR(g());\n}\n")
         problems = repo_shape.absl_prefixed_status_macros(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("bench/new.cc has 1", problems[0])
+        self.assertIn("bench/new.cc: has 1", problems[0])
 
     def test_listed_status_macro_count_must_match(self):
         write(self.root, "tools/repo_shape_absl_macros.txt",
@@ -237,7 +241,7 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
               "void f() {\n  ABSL_ASSIGN_OR_RETURN(int x, g());\n}\n")
         problems = repo_shape.absl_prefixed_status_macros(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("dcfs/known.cc has 1", problems[0])
+        self.assertIn("dcfs/known.cc: has 1", problems[0])
 
     def test_nodiscard_on_a_status_is_reported_and_on_a_descriptor_is_not(self):
         write(self.root, "dcfs/nd.h",
@@ -269,21 +273,22 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
               'sleep 1\n')
         problems = repo_shape.guest_sleeps(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("a.sh has 1 bare sleep", problems[0])
-        self.assertIn("No timers", problems[0])
+        self.assertIn("a.sh: has 1 bare sleep", problems[0])
+        self.assertIn("#rule-no-timers", problems[0])
 
     def test_more_sleeps_than_the_list_knows_are_reported(self):
         write(self.root, "test/qemu/guest/legacy.sh",
               "sleep 1\nsleep 2\nsleep \"$n\"\n")
         problems = repo_shape.guest_sleeps(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("legacy.sh has 3 bare sleep(s), 2 known", problems[0])
+        self.assertIn("legacy.sh: has 3 bare sleep(s), 2 known", problems[0])
 
     def test_a_removed_sleep_must_come_off_the_list(self):
         write(self.root, "test/qemu/guest/legacy.sh", "sleep 1\n")
         problems = repo_shape.guest_sleeps(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("lower it", problems[0])
+        self.assertIn("set the count for test/qemu/guest/legacy.sh to 1",
+                      problems[0])
 
     def test_sleep_as_a_word_a_comment_or_the_helper_is_not_a_sleep(self):
         # lib.sh of the good tree has all three and reports nothing.
@@ -358,7 +363,8 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
         problems = repo_shape.project_prefix(self.root)
         self.assertEqual(1, len(problems), problems)
         self.assertIn("dcfs/y.h:2:", problems[0])
-        self.assertIn("docs/style.md, 1.3", problems[0])
+        self.assertIn("rename it without the Dcfs prefix", problems[0])
+        self.assertNotIn("#rule-", problems[0])
 
     def test_a_dcfs_word_in_a_comment_or_a_string_is_not_reported(self):
         write(self.root, "dcfs/z.cc",
@@ -378,7 +384,7 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
               "void f(int n) {\n  std::vector<int> v(n);\n}\n")
         problems = repo_shape.fixed_arrays(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("dcfs/m.cc has 1 local buffer", problems[0])
+        self.assertIn("dcfs/m.cc: has 1 local buffer", problems[0])
         self.assertIn("absl::FixedArray", problems[0])
 
     def test_a_string_filled_once_is_reported(self):
@@ -386,7 +392,7 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
               "void f(int n) {\n  std::string s(n, '\\0');\n}\n")
         problems = repo_shape.fixed_arrays(self.root)
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("tools/n.cc has 1 local buffer", problems[0])
+        self.assertIn("tools/n.cc: has 1 local buffer", problems[0])
 
     def test_iterator_pairs_and_brace_inits_are_not_reported(self):
         write(self.root, "dcfs/o.cc",
@@ -426,7 +432,7 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
               "dcfs/known.cc 1 | a fixture reason\n")
         problems = repo_shape.fixed_arrays(self.root)
         self.assertEqual(2, len(problems), problems)
-        self.assertIn("dcfs/known.cc has 3 local buffer(s) sized once, "
+        self.assertIn("dcfs/known.cc: has 3 local buffer(s) sized once, "
                       "1 known", problems[0])
         self.assertIn("lists 1 buffer(s) for dcfs/known.cc, which has 3",
                       problems[1])
@@ -450,7 +456,7 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
     def test_spdx_file_without_a_header_is_reported(self):
         problems = self.spdx_problems({"dcfs/x.cc": "int x;\n"})
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("dcfs/x.cc has no SPDX-License-Identifier", problems[0])
+        self.assertIn("dcfs/x.cc: has no SPDX-License-Identifier", problems[0])
 
     def test_spdx_mit_header_passes(self):
         self.assertEqual([], self.spdx_problems(
@@ -463,7 +469,7 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
                           "MIT\n",
         })
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("tools/z.sh has no SPDX-License-Identifier", problems[0])
+        self.assertIn("tools/z.sh: has no SPDX-License-Identifier", problems[0])
 
     def test_spdx_listed_bsd_passes(self):
         self.assertEqual([], self.spdx_problems(
@@ -475,7 +481,7 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
         problems = self.spdx_problems(
             {"dcfs/b.cc": "// SPDX-License-Identifier: BSD-3-Clause\n"})
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("dcfs/b.cc is BSD-3-Clause but is not listed",
+        self.assertIn("dcfs/b.cc: is BSD-3-Clause but is not listed",
                       problems[0])
 
     def test_spdx_listing_must_name_the_header_licence(self):
@@ -483,7 +489,8 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
             {"dcfs/b.cc": "// SPDX-License-Identifier: BSD-3-Clause\n"},
             third_party=["dcfs/b.cc | ISC | shipped | copied from x\n"])
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("dcfs/b.cc is BSD-3-Clause, listed as ISC", problems[0])
+        self.assertIn("dcfs/b.cc: is BSD-3-Clause, listed as ISC",
+                      problems[0])
 
     def test_spdx_gpl_listed_test_only_passes(self):
         self.assertEqual([], self.spdx_problems(
@@ -516,9 +523,9 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
             "tools/z.py": "no header\n",
         })
         self.assertEqual(3, len(problems), problems)
-        self.assertIn("BUILD has no", problems[0])
-        self.assertIn("test/qemu/guest/init has no", problems[1])
-        self.assertIn("tools/z.py has no", problems[2])
+        self.assertIn("BUILD: has no", problems[0])
+        self.assertIn("test/qemu/guest/init: has no", problems[1])
+        self.assertIn("tools/z.py: has no", problems[2])
 
 
     def long_problems(self, files, allow=""):
@@ -530,7 +537,7 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
     def test_a_long_markdown_line_is_reported(self):
         problems = self.long_problems({"docs/a.md": "word " * 17 + "\n"})
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("docs/a.md has 1 line(s) over 80 columns, 0 known",
+        self.assertIn("docs/a.md: has 1 line(s) over 80 columns, 0 known",
                       problems[0])
 
     def test_long_lines_in_a_fence_a_table_or_a_link_definition_pass(self):
@@ -574,7 +581,7 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
     def test_a_code_span_split_across_a_line_is_reported(self):
         problems = self.split_problems({"docs/a.md": "Use `foo\nbar` here.\n"})
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("docs/a.md has 1 split code span(s), 0 known",
+        self.assertIn("docs/a.md: has 1 split code span(s), 0 known",
                       problems[0])
 
     def test_whole_spans_and_fences_are_not_split_spans(self):
@@ -632,8 +639,9 @@ class RepoShapeCliTest(unittest.TestCase):
         write(self.root, "docs/a.md", "word " * 17 + "\n")
         code, out = self.run_cli()
         self.assertEqual((1, [
-            "docs/a.md has 1 line(s) over 80 columns, 0 known: fix them "
-            "(the list tools/repo_shape_long_lines.txt does not grow)"]),
+            "docs/a.md: has 1 line(s) over 80 columns, 0 known (the list "
+            "tools/repo_shape_long_lines.txt does not grow); fix: wrap the "
+            "long lines to 80 columns; see docs/style.md#rule-markdown-style"]),
                          (code, out.splitlines()))
 
     def test_an_allowlist_count_above_the_actual_fails(self):
@@ -642,16 +650,19 @@ class RepoShapeCliTest(unittest.TestCase):
               "# known\ndocs/a.md 2\n")
         code, out = self.run_cli()
         self.assertEqual((1, [
-            "tools/repo_shape_long_lines.txt lists 2 for docs/a.md, which "
-            "has 0: lower it or take the entry off (the list only shrinks)"]),
+            "tools/repo_shape_long_lines.txt: lists 2 for docs/a.md, which "
+            "has 0 (the list only shrinks); fix: set the count for docs/a.md "
+            "to 0, or take the entry off; "
+            "see docs/style.md#rule-markdown-style"]),
                          (code, out.splitlines()))
 
     def test_a_split_backtick_span_fails(self):
         write(self.root, "docs/a.md", "Use `foo\nbar` here.\n")
         code, out = self.run_cli()
         self.assertEqual((1, [
-            "docs/a.md has 1 split code span(s), 0 known: fix them (the "
-            "list tools/repo_shape_split_spans.txt does not grow)"]),
+            "docs/a.md: has 1 split code span(s), 0 known (the list "
+            "tools/repo_shape_split_spans.txt does not grow); fix: join each "
+            "code span onto one line; see docs/style.md#rule-markdown-style"]),
                          (code, out.splitlines()))
 
 
@@ -723,5 +734,147 @@ class ScanSourcesTest(unittest.TestCase):
         self.assertEqual([], repo_shape.scan_covers_cxx(self.root))
 
 
+# Every check's messages state the problem, give one fix line and name the
+# anchor of the rule they enforce (step 25.68). A check in UNRULED has no rule
+# marker yet: its messages give a fix and no anchor. The set shrinks to empty
+# as 25.68b adds the anchors.
+UNRULED = frozenset({
+    "guest_scripts_used", "disabled_checks_listed", "fixed_arrays",
+    "rule_index", "agent_file_attributions", "spdx_licenses",
+    "project_prefix"})
+# Checks that take git's list of tracked files as a keyword.
+TRACKED = frozenset({"spdx_licenses", "long_lines", "split_code_spans"})
+
+# One tree change per check that makes it report at least one problem.
+MUTATIONS = {
+    "third_party_readmes": lambda root: os.makedirs(
+        os.path.join(root, "third_party", "bare")),
+    "guest_scripts_used": lambda root: write(
+        root, "test/qemu/guest/orphan.sh"),
+    "guest_sleeps": lambda root: write(
+        root, "test/qemu/guest/new.sh", "sleep 1\n"),
+    "no_new_guest_shell": lambda root: write(root, "test/qemu/new.sh"),
+    "fixed_arrays": lambda root: write(
+        root, "dcfs/new.cc", "void f(int n) {\n  std::vector<int> v(n);\n}\n"),
+    "absl_prefixed_status_macros": lambda root: write(
+        root, "bench/new.cc", "void f() {\n  ABSL_RETURN_IF_ERROR(g());\n}\n"),
+    "nodiscard_on_status": lambda root: write(
+        root, "dcfs/nd.h", "[[nodiscard]] absl::Status f();\n"),
+    "project_prefix": lambda root: write(
+        root, "dcfs/y.h", "DcfsThing f();\n"),
+    "disabled_checks_listed": lambda root: write(
+        root, "test/qemu/guest/c.sh", "disabled other-bug why\n"),
+    "no_test_only_comments": lambda root: write(
+        root, "dcfs/t.h", "// only in tests\n"),
+    "no_testonly_friends": lambda root: write(
+        root, "dcfs/g.h", "friend class testonly::X;\n"),
+    "rule_index": lambda root: write(
+        root, "docs/design.md", '<a id="rule-orphan"></a>\n'),
+    "agent_file_attributions": lambda root: write(
+        root, ".claude/agents/dcfs-x.md", "(russ, 2026-10-16: x)\n"),
+    "spdx_licenses": lambda root: write(root, "dcfs/nospdx.cc"),
+    "long_lines": lambda root: write(root, "docs/long.md", "word " * 17 + "\n"),
+    "split_code_spans": lambda root: write(
+        root, "docs/split.md", "a `b\nc` d\n"),
+    "scan_covers_cxx": lambda root: (
+        write(root, "dcfs/BUILD.bazel", "cc_library(name = 'x')\n"),
+        write(root, "dcfs/q.cc")),
+}
+
+REAL = {}  # the workspace, from the anchor= argument (as repo_shape_test)
+
+
+def files(root):
+    return [os.path.relpath(os.path.join(d, n), root)
+            for d, _, names in os.walk(root) for n in names]
+
+
+class ErrorMessageTest(unittest.TestCase):
+
+    def test_every_check_has_a_mutation(self):
+        self.assertEqual(sorted(c.__name__ for c in repo_shape.CHECKS),
+                         sorted(MUTATIONS))
+
+    def test_every_message_gives_a_fix_and_names_a_rule_anchor(self):
+        for check in repo_shape.CHECKS:
+            name = check.__name__
+            with self.subTest(check=name), \
+                    tempfile.TemporaryDirectory() as root:
+                good_tree(root)
+                write(root, "tools/licenses_allowed.txt", "MIT\n")
+                write(root, "tools/third_party_files.txt", "# known\n")
+                write(root, "tools/repo_shape_long_lines.txt", "# known\n")
+                write(root, "tools/repo_shape_split_spans.txt", "# known\n")
+                MUTATIONS[name](root)
+                if name in TRACKED:
+                    problems = check(root, tracked=sorted(files(root)))
+                else:
+                    problems = check(root)
+                self.assertTrue(problems, name)
+                for problem in problems:
+                    self.assertIn("; fix: ", problem)
+                    if name in UNRULED:
+                        self.assertNotIn("#rule-", problem)
+                        continue
+                    match = re.search(
+                        r"; see (docs/[\w./-]+\.md)#(rule-[a-z0-9-]+)$",
+                        problem)
+                    self.assertIsNotNone(match, problem)
+                    text = repo_shape.read(REAL["root"], match.group(1))
+                    self.assertIn('<a id="%s"></a>' % match.group(2), text,
+                                  problem)
+
+    def test_long_line_rule_names_the_rule_of_each_file_type(self):
+        cases = {
+            "a.md": "docs/style.md#rule-markdown-style",
+            "a.py": "docs/style.md#rule-python-style",
+            "test/qemu/guest/x.sh":
+                "docs/style.md#rule-guest-scripts-busybox-sh",
+            "tools/x.sh": "docs/style.md#rule-host-scripts-bash",
+            "BUILD.bazel": "docs/style.md#rule-bazel-style",
+            "x.bzl": "docs/style.md#rule-bazel-style",
+        }
+        for path, anchor in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(anchor, repo_shape.long_line_rule(path))
+
+    def test_every_anchor_literal_in_repo_shape_names_a_marker(self):
+        with open(repo_shape.__file__, encoding="utf-8") as f:
+            source = f.read()
+        anchors = set(re.findall(r"docs/[\w./-]+\.md#rule-[a-z0-9-]+", source))
+        self.assertTrue(anchors)
+        for anchor in sorted(anchors):
+            path, _, rule = anchor.partition("#")
+            with self.subTest(anchor=anchor):
+                text = repo_shape.read(REAL["root"], path)
+                self.assertIn('<a id="%s"></a>' % rule, text)
+
+    def test_every_problem_call_passes_a_non_empty_fix(self):
+        with open(repo_shape.__file__, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        calls = [node for node in ast.walk(tree)
+                 if isinstance(node, ast.Call) and
+                 isinstance(node.func, ast.Name) and
+                 node.func.id == "problem"]
+        self.assertTrue(calls)
+        for call in calls:
+            with self.subTest(line=call.lineno):
+                self.assertGreaterEqual(len(call.args), 3)
+                fix = call.args[2]
+                if isinstance(fix, ast.Constant):
+                    self.assertTrue(fix.value.strip())
+
+
+def main():
+    rest = []
+    for arg in sys.argv[1:]:
+        if arg.startswith("anchor="):
+            REAL["root"] = os.path.dirname(
+                os.path.realpath(arg[len("anchor="):]))
+        else:
+            rest.append(arg)
+    unittest.main(argv=[sys.argv[0]] + rest)
+
+
 if __name__ == "__main__":
-    unittest.main()
+    main()

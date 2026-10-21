@@ -213,7 +213,6 @@ tools/noisy_report.py 4
 tools/noisy_report_test.py 1
 tools/pmu_report_test.sh 10
 tools/raw_syscalls_test.py 1
-tools/repo_shape.py 1
 tools/repro_compare.py 4
 tools/repro_compare_self_check_test.py 1
 tools/reproducible_build.sh 2
