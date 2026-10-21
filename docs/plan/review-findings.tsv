@@ -515,3 +515,15 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-20	25.64	1	dcfs-style-reviewer/sonnet/high	nit	hygiene	-	tools/approved_macros.txt:20-26	ragged header	-	fixed/merged ef722783
 2026-10-20	25.64	1	dcfs-style-reviewer/sonnet/high	nit	hygiene	-	tools/style_checks.bzl:152-176	duplicated action	-	fixed/merged ef722783
 2026-10-20	25.64	1	dcfs-style-reviewer/sonnet/high	nit	hygiene	-	tools/style_checks.py:447	optional macros_text skips the check silently	-	fixed/merged ef722783
+2026-10-20	25.68a	1	dcfs-style-reviewer/sonnet/high	blocker	style-other	docs/style.md 5 (Google Python)	tools/repo_shape.py:567	nodiscard_on_status problems.append indented 20 under a 12-column if body	could	fixed/merged 1764c63f
+2026-10-20	25.68a	1	dcfs-style-reviewer/sonnet/high	blocker	test-gap	docs/style.md 2; rule-no-unnecessary-code	tools/repo_shape_self_check_test.py:737-830	meta-test never runs second-branch messages or long_line_rule's .py/.sh/Bazel branches; anchor typos undetected	could	fixed/merged 1764c63f
+2026-10-20	25.68a	1	dcfs-style-reviewer/sonnet/high	should	docs	docs/style.md 1.3	tools/repo_shape.py:481-492	project_prefix cites rule-unqualified-dcfs-names, but the Dcfs-prefix rule (style.md:617) has no anchor	could	deferred to 25.68b
+2026-10-20	25.68a	1	dcfs-style-reviewer/sonnet/high	should	docs	docs/style.md 1.2	tools/repo_shape.py:435-460	fixed_arrays is in UNRULED though style.md:503 is a ratified rule lacking only a marker and index line	could	deferred to 25.68b
+2026-10-20	25.68a	1	dcfs-style-reviewer/sonnet/high	should	docs	-	tools/repo_shape.py:450	fixed_arrays fix "list the file's count" misleads on a shrink-only list and names no file	no	fixed/merged 1764c63f
+2026-10-20	25.68a	1	dcfs-style-reviewer/sonnet/high	should	docs	-	tools/repo_shape.py:548	absl_macros fix omits the below-list case; "list the count" ambiguous	no	fixed/merged 1764c63f
+2026-10-20	25.68a	1	dcfs-style-reviewer/sonnet/high	nit	docs	docs/style.md 3	tools/repo_shape.py:123-130	third_party_readmes fix omits how-obtained and the Updating-the-pin procedure	no	fixed/merged 1764c63f
+2026-10-20	25.68a	1	dcfs-style-reviewer/sonnet/high	should	comment-accuracy	docs/style.md 1.9	tools/repo_shape_self_check_test.py:733-736	"the report names it" is false; nothing reports UNRULED; no why for the set	no	fixed/merged 1764c63f
+2026-10-20	25.68a	1	dcfs-style-reviewer/sonnet/high	nit	style-other	docs/style.md 5	tools/repo_shape.py:132,202,377,747	duplicate *_LIST and *_LIST_PATH constants	no	fixed/merged 1764c63f
+2026-10-20	25.68a	1	dcfs-style-reviewer/sonnet/high	nit	naming	docs/style.md 5	tools/repo_shape.py:1065	loop variable `problem` shadows module function `problem`	no	fixed/merged 1764c63f
+2026-10-20	25.68a	1	dcfs-style-reviewer/sonnet/high	nit	comment-accuracy	docs/style.md 1.9	tools/repo_shape.py:900	long_line_rule docstring restates the name	no	fixed/merged 1764c63f
+2026-10-20	25.68a	1	dcfs-style-reviewer/sonnet/high	none	style-other	docs/style.md 3	tools/repo_shape.py:909-910	question: 80-column anchor for Bazel/.sh files; rule-bazel-style does not state 80 columns	no	decided: option A, in 25.68b
