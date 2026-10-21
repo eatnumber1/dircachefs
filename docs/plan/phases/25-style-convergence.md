@@ -2913,7 +2913,12 @@ Owner: not yet assigned. Dependencies: none.
 modified copy with a seeded style violation fails the style check (each fails
 first, with no check).
 
-## 25.64 Unneeded macro allowances (orchestrator proposal, 2026-10-19; queued)
+## 25.64 Unneeded macro allowances (orchestrator, 2026-10-19; done 2026-10-20)
+
+Merged to main 2026-10-20 as ef722783 (squashed from 09c2262f and 01b7cc49;
+test_first_tool ACCEPTED; tools tier green on main). Cost, cold: the
+StyleMacros action totals 524 s against StyleTidy's 1833 s over 138 files
+(about +29%), cached per file.
 
 Orchestrator's proposal, not russ's words (clerk batch 53). Follow-up to 25.58
 (M0, small, after it), from the macro checks above: a stale allowance is one
@@ -3213,6 +3218,60 @@ Test first: the meta-test fails on the current messages that lack an anchor,
 then each message is fixed.
 
 Owner: dcfs-mechanical (Haiku). Dependencies: 25.27.
+
+25.68a (the `repo_shape` slice) merged to main 2026-10-20 as 1764c63f
+(squashed from 2622ffe2 and f8a21e00; test_first_tool ACCEPTED; tools tier
+green). The rest of 25.68 (the `style_matchers`, `approved_macros`,
+`commit_subjects.sh` and clang-tidy wrapper messages) is still open, as is
+25.68b (rule anchors, below).
+
+## 25.68b Anchors for the checks that enforce no rule (orchestrator, 2026-10-20)
+
+Queued (clerk batch 57). Follow-up to 25.68a. `tools/repo_shape_self_check_test.py` holds the set
+`UNRULED` of seven checks whose messages give a fix and no rule anchor. This
+step gives each a rule and an anchor, points the messages at them, and
+empties and deletes `UNRULED`, so the meta-test requires an anchor for every
+check. Mechanical, with two rule texts to write. Owner not yet assigned.
+Dependencies: 25.68a (merged).
+
+1. Anchors for rules already written but unmarked:
+   - `fixed_arrays`: the FixedArray bullet in `docs/style.md` 1.2 (about line
+     503) gets `<a id="rule-fixed-arrays"></a>`, with an index line in
+     `docs/rules/index-style.md`.
+   - `rule_index`: the AGENTS.md paragraph that says every ratified rule has
+     one line (russ, 2026-10-18) gets an anchor, with an index line.
+   - `agent_file_attributions`: a rule is homed once, so the anchor goes on
+     the rule's home, not on the agent files that restate it.
+   - `spdx_licenses`: `docs/licenses.md`, step 7.8, gets an anchor, with an
+     index line.
+   - Anchor names are suggestions; the step may choose others, but each
+     check's message must link the anchor that exists.
+2. Write the rule each of two existing checks enforces, citing the step
+   that added it (26.13, commit 218891b8, for both):
+   - `guest_scripts_used`: every guest script under `test/qemu/guest/` is
+     used by a test in `test/qemu/BUILD.bazel`, or is a named helper (the
+     exception list in `tools/repo_shape.py`'s docstring), or is sourced by
+     another guest script.
+   - `disabled_checks_listed`: every `disabled NAME ...` check of the guest
+     scripts is named in `README.md`'s Limitations section.
+3. The 80-column rule, option A (the style reviewer's option, decided by the
+   orchestrator 2026-10-20; this replaces a general 80-column anchor): add
+   to `rule-bazel-style` the sentence "BUILD, .bzl and .bazelrc lines are
+   wrapped at 80 columns (repo_shape long_lines; buildifier does not wrap
+   them)." Move "80 columns" from the shell preamble (`docs/style.md`, about
+   line 1975) into the `rule-host-scripts-bash` and
+   `rule-guest-scripts-busybox-sh` bullets. The `long_lines` fallback to
+   `rule-bazel-style` then states the limit.
+4. The Dcfs-prefix rule: `docs/style.md` line 617 ("a name ... never repeats
+   the namespace") gets `<a id="rule-name-never-repeats-namespace"></a>`,
+   with an index line. `project_prefix` cites it; 25.68a parked that check
+   in `UNRULED` rather than keep a wrong anchor.
+5. Messages point at the new anchors. Then `UNRULED` is emptied and deleted,
+   and the meta-test asserts an anchor in every message.
+
+*Test:* the meta-test fails while any check is in `UNRULED` or any message
+lacks an anchor, and passes once each check's message links a marker that
+exists in the docs.
 
 ## 25.69 Scheduled cleanup agents after quota resets (russ approved 2026-10-20)
 

@@ -507,3 +507,11 @@ date	step	round	reviewer	severity	category	rule	file	summary	mechanizable	outcom
 2026-10-20	12.28	1	dcfs-style-reviewer/sonnet/high	nit	style-other	-	third_party/tlaplus/BUILD.bazel:16	rootpath where location is the rule	could	fixed/merged aeac8fa1
 2026-10-20	12.28	1	dcfs-style-reviewer/sonnet/high	none	test-shape	rule-load-agnostic-tests; docs/style.md 1.11	third_party/tlaplus/tlc_test_runner_test.py:18-20	question: in-test hang guard; kept as a hang guard that cleans up its process group, with a justification comment	no	decided
 2026-10-20	12.28	1	dcfs-style-reviewer/sonnet/high	none	style-other	docs/style.md section 3	third_party/tlaplus/BUILD.bazel:10	question: step number in a test target comment; kept per style section 3	no	decided
+2026-10-20	25.64	1	dcfs-style-reviewer/sonnet/high	should	test-gap	-	tools/style_checks.py:431-449	run() macros branch has no unit test	-	fixed/merged ef722783
+2026-10-20	25.64	1	dcfs-style-reviewer/sonnet/high	should	test-shape	-	tools/style_checks_self_check_test.py	MACROS fixture says error: where the real clang-tidy output says warning:	-	fixed/merged ef722783
+2026-10-20	25.64	1	dcfs-style-reviewer/sonnet/high	should	hygiene	-	tools/style_checks.bzl:40-47	HeaderFilterRegex and CheckCapsOnly duplicated, unchecked	-	fixed/merged ef722783
+2026-10-20	25.64	1	dcfs-style-reviewer/sonnet/high	nit	docs	-	tools/style_checks.bzl:1-23	docstrings in style_checks.bzl:1-23 and style_checks.py-	fixed/merged ef722783
+2026-10-20	25.64	1	dcfs-style-reviewer/sonnet/high	nit	docs	-	tools/approved_macros_test.py:91	comment leads with the step number	-	fixed/merged ef722783
+2026-10-20	25.64	1	dcfs-style-reviewer/sonnet/high	nit	hygiene	-	tools/approved_macros.txt:20-26	ragged header	-	fixed/merged ef722783
+2026-10-20	25.64	1	dcfs-style-reviewer/sonnet/high	nit	hygiene	-	tools/style_checks.bzl:152-176	duplicated action	-	fixed/merged ef722783
+2026-10-20	25.64	1	dcfs-style-reviewer/sonnet/high	nit	hygiene	-	tools/style_checks.py:447	optional macros_text skips the check silently	-	fixed/merged ef722783
